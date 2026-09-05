@@ -1308,6 +1308,8 @@ void manage_desktop( WCHAR *arg )
 
         memset( &si, 0, sizeof(si) );
         si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_SHOWNORMAL;
         TRACE( "starting %s\n", debugstr_w(cmdline) );
         if (CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
         {

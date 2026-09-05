@@ -22,6 +22,7 @@
 @ stdcall AddConsoleAliasA(str str str)
 @ stdcall AddConsoleAliasW(wstr wstr wstr)
 @ stdcall AddDllDirectory(wstr)
+@ stdcall AddDependencyToProcessPackageGraph(wstr int64 long long)
 @ stdcall AddMandatoryAce(ptr long long long ptr)
 @ stdcall AddRefActCtx(ptr)
 # @ stub AddResourceAttributeAce
@@ -380,7 +381,7 @@
 @ stdcall FindNextFileW(long ptr)
 @ stdcall FindNextStreamW(long ptr)
 @ stdcall FindNextVolumeW(long ptr long)
-# @ stub FindPackagesByPackageFamily
+@ stub -arch=win64 FindPackagesByPackageFamily
 @ stdcall FindResourceExW(long wstr wstr long)
 @ stdcall FindResourceW(long wstr wstr)
 @ stdcall FindStringOrdinal(long wstr long wstr long long)
@@ -652,6 +653,7 @@
 # @ stub GetPackageVolumeSisPath
 @ stdcall GetPackagesByPackageFamily(wstr ptr ptr ptr ptr)
 @ stdcall GetPerformanceInfo(ptr long)
+@ stdcall GetPersistedRegistryLocationW(wstr wstr ptr long ptr)
 @ stdcall GetPhysicallyInstalledSystemMemory(ptr)
 # @ stub GetPreviousFgPolicyRefreshInfoInternal
 @ stdcall GetPriorityClass(long)

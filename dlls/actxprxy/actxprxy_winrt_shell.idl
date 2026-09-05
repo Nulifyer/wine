@@ -1,0 +1,71 @@
+/* Proxy for the WinRT background-activation delegate used by the Windows shell. */
+
+#pragma makedep proxy
+#pragma makedep register
+#pragma makedep ident
+
+import "inspectable.idl";
+import "shobjidl.idl";
+
+/*
+ * Windows' private shell proxy marshals an absolute PIDL as a counted byte
+ * string.  Keep this private alias here rather than changing the public shell
+ * headers used by every other proxy in actxprxy.
+ */
+typedef struct LINUXNT_WIRE_PIDLIST
+{
+    ULONG size;
+    [size_is(size)] BYTE data[];
+} LINUXNT_WIRE_PIDLIST;
+typedef [unique] LINUXNT_WIRE_PIDLIST *LINUXNT_WIRE_PIDLIST_PTR;
+typedef [wire_marshal(LINUXNT_WIRE_PIDLIST_PTR)] PCIDLIST_ABSOLUTE LINUXNT_PCIDLIST_ABSOLUTE;
+
+typedef [v1_enum] enum LAUNCHEXPLORERFLAGS
+{
+    LEF_DEFAULT = 0
+} LAUNCHEXPLORERFLAGS;
+
+[
+    object,
+    uuid(6aca2690-0de1-46c9-a1c5-9338a22bf12b),
+    pointer_default(unique)
+]
+interface IBrowserThreadHandshake : IUnknown
+{
+}
+
+[
+    object,
+    uuid(49a07732-e7b8-5c5b-9de7-22e33cb97004),
+    pointer_default(unique)
+]
+interface IBackgroundActivatedEventHandler : IUnknown
+{
+    [local] HRESULT GetIids([out] ULONG *iid_count, [out, size_is(,*iid_count)] IID **iids);
+    [local] HRESULT GetRuntimeClassName([out] void **class_name);
+    [local] HRESULT GetTrustLevel([out] int *trust_level);
+    HRESULT Invoke([in] IInspectable *sender, [in] IInspectable *args);
+}
+
+[
+    object,
+    uuid(ff9ce68e-060d-4120-81f9-f3061c703225),
+    pointer_default(unique)
+]
+interface IExplorerHost : IUnknown
+{
+    HRESULT ShowWindow(
+        [in] LINUXNT_PCIDLIST_ABSOLUTE pidl,
+        [in] LAUNCHEXPLORERFLAGS flags,
+        [in] POINT point,
+        [in] int show_command,
+        [in] HWND owner,
+        [in] IUnknown *site,
+        [in] IBrowserThreadHandshake *handshake);
+}
+
+[
+    threading(both),
+    uuid(b8da6310-e19b-11d0-933c-00a0c90dcaa9)
+]
+coclass PSFactoryBuffer { interface IPSFactoryBuffer; }

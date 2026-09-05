@@ -50,6 +50,8 @@ static LONG com_lockcount;
 
 static LONG com_server_process_refcount;
 
+extern HRESULT WINAPI RoGetApartmentIdentifier(UINT64 *identifier);
+
 struct comclassredirect_data
 {
     ULONG size;
@@ -3526,6 +3528,46 @@ HRESULT WINAPI CoResumeClassObjects(void)
     FIXME("stub\n");
 
     return S_OK;
+}
+
+/***********************************************************************
+ *           CoGetSystemSecurityPermissions    (combase.@)
+ *
+ * Wine does not have a machine-wide COM resolver policy.  Return a valid
+ * default descriptor with an unrestricted DACL, which matches that local
+ * policy while preserving the allocation contract of the Windows API.
+ */
+HRESULT WINAPI CoGetSystemSecurityPermissions(DWORD type, PSECURITY_DESCRIPTOR *descriptor)
+{
+    PSECURITY_DESCRIPTOR ret;
+
+    TRACE("%lu, %p\n", type, descriptor);
+
+    if (type > 3 || !descriptor) return E_INVALIDARG;
+    *descriptor = NULL;
+
+    if (!(ret = LocalAlloc(LMEM_FIXED, SECURITY_DESCRIPTOR_MIN_LENGTH))) return E_OUTOFMEMORY;
+    if (!InitializeSecurityDescriptor(ret, SECURITY_DESCRIPTOR_REVISION) ||
+        !SetSecurityDescriptorDacl(ret, TRUE, NULL, FALSE))
+    {
+        LocalFree(ret);
+        return E_FAIL;
+    }
+
+    *descriptor = ret;
+    return S_OK;
+}
+
+/***********************************************************************
+ *           CoGetApartmentIdentifier    (combase.@)
+ *
+ * Current Windows system components import this compatibility entry by
+ * ordinal.  It reports the same apartment identifier as the public WinRT
+ * spelling.
+ */
+HRESULT WINAPI CoGetApartmentIdentifier(UINT64 *identifier)
+{
+    return RoGetApartmentIdentifier(identifier);
 }
 
 /***********************************************************************

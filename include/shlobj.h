@@ -1584,6 +1584,12 @@ typedef struct _SHChangeProductKeyAsIDList {
 WINSHELLAPI ULONG WINAPI SHChangeNotifyRegister(HWND hwnd, int fSources, LONG fEvents, UINT wMsg,
                                                 int cEntries, SHChangeNotifyEntry *pshcne);
 WINSHELLAPI BOOL WINAPI SHChangeNotifyDeregister(ULONG ulID);
+typedef enum
+{
+    SCNRT_ENABLE = 0,
+    SCNRT_DISABLE = 1
+} SCNRT_STATUS;
+WINSHELLAPI void WINAPI SHChangeNotifyRegisterThread(SCNRT_STATUS status);
 WINSHELLAPI HANDLE WINAPI SHChangeNotification_Lock(HANDLE hChangeNotification, DWORD dwProcessId,
                                                     LPITEMIDLIST **pppidl, LONG *plEvent);
 WINSHELLAPI BOOL WINAPI SHChangeNotification_Unlock(HANDLE hLock);
@@ -1729,6 +1735,8 @@ WINSHELLAPI HRESULT WINAPI SHGetDesktopFolder(IShellFolder * *);
 
 WINSHELLAPI HRESULT WINAPI SHBindToFolderIDListParent(IShellFolder *psf, LPCITEMIDLIST pidl, REFIID riid,
                                                       LPVOID *ppv, LPCITEMIDLIST *ppidlLast);
+WINSHELLAPI HRESULT WINAPI SHBindToFolderIDListParentEx(IShellFolder *psf, LPCITEMIDLIST pidl, IBindCtx *pbc,
+                                                        REFIID riid, LPVOID *ppv, LPCITEMIDLIST *ppidlLast);
 
 /****************************************************************************
  * SHBindToParent API

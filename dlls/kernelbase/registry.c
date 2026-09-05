@@ -48,6 +48,38 @@ WINE_DEFAULT_DEBUG_CHANNEL(reg);
 #define HKEY_SPECIAL_ROOT_FIRST   HKEY_CLASSES_ROOT
 #define HKEY_SPECIAL_ROOT_LAST    HKEY_DYN_DATA
 
+/***********************************************************************
+ * GetPersistedRegistryLocationW (kernelbase.@)
+ *
+ * State separation is not enabled in Wine.  The persisted location is
+ * therefore the ordinary registry path formed by the two path components.
+ * Buffer sizes use bytes, as expected by the state-separation API.
+ */
+LSTATUS WINAPI GetPersistedRegistryLocationW(const WCHAR *base, const WCHAR *subkey,
+                                             WCHAR *buffer, DWORD buffer_size,
+                                             DWORD *required_size)
+{
+    DWORD base_len, subkey_len, separator, size;
+
+    TRACE("%s, %s, %p, %lu, %p\n", debugstr_w(base), debugstr_w(subkey), buffer,
+          buffer_size, required_size);
+
+    if (!base || !subkey || !required_size) return ERROR_INVALID_PARAMETER;
+
+    base_len = lstrlenW(base);
+    subkey_len = lstrlenW(subkey);
+    separator = base_len && subkey_len && base[base_len - 1] != '\\' && subkey[0] != '\\';
+    size = (base_len + separator + subkey_len + 1) * sizeof(WCHAR);
+    *required_size = size;
+
+    if (!buffer || buffer_size < size) return ERROR_MORE_DATA;
+
+    memcpy(buffer, base, base_len * sizeof(WCHAR));
+    if (separator) buffer[base_len++] = '\\';
+    memcpy(buffer + base_len, subkey, (subkey_len + 1) * sizeof(WCHAR));
+    return ERROR_SUCCESS;
+}
+
 static const WCHAR * const root_key_names[] =
 {
     L"\\Registry\\Machine\\Software\\Classes",
@@ -644,6 +676,17 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD 
 LSTATUS WINAPI DECLSPEC_HOTPATCH RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD options, REGSAM access, PHKEY retkey )
 {
     UNICODE_STRING nameW;
+    void *frames[16];
+    USHORT frame_count, i;
+
+    if ((ULONG_PTR)retkey < 0x10000)
+    {
+        frame_count = RtlCaptureStackBackTrace( 0, ARRAY_SIZE(frames), frames, NULL );
+        ERR( "invalid result pointer %p for key %p name %s options %#lx access %#lx\n",
+             retkey, hkey, debugstr_w(name), options, access );
+        for (i = 0; i < frame_count; i++) ERR( "LinuxNT call frame %u: %p\n", i, frames[i] );
+        return ERROR_INVALID_PARAMETER;
+    }
 
     if (retkey && (!name || !name[0]) &&
         (HandleToUlong(hkey) >= HandleToUlong(HKEY_SPECIAL_ROOT_FIRST)) &&

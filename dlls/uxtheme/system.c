@@ -1307,6 +1307,21 @@ BOOLEAN WINAPI AllowDarkModeForWindow(HWND hwnd, BOOLEAN allow)
 }
 
 /**********************************************************************
+ *      AllowDarkModeForWindowWithTelemetryId               (UXTHEME.140)
+ *
+ * Windows 11 exposes this private entry point with the same public-facing
+ * arguments as AllowDarkModeForWindow.  The native implementation also
+ * records whether its telemetry property already existed.  Wine does not
+ * consume that telemetry state, so preserve the dark-mode request contract
+ * and return the result from the existing implementation.
+ */
+BOOLEAN WINAPI AllowDarkModeForWindowWithTelemetryId(HWND hwnd, BOOLEAN allow)
+{
+    TRACE("%p %d\n", hwnd, allow);
+    return AllowDarkModeForWindow(hwnd, allow);
+}
+
+/**********************************************************************
  *      SetPreferredAppMode                             (UXTHEME.135)
  *
  */

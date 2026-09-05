@@ -103,3 +103,4 @@
 @ stub WcsSetDefaultRenderingIntent
 @ stub WcsSetUsePerUserProfiles
 @ stub WcsTranslateColors
+260 stub -arch=win64 -noname mscms_260

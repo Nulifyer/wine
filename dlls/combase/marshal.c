@@ -475,6 +475,7 @@ static void dump_mshflags(MSHLFLAGS flags)
 HRESULT WINAPI CoMarshalInterface(IStream *stream, REFIID riid, IUnknown *unk,
         DWORD dest_context, void *pvDestContext, DWORD mshlFlags)
 {
+    IUnknown *agile = NULL, *ftm = NULL;
     CLSID marshaler_clsid;
     IMarshal *marshal;
     HRESULT hr;
@@ -487,11 +488,19 @@ HRESULT WINAPI CoMarshalInterface(IStream *stream, REFIID riid, IUnknown *unk,
         return E_INVALIDARG;
 
     hr = IUnknown_QueryInterface(unk, &IID_IMarshal, (void **)&marshal);
+    if (hr != S_OK && (dest_context == MSHCTX_INPROC || dest_context == MSHCTX_CROSSCTX) &&
+            IUnknown_QueryInterface(unk, &IID_IAgileObject, (void **)&agile) == S_OK)
+    {
+        IUnknown_Release(agile);
+        if (CoCreateFreeThreadedMarshaler(unk, &ftm) == S_OK)
+            hr = IUnknown_QueryInterface(ftm, &IID_IMarshal, (void **)&marshal);
+    }
     if (hr != S_OK)
         hr = CoGetStandardMarshal(riid, unk, dest_context, pvDestContext, mshlFlags, &marshal);
     if (hr != S_OK)
     {
         ERR("Failed to get marshaller, %#lx\n", hr);
+        if (ftm) IUnknown_Release(ftm);
         return hr;
     }
 
@@ -546,6 +555,7 @@ HRESULT WINAPI CoMarshalInterface(IStream *stream, REFIID riid, IUnknown *unk,
 
 cleanup:
     IMarshal_Release(marshal);
+    if (ftm) IUnknown_Release(ftm);
 
     TRACE("completed with hr %#lx\n", hr);
 

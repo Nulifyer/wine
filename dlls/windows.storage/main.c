@@ -22,6 +22,20 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(storage);
 
+static LONG explorer_server_mode;
+
+LONG *WINAPI Global_WindowsStorage_esServerMode(void)
+{
+    return &explorer_server_mode;
+}
+
+HRESULT WINAPI SetExplorerServerMode(BOOL enabled)
+{
+    TRACE("enabled %d.\n", enabled);
+    InterlockedExchange(&explorer_server_mode, enabled);
+    return S_OK;
+}
+
 HRESULT WINAPI DllGetClassObject( REFCLSID clsid, REFIID riid, void **out )
 {
     FIXME( "clsid %s, riid %s, out %p stub!\n", debugstr_guid( clsid ), debugstr_guid( riid ), out );

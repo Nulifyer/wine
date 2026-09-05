@@ -38,6 +38,7 @@
 #include "rpcproxy.h"
 #include "shlwapi.h"
 #include "propsys.h"
+#include "propkey.h"
 #include "commoncontrols.h"
 
 #include "pidl.h"
@@ -49,6 +50,53 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
+
+BOOL WINAPI IsProcessAnExplorer(void)
+{
+    static const WCHAR explorerW[] = L"explorer.exe";
+    static const WCHAR ppishellW[] = L"ppishell.exe";
+    static const WCHAR dpinitW[] = L"dpinit.exe";
+    WCHAR path[MAX_PATH];
+    const WCHAR *name;
+
+    if (!GetModuleFileNameW(NULL, path, ARRAY_SIZE(path))) return FALSE;
+    name = PathFindFileNameW(path);
+    return !wcsicmp(name, explorerW) || !wcsicmp(name, ppishellW) || !wcsicmp(name, dpinitW);
+}
+
+HRESULT WINAPI GetAppIDRoot(IShellItem *item, REFIID riid, void **out, PROPVARIANT *appid)
+{
+    IShellItem *current = item, *parent;
+    IShellItem2 *item2;
+    HRESULT hr;
+
+    if (!item || !riid || !out || !appid) return E_INVALIDARG;
+    *out = NULL;
+    PropVariantInit(appid);
+
+    for (;;)
+    {
+        hr = IShellItem_QueryInterface(current, &IID_IShellItem2, (void **)&item2);
+        if (SUCCEEDED(hr))
+        {
+            hr = IShellItem2_GetProperty(item2, &PKEY_AppUserModel_ID, appid);
+            IShellItem2_Release(item2);
+            if (SUCCEEDED(hr) && appid->vt != VT_EMPTY)
+            {
+                hr = IShellItem_QueryInterface(current, riid, out);
+                if (current != item) IShellItem_Release(current);
+                return hr;
+            }
+            PropVariantClear(appid);
+            PropVariantInit(appid);
+        }
+
+        hr = IShellItem_GetParent(current, &parent);
+        if (current != item) IShellItem_Release(current);
+        if (FAILED(hr)) return hr;
+        current = parent;
+    }
+}
 
 static DWORD shgfi_get_exe_type(LPCWSTR szFullPath)
 {

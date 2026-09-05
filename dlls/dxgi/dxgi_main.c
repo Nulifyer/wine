@@ -29,6 +29,7 @@ struct dxgi_main
     UINT layer_count;
 };
 static struct dxgi_main dxgi_main;
+static LONG adapter_removal_support;
 
 static void dxgi_main_cleanup(void)
 {
@@ -61,6 +62,15 @@ HRESULT WINAPI CreateDXGIFactory2(UINT flags, REFIID iid, void **factory)
         FIXME("Ignoring flags %#x.\n", flags);
 
     return dxgi_factory_create(iid, factory, TRUE);
+}
+
+HRESULT WINAPI DXGIDeclareAdapterRemovalSupport(void)
+{
+    TRACE(".\n");
+
+    if (InterlockedCompareExchange(&adapter_removal_support, 1, 0))
+        return DXGI_ERROR_ALREADY_EXISTS;
+    return S_OK;
 }
 
 HRESULT WINAPI CreateDXGIFactory1(REFIID iid, void **factory)

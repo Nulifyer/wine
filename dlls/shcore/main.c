@@ -28,6 +28,7 @@
 #include "winternl.h"
 #include "initguid.h"
 #include "ocidl.h"
+#include "shobjidl.h"
 #include "featurestagingapi.h"
 #include "shellscalingapi.h"
 #include "shcore.h"
@@ -39,8 +40,69 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shcore);
 
+INT WINAPI SHStringFromGUIDW(REFGUID, LPWSTR, INT);
+HWND WINAPI SHCreateWorkerWindowW(WNDPROC, HWND, DWORD, DWORD, HMENU, LONG_PTR);
+
 static DWORD shcore_tls;
 static IUnknown *process_ref;
+
+BOOL WINAPI GUIDFromStringW(LPCWSTR string, GUID *guid)
+{
+    UNICODE_STRING unicode_string;
+
+    RtlInitUnicodeString(&unicode_string, string);
+    return !RtlGUIDFromString(&unicode_string, guid);
+}
+
+HRESULT WINAPI SHRegGetCLSIDKey(REFGUID guid, LPCWSTR value, BOOL use_hkcu,
+        BOOL create, REGSAM access, HKEY *key)
+{
+    static const WCHAR prefix[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\CLSID\\";
+    WCHAR path[MAX_PATH];
+    HKEY root = use_hkcu ? HKEY_CURRENT_USER : HKEY_CLASSES_ROOT;
+    LSTATUS status;
+
+    memcpy(path, prefix, sizeof(prefix));
+    SHStringFromGUIDW(guid, path + ARRAY_SIZE(prefix) - 1, 39);
+    if (value)
+    {
+        SIZE_T offset = ARRAY_SIZE(prefix) + 38;
+        SIZE_T remaining = ARRAY_SIZE(path) - offset;
+
+        path[offset - 1] = '\\';
+        if (lstrlenW(value) + 1 > remaining) return HRESULT_FROM_WIN32(ERROR_FILENAME_EXCED_RANGE);
+        lstrcpyW(path + offset, value);
+    }
+
+    if (create)
+        status = RegCreateKeyExW(root, path, 0, NULL, 0, access, NULL, key, NULL);
+    else
+        status = RegOpenKeyExW(root, path, 0, access, key);
+
+    return HRESULT_FROM_WIN32(status);
+}
+
+LSTATUS WINAPI SHRegGetValueFromHKCUHKLM(LPCWSTR subkey, LPCWSTR value, SRRF flags,
+        DWORD *type, void *data, DWORD *size)
+{
+    DWORD original_size = size ? *size : 0;
+    LSTATUS status;
+
+    status = SHRegGetValueW(HKEY_CURRENT_USER, subkey, value, flags, type, data, size);
+    if (status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND)
+    {
+        if (size) *size = original_size;
+        status = SHRegGetValueW(HKEY_LOCAL_MACHINE, subkey, value, flags, type, data, size);
+    }
+
+    return status;
+}
+
+HWND WINAPI SHCoreCreateWorkerWindowW(WNDPROC wndproc, HWND parent, DWORD ex_style,
+        DWORD style, HMENU menu, LONG_PTR window_data)
+{
+    return SHCreateWorkerWindowW(wndproc, parent, ex_style, style, menu, window_data);
+}
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 {
@@ -203,6 +265,48 @@ HRESULT WINAPI IUnknown_QueryService(IUnknown *obj, REFGUID sid, REFIID iid, voi
         IServiceProvider_Release(provider);
     }
 
+    return hr;
+}
+
+HRESULT WINAPI IUnknown_ProfferService(IUnknown *obj, REFGUID service,
+                                        IServiceProvider *provider, DWORD *cookie)
+{
+    IProfferService *proffer = NULL;
+    HRESULT hr;
+
+    TRACE("(%p, %s, %p, %p)\n", obj, debugstr_guid(service), provider, cookie);
+
+    if (!service || !cookie) return E_INVALIDARG;
+    hr = IUnknown_QueryService(obj, &IID_IProfferService, &IID_IProfferService, (void **)&proffer);
+    if (FAILED(hr)) return hr;
+
+    if (provider)
+        hr = IProfferService_ProfferService(proffer, service, provider, cookie);
+    else
+    {
+        hr = IProfferService_RevokeService(proffer, *cookie);
+        if (SUCCEEDED(hr)) *cookie = 0;
+    }
+    IProfferService_Release(proffer);
+    return hr;
+}
+
+HRESULT WINAPI IUnknown_GetClassID(IUnknown *obj, CLSID *clsid)
+{
+    IPersist *persist;
+    HRESULT hr;
+
+    if (!clsid) return E_INVALIDARG;
+    memset(clsid, 0, sizeof(*clsid));
+    if (!obj) return E_FAIL;
+
+    hr = IUnknown_QueryInterface(obj, &IID_IPersist, (void **)&persist);
+    if (FAILED(hr))
+        hr = IUnknown_QueryInterface(obj, &IID_IPersistFolder, (void **)&persist);
+    if (FAILED(hr)) return hr;
+
+    hr = IPersist_GetClassID(persist, clsid);
+    IPersist_Release(persist);
     return hr;
 }
 

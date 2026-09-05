@@ -87,6 +87,7 @@
 @ stdcall PSGetPropertySystem(ptr ptr)
 @ stub PSGetPropertyValue
 @ stub PSLookupPropertyHandlerCLSID
+@ stub -arch=win64 PSPropertyBag_WriteDWORD
 @ stdcall PSPropertyKeyFromString(wstr ptr)
 @ stdcall PSRefreshPropertySchema()
 @ stdcall PSRegisterPropertySchema(wstr)

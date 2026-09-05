@@ -158,7 +158,7 @@
 @ stub Global_WindowsStorage_csSCN
 @ stub Global_WindowsStorage_dwThreadBindCtx
 @ stub Global_WindowsStorage_dwThreadInitializing
-@ stub Global_WindowsStorage_esServerMode
+@ stdcall Global_WindowsStorage_esServerMode()
 @ stub Global_WindowsStorage_fEndInitialized
 @ stub Global_WindowsStorage_fIconCacheHasBeenSuccessfullyCreated
 @ stub Global_WindowsStorage_fIconCacheIsValid
@@ -312,6 +312,7 @@
 @ stub SendNotificationsForLibraryItem
 @ stub SerializeLinkToText
 @ stub SetThreadFlags
+@ stdcall SetExplorerServerMode(long)
 @ stdcall ShellExecuteA(long str str str str long)
 @ stdcall ShellExecuteExW(long)
 @ stdcall ShellExecuteW(long wstr wstr wstr wstr long)

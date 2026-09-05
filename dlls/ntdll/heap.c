@@ -2554,6 +2554,19 @@ ULONG WINAPI RtlGetProcessHeaps( ULONG count, HANDLE *heaps )
 }
 
 /***********************************************************************
+ *           RtlDisownModuleHeapAllocation    (NTDLL.@)
+ *
+ * This only affects Application Verifier's leak accounting on Windows.
+ * Wine has no corresponding per-module verifier tracking, so the normal
+ * (verifier-disabled) contract is a successful no-op.
+ */
+NTSTATUS WINAPI RtlDisownModuleHeapAllocation( HANDLE heap, void *allocation )
+{
+    TRACE( "%p %p\n", heap, allocation );
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
  *           RtlQueryHeapInformation    (NTDLL.@)
  */
 NTSTATUS WINAPI RtlQueryHeapInformation( HANDLE handle, HEAP_INFORMATION_CLASS info_class,

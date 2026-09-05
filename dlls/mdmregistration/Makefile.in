@@ -1,0 +1,4 @@
+MODULE = mdmregistration.dll
+
+SOURCES = \
+	main.c

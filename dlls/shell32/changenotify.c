@@ -444,6 +444,18 @@ DWORD WINAPI NTSHChangeNotifyRegister(
 }
 
 /*************************************************************************
+ * SHChangeNotifyRegisterThread          [SHELL32.@]
+ *
+ * Wine's change-notification registrations are already safe to issue from
+ * worker threads. Windows uses this opt-in to select an asynchronous change
+ * router, so there is no separate Wine router state to toggle.
+ */
+void WINAPI SHChangeNotifyRegisterThread(SCNRT_STATUS status)
+{
+    TRACE("status %u\n", status);
+}
+
+/*************************************************************************
  * SHChangeNotification_Lock			[SHELL32.644]
  */
 HANDLE WINAPI SHChangeNotification_Lock(

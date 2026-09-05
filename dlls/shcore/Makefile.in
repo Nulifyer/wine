@@ -1,6 +1,6 @@
 MODULE    = shcore.dll
 IMPORTLIB = shcore
-IMPORTS   = advapi32
+IMPORTS   = advapi32 shlwapi
 DELAYIMPORTS = user32 ole32
 
 SOURCES = \
