@@ -117,9 +117,9 @@
 @ stdcall CoGetObjectContext(ptr ptr)
 @ stdcall CoGetPSClsid(ptr ptr)
 @ stub CoGetProcessIdentifier
-@ stdcall CoGetStandardMarshal(ptr ptr long ptr long ptr)
+@ stdcall CoRegisterForApartmentShutdown(ptr ptr ptr) RoRegisterForApartmentShutdown
 @ stub CoGetStdMarshalEx
-@ stub CoGetSystemSecurityPermissions
+@ stdcall CoGetApartmentIdentifier(ptr)
 @ stdcall CoGetTreatAsClass(ptr ptr)
 @ stdcall CoImpersonateClient()
 @ stdcall CoIncrementMTAUsage(ptr)
@@ -223,13 +223,13 @@
 @ stdcall HPALETTE_UserSize(ptr long ptr)
 @ stdcall HPALETTE_UserUnmarshal(ptr ptr ptr)
 @ stdcall HSTRING_UserFree(ptr ptr)
-@ stub -arch=win64 HSTRING_UserFree64
+@ stdcall -arch=win64 HSTRING_UserFree64(ptr ptr)
 @ stdcall HSTRING_UserMarshal(ptr ptr ptr)
-@ stub -arch=win64 HSTRING_UserMarshal64
+@ stdcall -arch=win64 HSTRING_UserMarshal64(ptr ptr ptr)
 @ stdcall HSTRING_UserSize(ptr long ptr)
-@ stub -arch=win64 HSTRING_UserSize64
+@ stdcall -arch=win64 HSTRING_UserSize64(ptr long ptr)
 @ stdcall HSTRING_UserUnmarshal(ptr ptr ptr)
-@ stub -arch=win64 HSTRING_UserUnmarshal64
+@ stdcall -arch=win64 HSTRING_UserUnmarshal64(ptr ptr ptr)
 @ stdcall HWND_UserFree(ptr ptr)
 @ stdcall HWND_UserMarshal(ptr ptr ptr)
 @ stdcall HWND_UserSize(ptr long ptr)
@@ -299,7 +299,7 @@
 @ stdcall RoGetErrorReportingFlags(ptr)
 @ stdcall RoGetMatchingRestrictedErrorInfo(long ptr)
 @ stdcall RoGetParameterizedTypeInstanceIID(long ptr ptr ptr ptr)
-@ stdcall RoGetServerActivatableClasses(ptr ptr ptr)
+@ stdcall CoGetStandardMarshal(ptr ptr long ptr long ptr)
 @ stdcall RoInitialize(long)
 @ stub RoInspectCapturedStackBackTrace
 @ stub RoInspectThreadErrorInfo
@@ -353,3 +353,5 @@
 @ stdcall WindowsSubstringWithSpecifiedLength(ptr long long ptr)
 @ stdcall WindowsTrimStringEnd(ptr ptr ptr)
 @ stdcall WindowsTrimStringStart(ptr ptr ptr)
+@ stdcall CoGetSystemSecurityPermissions(long ptr)
+@ stdcall RoGetServerActivatableClasses(ptr ptr ptr)

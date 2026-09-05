@@ -339,7 +339,7 @@
 # @ stub CreateSystemThreads
 @ stdcall CreateWindowExA(long str str long long long long long long long long ptr)
 @ stdcall CreateWindowExW(long wstr wstr long long long long long long long long ptr)
-# @ stub CreateWindowInBand
+@ stub -arch=win64 CreateWindowInBand
 # @ stub CreateWindowInBandEx
 # @ stub CreateWindowIndirect
 @ stdcall CreateWindowStationA(str long long ptr)
@@ -731,7 +731,7 @@
 @ stdcall GrayStringW(long long ptr long long long long long long)
 @ stdcall HideCaret(long) NtUserHideCaret
 @ stdcall HiliteMenuItem(long long long long) NtUserHiliteMenuItem
-# @ stub HungWindowFromGhostWindow
+@ stub -arch=win64 HungWindowFromGhostWindow
 # @ stub IMPGetIMEA
 # @ stub IMPGetIMEW
 # @ stub IMPQueryIMEA
@@ -752,8 +752,8 @@
 @ stdcall InitializeTouchInjection(long long) NtUserInitializeTouchInjection
 # @ stub InjectDeviceInput
 # @ stub InjectGenericHidInput
-# @ stub InjectKeyboardInput
-# @ stub InjectMouseInput
+@ stub -arch=win64 InjectKeyboardInput
+@ stub -arch=win64 InjectMouseInput
 # @ stub InjectPointerInput
 # @ stub InjectSyntheticPointerInput
 # @ stub InjectTouchInput
@@ -1032,7 +1032,7 @@
 @ stdcall -import SetCursorPos(long long) NtUserSetCursorPos
 @ stdcall SetDebugErrorLevel(long)
 @ stdcall SetDeskWallpaper(str)
-# @ stub SetDesktopColorTransform
+@ stub -arch=win64 SetDesktopColorTransform
 # @ stub SetDialogControlDpiChangeBehavior
 # @ stub SetDialogDpiChangeBehavior
 @ stdcall SetDisplayAutoRotationPreferences(long)

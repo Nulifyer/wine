@@ -490,12 +490,18 @@ void WINAPI RoFailFastWithErrorContextInternal2(HRESULT error, ULONG exception_c
  */
 HRESULT WINAPI RoGetApartmentIdentifier(UINT64 *identifier)
 {
-    FIXME("(%p): stub\n", identifier);
+    struct apartment *apt;
 
     if (!identifier)
         return E_INVALIDARG;
 
-    *identifier = 0xdeadbeef;
+    if (!(apt = apartment_get_current_or_mta()))
+        return CO_E_NOTINITIALIZED;
+
+    *identifier = apartment_getoxid(apt);
+    apartment_release(apt);
+
+    TRACE("(%p): %s\n", identifier, wine_dbgstr_longlong(*identifier));
     return S_OK;
 }
 

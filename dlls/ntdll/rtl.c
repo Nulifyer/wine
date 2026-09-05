@@ -1631,6 +1631,33 @@ NTSTATUS WINAPI RtlQueryPackageIdentity(HANDLE token, WCHAR *fullname, SIZE_T *f
 }
 
 /*********************************************************************
+ *           RtlQueryPackageClaims [NTDLL.@]
+ *
+ * An ordinary desktop process has no package identity.  Keep every
+ * optional result deterministic while reporting that state to callers.
+ */
+NTSTATUS WINAPI RtlQueryPackageClaims(HANDLE token, WCHAR *fullname, SIZE_T *fullname_size,
+                                      WCHAR *appid, SIZE_T *appid_size, GUID *dynamic_id,
+                                      void *package_claim, ULONGLONG *attributes_present)
+{
+    struct package_claim
+    {
+        ULONG flags;
+        ULONG origin;
+    };
+
+    FIXME("(%p, %p, %p, %p, %p, %p, %p, %p): no package identity\n", token, fullname,
+          fullname_size, appid, appid_size, dynamic_id, package_claim, attributes_present);
+
+    if (fullname_size) *fullname_size = 0;
+    if (appid_size) *appid_size = 0;
+    if (dynamic_id) memset(dynamic_id, 0, sizeof(*dynamic_id));
+    if (package_claim) memset(package_claim, 0, sizeof(struct package_claim));
+    if (attributes_present) *attributes_present = 0;
+    return STATUS_NOT_FOUND;
+}
+
+/*********************************************************************
  *           RtlIsCloudFilesPlaceholder [NTDLL.@]
  */
 BOOLEAN WINAPI RtlIsCloudFilesPlaceholder(ULONG attributes, ULONG tag)

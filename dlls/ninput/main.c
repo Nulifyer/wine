@@ -268,3 +268,10 @@ HRESULT WINAPI NINPUT_2502(HINTERACTIONCONTEXT *context, void *p1, void *p2)
 
     return S_OK;
 }
+
+/* ConfigureDownlevelInput, exported by ordinal 2506. This is invoked by the
+ * application compatibility engine to apply optional legacy input settings. */
+void WINAPI NINPUT_2506(const char *command_line)
+{
+    TRACE("command_line %s.\n", debugstr_a(command_line));
+}

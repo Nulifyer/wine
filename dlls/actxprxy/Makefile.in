@@ -13,6 +13,7 @@ SOURCES = \
 	actxprxy_servprov.idl \
 	actxprxy_shldisp.idl \
 	actxprxy_shobjidl.idl \
+	actxprxy_winrt_shell.idl \
 	actxprxy_urlhist.idl \
 	usrmarshal.c
 

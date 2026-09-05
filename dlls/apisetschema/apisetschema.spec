@@ -602,6 +602,7 @@ apiset ext-ms-win-rtcore-ntuser-winevent-ext-l1-1-0 = user32.dll
 apiset ext-ms-win-rtcore-ntuser-winstamin-l1-1-0 =
 apiset ext-ms-win-rtcore-ntuser-wmpointer-l1-1-0 = user32.dll
 apiset ext-ms-win-rtcore-ntuser-wmpointermin-l1-1-0 =
+apiset ext-ms-win-resourcemanager-limits-l1-1-0 = rmclient.dll
 apiset ext-ms-win-rtcore-ole32-dragdrop-l1-1-0 = ole32.dll
 apiset ext-ms-win-rtcore-ole32-misc-l1-1-0 = ole32.dll
 apiset ext-ms-win-rtcore-webview-l1-1-0 =

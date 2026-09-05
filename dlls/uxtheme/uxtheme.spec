@@ -54,6 +54,7 @@
 136 stdcall -noname FlushMenuThemes()
 137 stdcall -noname IsDarkModeAllowedForWindow(ptr)
 138 stdcall -noname ShouldSystemUseDarkMode()
+140 stdcall -noname AllowDarkModeForWindowWithTelemetryId(ptr long)
 
 # Standard functions
 @ stdcall BeginBufferedAnimation(ptr ptr ptr long ptr ptr ptr ptr)

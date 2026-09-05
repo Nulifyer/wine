@@ -650,6 +650,7 @@
 @ stdcall RtlDestroyProcessParameters(ptr)
 @ stdcall RtlDestroyQueryDebugBuffer(ptr)
 @ stdcall RtlDetermineDosPathNameType_U(wstr)
+@ stdcall RtlDisownModuleHeapAllocation(long ptr)
 @ stdcall RtlDllShutdownInProgress()
 # @ stub RtlDnsHostNameToComputerName
 @ stdcall RtlDoesFileExists_U(wstr)
@@ -960,6 +961,7 @@
 @ stdcall RtlQueryInformationActiveActivationContext(long ptr long ptr)
 @ stub RtlQueryInterfaceMemoryStream
 @ stdcall RtlQueryPackageIdentity(long ptr ptr ptr ptr ptr)
+@ stdcall RtlQueryPackageClaims(long ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RtlQueryPerformanceCounter(ptr)
 @ stdcall RtlQueryPerformanceFrequency(ptr)
 @ stub RtlQueryProcessBackTraceInformation

@@ -29,4 +29,4 @@
 2503 stub @
 2504 stub @
 2505 stub @
-2506 stub @
+2506 stdcall @(str) NINPUT_2506

@@ -1253,6 +1253,7 @@ enable_mcicda
 enable_mciqtz32
 enable_mciseq
 enable_mciwave
+enable_mdmregistration
 enable_mf
 enable_mf3216
 enable_mfasfsrcsnk
@@ -1423,6 +1424,7 @@ enable_resutils
 enable_riched20
 enable_riched32
 enable_rometadata
+enable_rmclient
 enable_rpcrt4
 enable_rsabase
 enable_rsaenh
@@ -22428,6 +22430,7 @@ wine_fn_config_makefile dlls/mcicda enable_mcicda
 wine_fn_config_makefile dlls/mciqtz32 enable_mciqtz32
 wine_fn_config_makefile dlls/mciseq enable_mciseq
 wine_fn_config_makefile dlls/mciwave enable_mciwave
+wine_fn_config_makefile dlls/mdmregistration enable_mdmregistration
 wine_fn_config_makefile dlls/mf enable_mf
 wine_fn_config_makefile dlls/mf/tests enable_tests
 wine_fn_config_makefile dlls/mf3216 enable_mf3216
@@ -22699,6 +22702,7 @@ wine_fn_config_makefile dlls/riched32 enable_riched32
 wine_fn_config_makefile dlls/riched32/tests enable_tests
 wine_fn_config_makefile dlls/rometadata enable_rometadata
 wine_fn_config_makefile dlls/rometadata/tests enable_tests
+wine_fn_config_makefile dlls/rmclient enable_rmclient
 wine_fn_config_makefile dlls/rpcrt4 enable_rpcrt4
 wine_fn_config_makefile dlls/rpcrt4/tests enable_tests
 wine_fn_config_makefile dlls/rsabase enable_rsabase

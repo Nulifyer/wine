@@ -1290,6 +1290,15 @@ HRESULT WINAPI SHBindToParent(LPCITEMIDLIST pidl, REFIID riid, LPVOID *ppv, LPCI
  */
 HRESULT WINAPI SHBindToFolderIDListParent(IShellFolder *psf, LPCITEMIDLIST pidl, REFIID riid, LPVOID *ppv, LPCITEMIDLIST *ppidlLast)
 {
+    return SHBindToFolderIDListParentEx(psf, pidl, NULL, riid, ppv, ppidlLast);
+}
+
+/*************************************************************************
+ * SHBindToFolderIDListParentEx           [SHELL32.@]
+ */
+HRESULT WINAPI SHBindToFolderIDListParentEx(IShellFolder *psf, LPCITEMIDLIST pidl, IBindCtx *pbc,
+                                             REFIID riid, LPVOID *ppv, LPCITEMIDLIST *ppidlLast)
+{
     IShellFolder *psfDesktop = NULL;
     HRESULT hr;
 
@@ -1321,7 +1330,7 @@ HRESULT WINAPI SHBindToFolderIDListParent(IShellFolder *psf, LPCITEMIDLIST pidl,
     {
         LPITEMIDLIST pidlParent = ILClone(pidl);
         ILRemoveLastID(pidlParent);
-        hr = IShellFolder_BindToObject(psf, pidlParent, NULL, riid, ppv);
+        hr = IShellFolder_BindToObject(psf, pidlParent, pbc, riid, ppv);
         ILFree(pidlParent);
     }
 

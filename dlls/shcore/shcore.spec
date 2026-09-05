@@ -111,9 +111,9 @@
 115 stub -noname CreateRandomAccessStreamOnFileWithOptions
 116 stub -noname RandomAccessStreamCopyAsync
 117 stub -noname CreateRandomAccessStreamOnPlaceholderFile
-120 stub -noname SHRegGetCLSIDKey
+120 stdcall -noname SHRegGetCLSIDKey(ptr wstr long long long ptr)
 121 stub -noname SHRegSetValue
-122 stub SHRegGetValueFromHKCUHKLM
+122 stdcall SHRegGetValueFromHKCUHKLM(wstr wstr long ptr ptr ptr)
 123 stub -noname SHRegGetBoolValueFromHKCUHKLM
 124 stub -noname SHGetValueGoodBootA
 125 stub -noname SHGetValueGoodBootW
@@ -123,9 +123,9 @@
 131 stub -noname SHGlobalCounterIncrement
 132 stub -noname SHGlobalCounterDecrement
 133 stub -noname SHGlobalCounterSetValue
-140 stub -noname IUnknown_ProfferService
+140 stdcall -noname IUnknown_ProfferService(ptr ptr ptr ptr)
 141 stub -noname IUnknown_RemoveBackReferences
-142 stub -noname IUnknown_GetClassID
+142 stdcall -noname IUnknown_GetClassID(ptr ptr)
 143 stub -noname StrRetToStrW
 144 stub -noname StrRetToBSTR
 145 stub -noname StrRetToBufW
@@ -149,13 +149,13 @@
 185 stub -noname SHGetSizeShared
 186 stub -noname SHUnlockShared
 187 stub -noname SHFreeShared
-188 stub -noname SHCreateWorkerWindowW
+188 stdcall -noname SHCreateWorkerWindowW(ptr ptr long long ptr long) SHCoreCreateWorkerWindowW
 189 stub -noname SHCreateOplockProvider
 190 stub -noname SHWindowsPolicy
 191 stub -noname SHWindowsPolicyGetValue
 192 stub -noname IsAppCompatModeEnabled
 193 stub -noname SHGetObjectCompatFlags
-200 stub -noname GUIDFromStringW
+200 stdcall -noname GUIDFromStringW(wstr ptr)
 220 stub -noname GetPhysicalDpiForDevice
 222 stub -noname ScaleRelativePixelsForDevice
 223 stub -noname PhysicalRectFromScaledRect
@@ -193,6 +193,6 @@
 282 stub -noname SuspendSHNotify
 283 stub -noname ResumeSHNotify
 284 stub -noname IsNotifySuspended
-290 stub -noname SHCreateDirectoryExW
-291 stub -noname SHCreateDirectoryExA
-292 stub -noname SHCreateDirectory
+290 stdcall -noname SHCreateDirectoryExW(long wstr ptr) shell32.SHCreateDirectoryExW
+291 stdcall -noname SHCreateDirectoryExA(long str ptr) shell32.SHCreateDirectoryExA
+292 stdcall -noname SHCreateDirectory(long ptr) shell32.SHCreateDirectory

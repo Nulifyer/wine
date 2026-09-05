@@ -1557,6 +1557,17 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentApplicationUserModelId( UINT32 *le
 }
 
 /***********************************************************************
+ *         AddDependencyToProcessPackageGraph   (kernelbase.@)
+ */
+HRESULT WINAPI AddDependencyToProcessPackageGraph( const WCHAR *package_full_name, UINT64 context,
+                                                   UINT32 rank, UINT32 options )
+{
+    TRACE( "(%s, %s, %u, %#x)\n", debugstr_w(package_full_name),
+           wine_dbgstr_longlong(context), rank, options );
+    return S_OK;
+}
+
+/***********************************************************************
  *         GetCurrentPackageFamilyName   (kernelbase.@)
  */
 LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackageFamilyName( UINT32 *length, WCHAR *name )

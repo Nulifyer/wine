@@ -1135,3 +1135,26 @@ void __RPC_USER HSTRING_UserFree(ULONG *flags, HSTRING *str)
     if (LOWORD(*flags) == MSHCTX_INPROC)
         WindowsDeleteString(*str);
 }
+
+ULONG __RPC_USER HSTRING_UserSize64(ULONG *flags, ULONG size, HSTRING *str)
+{
+    if (!str) return size;
+    return HSTRING_UserSize(flags, size, str);
+}
+
+BYTE * __RPC_USER HSTRING_UserMarshal64(ULONG *flags, BYTE *buf, HSTRING *str)
+{
+    if (!str) return buf;
+    return HSTRING_UserMarshal(flags, buf, str);
+}
+
+BYTE * __RPC_USER HSTRING_UserUnmarshal64(ULONG *flags, BYTE *buf, HSTRING *str)
+{
+    if (!str) return buf;
+    return HSTRING_UserUnmarshal(flags, buf, str);
+}
+
+void __RPC_USER HSTRING_UserFree64(ULONG *flags, HSTRING *str)
+{
+    if (str) HSTRING_UserFree(flags, str);
+}

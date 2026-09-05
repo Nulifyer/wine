@@ -38,6 +38,66 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(actxprxy);
 
+static ULONG linuxnt_pidl_size(PCIDLIST_ABSOLUTE pidl)
+{
+    const BYTE *cursor = (const BYTE *)pidl;
+    ULONG size = 0;
+    WORD item_size;
+
+    if (!pidl) return 0;
+
+    for (;;)
+    {
+        memcpy(&item_size, cursor, sizeof(item_size));
+        if (!item_size) return size + sizeof(item_size);
+        if (item_size < sizeof(item_size) || size > ~0u - item_size) return 0;
+        size += item_size;
+        cursor += item_size;
+    }
+}
+
+ULONG __RPC_USER LINUXNT_PCIDLIST_ABSOLUTE_UserSize(ULONG *flags, ULONG size,
+                                                    PCIDLIST_ABSOLUTE *pidl)
+{
+    ULONG pidl_size = linuxnt_pidl_size(*pidl);
+
+    return size + sizeof(pidl_size) + pidl_size;
+}
+
+unsigned char *__RPC_USER LINUXNT_PCIDLIST_ABSOLUTE_UserMarshal(ULONG *flags, unsigned char *buffer,
+                                                                PCIDLIST_ABSOLUTE *pidl)
+{
+    ULONG size = linuxnt_pidl_size(*pidl);
+
+    memcpy(buffer, &size, sizeof(size));
+    buffer += sizeof(size);
+    if (size) memcpy(buffer, *pidl, size);
+    return buffer + size;
+}
+
+unsigned char *__RPC_USER LINUXNT_PCIDLIST_ABSOLUTE_UserUnmarshal(ULONG *flags, unsigned char *buffer,
+                                                                  PCIDLIST_ABSOLUTE *pidl)
+{
+    ULONG size;
+    ITEMIDLIST *copy = NULL;
+
+    memcpy(&size, buffer, sizeof(size));
+    buffer += sizeof(size);
+    if (size)
+    {
+        if (size < sizeof(WORD) || !(copy = CoTaskMemAlloc(size))) RpcRaiseException(E_OUTOFMEMORY);
+        memcpy(copy, buffer, size);
+    }
+    *pidl = copy;
+    return buffer + size;
+}
+
+void __RPC_USER LINUXNT_PCIDLIST_ABSOLUTE_UserFree(ULONG *flags, PCIDLIST_ABSOLUTE *pidl)
+{
+    CoTaskMemFree((void *)*pidl);
+    *pidl = NULL;
+}
+
 HRESULT CALLBACK IServiceProvider_QueryService_Proxy(
     IServiceProvider* This,
     REFGUID guidService,

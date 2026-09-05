@@ -4,6 +4,7 @@
 # This list was updated to dll version 4.72
 
    2 stdcall -ordinal SHChangeNotifyRegister(long long long long long ptr)
+@ stdcall SHChangeNotifyRegisterThread(long)
    3 stdcall SHDefExtractIconA(str long long ptr ptr long)
    4 stdcall -ordinal SHChangeNotifyDeregister(long)
    5 stdcall -noname SHChangeNotifyUpdateEntryList(long long long long)
@@ -260,14 +261,23 @@
  701 stdcall CDefFolderMenu_Create2(ptr ptr long ptr ptr ptr long ptr ptr)
  704 stdcall -noname GUIDFromStringW(wstr ptr)
  709 stdcall SHGetSetFolderCustomSettings(ptr wstr long)
+ 711 stub -noname CheckWinIniForAssocs
  714 stdcall -noname PathIsTemporaryW(wstr)
  716 stdcall SHMultiFileProperties(ptr long)
  723 stdcall -noname SHCreateSessionKey(long ptr)
  727 stdcall SHGetImageList(long ptr ptr)
  730 stdcall -noname RestartDialogEx(long wstr long long)
+ 733 stub -noname CheckDiskSpace
  743 stdcall SHCreateFileExtractIconW(wstr long ptr ptr)
  747 stdcall SHLimitInputEdit(ptr ptr)
+ 753 stub -noname CheckStagingArea
+ 764 stub -noname AssocCreateElement
+ 866 stub -noname SHExtCoCreateInstance
  885 stdcall -noname RunInstallUninstallStubs(wstr)
+ 896 stub -noname ClearDestinationsForAllApps
+ 899 stdcall -noname SetExplorerServerMode(long) windows.storage.dll.SetExplorerServerMode
+ 900 stdcall -noname GetAppIDRoot(ptr ptr ptr ptr)
+ 941 stdcall IsProcessAnExplorer()
 
 1217 stub FOOBAR1217   # no joke! This is the real name!!
 
@@ -336,6 +346,7 @@
 @ stdcall SHAssocEnumHandlers(wstr long ptr)
 @ stdcall SHAssocEnumHandlersForProtocolByApplication(wstr ptr ptr)
 @ stdcall SHBindToFolderIDListParent(ptr ptr ptr ptr ptr)
+@ stdcall SHBindToFolderIDListParentEx(ptr ptr ptr ptr ptr ptr)
 @ stdcall SHBindToObject(ptr ptr ptr ptr ptr)
 @ stdcall SHBindToParent(ptr ptr ptr ptr)
 @ stdcall SHBrowseForFolder(ptr) SHBrowseForFolderA
@@ -362,6 +373,7 @@
 @ stdcall SHCreateShellItemArrayFromIDLists(long ptr ptr)
 @ stdcall SHEmptyRecycleBinA(long str long)
 @ stdcall SHEmptyRecycleBinW(long wstr long)
+@ stub -arch=win64 SHEnableServiceObject
 @ stdcall SHEnumerateUnreadMailAccountsW(ptr long ptr long)
 @ stdcall SHEvaluateSystemCommandTemplate(wstr ptr ptr ptr)
 @ stdcall SHExtractIconsW(wstr long long long ptr ptr long long) user32.PrivateExtractIconsW
