@@ -917,7 +917,7 @@
 @ stdcall -syscall NtUserDragDetect(long long long)
 @ stdcall -syscall NtUserDragObject(long long long long long)
 @ stdcall -syscall NtUserDrainThreadCoreMessagingCompletions()
-@ stdcall -syscall NtUserDrainThreadCoreMessagingCompletions2()
+@ stdcall -syscall NtUserDrainThreadCoreMessagingCompletions2(long)
 @ stub -syscall NtUserDrawAnimatedRects
 @ stub -syscall NtUserDrawCaption
 @ stdcall -syscall NtUserDrawCaptionTemp(long long ptr long long wstr long)

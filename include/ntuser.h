@@ -805,7 +805,7 @@ W32KAPI NTSTATUS WINAPI NtUserDisplayConfigGetDeviceInfo( DISPLAYCONFIG_DEVICE_I
 W32KAPI BOOL    WINAPI NtUserDragDetect( HWND hwnd, int x, int y );
 W32KAPI DWORD   WINAPI NtUserDragObject( HWND parent, HWND hwnd, UINT fmt, ULONG_PTR data, HCURSOR cursor );
 W32KAPI ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions(void);
-W32KAPI ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2(void);
+W32KAPI ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2(HWND hwnd);
 W32KAPI HANDLE WINAPI NtUserInitThreadCoreMessagingIocp2(HWND hwnd, DWORD *mode);
 W32KAPI BOOL    WINAPI NtUserDrawCaptionTemp( HWND hwnd, HDC hdc, const RECT *rect, HFONT font,
                                               HICON icon, const WCHAR *str, UINT flags );

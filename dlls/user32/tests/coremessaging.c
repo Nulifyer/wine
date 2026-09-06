@@ -14,6 +14,7 @@
 #include "wine/test.h"
 
 typedef HANDLE (WINAPI *init_thread_coremessaging_iocp2_fn)( HWND, DWORD * );
+typedef ULONG_PTR (WINAPI *drain_thread_coremessaging_completions2_fn)( HWND );
 
 static const char window_class[] = "CoreMessagingTestWindow";
 
@@ -44,17 +45,20 @@ static DWORD WINAPI foreign_window_thread( void *context )
 static void test_init_thread_coremessaging_iocp2(void)
 {
     init_thread_coremessaging_iocp2_fn init;
+    drain_thread_coremessaging_completions2_fn drain;
     struct foreign_window_state foreign = {0};
     WNDCLASSA cls = {0};
     HANDLE first, second, third, thread;
     HWND hwnd1, hwnd2, destroyed;
     DWORD mode, flags, error;
+    ULONG_PTR drain_ret;
     BOOL ret;
 
     init = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2669 ));
-    if (!init)
+    drain = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2670 ));
+    if (!init || !drain)
     {
-        win_skip( "InitThreadCoreMessagingIocp2 is not available.\n" );
+        win_skip( "CoreMessaging thread integration exports are not available.\n" );
         return;
     }
 
@@ -69,12 +73,32 @@ static void test_init_thread_coremessaging_iocp2(void)
                              HWND_MESSAGE, NULL, cls.hInstance, NULL );
     ok( !!hwnd1 && !!hwnd2, "Failed to create test windows, error %lu.\n", GetLastError() );
 
+    SetLastError( 0xdeadbeef );
+    drain_ret = drain( NULL );
+    ok( !drain_ret, "NULL window returned %Ix.\n", drain_ret );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "Expected error 1400, got %lu.\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    drain_ret = drain( hwnd1 );
+    ok( !drain_ret, "Unregistered window returned %Ix.\n", drain_ret );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "Expected error 1400, got %lu.\n", GetLastError() );
+
     mode = 0xcccccccc;
     SetLastError( 0xdeadbeef );
     first = init( hwnd1, &mode );
     ok( !!first, "First registration failed, error %lu.\n", GetLastError() );
     ok( mode == 0, "Expected first mode 0, got %#lx.\n", mode );
     ok( GetLastError() == 0xdeadbeef, "Expected unchanged error, got %lu.\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    drain_ret = drain( hwnd1 );
+    ok( drain_ret == TRUE, "Registered window returned %Ix.\n", drain_ret );
+    ok( GetLastError() == 0xdeadbeef, "Expected unchanged error, got %lu.\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    drain_ret = drain( hwnd2 );
+    ok( !drain_ret, "Unregistered second window returned %Ix.\n", drain_ret );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "Expected error 1400, got %lu.\n", GetLastError() );
 
     flags = 0;
     ret = GetHandleInformation( first, &flags );
@@ -93,6 +117,11 @@ static void test_init_thread_coremessaging_iocp2(void)
     third = init( hwnd2, &mode );
     ok( third == first, "Expected shared port %p, got %p.\n", first, third );
     ok( mode == 1, "Expected subsequent mode 1, got %#lx.\n", mode );
+    ok( GetLastError() == 0xdeadbeef, "Expected unchanged error, got %lu.\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    drain_ret = drain( hwnd2 );
+    ok( drain_ret == TRUE, "Registered second window returned %Ix.\n", drain_ret );
     ok( GetLastError() == 0xdeadbeef, "Expected unchanged error, got %lu.\n", GetLastError() );
 
     SetLastError( 0xdeadbeef );

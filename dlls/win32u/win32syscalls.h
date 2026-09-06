@@ -919,7 +919,7 @@
     SYSCALL_ENTRY( 0x1393, NtUserDragDetect, 12 ) \
     SYSCALL_ENTRY( 0x1394, NtUserDragObject, 20 ) \
     SYSCALL_ENTRY( 0x1395, NtUserDrainThreadCoreMessagingCompletions, 0 ) \
-    SYSCALL_ENTRY( 0x1396, NtUserDrainThreadCoreMessagingCompletions2, 0 ) \
+    SYSCALL_ENTRY( 0x1396, NtUserDrainThreadCoreMessagingCompletions2, 4 ) \
     SYSCALL_ENTRY( 0x1397, NtUserDrawAnimatedRects, 0 ) \
     SYSCALL_ENTRY( 0x1398, NtUserDrawCaption, 0 ) \
     SYSCALL_ENTRY( 0x1399, NtUserDrawCaptionTemp, 28 ) \
@@ -2461,7 +2461,7 @@
     SYSCALL_ENTRY( 0x1393, NtUserDragDetect, 24 ) \
     SYSCALL_ENTRY( 0x1394, NtUserDragObject, 40 ) \
     SYSCALL_ENTRY( 0x1395, NtUserDrainThreadCoreMessagingCompletions, 0 ) \
-    SYSCALL_ENTRY( 0x1396, NtUserDrainThreadCoreMessagingCompletions2, 0 ) \
+    SYSCALL_ENTRY( 0x1396, NtUserDrainThreadCoreMessagingCompletions2, 8 ) \
     SYSCALL_ENTRY( 0x1397, NtUserDrawAnimatedRects, 0 ) \
     SYSCALL_ENTRY( 0x1398, NtUserDrawCaption, 0 ) \
     SYSCALL_ENTRY( 0x1399, NtUserDrawCaptionTemp, 56 ) \
