@@ -210,9 +210,10 @@ static void dump_get_process_info_reply( const struct get_process_info_reply *re
     dump_timeout( ", end_time=", &req->end_time );
     fprintf( stderr, ", session_id=%08x", req->session_id );
     fprintf( stderr, ", exit_code=%d", req->exit_code );
-    fprintf( stderr, ", priority=%04x", req->priority );
-    fprintf( stderr, ", base_priority=%04x", req->base_priority );
-    fprintf( stderr, ", disable_boost=%04x", req->disable_boost );
+    fprintf( stderr, ", priority=%02x", req->priority );
+    fprintf( stderr, ", base_priority=%02x", req->base_priority );
+    fprintf( stderr, ", disable_boost=%02x", req->disable_boost );
+    fprintf( stderr, ", handle_checking_mode=%02x", req->handle_checking_mode );
     fprintf( stderr, ", machine=%04x", req->machine );
     dump_varargs_pe_image_info( ", image=", cur_size );
 }
@@ -266,6 +267,7 @@ static void dump_set_process_info_request( const struct set_process_info_request
     fprintf( stderr, ", disable_boost=%d", req->disable_boost );
     fprintf( stderr, ", token=%04x", req->token );
     fprintf( stderr, ", mask=%d", req->mask );
+    fprintf( stderr, ", handle_checking_mode=%08x", req->handle_checking_mode );
 }
 
 static void dump_get_thread_info_request( const struct get_thread_info_request *req )
