@@ -1388,6 +1388,19 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
         len = 0;
         break;
 
+    case ProcessHandleCheckingMode:
+        if (size != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info) return STATUS_ACCESS_VIOLATION;
+        SERVER_START_REQ( get_process_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            if (!(ret = wine_server_call( req )))
+                *(ULONG *)info = reply->handle_checking_mode;
+        }
+        SERVER_END_REQ;
+        /* Windows leaves ReturnLength untouched for this information class. */
+        return ret;
+
     case ProcessAffinityMask:
         len = sizeof(ULONG_PTR);
         if (size == len)
@@ -1799,6 +1812,20 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
         set_process_instrumentation_callback( callback );
         break;
     }
+
+    case ProcessHandleCheckingMode:
+        if (size != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info) return STATUS_ACCESS_VIOLATION;
+        if (*(ULONG *)info > 1) return STATUS_INVALID_PARAMETER;
+        SERVER_START_REQ( set_process_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            req->handle_checking_mode = *(ULONG *)info;
+            req->mask = SET_PROCESS_INFO_HANDLE_CHECKING;
+            ret = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        break;
 
     case ProcessThreadStackAllocation:
     {

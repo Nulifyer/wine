@@ -619,6 +619,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->priority        = PROCESS_PRIOCLASS_NORMAL;
     process->base_priority   = 8;
     process->disable_boost   = 0;
+    process->handle_checking_mode = 0;
     process->suspend         = 0;
     process->is_system       = 0;
     process->debug_children  = 1;
@@ -1485,6 +1486,7 @@ DECL_HANDLER(get_process_info)
         reply->priority         = process->priority;
         reply->base_priority    = process->base_priority;
         reply->disable_boost    = process->disable_boost;
+        reply->handle_checking_mode = process->handle_checking_mode;
         reply->affinity         = process->affinity;
         reply->peb              = process->peb;
         reply->start_time       = process->start_time;
@@ -1698,6 +1700,8 @@ DECL_HANDLER(set_process_info)
         if (req->mask & SET_PROCESS_INFO_BASE_PRIORITY) set_process_base_priority( process, req->base_priority );
         if (req->mask & SET_PROCESS_INFO_DISABLE_BOOST) set_process_disable_boost( process, req->disable_boost );
         if (req->mask & SET_PROCESS_INFO_AFFINITY) set_process_affinity( process, req->affinity );
+        if (req->mask & SET_PROCESS_INFO_HANDLE_CHECKING)
+            process->handle_checking_mode = req->handle_checking_mode;
         if (req->mask & SET_PROCESS_INFO_TOKEN)
         {
             struct token *token;

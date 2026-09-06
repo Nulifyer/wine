@@ -1251,9 +1251,10 @@ typedef volatile struct
     timeout_t    end_time;         /* process end time */
     unsigned int session_id;       /* process session id */
     int          exit_code;        /* process exit code */
-    unsigned short priority;       /* priority class */
-    unsigned short base_priority;  /* process base priority */
-    unsigned short disable_boost;  /* disable process priority boost */
+    unsigned char priority;        /* priority class */
+    unsigned char base_priority;   /* process base priority */
+    unsigned char disable_boost;   /* disable process priority boost */
+    unsigned char handle_checking_mode; /* process handle checking policy */
     unsigned short machine;        /* process architecture */
     VARARG(image,pe_image_info);   /* image info for main exe */
 @END
@@ -1302,12 +1303,14 @@ typedef volatile struct
     int          disable_boost; /* disable process priority boost */
     obj_handle_t token;        /* primary token */
     int          mask;         /* setting mask (see below) */
+    unsigned int handle_checking_mode; /* process handle checking policy */
 @END
 #define SET_PROCESS_INFO_PRIORITY      0x01
 #define SET_PROCESS_INFO_BASE_PRIORITY 0x02
 #define SET_PROCESS_INFO_DISABLE_BOOST 0x04
 #define SET_PROCESS_INFO_AFFINITY      0x08
 #define SET_PROCESS_INFO_TOKEN         0x10
+#define SET_PROCESS_INFO_HANDLE_CHECKING 0x20
 
 
 /* Retrieve information about a thread */

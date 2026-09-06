@@ -2989,6 +2989,59 @@ static void test_mapprotection(void)
         pNtSetInformationProcess( GetCurrentProcess(), ProcessExecuteFlags, &oldflags, sizeof(oldflags) );
 }
 
+static void test_process_handle_checking_mode(void)
+{
+    static const ULONG bad_sizes[] = {0, 1, 2, 3, 5, 8};
+    ULONG mode, return_length;
+    NTSTATUS status;
+    HANDLE process;
+    unsigned int i;
+
+    mode = 0xcccccccc;
+    return_length = 0xcccccccc;
+    status = pNtQueryInformationProcess( GetCurrentProcess(), ProcessHandleCheckingMode,
+                                         &mode, sizeof(mode), &return_length );
+    ok( status == STATUS_SUCCESS, "got %#lx.\n", status );
+    ok( mode == 0, "got mode %#lx.\n", mode );
+    ok( return_length == 0xcccccccc, "got return length %#lx.\n", return_length );
+
+    for (i = 0; i < ARRAY_SIZE(bad_sizes); ++i)
+    {
+        mode = 0;
+        status = pNtQueryInformationProcess( GetCurrentProcess(), ProcessHandleCheckingMode,
+                                             &mode, bad_sizes[i], NULL );
+        ok( status == STATUS_INFO_LENGTH_MISMATCH, "size %lu got %#lx.\n", bad_sizes[i], status );
+        status = pNtSetInformationProcess( GetCurrentProcess(), ProcessHandleCheckingMode,
+                                           &mode, bad_sizes[i] );
+        ok( status == STATUS_INFO_LENGTH_MISMATCH, "size %lu got %#lx.\n", bad_sizes[i], status );
+    }
+
+    mode = 2;
+    status = pNtSetInformationProcess( GetCurrentProcess(), ProcessHandleCheckingMode,
+                                       &mode, sizeof(mode) );
+    ok( status == STATUS_INVALID_PARAMETER, "got %#lx.\n", status );
+
+    mode = 1;
+    status = pNtSetInformationProcess( GetCurrentProcess(), ProcessHandleCheckingMode,
+                                       &mode, sizeof(mode) );
+    ok( status == STATUS_SUCCESS, "got %#lx.\n", status );
+
+    process = OpenProcess( PROCESS_QUERY_INFORMATION | PROCESS_SET_INFORMATION,
+                           FALSE, GetCurrentProcessId() );
+    ok( process != NULL, "OpenProcess failed, error %lu.\n", GetLastError() );
+    mode = 0;
+    status = pNtQueryInformationProcess( process, ProcessHandleCheckingMode,
+                                         &mode, sizeof(mode), NULL );
+    ok( status == STATUS_SUCCESS, "got %#lx.\n", status );
+    ok( mode == 1, "got mode %#lx.\n", mode );
+
+    mode = 0;
+    status = pNtSetInformationProcess( process, ProcessHandleCheckingMode,
+                                       &mode, sizeof(mode) );
+    ok( status == STATUS_SUCCESS, "got %#lx.\n", status );
+    NtClose( process );
+}
+
 static void test_threadstack(void)
 {
     PROCESS_STACK_ALLOCATION_INFORMATION info = { 0x100000, 0, (void *)0xdeadbeef };
@@ -4732,6 +4785,7 @@ START_TEST(info)
     test_query_process_image_info();
     test_query_process_quota_limits();
     test_mapprotection();
+    test_process_handle_checking_mode();
     test_threadstack();
 
     /* NtQueryInformationThread */

@@ -1299,11 +1299,13 @@ struct get_process_info_reply
     timeout_t    end_time;
     unsigned int session_id;
     int          exit_code;
-    unsigned short priority;
-    unsigned short base_priority;
-    unsigned short disable_boost;
+    unsigned char priority;
+    unsigned char base_priority;
+    unsigned char disable_boost;
+    unsigned char handle_checking_mode;
     unsigned short machine;
     /* VARARG(image,pe_image_info); */
+    char __pad_62[2];
 };
 
 
@@ -1368,7 +1370,7 @@ struct set_process_info_request
     int          disable_boost;
     obj_handle_t token;
     int          mask;
-    char __pad_44[4];
+    unsigned int handle_checking_mode;
 };
 struct set_process_info_reply
 {
@@ -1379,6 +1381,7 @@ struct set_process_info_reply
 #define SET_PROCESS_INFO_DISABLE_BOOST 0x04
 #define SET_PROCESS_INFO_AFFINITY      0x08
 #define SET_PROCESS_INFO_TOKEN         0x10
+#define SET_PROCESS_INFO_HANDLE_CHECKING 0x20
 
 
 
