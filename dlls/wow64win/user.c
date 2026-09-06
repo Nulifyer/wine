@@ -38,7 +38,9 @@ NTSTATUS WINAPI wow64_NtUserDrainThreadCoreMessagingCompletions( UINT *args )
 
 NTSTATUS WINAPI wow64_NtUserDrainThreadCoreMessagingCompletions2( UINT *args )
 {
-    return NtUserDrainThreadCoreMessagingCompletions2();
+    HWND hwnd = get_handle( &args );
+
+    return NtUserDrainThreadCoreMessagingCompletions2( hwnd );
 }
 
 NTSTATUS WINAPI wow64_NtUserInitThreadCoreMessagingIocp2( UINT *args )

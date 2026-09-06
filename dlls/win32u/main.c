@@ -1422,7 +1422,7 @@ ULONG_PTR SYSCALL_API NtUserDrainThreadCoreMessagingCompletions(void)
     SYSCALL_FUNC( NtUserDrainThreadCoreMessagingCompletions );
 }
 
-ULONG_PTR SYSCALL_API NtUserDrainThreadCoreMessagingCompletions2(void)
+ULONG_PTR SYSCALL_API NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
 {
     SYSCALL_FUNC( NtUserDrainThreadCoreMessagingCompletions2 );
 }

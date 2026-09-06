@@ -1068,10 +1068,17 @@ ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions(void)
 /***********************************************************************
  *           NtUserDrainThreadCoreMessagingCompletions2 (win32u.@)
  */
-ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2(void)
+ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
 {
-    /* LinuxNT does not advertise the private scheduled-dispatch contract, so
-     * no completions are placed on win32k's corresponding private queue. */
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct core_messaging_window *window;
+
+    LIST_FOR_EACH_ENTRY( window, &thread_info->core_messaging_windows,
+                         struct core_messaging_window, entry )
+    {
+        if (window->hwnd == hwnd) return TRUE;
+    }
+
     RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
     return FALSE;
 }
