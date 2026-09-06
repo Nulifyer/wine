@@ -31,6 +31,24 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wow);
 
+NTSTATUS WINAPI wow64_NtUserDrainThreadCoreMessagingCompletions( UINT *args )
+{
+    return NtUserDrainThreadCoreMessagingCompletions();
+}
+
+NTSTATUS WINAPI wow64_NtUserDrainThreadCoreMessagingCompletions2( UINT *args )
+{
+    return NtUserDrainThreadCoreMessagingCompletions2();
+}
+
+NTSTATUS WINAPI wow64_NtUserInitThreadCoreMessagingIocp2( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    DWORD *mode = get_ptr( &args );
+
+    return HandleToUlong( NtUserInitThreadCoreMessagingIocp2( hwnd, mode ));
+}
+
 typedef struct
 {
     DWORD cbSize;

@@ -120,7 +120,7 @@
 2610 stub -noname CompositionInputSinkViewInstanceIdFromPoint  # NtUserCompositionInputSinkViewInstanceIdFromPoint
 2611 stdcall -noname EnableWindowResizeOptimization(long long long) NtUserEnableWindowResizeOptimization
 2612 stub -noname InitThreadCoreMessagingIocp  # NtUserInitThreadCoreMessagingIocp
-2613 stub -noname DrainThreadCoreMessagingCompletions  # NtUserDrainThreadCoreMessagingCompletions
+2613 stdcall -noname DrainThreadCoreMessagingCompletions() NtUserDrainThreadCoreMessagingCompletions
 2614 stub -noname GetResizeDCompositionSynchronizationObject  # NtUserGetResizeDCompositionSynchronizationObject
 2615 stub -noname EnableResizeLayoutSynchronization  # NtUserEnableResizeLayoutSynchronization
 2616 stub -noname BeginLayoutUpdate  # NtUserBeginLayoutUpdate
@@ -168,8 +168,8 @@
 2666 stub RegisterForTooltipDismissNotification  # NtUserRegisterForTooltipDismissNotification
 2667 stub RegisterForCustomDockTargets  # NtUserRegisterForCustomDockTargets
 2668 stub GetClipboardMetadata  # NtUserGetClipboardMetadata
-2669 stub -noname InitThreadCoreMessagingIocp2  # NtUserInitThreadCoreMessagingIocp2
-2670 stub -noname DrainThreadCoreMessagingCompletions2  # NtUserDrainThreadCoreMessagingCompletions2
+2669 stdcall -noname InitThreadCoreMessagingIocp2(long ptr) NtUserInitThreadCoreMessagingIocp2
+2670 stdcall -noname DrainThreadCoreMessagingCompletions2() NtUserDrainThreadCoreMessagingCompletions2
 2671 stub ShellRegisterHotKey  # NtUserShellRegisterHotKey
 2672 stub SetUserObjectCapability  # NtUserSetUserObjectCapability
 2673 stdcall SetWindowMessageCapability(long long ptr long) NtUserSetWindowMessageCapability

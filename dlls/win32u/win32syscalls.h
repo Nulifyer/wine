@@ -1145,7 +1145,7 @@
     SYSCALL_ENTRY( 0x1475, NtUserInitAnsiOem, 0 ) \
     SYSCALL_ENTRY( 0x1476, NtUserInitTask, 0 ) \
     SYSCALL_ENTRY( 0x1477, NtUserInitThreadCoreMessagingIocp, 0 ) \
-    SYSCALL_ENTRY( 0x1478, NtUserInitThreadCoreMessagingIocp2, 0 ) \
+    SYSCALL_ENTRY( 0x1478, NtUserInitThreadCoreMessagingIocp2, 8 ) \
     SYSCALL_ENTRY( 0x1479, NtUserInitialize, 0 ) \
     SYSCALL_ENTRY( 0x147a, NtUserInitializeClientPfnArrays, 16 ) \
     SYSCALL_ENTRY( 0x147b, NtUserInitializeGenericHidInjection, 0 ) \
@@ -2687,7 +2687,7 @@
     SYSCALL_ENTRY( 0x1475, NtUserInitAnsiOem, 0 ) \
     SYSCALL_ENTRY( 0x1476, NtUserInitTask, 0 ) \
     SYSCALL_ENTRY( 0x1477, NtUserInitThreadCoreMessagingIocp, 0 ) \
-    SYSCALL_ENTRY( 0x1478, NtUserInitThreadCoreMessagingIocp2, 0 ) \
+    SYSCALL_ENTRY( 0x1478, NtUserInitThreadCoreMessagingIocp2, 16 ) \
     SYSCALL_ENTRY( 0x1479, NtUserInitialize, 0 ) \
     SYSCALL_ENTRY( 0x147a, NtUserInitializeClientPfnArrays, 32 ) \
     SYSCALL_ENTRY( 0x147b, NtUserInitializeGenericHidInjection, 0 ) \
@@ -3744,8 +3744,6 @@
     SYSCALL_STUB( NtUserDoSoundDisconnect ) \
     SYSCALL_STUB( NtUserDoUninitMessagePumpHook ) \
     SYSCALL_STUB( NtUserDownlevelTouchpad ) \
-    SYSCALL_STUB( NtUserDrainThreadCoreMessagingCompletions ) \
-    SYSCALL_STUB( NtUserDrainThreadCoreMessagingCompletions2 ) \
     SYSCALL_STUB( NtUserDrawAnimatedRects ) \
     SYSCALL_STUB( NtUserDrawCaption ) \
     SYSCALL_STUB( NtUserDwmGetRemoteSessionOcclusionEvent ) \
@@ -3877,7 +3875,6 @@
     SYSCALL_STUB( NtUserInitAnsiOem ) \
     SYSCALL_STUB( NtUserInitTask ) \
     SYSCALL_STUB( NtUserInitThreadCoreMessagingIocp ) \
-    SYSCALL_STUB( NtUserInitThreadCoreMessagingIocp2 ) \
     SYSCALL_STUB( NtUserInitialize ) \
     SYSCALL_STUB( NtUserInitializeGenericHidInjection ) \
     SYSCALL_STUB( NtUserInitializeInputDeviceInjection ) \
