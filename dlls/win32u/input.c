@@ -44,6 +44,12 @@ WINE_DECLARE_DEBUG_CHANNEL(keyboard);
 
 static const struct ratio no_dpi;
 
+struct core_messaging_window
+{
+    struct list entry;
+    HWND hwnd;
+};
+
 static const WCHAR keyboard_layouts_keyW[] =
 {
     '\\','R','e','g','i','s','t','r','y',
@@ -974,6 +980,123 @@ DWORD WINAPI NtUserGetQueueStatus( UINT flags )
     }
     SERVER_END_REQ;
     return ret;
+}
+
+/***********************************************************************
+ *           NtUserInitThreadCoreMessagingIocp2 (win32u.@)
+ */
+HANDLE WINAPI NtUserInitThreadCoreMessagingIocp2( HWND hwnd, DWORD *mode )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct core_messaging_window *window;
+    OBJECT_HANDLE_FLAG_INFORMATION handle_flags = {FALSE, TRUE};
+    BOOL first_registration = !thread_info->core_messaging_iocp;
+    NTSTATUS status;
+
+    if (!hwnd)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+        return NULL;
+    }
+    if (!is_window( hwnd )) return NULL;
+    if (get_window_thread( hwnd, NULL ) != GetCurrentThreadId())
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return NULL;
+    }
+
+    LIST_FOR_EACH_ENTRY( window, &thread_info->core_messaging_windows,
+                         struct core_messaging_window, entry )
+    {
+        if (window->hwnd == hwnd)
+        {
+            RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+            return NULL;
+        }
+    }
+
+    if (!(window = malloc( sizeof(*window) )))
+    {
+        RtlSetLastWin32Error( ERROR_NOT_ENOUGH_MEMORY );
+        return NULL;
+    }
+
+    if (first_registration)
+    {
+        status = NtCreateIoCompletion( &thread_info->core_messaging_iocp,
+                                       IO_COMPLETION_ALL_ACCESS, NULL, 1 );
+        if (status)
+        {
+            free( window );
+            RtlSetLastWin32Error( RtlNtStatusToDosError( status ) );
+            return NULL;
+        }
+        status = NtSetInformationObject( thread_info->core_messaging_iocp,
+                                         ObjectHandleFlagInformation,
+                                         &handle_flags, sizeof(handle_flags) );
+        if (status)
+        {
+            NtClose( thread_info->core_messaging_iocp );
+            thread_info->core_messaging_iocp = NULL;
+            free( window );
+            RtlSetLastWin32Error( RtlNtStatusToDosError( status ) );
+            return NULL;
+        }
+    }
+
+    window->hwnd = hwnd;
+    list_add_tail( &thread_info->core_messaging_windows, &window->entry );
+    if (mode) *mode = first_registration ? 0 : 1;
+    return thread_info->core_messaging_iocp;
+}
+
+/***********************************************************************
+ *           NtUserDrainThreadCoreMessagingCompletions (win32u.@)
+ */
+ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions(void)
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+
+    if (!thread_info->core_messaging_iocp)
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/***********************************************************************
+ *           NtUserDrainThreadCoreMessagingCompletions2 (win32u.@)
+ */
+ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2(void)
+{
+    /* LinuxNT does not advertise the private scheduled-dispatch contract, so
+     * no completions are placed on win32k's corresponding private queue. */
+    RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+    return FALSE;
+}
+
+void destroy_thread_core_messaging(void)
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct core_messaging_window *window, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE( window, next, &thread_info->core_messaging_windows,
+                              struct core_messaging_window, entry )
+    {
+        list_remove( &window->entry );
+        free( window );
+    }
+
+    if (thread_info->core_messaging_iocp)
+    {
+        OBJECT_HANDLE_FLAG_INFORMATION handle_flags = {FALSE, FALSE};
+
+        NtSetInformationObject( thread_info->core_messaging_iocp, ObjectHandleFlagInformation,
+                                &handle_flags, sizeof(handle_flags) );
+        NtClose( thread_info->core_messaging_iocp );
+        thread_info->core_messaging_iocp = NULL;
+    }
 }
 
 /***********************************************************************

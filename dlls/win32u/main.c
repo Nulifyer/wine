@@ -1417,6 +1417,16 @@ DWORD SYSCALL_API NtUserDragObject( HWND parent, HWND hwnd, UINT fmt, ULONG_PTR 
     SYSCALL_FUNC( NtUserDragObject );
 }
 
+ULONG_PTR SYSCALL_API NtUserDrainThreadCoreMessagingCompletions(void)
+{
+    SYSCALL_FUNC( NtUserDrainThreadCoreMessagingCompletions );
+}
+
+ULONG_PTR SYSCALL_API NtUserDrainThreadCoreMessagingCompletions2(void)
+{
+    SYSCALL_FUNC( NtUserDrainThreadCoreMessagingCompletions2 );
+}
+
 BOOL SYSCALL_API NtUserDrawCaptionTemp( HWND hwnd, HDC hdc, const RECT *rect, HFONT font,
                                         HICON icon, const WCHAR *str, UINT flags )
 {
@@ -1898,6 +1908,11 @@ NTSTATUS SYSCALL_API NtUserInitializeClientPfnArrays( const ntuser_client_func_p
                                                       const ntuser_client_func_ptr *client_workers, HINSTANCE user_module )
 {
     SYSCALL_FUNC( NtUserInitializeClientPfnArrays );
+}
+
+HANDLE SYSCALL_API NtUserInitThreadCoreMessagingIocp2( HWND hwnd, DWORD *mode )
+{
+    SYSCALL_FUNC( NtUserInitThreadCoreMessagingIocp2 );
 }
 
 BOOL SYSCALL_API NtUserInitializeTouchInjection( UINT max_count, UINT mode )
