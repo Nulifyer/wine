@@ -1369,10 +1369,11 @@ static DWORD WINAPI process_monitor_thread_proc( void *arg )
 
 int __cdecl main(int argc, char *argv[])
 {
+    static const WCHAR autostart_phase1_done_event[] = L"Global\\SC_AutoStartPhase1Done";
     static const WCHAR svcctl_started_event[] = SVCCTL_STARTED_EVENT;
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_limit;
     JOBOBJECT_ASSOCIATE_COMPLETION_PORT port_info;
-    HANDLE started_event, process_monitor_thread;
+    HANDLE autostart_event, started_event, process_monitor_thread;
     DWORD err;
 
     job_object = CreateJobObjectW(NULL, NULL);
@@ -1392,6 +1393,14 @@ int __cdecl main(int argc, char *argv[])
         return GetLastError();
     }
 
+    autostart_event = CreateEventW(NULL, TRUE, FALSE, autostart_phase1_done_event);
+    if (!autostart_event)
+    {
+        err = GetLastError();
+        WINE_ERR("Failed to create auto-start phase event, err %lu.\n", err);
+        return err;
+    }
+
     started_event = CreateEventW(NULL, TRUE, FALSE, svcctl_started_event);
 
     err = RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\ServiceCurrent", 0,
@@ -1409,22 +1418,31 @@ int __cdecl main(int argc, char *argv[])
     if ((err = RPC_Init()) == ERROR_SUCCESS)
     {
         scmdatabase_autostart_services(active_database);
-        process_monitor_thread = CreateThread(NULL, 0, process_monitor_thread_proc, NULL, 0, NULL);
-        SetEvent(started_event);
-        WaitForSingleObject(exit_event, INFINITE);
-        PostQueuedCompletionStatus(job_completion_port, 0, 0, NULL);
-        WaitForSingleObject(process_monitor_thread, INFINITE);
-        scmdatabase_wait_terminate(active_database);
-        if (delayed_autostart_cleanup)
+        if (!SetEvent(autostart_event))
         {
-            CloseThreadpoolCleanupGroupMembers(delayed_autostart_cleanup, TRUE, NULL);
-            CloseThreadpoolCleanupGroup(delayed_autostart_cleanup);
+            err = GetLastError();
+            WINE_ERR("Failed to signal auto-start phase event, err %lu.\n", err);
+        }
+        else
+        {
+            process_monitor_thread = CreateThread(NULL, 0, process_monitor_thread_proc, NULL, 0, NULL);
+            SetEvent(started_event);
+            WaitForSingleObject(exit_event, INFINITE);
+            PostQueuedCompletionStatus(job_completion_port, 0, 0, NULL);
+            WaitForSingleObject(process_monitor_thread, INFINITE);
+            scmdatabase_wait_terminate(active_database);
+            if (delayed_autostart_cleanup)
+            {
+                CloseThreadpoolCleanupGroupMembers(delayed_autostart_cleanup, TRUE, NULL);
+                CloseThreadpoolCleanupGroup(delayed_autostart_cleanup);
+            }
         }
         RPC_Stop();
     }
     scmdatabase_destroy(active_database);
     if (environment)
         DestroyEnvironmentBlock(environment);
+    CloseHandle(autostart_event);
 
     WINE_TRACE("services.exe exited with code %ld\n", err);
     return err;

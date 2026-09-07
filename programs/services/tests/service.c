@@ -341,6 +341,23 @@ static char current_event[32];
 static HANDLE event_handle = INVALID_HANDLE_VALUE;
 static CRITICAL_SECTION event_cs;
 
+static void test_autostart_phase1_event(void)
+{
+    static const WCHAR event_name[] = L"Global\\SC_AutoStartPhase1Done";
+    HANDLE event;
+    DWORD ret;
+
+    event = OpenEventW(SYNCHRONIZE, FALSE, event_name);
+    ok(!!event, "OpenEventW failed: %lu\n", GetLastError());
+    if (!event) return;
+
+    ret = WaitForSingleObject(event, 0);
+    ok(ret == WAIT_OBJECT_0, "event is not signaled, got %#lx\n", ret);
+    ret = WaitForSingleObject(event, 0);
+    ok(ret == WAIT_OBJECT_0, "event is not manual-reset, got %#lx\n", ret);
+    CloseHandle(event);
+}
+
 static SC_HANDLE register_service(const char *test_name)
 {
     char service_cmd[MAX_PATH+150], *ptr;
@@ -748,7 +765,15 @@ START_TEST(service)
 
     argc = winetest_get_mainargs(&argv);
 
+    if (argc >= 3 && !strcmp(argv[2], "autostart_event"))
+    {
+        test_autostart_phase1_event();
+        CloseServiceHandle(scm_handle);
+        return;
+    }
+
     if(argc < 3) {
+        test_autostart_phase1_event();
         test_runner(test_service);
         test_runner(test_no_stop);
         test_runner(test_kill_service_process);
