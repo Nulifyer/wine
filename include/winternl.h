@@ -2414,7 +2414,8 @@ typedef struct _KERNEL_USER_TIMES {
 } KERNEL_USER_TIMES, *PKERNEL_USER_TIMES;
 
 typedef enum _WINSTATIONINFOCLASS {
-    WinStationInformation = 8
+    WinStationInformation = 8,
+    WinStationType = 39
 } WINSTATIONINFOCLASS;
 
 typedef enum _MEMORY_INFORMATION_CLASS {

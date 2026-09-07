@@ -1,0 +1,4 @@
+TESTDLL   = winsta.dll
+
+SOURCES = \
+	winsta.c
