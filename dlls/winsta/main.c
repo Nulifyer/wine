@@ -101,14 +101,43 @@ BOOLEAN WINAPI WinStationIsSessionRemoteable( HANDLE server, ULONG session, BOOL
 BOOLEAN WINAPI WinStationQueryInformationA( HANDLE server, ULONG logon_id, WINSTATIONINFOCLASS class,
                                             void *info, ULONG len, ULONG *ret_len )
 {
-    FIXME( "%p %lu %u %p %lu %p\n", server, logon_id, class, info, len, ret_len );
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return FALSE;
+    return WinStationQueryInformationW( server, logon_id, class, info, len, ret_len );
 }
 
 BOOLEAN WINAPI WinStationQueryInformationW( HANDLE server, ULONG logon_id, WINSTATIONINFOCLASS class,
                                             void *info, ULONG len, ULONG *ret_len )
 {
+    ULONG session_type;
+
+    TRACE( "%p %lu %u %p %lu %p\n", server, logon_id, class, info, len, ret_len );
+
+    if (class == WinStationType)
+    {
+        if (!info || len < sizeof(session_type))
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
+
+        if (logon_id == LOGONID_CURRENT) logon_id = NtCurrentTeb()->Peb->SessionId;
+
+        /* Wine currently exposes the service session and one interactive console session. */
+        if (!logon_id)
+            session_type = SESSIONTYPE_SERVICES;
+        else if (logon_id == 1)
+            session_type = SESSIONTYPE_REGULARDESKTOP;
+        else
+        {
+            SetLastError( ERROR_FILE_NOT_FOUND );
+            return FALSE;
+        }
+
+        *(ULONG *)info = session_type;
+        if (ret_len) *ret_len = sizeof(session_type);
+        SetLastError( ERROR_SUCCESS );
+        return TRUE;
+    }
+
     FIXME( "%p %lu %u %p %lu %p\n", server, logon_id, class, info, len, ret_len );
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return FALSE;
