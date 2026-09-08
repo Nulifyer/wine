@@ -286,7 +286,7 @@ static ULONG WINAPI local_server_Release(IServiceProvider *iface)
 static HRESULT WINAPI local_server_QueryService(IServiceProvider *iface, REFGUID guid, REFIID riid, void **obj)
 {
     struct local_server *local_server = impl_from_IServiceProvider(iface);
-    struct apartment *apt = com_get_current_apt();
+    struct apartment *apt;
     HRESULT hr = E_FAIL;
     IUnknown *unk;
 
@@ -295,12 +295,16 @@ static HRESULT WINAPI local_server_QueryService(IServiceProvider *iface, REFGUID
     if (!local_server->apt)
         return E_UNEXPECTED;
 
+    if (!(apt = apartment_get_current_or_mta()))
+        return CO_E_NOTINITIALIZED;
+
     if ((unk = com_get_registered_class_object(apt, guid, CLSCTX_LOCAL_SERVER)))
     {
         hr = IUnknown_QueryInterface(unk, riid, obj);
         IUnknown_Release(unk);
     }
 
+    apartment_release(apt);
     return hr;
 }
 
