@@ -16,6 +16,7 @@ SOURCES = \
 	locale.c \
 	main.c \
 	memory.c \
+	package_catalog.c \
 	path.c \
 	process.c \
 	registry.c \

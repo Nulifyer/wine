@@ -332,6 +332,7 @@ apiset ext-ms-onecore-appmodel-deployment-internal-l1-1-0 = appxdeploymentclient
 apiset ext-ms-onecore-appmodel-emclient-l1-1-0 =
 apiset ext-ms-onecore-appmodel-emsvcs-l1-1-0 =
 apiset ext-ms-onecore-appmodel-pacmanclient-l1-1-0 =
+apiset ext-ms-onecore-appmodel-staterepository-cache-l1-1-6 = windows.staterepositorycore.dll
 apiset ext-ms-onecore-comp-dwmmonitor-l1-1-0 =
 apiset ext-ms-onecore-dcomp-l1-1-0 = dcomp.dll
 apiset ext-ms-onecore-defaultdiscovery-l1-1-0 =
