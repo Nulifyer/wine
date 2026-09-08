@@ -7,6 +7,7 @@ SOURCES = \
 	change.c \
 	directory.c \
 	env.c \
+	environment_var.c \
 	error.c \
 	exception.c \
 	file.c \

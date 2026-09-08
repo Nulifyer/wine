@@ -1023,6 +1023,7 @@
 @ stdcall RtlSetCurrentTransaction(ptr)
 @ stdcall RtlSetDaclSecurityDescriptor(ptr long ptr long)
 @ stdcall RtlSetEnvironmentVariable(ptr ptr ptr)
+@ stdcall RtlSetEnvironmentVar(ptr ptr long ptr long)
 @ stdcall RtlSetExtendedFeaturesMask(ptr int64)
 @ stdcall RtlSetGroupSecurityDescriptor(ptr ptr long)
 @ stdcall RtlSetHeapInformation(long long ptr long)
