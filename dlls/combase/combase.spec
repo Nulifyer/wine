@@ -297,7 +297,7 @@
 @ stdcall RoGetAgileReference(long ptr ptr ptr)
 @ stdcall RoGetApartmentIdentifier(ptr)
 @ stdcall RoGetErrorReportingFlags(ptr)
-@ stub RoGetMatchingRestrictedErrorInfo
+@ stdcall RoGetMatchingRestrictedErrorInfo(long ptr)
 @ stdcall RoGetParameterizedTypeInstanceIID(long ptr ptr ptr ptr)
 @ stdcall RoGetServerActivatableClasses(ptr ptr ptr)
 @ stdcall RoInitialize(long)

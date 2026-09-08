@@ -36,7 +36,11 @@ typedef enum
     RO_ERROR_REPORTING_SUPPRESSSETERRORINFO = 0x8,
 } RO_ERROR_REPORTING_FLAGS;
 
+#define EXCEPTION_RO_ORIGINATEERROR 0x40080201
+#define EXCEPTION_RO_TRANSFORMERROR 0x40080202
+
 HRESULT WINAPI GetRestrictedErrorInfo(IRestrictedErrorInfo **info);
+HRESULT WINAPI RoGetMatchingRestrictedErrorInfo(HRESULT error, IRestrictedErrorInfo **info);
 void    WINAPI RoFailFastWithErrorContext(HRESULT hr);
 HRESULT WINAPI RoGetErrorReportingFlags(UINT32 *flags);
 BOOL    WINAPI RoOriginateError(HRESULT error, HSTRING message);
