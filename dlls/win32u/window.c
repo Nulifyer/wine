@@ -1110,6 +1110,19 @@ BOOL is_window_unicode( HWND hwnd )
 }
 
 /*****************************************************************
+ *           NtUserEnableWindowResizeOptimization (win32u.@)
+ */
+BOOL WINAPI NtUserEnableWindowResizeOptimization( UINT flags, UINT value, UINT timeout )
+{
+    /* This configures Windows session-wide GDI resize optimization, not an
+     * individual HWND. Wine's normal host-backed resize path remains active.
+     * Reject the unsupported optimization without claiming to enable it. */
+    FIXME( "unsupported resize optimization %#x %u %u\n", flags, value, timeout );
+    RtlSetLastWin32Error( ERROR_NOT_SUPPORTED );
+    return FALSE;
+}
+
+/*****************************************************************
  *           NtUserEnableWindow (win32u.@)
  */
 BOOL WINAPI NtUserEnableWindow( HWND hwnd, BOOL enable )

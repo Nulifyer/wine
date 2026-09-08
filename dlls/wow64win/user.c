@@ -2196,6 +2196,15 @@ NTSTATUS WINAPI wow64_NtUserEnableScrollBar( UINT *args )
     return NtUserEnableScrollBar( hwnd, bar, flags );
 }
 
+NTSTATUS WINAPI wow64_NtUserEnableWindowResizeOptimization( UINT *args )
+{
+    UINT flags = get_ulong( &args );
+    UINT value = get_ulong( &args );
+    UINT timeout = get_ulong( &args );
+
+    return NtUserEnableWindowResizeOptimization( flags, value, timeout );
+}
+
 NTSTATUS WINAPI wow64_NtUserEnableWindow( UINT *args )
 {
     HWND hwnd = get_handle( &args );

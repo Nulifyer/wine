@@ -953,7 +953,7 @@
     SYSCALL_ENTRY( 0x13b5, NtUserEnableWindow, 8 ) \
     SYSCALL_ENTRY( 0x13b6, NtUserEnableWindowGDIScaledDpiMessage, 0 ) \
     SYSCALL_ENTRY( 0x13b7, NtUserEnableWindowGroupPolicy, 0 ) \
-    SYSCALL_ENTRY( 0x13b8, NtUserEnableWindowResizeOptimization, 0 ) \
+    SYSCALL_ENTRY( 0x13b8, NtUserEnableWindowResizeOptimization, 12 ) \
     SYSCALL_ENTRY( 0x13b9, NtUserEnableWindowShellWindowManagementBehavior, 0 ) \
     SYSCALL_ENTRY( 0x13ba, NtUserEndDeferWindowPosEx, 8 ) \
     SYSCALL_ENTRY( 0x13bb, NtUserEndMenu, 0 ) \
@@ -2495,7 +2495,7 @@
     SYSCALL_ENTRY( 0x13b5, NtUserEnableWindow, 16 ) \
     SYSCALL_ENTRY( 0x13b6, NtUserEnableWindowGDIScaledDpiMessage, 0 ) \
     SYSCALL_ENTRY( 0x13b7, NtUserEnableWindowGroupPolicy, 0 ) \
-    SYSCALL_ENTRY( 0x13b8, NtUserEnableWindowResizeOptimization, 0 ) \
+    SYSCALL_ENTRY( 0x13b8, NtUserEnableWindowResizeOptimization, 24 ) \
     SYSCALL_ENTRY( 0x13b9, NtUserEnableWindowShellWindowManagementBehavior, 0 ) \
     SYSCALL_ENTRY( 0x13ba, NtUserEndDeferWindowPosEx, 16 ) \
     SYSCALL_ENTRY( 0x13bb, NtUserEndMenu, 0 ) \
@@ -3769,7 +3769,6 @@
     SYSCALL_STUB( NtUserEnableTouchPad ) \
     SYSCALL_STUB( NtUserEnableWindowGDIScaledDpiMessage ) \
     SYSCALL_STUB( NtUserEnableWindowGroupPolicy ) \
-    SYSCALL_STUB( NtUserEnableWindowResizeOptimization ) \
     SYSCALL_STUB( NtUserEnableWindowShellWindowManagementBehavior ) \
     SYSCALL_STUB( NtUserEnsureDpiDepSysMetCacheForPlateau ) \
     SYSCALL_STUB( NtUserEvent ) \

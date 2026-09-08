@@ -951,7 +951,7 @@
 @ stdcall -syscall NtUserEnableWindow(long long)
 @ stub -syscall NtUserEnableWindowGDIScaledDpiMessage
 @ stub -syscall NtUserEnableWindowGroupPolicy
-@ stub -syscall NtUserEnableWindowResizeOptimization
+@ stdcall -syscall NtUserEnableWindowResizeOptimization(long long long)
 @ stub -syscall NtUserEnableWindowShellWindowManagementBehavior
 @ stdcall -syscall NtUserEndDeferWindowPosEx(long long)
 @ stdcall -syscall NtUserEndMenu()
