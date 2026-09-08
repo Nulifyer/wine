@@ -1,7 +1,8 @@
 TESTDLL   = combase.dll
-IMPORTS   = combase uuid user32
+IMPORTS   = advapi32 combase uuid user32
 
 SOURCES = \
+	activation_wait.c \
 	combase.rc \
 	roapi.c \
 	string.c \
