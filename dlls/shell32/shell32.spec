@@ -267,6 +267,7 @@
  730 stdcall -noname RestartDialogEx(long wstr long long)
  743 stdcall SHCreateFileExtractIconW(wstr long ptr ptr)
  747 stdcall SHLimitInputEdit(ptr ptr)
+ 885 stdcall -noname RunInstallUninstallStubs(wstr)
 
 1217 stub FOOBAR1217   # no joke! This is the real name!!
 
