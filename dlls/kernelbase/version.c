@@ -39,6 +39,7 @@
 #include "appmodel.h"
 
 #include "kernelbase.h"
+#include "package_graph.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ver);
@@ -1589,8 +1590,17 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackageId( UINT32 *len, BYTE *buff
  */
 LONG WINAPI GetCurrentPackageInfo( const UINT32 flags, UINT32 *buffer_size, BYTE *buffer, UINT32 *count )
 {
-    FIXME( "(%#x %p %p %p): stub\n", flags, buffer_size, buffer, count );
-    return APPMODEL_ERROR_NO_PACKAGE;
+    return package_graph_info(flags, 0, buffer_size, buffer, count);
+}
+
+LONG WINAPI GetCurrentPackageInfo2( UINT32 flags, UINT32 path_type, UINT32 *size, BYTE *buffer, UINT32 *count )
+{
+    return package_graph_info(flags, path_type, size, buffer, count);
+}
+
+HRESULT WINAPI GetCurrentPackageInfo3( UINT32 flags, UINT32 type, UINT32 *size, void *buffer, UINT32 *count )
+{
+    return package_graph_info3(flags, type, size, buffer, count);
 }
 
 /***********************************************************************

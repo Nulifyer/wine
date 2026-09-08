@@ -494,6 +494,11 @@
 @ stdcall GetCurrentPackageFullName(ptr ptr)
 @ stdcall GetCurrentPackageId(ptr ptr)
 @ stdcall GetCurrentPackageInfo(long ptr ptr ptr)
+@ stdcall -arch=win64 GetCurrentPackageInfo2(long long ptr ptr ptr)
+@ stdcall -arch=win64 GetCurrentPackageInfo3(long long ptr ptr ptr)
+@ stdcall -arch=win64 AddDependencyToProcessPackageGraph(wstr wstr long long)
+@ stdcall -arch=win64 AddPackageNameAliasesByPackageFullName(wstr long ptr)
+@ stdcall -arch=win64 GetPackageNameAliasesByPackageFullName(wstr ptr ptr)
 @ stdcall GetCurrentPackagePath(ptr ptr)
 # @ stub GetCurrentPackageResourcesContext
 # @ stub GetCurrentPackageSecurityContext

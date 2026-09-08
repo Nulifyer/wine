@@ -17,6 +17,7 @@ SOURCES = \
 	main.c \
 	memory.c \
 	package_catalog.c \
+	package_graph.c \
 	path.c \
 	process.c \
 	registry.c \
