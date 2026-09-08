@@ -237,5 +237,8 @@ NTSTATUS WINAPI PsLookupThreadByThreadId(HANDLE,PETHREAD*);
 PACCESS_TOKEN WINAPI PsReferencePrimaryToken(PEPROCESS);
 void WINAPI PsRevertToSelf(void);
 char WINAPI RtlQueryProcessPlaceholderCompatibilityMode(void);
+char WINAPI RtlQueryThreadPlaceholderCompatibilityMode(void);
+char WINAPI RtlSetProcessPlaceholderCompatibilityMode(char);
+char WINAPI RtlSetThreadPlaceholderCompatibilityMode(char);
 
 #endif

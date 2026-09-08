@@ -962,6 +962,7 @@
 @ stdcall RtlQueryProcessHeapInformation(ptr)
 @ stub RtlQueryProcessLockInformation
 @ stdcall RtlQueryProcessPlaceholderCompatibilityMode()
+@ stdcall RtlQueryThreadPlaceholderCompatibilityMode()
 @ stub RtlQueryProperties
 @ stub RtlQueryPropertyNames
 @ stub RtlQueryPropertySet
@@ -1035,6 +1036,7 @@
 # @ stub RtlSetMemoryStreamSize
 @ stdcall RtlSetOwnerSecurityDescriptor(ptr ptr long)
 # @ stub RtlSetProcessIsCritical
+@ stdcall RtlSetProcessPlaceholderCompatibilityMode(long)
 @ stdcall RtlSetProcessPreferredUILanguages(long ptr ptr)
 @ stub RtlSetProperties
 @ stub RtlSetPropertyClassId
@@ -1047,6 +1049,7 @@
 # @ stub RtlSetSecurityObjectEx
 @ stdcall RtlSetThreadErrorMode(long ptr)
 # @ stub RtlSetThreadIsCritical
+@ stdcall RtlSetThreadPlaceholderCompatibilityMode(long)
 @ stdcall RtlSetThreadPreferredUILanguages(long ptr ptr)
 # @ stub RtlSetThreadPoolStartFunc
 @ stdcall RtlSetTimeZoneInformation(ptr)

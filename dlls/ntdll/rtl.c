@@ -1635,8 +1635,49 @@ NTSTATUS WINAPI RtlQueryPackageIdentity(HANDLE token, WCHAR *fullname, SIZE_T *f
  */
 char WINAPI RtlQueryProcessPlaceholderCompatibilityMode(void)
 {
-    FIXME("stub\n");
-    return PHCM_APPLICATION_DEFAULT;
+    PEB *peb = NtCurrentTeb()->Peb;
+
+    return peb ? peb->PlaceholderCompatibilityMode : PHCM_ERROR_NO_PEB;
+}
+
+/*********************************************************************
+ *           RtlQueryThreadPlaceholderCompatibilityMode [NTDLL.@]
+ */
+char WINAPI RtlQueryThreadPlaceholderCompatibilityMode(void)
+{
+    TEB *teb = NtCurrentTeb();
+
+    return teb ? teb->PlaceholderCompatibilityMode : PHCM_ERROR_NO_TEB;
+}
+
+/*********************************************************************
+ *           RtlSetProcessPlaceholderCompatibilityMode [NTDLL.@]
+ */
+char WINAPI RtlSetProcessPlaceholderCompatibilityMode(char mode)
+{
+    PEB *peb;
+    char previous;
+
+    if ((unsigned char)mode > PHCM_MAX) return PHCM_ERROR_INVALID_PARAMETER;
+    if (!(peb = NtCurrentTeb()->Peb)) return PHCM_ERROR_NO_PEB;
+    previous = peb->PlaceholderCompatibilityMode;
+    peb->PlaceholderCompatibilityMode = mode;
+    return previous;
+}
+
+/*********************************************************************
+ *           RtlSetThreadPlaceholderCompatibilityMode [NTDLL.@]
+ */
+char WINAPI RtlSetThreadPlaceholderCompatibilityMode(char mode)
+{
+    TEB *teb;
+    char previous;
+
+    if ((unsigned char)mode > PHCM_MAX) return PHCM_ERROR_INVALID_PARAMETER;
+    if (!(teb = NtCurrentTeb())) return PHCM_ERROR_NO_TEB;
+    previous = teb->PlaceholderCompatibilityMode;
+    teb->PlaceholderCompatibilityMode = mode;
+    return previous;
 }
 
 /*********************************************************************
