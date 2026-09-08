@@ -2,6 +2,7 @@ TESTDLL   = kernelbase.dll
 
 SOURCES = \
 	file.c \
+	globalization_key.c \
 	memory.c \
 	path.c \
 	process.c \

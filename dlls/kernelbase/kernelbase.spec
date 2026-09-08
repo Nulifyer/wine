@@ -1029,7 +1029,7 @@
 @ stdcall OpenFileById(long ptr long long ptr long)
 @ stdcall OpenFileMappingFromApp(long long wstr)
 @ stdcall OpenFileMappingW(long long wstr)
-# @ stub OpenGlobalizationUserSettingsKey
+@ stdcall OpenGlobalizationUserSettingsKey(long ptr ptr)
 @ stdcall OpenMutexW(long long wstr)
 # @ stub OpenPackageInfoByFullName
 # @ stub OpenPackageInfoByFullNameForUser
