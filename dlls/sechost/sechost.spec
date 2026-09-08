@@ -104,7 +104,7 @@
 @ stub GetServiceRegistryStateKey
 @ stub I_QueryTagInformation
 @ stub I_RegisterSvchostNotificationCallback
-@ stub I_ScBroadcastServiceControlMessage
+@ stdcall I_ScBroadcastServiceControlMessage(long long long ptr)
 @ stub I_ScIsSecurityProcess
 @ stub I_ScPnPGetServiceName
 @ stub I_ScQueryServiceConfig

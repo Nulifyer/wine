@@ -168,7 +168,7 @@ static void CALLBACK shutdown_callback(TP_CALLBACK_INSTANCE *instance, void *con
     result = WaitForSingleObject(process->control_mutex, 30000);
     if (result == WAIT_OBJECT_0)
     {
-        process_send_control(process, FALSE, L"", SERVICE_CONTROL_STOP, NULL, 0, &result);
+        process_send_control(process, FALSE, L"", SERVICE_CONTROL_STOP, 0, NULL, 0, &result);
         ReleaseMutex(process->control_mutex);
     }
 
@@ -1243,7 +1243,7 @@ static BOOL process_send_command(struct process_entry *process, const void *data
  * process_send_control
  */
 BOOL process_send_control(struct process_entry *process, BOOL shared_process, const WCHAR *name,
-                          DWORD control, const BYTE *data, DWORD data_size, DWORD *result)
+                          DWORD control, DWORD event_type, const BYTE *data, DWORD data_size, DWORD *result)
 {
     service_start_info *ssi;
     DWORD len;
@@ -1263,6 +1263,7 @@ BOOL process_send_control(struct process_entry *process, BOOL shared_process, co
     ssi = malloc(FIELD_OFFSET(service_start_info, data[len]));
     ssi->magic = SERVICE_PROTOCOL_MAGIC;
     ssi->control = control;
+    ssi->event_type = event_type;
     ssi->total_size = FIELD_OFFSET(service_start_info, data[len]);
     ssi->name_size = lstrlenW(name) + 1;
     lstrcpyW((WCHAR *)ssi->data, name);
@@ -1400,7 +1401,7 @@ DWORD __cdecl svcctl_ControlService(
     }
 
     if (process_send_control(process, shared_process, service->service_entry->name,
-                             dwControl, NULL, 0, &result))
+                             dwControl, 0, NULL, 0, &result))
         result = ERROR_SUCCESS;
 
     if (lpServiceStatus)
@@ -1693,10 +1694,128 @@ DWORD __cdecl svcctl_EnumServicesStatusExW(
     return ERROR_SUCCESS;
 }
 
-DWORD __cdecl svcctl_unknown43(void)
+struct broadcast_job
 {
-    WINE_FIXME("\n");
-    return ERROR_CALL_NOT_IMPLEMENTED;
+    DWORD control, event_type, count;
+    BYTE data[2 * sizeof(DWORD)];
+    struct service_entry *services[];
+};
+
+static void free_broadcast_job(struct broadcast_job *job)
+{
+    DWORD i;
+    for (i = 0; i < job->count; ++i) release_service(job->services[i]);
+    free(job);
+}
+
+static void CALLBACK cancel_broadcast(void *context, void *cleanup_context)
+{
+    free_broadcast_job(context);
+}
+
+static void CALLBACK dispatch_broadcast(TP_CALLBACK_INSTANCE *instance, void *context)
+{
+    struct broadcast_job *job = context;
+    struct process_entry *process;
+    struct service_entry *service;
+    DWORD i, result;
+
+    for (i = 0; i < job->count; ++i)
+    {
+        service = job->services[i];
+        service_lock(service);
+        process = NULL;
+        if (service->status.dwCurrentState == SERVICE_RUNNING &&
+            service_accepts_control(service, job->control) && service->process)
+            process = grab_process(service->process);
+        service_unlock(service);
+        if (!process) continue;
+
+        result = WaitForSingleObject(process->control_mutex, service_pipe_timeout);
+        if (result == WAIT_OBJECT_0)
+        {
+            if (!process_send_control(process, FALSE, service->name, job->control,
+                                      job->event_type, job->data, sizeof(job->data), &result))
+                WINE_WARN("broadcast delivery to %s failed: %lu\n", wine_dbgstr_w(service->name), result);
+            ReleaseMutex(process->control_mutex);
+        }
+        else WINE_WARN("broadcast delivery to %s timed out\n", wine_dbgstr_w(service->name));
+        release_process(process);
+    }
+    free_broadcast_job(job);
+}
+
+static BOOL broadcast_caller_has_tcb_privilege(void)
+{
+    PRIVILEGE_SET privileges;
+    HANDLE token;
+    BOOL allowed = FALSE;
+
+    if (RpcImpersonateClient(NULL) != RPC_S_OK) return FALSE;
+    if (OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token))
+    {
+        privileges.PrivilegeCount = 1;
+        privileges.Control = PRIVILEGE_SET_ALL_NECESSARY;
+        privileges.Privilege[0].Attributes = SE_PRIVILEGE_ENABLED;
+        if (LookupPrivilegeValueW(NULL, L"SeTcbPrivilege", &privileges.Privilege[0].Luid))
+            PrivilegeCheck(token, &privileges, &allowed);
+        CloseHandle(token);
+    }
+    RpcRevertToSelf();
+    return allowed;
+}
+
+DWORD __cdecl svcctl_BroadcastServiceControlMessage(SC_RPC_HANDLE handle, DWORD control,
+                                                    DWORD event_type, DWORD data_size, const BYTE *data)
+{
+    struct sc_manager_handle *manager;
+    struct service_entry *service;
+    TP_CALLBACK_ENVIRON environment = {0};
+    struct broadcast_job *job;
+    DWORD count = 0, err;
+
+    WINE_TRACE("%p control %lu event %lu size %lu data %p\n", handle, control, event_type, data_size, data);
+    /* Only the observed session-change contract is implemented. Other valid
+     * system broadcasts require their own payload and recipient policy. */
+    if (control > 255 || !control) return ERROR_INVALID_PARAMETER;
+    if (control != SERVICE_CONTROL_SESSIONCHANGE) return ERROR_CALL_NOT_IMPLEMENTED;
+    if ((err = validate_scm_handle(handle, SC_MANAGER_ALL_ACCESS, &manager))) return err;
+    if (!broadcast_caller_has_tcb_privilege()) return ERROR_ACCESS_DENIED;
+    if (!data || data_size != 2 * sizeof(DWORD)) return ERROR_INVALID_PARAMETER;
+
+    scmdatabase_lock(manager->db);
+    LIST_FOR_EACH_ENTRY(service, &manager->db->services, struct service_entry, entry)
+    {
+        if ((service->config.dwServiceType & SERVICE_WIN32) &&
+            service->status.dwCurrentState == SERVICE_RUNNING &&
+            service_accepts_control(service, control)) ++count;
+    }
+    job = calloc(1, sizeof(*job) + count * sizeof(job->services[0]));
+    if (!job)
+    {
+        scmdatabase_unlock(manager->db);
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
+    job->control = control;
+    job->event_type = event_type;
+    memcpy(job->data, data, sizeof(job->data));
+    LIST_FOR_EACH_ENTRY(service, &manager->db->services, struct service_entry, entry)
+    {
+        if ((service->config.dwServiceType & SERVICE_WIN32) &&
+            service->status.dwCurrentState == SERVICE_RUNNING &&
+            service_accepts_control(service, control)) job->services[job->count++] = grab_service(service);
+    }
+    scmdatabase_unlock(manager->db);
+
+    environment.Version = 1;
+    environment.CleanupGroup = cleanup_group;
+    environment.CleanupGroupCancelCallback = cancel_broadcast;
+    if (!TrySubmitThreadpoolCallback(dispatch_broadcast, job, &environment))
+    {
+        free_broadcast_job(job);
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
+    return ERROR_SUCCESS;
 }
 
 DWORD __cdecl svcctl_CreateServiceWOW64A(

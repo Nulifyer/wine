@@ -1147,7 +1147,7 @@ static DWORD process_send_start_message(struct process_entry *process, BOOL shar
     *p = 0;
 
     if (!process_send_control(process, shared_process, name,
-                              SERVICE_CONTROL_START, (const BYTE *)str, len, &result))
+                              SERVICE_CONTROL_START, 0, (const BYTE *)str, len, &result))
         result = ERROR_SERVICE_REQUEST_TIMEOUT;
 
     free(str);

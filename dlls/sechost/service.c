@@ -1079,6 +1079,28 @@ BOOL WINAPI DECLSPEC_HOTPATCH ControlService( SC_HANDLE service, DWORD control, 
     return set_error( err );
 }
 
+DWORD WINAPI I_ScBroadcastServiceControlMessage( DWORD control, DWORD event_type,
+                                                DWORD data_size, const BYTE *data )
+{
+    SC_HANDLE manager;
+    DWORD err;
+
+    TRACE( "%lu %lu %lu %p\n", control, event_type, data_size, data );
+    if (!(manager = OpenSCManagerW( NULL, NULL, SC_MANAGER_ALL_ACCESS ))) return GetLastError();
+    __TRY
+    {
+        err = svcctl_BroadcastServiceControlMessage( manager, control, event_type, data_size, data );
+    }
+    __EXCEPT(rpc_filter)
+    {
+        err = map_exception_code( GetExceptionCode() );
+    }
+    __ENDTRY
+    CloseServiceHandle( manager );
+    SetLastError( ERROR_SUCCESS );
+    return err;
+}
+
 /******************************************************************************
  *     QueryServiceStatus   (sechost.@)
  */
@@ -1652,7 +1674,8 @@ static DWORD service_handle_start( struct service_data *service, const void *dat
     return 0;
 }
 
-static DWORD service_handle_control( struct service_data *service, DWORD control, const void *data, DWORD data_size )
+static DWORD service_handle_control( struct service_data *service, DWORD control, DWORD event_type,
+                                     const void *data, DWORD data_size )
 {
     DWORD ret = ERROR_INVALID_SERVICE_CONTROL;
 
@@ -1661,7 +1684,7 @@ static DWORD service_handle_control( struct service_data *service, DWORD control
     if (control == SERVICE_CONTROL_START)
         ret = service_handle_start( service, data, data_size );
     else if (service->handler)
-        ret = service->handler( control, 0, (void *)data, service->context );
+        ret = service->handler( control, event_type, (void *)data, service->context );
     return ret;
 }
 
@@ -1746,7 +1769,7 @@ static DWORD WINAPI service_control_dispatcher( void *arg )
         }
 
         data_size -= info.name_size * sizeof(WCHAR);
-        result = service_handle_control(service, info.control, data_size ?
+        result = service_handle_control(service, info.control, info.event_type, data_size ?
                                         &data[info.name_size * sizeof(WCHAR)] : NULL, data_size);
 
     done:
@@ -1791,7 +1814,7 @@ static void handle_shutdown_msg(DWORD msg, DWORD accept)
             }
         }
 
-        service_handle_control( services[i], msg, NULL, 0 );
+        service_handle_control( services[i], msg, 0, NULL, 0 );
         wait_handles[n++] = services[i]->full_access_handle;
     }
     LeaveCriticalSection( &service_cs );
