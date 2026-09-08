@@ -43,6 +43,8 @@ struct activatable_class_data
     DWORD threading_model;
 };
 
+HRESULT package_get_class_path(const WCHAR *classid, WCHAR **path);
+
 static HRESULT get_library_for_classid(const WCHAR *classid, WCHAR **out)
 {
     ACTCTX_SECTION_KEYED_DATA data;
@@ -63,6 +65,10 @@ static HRESULT get_library_for_classid(const WCHAR *classid, WCHAR **out)
         *out = wcsdup(ptr);
         return S_OK;
     }
+
+    /* Select the package registration before the system namespace. A failed
+     * selected provider is not retried through a different registration. */
+    if ((hr = package_get_class_path(classid, out)) != S_FALSE) return hr;
 
     /* load class registry key */
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\WindowsRuntime\\ActivatableClassId",

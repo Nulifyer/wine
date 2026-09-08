@@ -124,6 +124,18 @@ typedef struct PACKAGE_ID
 }
 PACKAGE_ID;
 
+#include <pshpack4.h>
+typedef struct PACKAGE_INFO
+{
+    UINT32 reserved;
+    UINT32 flags;
+    WCHAR *path;
+    WCHAR *packageFullName;
+    WCHAR *packageFamilyName;
+    PACKAGE_ID packageId;
+} PACKAGE_INFO;
+#include <poppack.h>
+
 LONG WINAPI AppPolicyGetMediaFoundationCodecLoading(HANDLE token, AppPolicyMediaFoundationCodecLoading *policy);
 LONG WINAPI AppPolicyGetProcessTerminationMethod(HANDLE token, AppPolicyProcessTerminationMethod *policy);
 LONG WINAPI AppPolicyGetShowDeveloperDiagnostic(HANDLE token, AppPolicyShowDeveloperDiagnostic *policy);

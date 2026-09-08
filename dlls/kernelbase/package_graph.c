@@ -22,15 +22,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(appmodel);
 
-#include "pshpack4.h"
-struct graph_package_info
-{
-    UINT32 reserved, flags;
-    WCHAR *path, *packageFullName, *packageFamilyName;
-    PACKAGE_ID packageId;
-};
-#include "poppack.h"
-
 struct graph_node
 {
     struct graph_node *next;
@@ -43,6 +34,41 @@ struct graph_node
 static SRWLOCK graph_lock = SRWLOCK_INIT;
 static struct graph_node *graph_head;
 static UINT32 graph_generation;
+
+extern NTSTATUS WINAPI __wine_set_package_dll_path(const UNICODE_STRING *path);
+
+/* Prepare the loader's derived path before publishing a new graph head.
+ * No loader callback enters this module while its search-path lock is held. */
+static HRESULT update_loader_path(struct graph_node *head)
+{
+    struct graph_node *node;
+    SIZE_T chars = 0, length;
+    WCHAR *storage, *cursor;
+    UNICODE_STRING path;
+    NTSTATUS status;
+
+    for (node = head; node; node = node->next)
+    {
+        if (wcschr(node->package->path, L';')) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+        length = wcslen(node->package->path) + 1;
+        if (length > 32767 - chars) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+        chars += length;
+    }
+    if (!(storage = HeapAlloc(GetProcessHeap(), 0, chars * sizeof(WCHAR)))) return E_OUTOFMEMORY;
+    for (cursor = storage, node = head; node; node = node->next)
+    {
+        length = wcslen(node->package->path);
+        memcpy(cursor, node->package->path, length * sizeof(WCHAR));
+        cursor += length;
+        *cursor++ = node->next ? L';' : 0;
+    }
+    path.Buffer = storage;
+    path.Length = (chars - 1) * sizeof(WCHAR);
+    path.MaximumLength = chars * sizeof(WCHAR);
+    status = __wine_set_package_dll_path(&path);
+    HeapFree(GetProcessHeap(), 0, storage);
+    return status ? HRESULT_FROM_NT(status) : S_OK;
+}
 
 /* Entries live until process teardown. Every mutation prepares its allocations
  * before publication; readers copy while holding the shared lock. */
@@ -119,6 +145,11 @@ HRESULT WINAPI AddDependencyToProcessPackageGraph(const WCHAR *family, const WCH
     if (alias && FAILED(hr = append_aliases(node, 1, &alias))) goto done;
     RtlAcquireSRWLockExclusive(&graph_lock);
     node->next = graph_head;
+    if (FAILED(hr = update_loader_path(node)))
+    {
+        RtlReleaseSRWLockExclusive(&graph_lock);
+        goto done;
+    }
     graph_head = node;
     ++graph_generation;
     RtlReleaseSRWLockExclusive(&graph_lock);
@@ -199,7 +230,7 @@ static LONG graph_info_locked(UINT32 flags, UINT32 path_type, UINT32 *size, BYTE
     struct graph_node *node;
     SIZE_T required = 0, node_size;
     UINT32 total = 0, supplied;
-    struct graph_package_info *info;
+    PACKAGE_INFO *info;
     BYTE *cursor;
     LONG ret = ERROR_SUCCESS;
 
@@ -226,7 +257,7 @@ static LONG graph_info_locked(UINT32 flags, UINT32 path_type, UINT32 *size, BYTE
     if (supplied < required) { ret = ERROR_INSUFFICIENT_BUFFER; goto done; }
     if (!total) goto done;
     memset(buffer, 0, required);
-    info = (struct graph_package_info *)buffer;
+    info = (PACKAGE_INFO *)buffer;
     cursor = buffer + total * sizeof(*info);
     for (node = graph_head; node; node = node->next, ++info)
     {

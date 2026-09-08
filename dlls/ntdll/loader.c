@@ -94,6 +94,7 @@ static int free_lib_count;   /* recursion depth of LdrUnloadDll calls */
 static LONG path_safe_mode;  /* path mode set by RtlSetSearchPathMode */
 static LONG dll_safe_mode = 1;  /* dll search mode */
 static UNICODE_STRING dll_directory;  /* extra path for LdrSetDllDirectory */
+static UNICODE_STRING package_dll_path; /* derived from KernelBase's process graph */
 static UNICODE_STRING system_dll_path; /* path to search for system dependency dlls */
 static DWORD default_search_flags;  /* default flags set by LdrSetDefaultDllDirectories */
 static WCHAR *default_load_path;    /* default dll search path */
@@ -4738,6 +4739,22 @@ NTSTATUS WINAPI LdrSetDllDirectory( const UNICODE_STRING *dir )
     return status;
 }
 
+/* LinuxNT-private adapter. KernelBase owns graph ordering and registration;
+ * the loader owns only this copied search path. It is not an environment
+ * variable and is not inherited as process identity by a child. */
+NTSTATUS WINAPI __wine_set_package_dll_path( const UNICODE_STRING *path )
+{
+    UNICODE_STRING copy;
+    NTSTATUS status;
+
+    if ((status = RtlDuplicateUnicodeString( 1, path, &copy ))) return status;
+    RtlEnterCriticalSection( &dlldir_section );
+    RtlFreeUnicodeString( &package_dll_path );
+    package_dll_path = copy;
+    RtlLeaveCriticalSection( &dlldir_section );
+    return STATUS_SUCCESS;
+}
+
 
 /****************************************************************************
  *		LdrAddDllDirectory  (NTDLL.@)
@@ -4844,6 +4861,26 @@ NTSTATUS WINAPI LdrGetDllPath( PCWSTR module, ULONG flags, PWSTR *path, PWSTR *u
         if (!(flags & LOAD_WITH_ALTERED_SEARCH_PATH) || !wcschr( module, L'\\' ))
             module = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
         status = get_dll_load_path( module, dlldir, dll_safe_mode, path );
+        if (!status && package_dll_path.Length)
+        {
+            SIZE_T length = package_dll_path.Length / sizeof(WCHAR);
+            SIZE_T tail = wcslen( *path ) + 1;
+            WCHAR *combined = RtlAllocateHeap( GetProcessHeap(), 0, (length + 1 + tail) * sizeof(WCHAR) );
+            if (!combined)
+            {
+                RtlFreeHeap( GetProcessHeap(), 0, *path );
+                *path = NULL;
+                status = STATUS_NO_MEMORY;
+            }
+            else
+            {
+                memcpy( combined, package_dll_path.Buffer, package_dll_path.Length );
+                combined[length] = ';';
+                memcpy( combined + length + 1, *path, tail * sizeof(WCHAR) );
+                RtlFreeHeap( GetProcessHeap(), 0, *path );
+                *path = combined;
+            }
+        }
     }
 
     RtlLeaveCriticalSection( &dlldir_section );
