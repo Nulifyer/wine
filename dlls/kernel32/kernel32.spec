@@ -1145,6 +1145,7 @@
 @ stub NotifyNLSUserCache
 # @ stub NotifyUILanguageChange
 # @ stub NumaVirtualQueryNode
+@ stdcall OOBEComplete(ptr)
 @ stdcall OpenConsoleW(wstr long long long)
 @ stub OpenDataFile
 @ stdcall -import OpenEventA(long long str)

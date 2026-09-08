@@ -23,6 +23,7 @@ SOURCES = \
 	locale.c \
 	mailslot.c \
 	module.c \
+	oobe.c \
 	path.c \
 	pipe.c \
 	power.c \
