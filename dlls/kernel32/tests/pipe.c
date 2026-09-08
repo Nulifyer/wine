@@ -1987,6 +1987,15 @@ static void test_ImpersonateNamedPipeClient(HANDLE hClientToken, DWORD security_
     ret = ConnectNamedPipe(hPipeServer, NULL);
     ok(ret || (GetLastError() == ERROR_PIPE_CONNECTED), "ConnectNamedPipe failed with error %ld\n", GetLastError());
 
+    ret = ImpersonateNamedPipeClient(hPipeServer);
+    error = GetLastError();
+    if ((security_flags & SECURITY_SQOS_PRESENT) && !(security_flags & SECURITY_CONTEXT_TRACKING))
+        ok(ret, "static context should be available at connection, error %lu\n", error);
+    else
+        ok(!ret && error == ERROR_CANNOT_IMPERSONATE,
+           "dynamic context needs a read, got %d error %lu\n", ret, error);
+    if (ret) RevertToSelf();
+
     ret = ReadFile(hPipeServer, buffer, sizeof(buffer), &dwBytesRead, NULL);
     ok(ret, "ReadFile failed with error %ld\n", GetLastError());
 
@@ -2036,6 +2045,13 @@ static void test_ImpersonateNamedPipeClient(HANDLE hClientToken, DWORD security_
     RevertToSelf();
 
     CloseHandle(hThread);
+    ret = DisconnectNamedPipe(hPipeServer);
+    ok(ret, "DisconnectNamedPipe failed with error %lu\n", GetLastError());
+    ret = ImpersonateNamedPipeClient(hPipeServer);
+    error = GetLastError();
+    ok(!ret && error == ERROR_CANNOT_IMPERSONATE,
+       "disconnected pipe retained its client context, got %d error %lu\n", ret, error);
+    if (ret) RevertToSelf();
     CloseHandle(hPipeServer);
 }
 
@@ -2096,7 +2112,6 @@ static void test_no_sqos_no_token(int call_index, HANDLE hToken)
     {
     case 0:
         priv_count = get_privilege_count(hToken);
-        todo_wine
         ok(priv_count == 0, "privilege count should have been 0 instead of %ld\n", priv_count);
         break;
     case 1:
@@ -2117,7 +2132,6 @@ static void test_no_sqos(int call_index, HANDLE hToken)
         ok(!are_all_privileges_disabled(hToken), "token should be a copy of the process one\n");
         break;
     case 1:
-        todo_wine
         ok(are_all_privileges_disabled(hToken), "impersonated token should have been modified\n");
         break;
     default:
@@ -2148,7 +2162,6 @@ static void test_dynamic_context(int call_index, HANDLE hToken)
         ok(!are_all_privileges_disabled(hToken), "token should be a copy of the process one\n");
         break;
     case 1:
-        todo_wine
         ok(are_all_privileges_disabled(hToken), "impersonated token should have been modified\n");
         break;
     default:
@@ -2178,7 +2191,6 @@ static void test_no_sqos_revert(int call_index, HANDLE hToken)
     {
     case 0:
         priv_count = get_privilege_count(hToken);
-        todo_wine
         ok(priv_count == 0, "privilege count should have been 0 instead of %ld\n", priv_count);
         break;
     case 1:
@@ -2196,11 +2208,9 @@ static void test_static_context_revert(int call_index, HANDLE hToken)
     switch (call_index)
     {
     case 0:
-        todo_wine
         ok(are_all_privileges_disabled(hToken), "privileges should have been disabled\n");
         break;
     case 1:
-        todo_wine
         ok(are_all_privileges_disabled(hToken), "impersonated token should not have been modified\n");
         break;
     default:
@@ -2213,7 +2223,6 @@ static void test_dynamic_context_revert(int call_index, HANDLE hToken)
     switch (call_index)
     {
     case 0:
-        todo_wine
         ok(are_all_privileges_disabled(hToken), "privileges should have been disabled\n");
         break;
     case 1:

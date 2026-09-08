@@ -648,6 +648,9 @@ static void dump_open_file_object_request( const struct open_file_object_request
     fprintf( stderr, ", sharing=%08x", req->sharing );
     fprintf( stderr, ", options=%08x", req->options );
     dump_uint64( ", async_user=", &req->async_user );
+    fprintf( stderr, ", impersonation_level=%d", req->impersonation_level );
+    fprintf( stderr, ", context_tracking=%d", req->context_tracking );
+    fprintf( stderr, ", effective_only=%d", req->effective_only );
     dump_varargs_unicode_str( ", filename=", cur_size );
 }
 
@@ -4494,6 +4497,7 @@ static const struct
     { "BUFFER_TOO_SMALL",            STATUS_BUFFER_TOO_SMALL },
     { "CANCELLED",                   STATUS_CANCELLED },
     { "CANNOT_DELETE",               STATUS_CANNOT_DELETE },
+    { "CANNOT_IMPERSONATE",          STATUS_CANNOT_IMPERSONATE },
     { "CANT_OPEN_ANONYMOUS",         STATUS_CANT_OPEN_ANONYMOUS },
     { "CHILD_MUST_BE_VOLATILE",      STATUS_CHILD_MUST_BE_VOLATILE },
     { "CONNECTION_ABORTED",          STATUS_CONNECTION_ABORTED },

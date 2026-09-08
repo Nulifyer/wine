@@ -1649,6 +1649,9 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
     unsigned int sharing;       /* sharing flags */
     unsigned int options;       /* file options */
     client_ptr_t async_user;    /* async user ptr, same as async_data.user */
+    int impersonation_level;    /* client security quality of service */
+    int context_tracking;       /* dynamic client token tracking */
+    int effective_only;         /* retain only enabled privileges */
     VARARG(filename,unicode_str); /* file name */
 @REPLY
     obj_handle_t handle;        /* handle to the file */

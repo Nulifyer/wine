@@ -653,6 +653,23 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
     return token;
 }
 
+struct token *token_duplicate_impersonation( struct token *source, int level, int effective_only )
+{
+    struct token *token = token_duplicate( source, 0, level, NULL, NULL, 0, NULL, 0 );
+    struct privilege *privilege, *next;
+
+    if (token && effective_only)
+    {
+        LIST_FOR_EACH_ENTRY_SAFE( privilege, next, &token->privileges, struct privilege, entry )
+        {
+            if (privilege->enabled) continue;
+            list_remove( &privilege->entry );
+            free( privilege );
+        }
+    }
+    return token;
+}
+
 static struct acl *create_default_dacl( const struct sid *user )
 {
     struct ace *ace;

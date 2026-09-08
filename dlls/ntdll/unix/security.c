@@ -468,7 +468,10 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
                 wine_server_set_reply( req, tpriv->Privileges, length - FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ) );
             status = wine_server_call( req );
             if (retlen) *retlen = FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ) + reply->len;
-            if (tpriv) tpriv->PrivilegeCount = reply->len / sizeof(LUID_AND_ATTRIBUTES);
+            if (!status && length < FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ))
+                status = STATUS_BUFFER_TOO_SMALL;
+            if (tpriv && length >= FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ))
+                tpriv->PrivilegeCount = reply->len / sizeof(LUID_AND_ATTRIBUTES);
         }
         SERVER_END_REQ;
         break;

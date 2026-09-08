@@ -5723,6 +5723,7 @@ static void set_sync_iosb( IO_STATUS_BLOCK *io, NTSTATUS status, ULONG_PTR info,
 static unsigned int server_open_file_object( HANDLE *ret_handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
                                              ULONG sharing, ULONG options )
 {
+    const SECURITY_QUALITY_OF_SERVICE *qos = attr->SecurityQualityOfService;
     HANDLE handle, wait_handle;
     struct async_irp *async;
     unsigned int status;
@@ -5738,6 +5739,9 @@ static unsigned int server_open_file_object( HANDLE *ret_handle, ACCESS_MASK acc
         req->sharing    = sharing;
         req->options    = options;
         req->async_user = wine_server_client_ptr( &async->io );
+        req->impersonation_level = qos ? qos->ImpersonationLevel : SecurityImpersonation;
+        req->context_tracking = qos ? qos->ContextTrackingMode : SECURITY_DYNAMIC_TRACKING;
+        req->effective_only = qos ? qos->EffectiveOnly : TRUE;
         wine_server_add_data( req, attr->ObjectName->Buffer, attr->ObjectName->Length );
         status = wine_server_call( req );
         handle = wine_server_ptr_handle( reply->handle );
@@ -6781,7 +6785,6 @@ NTSTATUS WINAPI NtFsControlFile( HANDLE handle, HANDLE event, PIO_APC_ROUTINE ap
         return status;
 
     case FSCTL_PIPE_IMPERSONATE:
-        FIXME("FSCTL_PIPE_IMPERSONATE: impersonating self\n");
         return server_ioctl_file( handle, event, apc, apc_context, io, code,
                                   in_buffer, in_size, out_buffer, out_size );
 

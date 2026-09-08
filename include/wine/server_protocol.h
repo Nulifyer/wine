@@ -1910,7 +1910,11 @@ struct open_file_object_request
     unsigned int sharing;
     unsigned int options;
     client_ptr_t async_user;
+    int impersonation_level;
+    int context_tracking;
+    int effective_only;
     /* VARARG(filename,unicode_str); */
+    char __pad_52[4];
 };
 struct open_file_object_reply
 {
@@ -7184,6 +7188,6 @@ union generic_reply
     struct alpc_create_port_reply alpc_create_port_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 962
+#define SERVER_PROTOCOL_VERSION 963
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

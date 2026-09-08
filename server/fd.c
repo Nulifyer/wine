@@ -3001,22 +3001,25 @@ DECL_HANDLER(open_file_object)
     if (!obj->ops->open_file) set_error( STATUS_OBJECT_TYPE_MISMATCH );
     else if ((result = obj->ops->open_file( obj, req->access, req->sharing, req->options )))
     {
-        struct async_data async_data = {.user = req->async_user};
-
-        reply->handle = alloc_handle( current->process, result, req->access, req->attributes );
-        async_data.handle = reply->handle;
-
-        if (reply->handle && (fd = get_obj_fd( result )))
+        if (set_named_pipe_client_security( result, req->impersonation_level,
+                                            req->context_tracking, req->effective_only ))
         {
-            if (fd->fd_ops->create && (async = create_request_async( fd, &async_data, 1 )))
-            {
-                fd->fd_ops->create( fd, async, req->access, req->sharing, req->options );
-                reply->wait = async_handoff( async, NULL, 1 );
-                release_object( async );
-            }
-            release_object( fd );
-        }
+            struct async_data async_data = {.user = req->async_user};
 
+            reply->handle = alloc_handle( current->process, result, req->access, req->attributes );
+            async_data.handle = reply->handle;
+
+            if (reply->handle && (fd = get_obj_fd( result )))
+            {
+                if (fd->fd_ops->create && (async = create_request_async( fd, &async_data, 1 )))
+                {
+                    fd->fd_ops->create( fd, async, req->access, req->sharing, req->options );
+                    reply->wait = async_handoff( async, NULL, 1 );
+                    release_object( async );
+                }
+                release_object( fd );
+            }
+        }
         release_object( result );
     }
     release_object( obj );

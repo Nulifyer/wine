@@ -209,6 +209,8 @@ extern struct obj_locator get_shared_object_locator( volatile void *object_shm )
 
 /* device functions */
 
+extern int set_named_pipe_client_security( struct object *obj, int level, int tracking, int effective_only );
+
 extern struct object *create_named_pipe_device( struct object *root, struct unicode_str name,
                                                 unsigned int attr, const struct security_descriptor *sd );
 extern struct object *create_mailslot_device( struct object *root, struct unicode_str name,
