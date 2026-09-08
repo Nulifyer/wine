@@ -779,3 +779,71 @@ NTSTATUS WINAPI RtlWriteRegistryValue( ULONG RelativeTo, PCWSTR path, PCWSTR nam
 
     return status;
 }
+
+/***********************************************************************
+ *      RtlIsFeatureEnabledForEnterprise   (NTDLL.@)
+ *
+ * Enterprise temporary controls select a feature list and then consult
+ * update policy. Missing or unreadable configuration leaves a feature enabled.
+ * These are the ordinary machine roots; persisted-state redirection is not
+ * implemented here.
+ */
+static NTSTATUS query_enterprise_dword( const WCHAR *path, const WCHAR *name, ULONG *value )
+{
+    struct
+    {
+        KEY_VALUE_PARTIAL_INFORMATION info;
+        ULONG extra;
+    } buffer;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING key_name, value_name;
+    HANDLE key;
+    ULONG size;
+    NTSTATUS status;
+
+    RtlInitUnicodeString( &key_name, path );
+    InitializeObjectAttributes( &attr, &key_name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+    if ((status = NtOpenKey( &key, KEY_QUERY_VALUE, &attr ))) return status;
+    RtlInitUnicodeString( &value_name, name );
+    status = NtQueryValueKey( key, &value_name, KeyValuePartialInformation,
+                             &buffer, sizeof(buffer), &size );
+    NtClose( key );
+    if (status) return status;
+    if (buffer.info.Type != REG_DWORD || buffer.info.DataLength != sizeof(*value))
+        return STATUS_OBJECT_TYPE_MISMATCH;
+    memcpy( value, buffer.info.Data, sizeof(*value) );
+    return STATUS_SUCCESS;
+}
+
+BOOLEAN WINAPI RtlIsFeatureEnabledForEnterprise( ULONG feature_id )
+{
+    static const WCHAR controls[] =
+        L"\\Registry\\Machine\\SYSTEM\\CurrentControlSet\\Control\\FeatureManagement\\EnterpriseTempControls";
+    static const WCHAR active[] =
+        L"\\Registry\\Machine\\SYSTEM\\CurrentControlSet\\Control\\FeatureManagement\\EnterpriseTempControls\\Active";
+    static const WCHAR primary_policy[] =
+        L"\\Registry\\Machine\\SOFTWARE\\Microsoft\\WindowsUpdate\\UpdatePolicy\\PolicyState";
+    static const WCHAR mirrored_policy[] =
+        L"\\Registry\\Machine\\SYSTEM\\CurrentControlSet\\Control\\FeatureManagement\\Policies";
+    UNICODE_STRING license_name = RTL_CONSTANT_STRING( L"UpdatePolicy-UpdateManagementGroup" );
+    WCHAR path[160], name[16];
+    ULONG config, value, hash, type, size;
+
+    TRACE( "(%#lx)\n", feature_id );
+    if (query_enterprise_dword( active, L"ActiveConfig", &config )) return TRUE;
+    hash = RtlUlongByteSwap( feature_id ^ 0x74161a4e ) ^ 0x8fb23d4f;
+    hash = ((hash << 1) | (hash >> 31)) ^ 0x833ea8ff;
+    swprintf( path, ARRAY_SIZE(path), L"%s\\%lu", controls, config );
+    swprintf( name, ARRAY_SIZE(name), L"%lu", hash );
+    if (query_enterprise_dword( path, name, &value ) || !value) return TRUE;
+
+    /* Native policy precedence, not alternative implementation selection. */
+    if (!query_enterprise_dword( primary_policy, L"TemporaryEnterpriseFeatureControlState", &value ) ||
+        !query_enterprise_dword( mirrored_policy, L"TemporaryEnterpriseFeatureControlState_Mirrored", &value ))
+        return value == 1 || value == 2;
+
+    if (!NtQueryLicenseValue( &license_name, &type, &value, sizeof(value), &size ) &&
+        type == REG_DWORD && size == sizeof(value))
+        return !value;
+    return TRUE;
+}

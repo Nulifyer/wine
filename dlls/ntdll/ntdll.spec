@@ -869,6 +869,7 @@
 @ stdcall RtlIsDosDeviceName_U(wstr)
 @ stdcall -arch=x86_64 -norelay RtlIsEcCode(ptr)
 @ stdcall RtlIsGenericTableEmpty(ptr)
+@ stdcall RtlIsFeatureEnabledForEnterprise(long)
 # @ stub RtlIsGenericTableEmptyAvl
 @ stdcall RtlIsNameLegalDOS8Dot3(ptr ptr ptr)
 @ stdcall RtlIsNormalizedString(long wstr long ptr)
