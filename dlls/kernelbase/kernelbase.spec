@@ -1402,7 +1402,7 @@
 @ stdcall ResumeThread(long)
 @ stdcall RevertToSelf()
 # @ stub RsopLoggingEnabledInternal
-# @ stub SHCoCreateInstance
+@ stdcall SHCoCreateInstance(wstr ptr ptr ptr ptr)
 @ stdcall SHExpandEnvironmentStringsA(str ptr long) ExpandEnvironmentStringsA
 @ stdcall SHExpandEnvironmentStringsW(wstr ptr long) ExpandEnvironmentStringsW
 @ stdcall SHLoadIndirectString(wstr ptr long ptr)

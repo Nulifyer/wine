@@ -209,7 +209,7 @@
 @ stdcall SHBindToParent(ptr ptr ptr ptr)
 @ stdcall SHChangeNotify(long long ptr ptr)
 @ stub SHChangeNotifyRegisterThread
-@ stub SHCoCreateInstanceWorker
+@ stdcall SHCoCreateInstanceWorker(wstr ptr ptr ptr ptr)
 @ stub SHCreateAssocHandler
 @ stdcall SHCreateAssociationRegistration(ptr ptr)
 @ stdcall SHCreateDataObject(ptr long ptr ptr ptr ptr)

@@ -22,6 +22,7 @@ SOURCES = \
 	process.c \
 	registry.c \
 	security.c \
+	shellcom.c \
 	string.c \
 	sync.c \
 	thread.c \
