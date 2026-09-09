@@ -115,7 +115,7 @@ static void semaphore_sync_satisfied( struct object *obj, struct wait_queue_entr
     sem->count--;
 }
 
-static struct object *create_semaphore_sync( unsigned int initial, unsigned int max )
+struct object *create_semaphore_sync( unsigned int initial, unsigned int max )
 {
     struct semaphore_sync *sem;
 
@@ -125,6 +125,14 @@ static struct object *create_semaphore_sync( unsigned int initial, unsigned int 
     sem->count = initial;
     sem->max   = max;
     return &sem->obj;
+}
+
+/* Release a server-owned semaphore through the selected synchronization backend. */
+void release_semaphore_sync( struct object *sync, unsigned int count )
+{
+    if (sync->ops == &semaphore_sync_ops)
+        release_semaphore( (struct semaphore_sync *)sync, count, NULL );
+    else release_inproc_semaphore_sync( (struct inproc_sync *)sync, count );
 }
 
 struct semaphore

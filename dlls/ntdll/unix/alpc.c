@@ -66,14 +66,14 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
                                    ALPC_MESSAGE_ATTRIBUTES *send_msg_attr,
                                    ALPC_MESSAGE_ATTRIBUTES *recv_msg_attr, LARGE_INTEGER *timeout )
 {
-    HANDLE handle = NULL;
+    HANDLE handle = NULL, wait_handle = NULL;
     NTSTATUS status;
     SIZE_T capacity = connect_msg_size ? *connect_msg_size : 0;
     ULONG sid_size = 0;
 
     if (!port_handle || !port_name) return STATUS_ACCESS_VIOLATION;
     if (send_msg_attr || recv_msg_attr || flags & ~ALPC_SYNC_CONNECTION || !port_attr ||
-        !(port_attr->Flags & 0x40000) || (obj_attr && obj_attr->SecurityDescriptor))
+        (obj_attr && obj_attr->SecurityDescriptor))
         return STATUS_NOT_IMPLEMENTED;
     if (!port_name->Buffer || port_name->Length % sizeof(WCHAR)) return STATUS_OBJECT_NAME_INVALID;
     if (connect_msg && (!connect_msg_size || capacity < sizeof(*connect_msg) || capacity > ~(data_size_t)0 ||
@@ -100,14 +100,18 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
         if (sid_size) wine_server_add_data( req, required_server_sid, sid_size );
         if (connect_msg) wine_server_add_data( req, connect_msg + 1, connect_msg->DataLength );
         status = wine_server_call( req );
-        if (!status) handle = wine_server_ptr_handle( reply->handle );
+        if (!status)
+        {
+            handle = wine_server_ptr_handle( reply->handle );
+            wait_handle = reply->wait_handle ? wine_server_ptr_handle( reply->wait_handle ) : handle;
+        }
     }
     SERVER_END_REQ;
     if (status) return status;
 
     /* Exactly one wait owns the caller's timeout. A pending request is canceled
      * by closing the private client handle, with the server also canceling it on thread termination. */
-    status = NtWaitForSingleObject( handle, FALSE, timeout );
+    status = NtWaitForSingleObject( wait_handle, FALSE, timeout );
     if (!status)
     {
         SERVER_START_REQ( alpc_get_connect_result )
@@ -221,6 +225,8 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
     TRACE( "%p, %#x, %p, %p, %p, %p, %p, %p.\n", port_handle, (unsigned int)flags,
            send_msg, send_msg_attr, recv_msg, recv_buffer_size, recv_msg_attr, timeout );
     if (send_msg_attr || recv_msg_attr || flags & ~(1 | 0x10000 | 0x20000)) return STATUS_NOT_IMPLEMENTED;
+    if ((flags & 0x20000) && (!send_msg || send_msg->MessageId || (flags & 0x10000)))
+        return STATUS_INVALID_PARAMETER_2;
     if (recv_msg && !recv_buffer_size) return STATUS_INVALID_PARAMETER;
     if (recv_msg && capacity < sizeof(*recv_msg)) return STATUS_BUFFER_TOO_SMALL;
     if (capacity > ~(data_size_t)0) return STATUS_INVALID_PARAMETER;
@@ -235,6 +241,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         req->send = !!send_msg;
         req->receive = !!recv_msg;
         req->wow64 = is_wow64();
+        req->no_wait = timeout && !timeout->QuadPart;
         if (send_msg) wine_server_add_data( req, send_msg + 1, send_msg->DataLength );
         if (recv_msg) wine_server_set_reply( req, recv_msg + 1, capacity - sizeof(*recv_msg) );
         status = wine_server_call( req );
@@ -255,29 +262,27 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
     SERVER_END_REQ;
     if (wait_handle)
     {
-        status = NtWaitForSingleObject( wait_handle, FALSE, timeout );
-        if (!status)
+        NTSTATUS wait_status = NtWaitForSingleObject( wait_handle, FALSE, timeout );
+        SERVER_START_REQ( alpc_get_message_result )
         {
-            SERVER_START_REQ( alpc_get_message_result )
+            req->handle = wine_server_obj_handle( wait_handle );
+            req->wait_status = wait_status;
+            wine_server_set_reply( req, recv_msg + 1, capacity - sizeof(*recv_msg) );
+            status = wine_server_call( req );
+            if ((!status && (flags & 0x20000)) || status == STATUS_BUFFER_TOO_SMALL)
+                *recv_buffer_size = reply->message_size + sizeof(*recv_msg);
+            if (!status)
             {
-                req->handle = wine_server_obj_handle( wait_handle );
-                wine_server_set_reply( req, recv_msg + 1, capacity - sizeof(*recv_msg) );
-                status = wine_server_call( req );
-                if (!status || status == STATUS_BUFFER_TOO_SMALL)
-                    *recv_buffer_size = reply->message_size + sizeof(*recv_msg);
-                if (!status)
-                {
-                    memset( recv_msg, 0, sizeof(*recv_msg) );
-                    recv_msg->DataLength = reply->message_size;
-                    recv_msg->TotalLength = sizeof(*recv_msg) + reply->message_size;
-                    recv_msg->Type = reply->message_type;
-                    recv_msg->ClientId.UniqueProcess = ULongToHandle( reply->sender_pid );
-                    recv_msg->ClientId.UniqueThread = ULongToHandle( reply->sender_tid );
-                    recv_msg->MessageId = reply->message_id;
-                }
+                memset( recv_msg, 0, sizeof(*recv_msg) );
+                recv_msg->DataLength = reply->message_size;
+                recv_msg->TotalLength = sizeof(*recv_msg) + reply->message_size;
+                recv_msg->Type = reply->message_type;
+                recv_msg->ClientId.UniqueProcess = ULongToHandle( reply->sender_pid );
+                recv_msg->ClientId.UniqueThread = ULongToHandle( reply->sender_tid );
+                recv_msg->MessageId = reply->message_id;
             }
-            SERVER_END_REQ;
         }
+        SERVER_END_REQ;
         NtClose( wait_handle );
     }
     return status;

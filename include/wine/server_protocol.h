@@ -6308,8 +6308,8 @@ struct alpc_send_receive_request
     int send;
     int receive;
     int wow64;
+    int no_wait;
     /* VARARG(message,bytes); */
-    char __pad_36[4];
 };
 struct alpc_send_receive_reply
 {
@@ -6329,6 +6329,8 @@ struct alpc_get_message_result_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    unsigned int wait_status;
+    char __pad_20[4];
 };
 struct alpc_get_message_result_reply
 {
@@ -6363,7 +6365,7 @@ struct alpc_connect_port_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
-    char __pad_12[4];
+    obj_handle_t wait_handle;
 };
 
 struct alpc_get_connect_result_request
@@ -7384,6 +7386,6 @@ union generic_reply
     struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 967
+#define SERVER_PROTOCOL_VERSION 969
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -3582,6 +3582,7 @@ static void dump_alpc_send_receive_request( const struct alpc_send_receive_reque
     fprintf( stderr, ", send=%d", req->send );
     fprintf( stderr, ", receive=%d", req->receive );
     fprintf( stderr, ", wow64=%d", req->wow64 );
+    fprintf( stderr, ", no_wait=%d", req->no_wait );
     dump_varargs_bytes( ", message=", cur_size );
 }
 
@@ -3599,6 +3600,7 @@ static void dump_alpc_send_receive_reply( const struct alpc_send_receive_reply *
 static void dump_alpc_get_message_result_request( const struct alpc_get_message_result_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", wait_status=%08x", req->wait_status );
 }
 
 static void dump_alpc_get_message_result_reply( const struct alpc_get_message_result_reply *req )
@@ -3627,6 +3629,7 @@ static void dump_alpc_connect_port_request( const struct alpc_connect_port_reque
 static void dump_alpc_connect_port_reply( const struct alpc_connect_port_reply *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", wait_handle=%04x", req->wait_handle );
 }
 
 static void dump_alpc_get_connect_result_request( const struct alpc_get_connect_result_request *req )
@@ -4723,6 +4726,7 @@ static const struct
     { "IO_TIMEOUT",                  STATUS_IO_TIMEOUT },
     { "KERNEL_APC",                  STATUS_KERNEL_APC },
     { "KEY_DELETED",                 STATUS_KEY_DELETED },
+    { "LPC_REQUESTS_NOT_ALLOWED",    STATUS_LPC_REQUESTS_NOT_ALLOWED },
     { "MAPPED_FILE_SIZE_ZERO",       STATUS_MAPPED_FILE_SIZE_ZERO },
     { "MESSAGE_LOST",                STATUS_MESSAGE_LOST },
     { "MORE_ENTRIES",                STATUS_MORE_ENTRIES },
@@ -4765,6 +4769,7 @@ static const struct
     { "PIPE_EMPTY",                  STATUS_PIPE_EMPTY },
     { "PIPE_LISTENING",              STATUS_PIPE_LISTENING },
     { "PIPE_NOT_AVAILABLE",          STATUS_PIPE_NOT_AVAILABLE },
+    { "PORT_CLOSED",                 STATUS_PORT_CLOSED },
     { "PORT_CONNECTION_REFUSED",     STATUS_PORT_CONNECTION_REFUSED },
     { "PORT_DISCONNECTED",           STATUS_PORT_DISCONNECTED },
     { "PORT_MESSAGE_TOO_LONG",       STATUS_PORT_MESSAGE_TOO_LONG },

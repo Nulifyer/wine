@@ -4383,6 +4383,7 @@ enum inproc_sync_type
     int send;
     int receive;
     int wow64;
+    int no_wait;
     VARARG(message,bytes);
 @REPLY
     obj_handle_t wait_handle;
@@ -4398,6 +4399,7 @@ enum inproc_sync_type
 /* Fetch the result of one private synchronous ALPC message wait. */
 @REQ(alpc_get_message_result)
     obj_handle_t handle;
+    unsigned int wait_status;
 @REPLY
     unsigned int message_id;
     unsigned int message_type;
@@ -4421,6 +4423,7 @@ enum inproc_sync_type
     VARARG(data,bytes);
 @REPLY
     obj_handle_t handle;
+    obj_handle_t wait_handle;
 @END
 
 @REQ(alpc_get_connect_result)

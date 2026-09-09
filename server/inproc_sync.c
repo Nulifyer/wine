@@ -156,6 +156,14 @@ struct inproc_sync *create_inproc_semaphore_sync( unsigned int initial, unsigned
     return sem;
 }
 
+void release_inproc_semaphore_sync( struct inproc_sync *sync, unsigned int count )
+{
+    __u32 value = count;
+    assert( sync->type == INPROC_SYNC_SEMAPHORE );
+    if (ioctl( sync->fd, NTSYNC_IOC_SEM_RELEASE, &value ) == -1)
+        set_error( STATUS_SEMAPHORE_LIMIT_EXCEEDED );
+}
+
 static void inproc_sync_dump( struct object *obj, int verbose )
 {
     struct inproc_sync *sync = (struct inproc_sync *)obj;
@@ -253,6 +261,10 @@ struct inproc_sync *create_inproc_mutex_sync( thread_id_t owner, unsigned int co
 struct inproc_sync *create_inproc_semaphore_sync( unsigned int initial, unsigned int max )
 {
     return NULL;
+}
+
+void release_inproc_semaphore_sync( struct inproc_sync *sync, unsigned int count )
+{
 }
 
 void signal_inproc_sync( struct inproc_sync *sync )
