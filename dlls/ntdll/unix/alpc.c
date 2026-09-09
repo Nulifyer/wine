@@ -220,8 +220,6 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
     TRACE( "%p, %#x, %p, %p, %p, %p, %p, %p.\n", port_handle, (unsigned int)flags,
            send_msg, send_msg_attr, recv_msg, recv_buffer_size, recv_msg_attr, timeout );
     if (send_msg_attr || recv_msg_attr || flags & ~(1 | 0x10000)) return STATUS_NOT_IMPLEMENTED;
-    if (send_msg && (send_msg->MessageId || send_msg->ClientId.UniqueProcess ||
-                     send_msg->ClientId.UniqueThread)) return STATUS_NOT_IMPLEMENTED;
     if (recv_msg && !recv_buffer_size) return STATUS_INVALID_PARAMETER;
     if (recv_msg && capacity < sizeof(*recv_msg)) return STATUS_BUFFER_TOO_SMALL;
     if (capacity > ~(data_size_t)0) return STATUS_INVALID_PARAMETER;
