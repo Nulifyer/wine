@@ -37,6 +37,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
 HINSTANCE hProxyDll;
 
+static const CLSID CLSID_ContextSwitcher =
+    {0x0000034e, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
+
 static ULONG_PTR global_options[COMGLB_PROPERTIES_RESERVED3 + 1];
 
 /* Ole32 exports */
@@ -560,10 +563,23 @@ static const IClassFactoryVtbl global_options_factory_vtbl =
 
 static IClassFactory global_options_factory = { &global_options_factory_vtbl };
 
+static HRESULT WINAPI context_switcher_CreateInstance(IClassFactory *, IUnknown *, REFIID, void **);
+static const IClassFactoryVtbl context_switcher_factory_vtbl =
+{
+    class_factory_QueryInterface,
+    class_factory_AddRef,
+    class_factory_Release,
+    context_switcher_CreateInstance,
+    class_factory_LockServer
+};
+static IClassFactory context_switcher_factory = { &context_switcher_factory_vtbl };
+
 static HRESULT get_builtin_class_factory(REFCLSID rclsid, REFIID riid, void **obj)
 {
     if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
         return IClassFactory_QueryInterface(&global_options_factory, riid, obj);
+    if (IsEqualCLSID(rclsid, &CLSID_ContextSwitcher))
+        return IClassFactory_QueryInterface(&context_switcher_factory, riid, obj);
     return E_UNEXPECTED;
 }
 
@@ -1784,12 +1800,13 @@ static HRESULT com_get_class_object(REFCLSID rclsid, DWORD clscontext,
     {
         if (IsEqualCLSID(rclsid, &CLSID_InProcFreeMarshaler) ||
                 IsEqualCLSID(rclsid, &CLSID_GlobalOptions) ||
+                IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
                 (!(clscontext & CLSCTX_APPCONTAINER) && IsEqualCLSID(rclsid, &CLSID_ManualResetEvent)) ||
                 IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
         {
             apartment_release(apt);
 
-            if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
+            if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher))
                 return get_builtin_class_factory(rclsid, riid, obj);
             else
                 return Ole32DllGetClassObject(rclsid, riid, obj);
@@ -2464,6 +2481,7 @@ static struct thread_context
     LONG ref;
     LONG reported_ref;
     OXID oxid;
+    BOOL isolated;
 } *mta_context;
 
 static inline struct thread_context *impl_from_IComThreadingInfo(IComThreadingInfo *iface)
@@ -2631,6 +2649,54 @@ static ULONG WINAPI thread_context_callback_Release(IContextCallback *iface)
     return IComThreadingInfo_Release(&context->IComThreadingInfo_iface);
 }
 
+/* The caller holds a context reference. Remoted callers must first authenticate
+ * the process secret; token and callback are then process-local pointers. */
+HRESULT com_invoke_context(IObjContext *token, PFNCONTEXTCALL callback, ComCallData *param, REFIID iid)
+{
+    struct thread_context *context = impl_from_IObjContext(token);
+    IObjContext *previous;
+    struct tlsdata *tlsdata;
+    struct apartment *apt;
+    GUID logical_id;
+    BOOL restore_logical = FALSE;
+    HRESULT hr;
+
+    if (!callback) return E_INVALIDARG;
+    if (FAILED(hr = CoGetContextToken((ULONG_PTR *)&previous))) return hr;
+    if (FAILED(hr = com_get_tlsdata(&tlsdata))) return hr;
+    if (!(apt = apartment_get_current_or_mta())) return CO_E_NOTINITIALIZED;
+    hr = apt->oxid == context->oxid ? S_OK : RPC_E_WRONG_THREAD;
+    apartment_release(apt);
+    if (FAILED(hr)) return hr;
+
+    InterlockedIncrement(&context->ref);
+    if (IsEqualIID(iid, &IID_IEnterActivityWithNoLock))
+    {
+        hr = CoGetCurrentLogicalThreadId(&logical_id);
+        if (FAILED(hr)) goto done;
+        hr = IComThreadingInfo_SetCurrentLogicalThreadId(&context->IComThreadingInfo_iface, iid);
+        if (FAILED(hr)) goto done;
+        restore_logical = TRUE;
+    }
+    tlsdata->context_token = token;
+    __TRY
+    {
+        hr = callback(param);
+    }
+    __EXCEPT_ALL
+    {
+        hr = RPC_E_SERVERFAULT;
+    }
+    __ENDTRY
+    tlsdata->context_token = previous;
+    if (restore_logical)
+        IComThreadingInfo_SetCurrentLogicalThreadId(&context->IComThreadingInfo_iface, &logical_id);
+
+done:
+    context_token_release(token);
+    return hr;
+}
+
 static HRESULT WINAPI thread_context_callback_ContextCallback(IContextCallback *iface,
         PFNCONTEXTCALL callback, ComCallData *param, REFIID riid, int method, IUnknown *punk)
 {
@@ -2659,37 +2725,10 @@ static HRESULT WINAPI thread_context_callback_ContextCallback(IContextCallback *
     }
     rpc_start_remoting(apt);
 
-    if (&context->IObjContext_iface == current_context)
+    if (context->oxid == apt->oxid)
     {
-        IComThreadingInfo *cti = NULL;
-        GUID thread_id;
-
         apartment_release(apt);
-
-        if (IsEqualIID(riid, &IID_IEnterActivityWithNoLock))
-        {
-            cti = &context->IComThreadingInfo_iface;
-            if (FAILED((hr = IComThreadingInfo_GetCurrentLogicalThreadId(cti, &thread_id))))
-                return hr;
-            if (FAILED((hr = IComThreadingInfo_SetCurrentLogicalThreadId(cti, riid))))
-                return hr;
-        }
-
-        __TRY
-        {
-            hr = callback(param);
-        }
-        __EXCEPT_ALL
-        {
-            hr = RPC_E_SERVERFAULT;
-        }
-        __ENDTRY
-
-        if (cti)
-            IComThreadingInfo_SetCurrentLogicalThreadId(cti, &thread_id);
-
-        TRACE("callback returned %lx\n", hr);
-        return hr;
+        return com_invoke_context(&context->IObjContext_iface, callback, param, riid);
     }
 
     hr = rpc_resolve_oxid(context->oxid, &oxid_info);
@@ -2701,8 +2740,8 @@ static HRESULT WINAPI thread_context_callback_ContextCallback(IContextCallback *
         stdobjref.oid = -1;
         stdobjref.ipid = oxid_info.ipidRemUnknown;
         hr = unmarshal_object(&stdobjref, apt, MSHCTX_INPROC, NULL, &IID_IRundown, &oxid_info, (void**)&rundown);
-        apartment_release(apt);
     }
+    apartment_release(apt);
     if (FAILED(hr))
         return hr;
 
@@ -2830,6 +2869,101 @@ static const IObjContextVtbl thread_object_context_vtbl =
     thread_object_context_Reserved7
 };
 
+/* The public switcher exposes only IUnknown/IContextCallback. Its private
+ * context retains the complete context interfaces visible inside callbacks. */
+struct context_switcher
+{
+    IContextCallback IContextCallback_iface;
+    LONG ref;
+    struct thread_context *context;
+};
+
+static inline struct context_switcher *impl_from_switcher(IContextCallback *iface)
+{
+    return CONTAINING_RECORD(iface, struct context_switcher, IContextCallback_iface);
+}
+
+static HRESULT WINAPI context_switcher_QueryInterface(IContextCallback *iface, REFIID iid, void **out)
+{
+    *out = NULL;
+    if (!IsEqualIID(iid, &IID_IUnknown) && !IsEqualIID(iid, &IID_IContextCallback)) return E_NOINTERFACE;
+    *out = iface;
+    IContextCallback_AddRef(iface);
+    return S_OK;
+}
+
+static ULONG WINAPI context_switcher_AddRef(IContextCallback *iface)
+{
+    return InterlockedIncrement(&impl_from_switcher(iface)->ref);
+}
+
+static ULONG WINAPI context_switcher_Release(IContextCallback *iface)
+{
+    struct context_switcher *object = impl_from_switcher(iface);
+    ULONG refs = InterlockedDecrement(&object->ref);
+    if (!refs)
+    {
+        context_token_release(&object->context->IObjContext_iface);
+        free(object);
+    }
+    return refs;
+}
+
+static HRESULT WINAPI context_switcher_Callback(IContextCallback *iface, PFNCONTEXTCALL callback,
+        ComCallData *param, REFIID iid, int method, IUnknown *unknown)
+{
+    struct thread_context *context = impl_from_switcher(iface)->context;
+    HRESULT hr;
+
+    InterlockedIncrement(&context->ref);
+    hr = IContextCallback_ContextCallback(&context->IContextCallback_iface, callback, param, iid, method, unknown);
+    context_token_release(&context->IObjContext_iface);
+    return hr;
+}
+
+static const IContextCallbackVtbl context_switcher_vtbl =
+{
+    context_switcher_QueryInterface,
+    context_switcher_AddRef,
+    context_switcher_Release,
+    context_switcher_Callback
+};
+
+static HRESULT WINAPI context_switcher_CreateInstance(IClassFactory *factory, IUnknown *outer, REFIID iid, void **out)
+{
+    struct context_switcher *object;
+    struct thread_context *context;
+    struct apartment *apt;
+    HRESULT hr;
+
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (outer) return CLASS_E_NOAGGREGATION;
+    if (!(apt = apartment_get_current_or_mta())) return CO_E_NOTINITIALIZED;
+    object = calloc(1, sizeof(*object));
+    context = calloc(1, sizeof(*context));
+    if (!object || !context)
+    {
+        free(object);
+        free(context);
+        apartment_release(apt);
+        return E_OUTOFMEMORY;
+    }
+    context->IComThreadingInfo_iface.lpVtbl = &thread_context_info_vtbl;
+    context->IContextCallback_iface.lpVtbl = &thread_context_callback_vtbl;
+    context->IObjContext_iface.lpVtbl = &thread_object_context_vtbl;
+    context->ref = 1;
+    context->oxid = apt->oxid;
+    context->isolated = TRUE;
+    apartment_release(apt);
+    object->IContextCallback_iface.lpVtbl = &context_switcher_vtbl;
+    object->ref = 1;
+    object->context = context;
+    hr = IContextCallback_QueryInterface(&object->IContextCallback_iface, iid, out);
+    IContextCallback_Release(&object->IContextCallback_iface);
+    return hr;
+}
+
 /***********************************************************************
  *           CoGetContextToken    (combase.@)
  */
@@ -2856,8 +2990,8 @@ HRESULT WINAPI CoGetContextToken(ULONG_PTR *token)
     if (tlsdata->context_token)
     {
         struct thread_context *context = impl_from_IObjContext(tlsdata->context_token);
-        if ((apt->multi_threaded && context != mta_context) ||
-            (!apt->multi_threaded && context == mta_context))
+        if (!context->isolated && ((apt->multi_threaded && context != mta_context) ||
+            (!apt->multi_threaded && context == mta_context)))
         {
             context_token_release(tlsdata->context_token);
             tlsdata->context_token = NULL;
@@ -3710,8 +3844,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj)
 
     *obj = NULL;
 
-    if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
-        return IClassFactory_QueryInterface(&global_options_factory, riid, obj);
+    if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher))
+        return get_builtin_class_factory(rclsid, riid, obj);
 
     return CLASS_E_CLASSNOTAVAILABLE;
 }

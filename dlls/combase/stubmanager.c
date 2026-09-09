@@ -35,6 +35,7 @@
 #define USE_COM_CONTEXT_DEF
 #include "objbase.h"
 #include "comsvcs.h"
+#include "ctxtcall.h"
 #include "rpc.h"
 
 #include "wine/debug.h"
@@ -850,49 +851,17 @@ void get_process_secret(GUID *process_secret)
 
 static HRESULT WINAPI Rundown_DoCallback(IRundown *iface, XAptCallback *pCallbackData)
 {
-    HRESULT (WINAPI *callback)(void *) = (void*)(ULONG_PTR)pCallbackData->pfnCallback;
-    void *param = (void *)(ULONG_PTR)pCallbackData->pParam;
-    IComThreadingInfo *cti = NULL;
-    GUID thread_id, secret;
-    IObjContext *context;
-    HRESULT hr;
+    PFNCONTEXTCALL callback = (void *)(ULONG_PTR)pCallbackData->pfnCallback;
+    ComCallData *param = (void *)(ULONG_PTR)pCallbackData->pParam;
+    GUID secret;
 
     TRACE("%p, %p\n", iface, pCallbackData);
 
     get_process_secret(&secret);
     if (!IsEqualIID(&secret, &pCallbackData->guidProcessSecret))
         return E_FAIL;
-    if (FAILED((hr = CoGetContextToken((ULONG_PTR *)&context))))
-        return hr;
-    if (pCallbackData->pServerCtx != (ULONG_PTR)context)
-    {
-        ERR("context token doesn't match\n");
-        return E_FAIL;
-    }
-
-    if (IsEqualIID(&IID_IEnterActivityWithNoLock, &pCallbackData->iid))
-    {
-        hr = IObjContext_QueryInterface(context, &IID_IComThreadingInfo, (void **)&cti);
-        if (FAILED(hr))
-            return hr;
-        hr = IComThreadingInfo_GetCurrentLogicalThreadId(cti, &thread_id);
-        if (SUCCEEDED(hr))
-            hr = IComThreadingInfo_SetCurrentLogicalThreadId(cti, &IID_IEnterActivityWithNoLock);
-        if (FAILED(hr))
-        {
-            IComThreadingInfo_Release(cti);
-            return hr;
-        }
-    }
-
-    hr = callback(param);
-
-    if (cti)
-    {
-        IComThreadingInfo_SetCurrentLogicalThreadId(cti, &thread_id);
-        IComThreadingInfo_Release(cti);
-    }
-    return hr;
+    return com_invoke_context((IObjContext *)(ULONG_PTR)pCallbackData->pServerCtx,
+            callback, param, &pCallbackData->iid);
 }
 
 static HRESULT WINAPI Rundown_DoNonreentrantCallback(IRundown *iface, XAptCallback *pCallbackData)
