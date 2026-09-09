@@ -876,7 +876,7 @@
 @ stdcall RtlIsProcessorFeaturePresent(long)
 # @ stub RtlIsRangeAvailable
 @ stdcall RtlIsTextUnicode(ptr long ptr)
-# @ stub RtlIsThreadWithinLoaderCallout
+@ stdcall RtlIsThreadWithinLoaderCallout()
 @ stdcall RtlIsValidHandle(ptr ptr)
 @ stdcall RtlIsValidIndexHandle(ptr long ptr)
 @ stdcall RtlIsValidLocaleName(wstr long)

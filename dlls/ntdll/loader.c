@@ -2062,6 +2062,15 @@ NTSTATUS WINAPI LdrUnlockLoaderLock( ULONG flags, ULONG_PTR magic )
 
 
 /******************************************************************
+ *              RtlIsThreadWithinLoaderCallout  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlIsThreadWithinLoaderCallout(void)
+{
+    return loader_section.OwningThread == NtCurrentTeb()->ClientId.UniqueThread;
+}
+
+
+/******************************************************************
  *		LdrGetProcedureAddress  (NTDLL.@)
  */
 NTSTATUS WINAPI LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
