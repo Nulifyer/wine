@@ -560,6 +560,7 @@ static void cleanup_thread( struct thread *thread )
 {
     int i;
 
+    cleanup_thread_alpc( thread );
     cleanup_thread_completion( thread );
     if (thread->context)
     {

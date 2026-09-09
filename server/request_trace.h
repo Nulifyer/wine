@@ -3595,6 +3595,64 @@ static void dump_alpc_send_receive_reply( const struct alpc_send_receive_reply *
     dump_varargs_bytes( ", message=", cur_size );
 }
 
+static void dump_alpc_connect_port_request( const struct alpc_connect_port_request *req )
+{
+    fprintf( stderr, " rootdir=%04x", req->rootdir );
+    fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", port_flags=%08x", req->port_flags );
+    dump_uint64( ", max_msg_len=", &req->max_msg_len );
+    fprintf( stderr, ", name_size=%u", req->name_size );
+    fprintf( stderr, ", sid_size=%u", req->sid_size );
+    fprintf( stderr, ", wow64=%d", req->wow64 );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_alpc_connect_port_reply( const struct alpc_connect_port_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_get_connect_result_request( const struct alpc_get_connect_result_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_get_connect_result_reply( const struct alpc_get_connect_result_reply *req )
+{
+    fprintf( stderr, " status=%08x", req->status );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", message_type=%08x", req->message_type );
+    fprintf( stderr, ", sender_pid=%04x", req->sender_pid );
+    fprintf( stderr, ", sender_tid=%04x", req->sender_tid );
+    fprintf( stderr, ", message_size=%u", req->message_size );
+    dump_varargs_bytes( ", message=", cur_size );
+}
+
+static void dump_alpc_accept_connect_port_request( const struct alpc_accept_connect_port_request *req )
+{
+    fprintf( stderr, " connection=%04x", req->connection );
+    fprintf( stderr, ", port_flags=%08x", req->port_flags );
+    dump_uint64( ", max_msg_len=", &req->max_msg_len );
+    fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", sender_pid=%04x", req->sender_pid );
+    fprintf( stderr, ", sender_tid=%04x", req->sender_tid );
+    dump_uint64( ", context=", &req->context );
+    fprintf( stderr, ", accept=%d", req->accept );
+    dump_varargs_bytes( ", message=", cur_size );
+}
+
+static void dump_alpc_accept_connect_port_reply( const struct alpc_accept_connect_port_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_disconnect_port_request( const struct alpc_disconnect_port_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -3911,6 +3969,10 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_mutex_release_request,
     (dump_func)dump_alpc_create_port_request,
     (dump_func)dump_alpc_send_receive_request,
+    (dump_func)dump_alpc_connect_port_request,
+    (dump_func)dump_alpc_get_connect_result_request,
+    (dump_func)dump_alpc_accept_connect_port_request,
+    (dump_func)dump_alpc_disconnect_port_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4227,6 +4289,10 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_alpc_create_port_reply,
     (dump_func)dump_alpc_send_receive_reply,
+    (dump_func)dump_alpc_connect_port_reply,
+    (dump_func)dump_alpc_get_connect_result_reply,
+    (dump_func)dump_alpc_accept_connect_port_reply,
+    NULL,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -4543,6 +4609,10 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "d3dkmt_mutex_release",
     "alpc_create_port",
     "alpc_send_receive",
+    "alpc_connect_port",
+    "alpc_get_connect_result",
+    "alpc_accept_connect_port",
+    "alpc_disconnect_port",
 };
 
 static const struct
@@ -4617,6 +4687,7 @@ static const struct
     { "INVALID_IMAGE_WIN_16",        STATUS_INVALID_IMAGE_WIN_16 },
     { "INVALID_IMAGE_WIN_64",        STATUS_INVALID_IMAGE_WIN_64 },
     { "INVALID_LOCK_SEQUENCE",       STATUS_INVALID_LOCK_SEQUENCE },
+    { "INVALID_MESSAGE",             STATUS_INVALID_MESSAGE },
     { "INVALID_OWNER",               STATUS_INVALID_OWNER },
     { "INVALID_PARAMETER",           STATUS_INVALID_PARAMETER },
     { "INVALID_PARAMETER_1",         STATUS_INVALID_PARAMETER_1 },
@@ -4625,6 +4696,7 @@ static const struct
     { "INVALID_PIPE_STATE",          STATUS_INVALID_PIPE_STATE },
     { "INVALID_READ_MODE",           STATUS_INVALID_READ_MODE },
     { "INVALID_SECURITY_DESCR",      STATUS_INVALID_SECURITY_DESCR },
+    { "INVALID_SID",                 STATUS_INVALID_SID },
     { "INVALID_STATE_TRANSITION",    STATUS_INVALID_STATE_TRANSITION },
     { "INVALID_USER_BUFFER",         STATUS_INVALID_USER_BUFFER },
     { "IO_REPARSE_DATA_INVALID",     STATUS_IO_REPARSE_DATA_INVALID },
@@ -4633,6 +4705,7 @@ static const struct
     { "KERNEL_APC",                  STATUS_KERNEL_APC },
     { "KEY_DELETED",                 STATUS_KEY_DELETED },
     { "MAPPED_FILE_SIZE_ZERO",       STATUS_MAPPED_FILE_SIZE_ZERO },
+    { "MESSAGE_LOST",                STATUS_MESSAGE_LOST },
     { "MORE_ENTRIES",                STATUS_MORE_ENTRIES },
     { "MUTANT_NOT_OWNED",            STATUS_MUTANT_NOT_OWNED },
     { "NAME_TOO_LONG",               STATUS_NAME_TOO_LONG },
@@ -4673,6 +4746,8 @@ static const struct
     { "PIPE_EMPTY",                  STATUS_PIPE_EMPTY },
     { "PIPE_LISTENING",              STATUS_PIPE_LISTENING },
     { "PIPE_NOT_AVAILABLE",          STATUS_PIPE_NOT_AVAILABLE },
+    { "PORT_CONNECTION_REFUSED",     STATUS_PORT_CONNECTION_REFUSED },
+    { "PORT_DISCONNECTED",           STATUS_PORT_DISCONNECTED },
     { "PORT_MESSAGE_TOO_LONG",       STATUS_PORT_MESSAGE_TOO_LONG },
     { "PORT_NOT_SET",                STATUS_PORT_NOT_SET },
     { "PREDEFINED_HANDLE",           STATUS_PREDEFINED_HANDLE },
@@ -4684,6 +4759,7 @@ static const struct
     { "REPARSE_POINT_NOT_RESOLVED",  STATUS_REPARSE_POINT_NOT_RESOLVED },
     { "SECTION_TOO_BIG",             STATUS_SECTION_TOO_BIG },
     { "SEMAPHORE_LIMIT_EXCEEDED",    STATUS_SEMAPHORE_LIMIT_EXCEEDED },
+    { "SERVER_SID_MISMATCH",         STATUS_SERVER_SID_MISMATCH },
     { "SHARING_VIOLATION",           STATUS_SHARING_VIOLATION },
     { "SHUTDOWN_IN_PROGRESS",        STATUS_SHUTDOWN_IN_PROGRESS },
     { "SUSPEND_COUNT_EXCEEDED",      STATUS_SUSPEND_COUNT_EXCEEDED },

@@ -1079,6 +1079,11 @@ const struct acl *token_get_default_dacl( struct token *token )
     return token->default_dacl;
 }
 
+const struct sid *token_get_user( struct token *token )
+{
+    return token->user;
+}
+
 const struct sid *token_get_owner( struct token *token )
 {
     return token->owner;

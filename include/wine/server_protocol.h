@@ -6324,6 +6324,80 @@ struct alpc_send_receive_reply
 };
 
 
+
+struct alpc_connect_port_request
+{
+    struct request_header __header;
+    obj_handle_t rootdir;
+    unsigned int attributes;
+    unsigned int flags;
+    unsigned int port_flags;
+    char __pad_28[4];
+    mem_size_t max_msg_len;
+    data_size_t name_size;
+    data_size_t sid_size;
+    int wow64;
+    /* VARARG(data,bytes); */
+    char __pad_52[4];
+};
+struct alpc_connect_port_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+struct alpc_get_connect_result_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct alpc_get_connect_result_reply
+{
+    struct reply_header __header;
+    unsigned int status;
+    unsigned int message_id;
+    unsigned int message_type;
+    process_id_t sender_pid;
+    thread_id_t sender_tid;
+    data_size_t message_size;
+    /* VARARG(message,bytes); */
+};
+
+struct alpc_accept_connect_port_request
+{
+    struct request_header __header;
+    obj_handle_t connection;
+    unsigned int port_flags;
+    char __pad_20[4];
+    mem_size_t max_msg_len;
+    unsigned int attributes;
+    unsigned int message_id;
+    process_id_t sender_pid;
+    thread_id_t sender_tid;
+    client_ptr_t context;
+    int accept;
+    /* VARARG(message,bytes); */
+    char __pad_60[4];
+};
+struct alpc_accept_connect_port_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+struct alpc_disconnect_port_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct alpc_disconnect_port_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -6638,6 +6712,10 @@ enum request
     REQ_d3dkmt_mutex_release,
     REQ_alpc_create_port,
     REQ_alpc_send_receive,
+    REQ_alpc_connect_port,
+    REQ_alpc_get_connect_result,
+    REQ_alpc_accept_connect_port,
+    REQ_alpc_disconnect_port,
     REQ_NB_REQUESTS
 };
 
@@ -6957,6 +7035,10 @@ union generic_request
     struct d3dkmt_mutex_release_request d3dkmt_mutex_release_request;
     struct alpc_create_port_request alpc_create_port_request;
     struct alpc_send_receive_request alpc_send_receive_request;
+    struct alpc_connect_port_request alpc_connect_port_request;
+    struct alpc_get_connect_result_request alpc_get_connect_result_request;
+    struct alpc_accept_connect_port_request alpc_accept_connect_port_request;
+    struct alpc_disconnect_port_request alpc_disconnect_port_request;
 };
 union generic_reply
 {
@@ -7274,8 +7356,12 @@ union generic_reply
     struct d3dkmt_mutex_release_reply d3dkmt_mutex_release_reply;
     struct alpc_create_port_reply alpc_create_port_reply;
     struct alpc_send_receive_reply alpc_send_receive_reply;
+    struct alpc_connect_port_reply alpc_connect_port_reply;
+    struct alpc_get_connect_result_reply alpc_get_connect_result_reply;
+    struct alpc_accept_connect_port_reply alpc_accept_connect_port_reply;
+    struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 965
+#define SERVER_PROTOCOL_VERSION 966
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

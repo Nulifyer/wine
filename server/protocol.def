@@ -4392,3 +4392,50 @@ enum inproc_sync_type
     data_size_t message_size;
     VARARG(message,bytes);
 @END
+
+
+/* Begin admission to a named ALPC listener. Payload follows name and SID. */
+@REQ(alpc_connect_port)
+    obj_handle_t rootdir;
+    unsigned int attributes;
+    unsigned int flags;
+    unsigned int port_flags;
+    mem_size_t max_msg_len;
+    data_size_t name_size;
+    data_size_t sid_size;
+    int wow64;
+    VARARG(data,bytes);
+@REPLY
+    obj_handle_t handle;
+@END
+
+@REQ(alpc_get_connect_result)
+    obj_handle_t handle;
+@REPLY
+    unsigned int status;
+    unsigned int message_id;
+    unsigned int message_type;
+    process_id_t sender_pid;
+    thread_id_t sender_tid;
+    data_size_t message_size;
+    VARARG(message,bytes);
+@END
+
+@REQ(alpc_accept_connect_port)
+    obj_handle_t connection;
+    unsigned int port_flags;
+    mem_size_t max_msg_len;
+    unsigned int attributes;
+    unsigned int message_id;
+    process_id_t sender_pid;
+    thread_id_t sender_tid;
+    client_ptr_t context;
+    int accept;
+    VARARG(message,bytes);
+@REPLY
+    obj_handle_t handle;
+@END
+
+@REQ(alpc_disconnect_port)
+    obj_handle_t handle;
+@END

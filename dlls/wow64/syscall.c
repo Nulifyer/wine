@@ -538,6 +538,7 @@ NTSTATUS WINAPI wow64_NtAlpcConnectPort( UINT *args )
     if (status == STATUS_SUCCESS)
     {
         put_handle( handle_ptr, handle );
+        if (size32) put_size( size32, size - (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)) );
         alpc_port_message_64to32( msg32, msg );
         alpc_port_message_attributes_64to32( recv_msg_attr32, recv_msg_attr );
     }

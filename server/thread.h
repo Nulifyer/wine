@@ -123,6 +123,7 @@ extern int wake_thread_queue_entry( struct wait_queue_entry *entry );
 extern int add_queue( struct object *obj, struct wait_queue_entry *entry );
 extern void remove_queue( struct object *obj, struct wait_queue_entry *entry );
 extern void kill_thread( struct thread *thread, int violent_death );
+extern void cleanup_thread_alpc( struct thread *thread );
 extern int is_obj_signaled( struct object *obj );
 extern void wake_up_completion_packets( struct object *obj );
 extern void wake_up( struct object *obj, int max );
