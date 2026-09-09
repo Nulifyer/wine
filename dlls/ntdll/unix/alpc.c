@@ -123,9 +123,46 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
                                            ALPC_MESSAGE_ATTRIBUTES *recv_msg_attr,
                                            LARGE_INTEGER *timeout )
 {
-    FIXME( "%p, %#x, %p, %p, %p, %p, %p, %p stub!\n", port_handle, (unsigned int)flags, send_msg,
-           send_msg_attr, recv_msg, recv_buffer_size, recv_msg_attr, timeout );
-    return STATUS_NOT_IMPLEMENTED;
+    SIZE_T capacity = recv_buffer_size ? *recv_buffer_size : 0;
+    NTSTATUS status;
+
+    TRACE( "%p, %#x, %p, %p, %p, %p, %p, %p.\n", port_handle, (unsigned int)flags,
+           send_msg, send_msg_attr, recv_msg, recv_buffer_size, recv_msg_attr, timeout );
+    if (send_msg_attr || recv_msg_attr || flags & ~(1 | 0x10000)) return STATUS_NOT_IMPLEMENTED;
+    if (send_msg && (send_msg->MessageId || send_msg->ClientId.UniqueProcess ||
+                     send_msg->ClientId.UniqueThread)) return STATUS_NOT_IMPLEMENTED;
+    if (recv_msg && !recv_buffer_size) return STATUS_INVALID_PARAMETER;
+    if (recv_msg && capacity < sizeof(*recv_msg)) return STATUS_BUFFER_TOO_SMALL;
+    if (capacity > ~(data_size_t)0) return STATUS_INVALID_PARAMETER;
+    if (send_msg && send_msg->TotalLength != sizeof(*send_msg) + send_msg->DataLength)
+        return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( alpc_send_receive )
+    {
+        req->handle = wine_server_obj_handle( port_handle );
+        req->flags = flags;
+        req->message_id = send_msg ? send_msg->MessageId : 0;
+        req->send = !!send_msg;
+        req->receive = !!recv_msg;
+        req->wow64 = is_wow64();
+        if (send_msg) wine_server_add_data( req, send_msg + 1, send_msg->DataLength );
+        if (recv_msg) wine_server_set_reply( req, recv_msg + 1, capacity - sizeof(*recv_msg) );
+        status = wine_server_call( req );
+        if (recv_msg && status == STATUS_BUFFER_TOO_SMALL)
+            *recv_buffer_size = reply->message_size + sizeof(*recv_msg);
+        if (recv_msg && !status)
+        {
+            memset( recv_msg, 0, sizeof(*recv_msg) );
+            recv_msg->DataLength = reply->message_size;
+            recv_msg->TotalLength = sizeof(*recv_msg) + reply->message_size;
+            recv_msg->Type = reply->message_type;
+            recv_msg->ClientId.UniqueProcess = ULongToHandle( reply->sender_pid );
+            recv_msg->ClientId.UniqueThread = ULongToHandle( reply->sender_tid );
+            recv_msg->MessageId = reply->message_id;
+        }
+    }
+    SERVER_END_REQ;
+    return status;
 }
 
 NTSTATUS WINAPI NtAlpcImpersonateClientOfPort( HANDLE port_handle, ALPC_PORT_MESSAGE *msg, void *reserved )

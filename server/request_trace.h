@@ -3574,6 +3574,27 @@ static void dump_alpc_create_port_reply( const struct alpc_create_port_reply *re
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_alpc_send_receive_request( const struct alpc_send_receive_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", send=%d", req->send );
+    fprintf( stderr, ", receive=%d", req->receive );
+    fprintf( stderr, ", wow64=%d", req->wow64 );
+    dump_varargs_bytes( ", message=", cur_size );
+}
+
+static void dump_alpc_send_receive_reply( const struct alpc_send_receive_reply *req )
+{
+    fprintf( stderr, " message_id=%08x", req->message_id );
+    fprintf( stderr, ", message_type=%08x", req->message_type );
+    fprintf( stderr, ", sender_pid=%04x", req->sender_pid );
+    fprintf( stderr, ", sender_tid=%04x", req->sender_tid );
+    fprintf( stderr, ", message_size=%u", req->message_size );
+    dump_varargs_bytes( ", message=", cur_size );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -3889,6 +3910,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_mutex_acquire_request,
     (dump_func)dump_d3dkmt_mutex_release_request,
     (dump_func)dump_alpc_create_port_request,
+    (dump_func)dump_alpc_send_receive_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4204,6 +4226,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_mutex_acquire_reply,
     NULL,
     (dump_func)dump_alpc_create_port_reply,
+    (dump_func)dump_alpc_send_receive_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -4519,6 +4542,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "d3dkmt_mutex_acquire",
     "d3dkmt_mutex_release",
     "alpc_create_port",
+    "alpc_send_receive",
 };
 
 static const struct
@@ -4649,6 +4673,7 @@ static const struct
     { "PIPE_EMPTY",                  STATUS_PIPE_EMPTY },
     { "PIPE_LISTENING",              STATUS_PIPE_LISTENING },
     { "PIPE_NOT_AVAILABLE",          STATUS_PIPE_NOT_AVAILABLE },
+    { "PORT_MESSAGE_TOO_LONG",       STATUS_PORT_MESSAGE_TOO_LONG },
     { "PORT_NOT_SET",                STATUS_PORT_NOT_SET },
     { "PREDEFINED_HANDLE",           STATUS_PREDEFINED_HANDLE },
     { "PRIVILEGE_NOT_HELD",          STATUS_PRIVILEGE_NOT_HELD },
