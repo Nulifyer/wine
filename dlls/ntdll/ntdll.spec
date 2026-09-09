@@ -862,6 +862,7 @@
 @ stdcall RtlIpv6StringToAddressExW(wstr ptr ptr ptr)
 @ stdcall RtlIpv6StringToAddressW(wstr ptr ptr)
 @ stdcall RtlIsActivationContextActive(ptr)
+@ stdcall RtlIsCloudFilesPlaceholder(long long)
 @ stdcall RtlIsCriticalSectionLocked(ptr)
 @ stdcall RtlIsCriticalSectionLockedByThread(ptr)
 @ stdcall RtlIsCurrentProcess(long)
@@ -873,6 +874,7 @@
 # @ stub RtlIsGenericTableEmptyAvl
 @ stdcall RtlIsNameLegalDOS8Dot3(ptr ptr ptr)
 @ stdcall RtlIsNormalizedString(long wstr long ptr)
+@ stdcall RtlIsPartialPlaceholder(long long)
 @ stdcall RtlIsProcessorFeaturePresent(long)
 # @ stub RtlIsRangeAvailable
 @ stdcall RtlIsTextUnicode(ptr long ptr)

@@ -1631,6 +1631,23 @@ NTSTATUS WINAPI RtlQueryPackageIdentity(HANDLE token, WCHAR *fullname, SIZE_T *f
 }
 
 /*********************************************************************
+ *           RtlIsCloudFilesPlaceholder [NTDLL.@]
+ */
+BOOLEAN WINAPI RtlIsCloudFilesPlaceholder(ULONG attributes, ULONG tag)
+{
+    return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+           (tag & ~IO_REPARSE_TAG_CLOUD_MASK) == IO_REPARSE_TAG_CLOUD;
+}
+
+/*********************************************************************
+ *           RtlIsPartialPlaceholder [NTDLL.@]
+ */
+BOOLEAN WINAPI RtlIsPartialPlaceholder(ULONG attributes, ULONG tag)
+{
+    return !!(attributes & (FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS));
+}
+
+/*********************************************************************
  *           RtlQueryProcessPlaceholderCompatibilityMode [NTDLL.@]
  */
 char WINAPI RtlQueryProcessPlaceholderCompatibilityMode(void)
