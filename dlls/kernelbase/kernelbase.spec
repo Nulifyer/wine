@@ -1779,7 +1779,7 @@
 @ stdcall Wow64GetThreadContext(long ptr)
 @ stdcall Wow64RevertWow64FsRedirection(ptr)
 @ stdcall Wow64SetThreadContext(long ptr)
-# @ stub Wow64SetThreadDefaultGuestMachine
+@ stdcall Wow64SetThreadDefaultGuestMachine(long)
 # @ stub Wow64SuspendThread
 # @ stub -arch=i386 Wow64Transition
 @ stdcall WriteConsoleA(long ptr long ptr ptr)
