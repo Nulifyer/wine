@@ -6314,6 +6314,25 @@ struct alpc_send_receive_request
 struct alpc_send_receive_reply
 {
     struct reply_header __header;
+    obj_handle_t wait_handle;
+    unsigned int message_id;
+    unsigned int message_type;
+    process_id_t sender_pid;
+    thread_id_t sender_tid;
+    data_size_t message_size;
+    /* VARARG(message,bytes); */
+};
+
+
+
+struct alpc_get_message_result_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct alpc_get_message_result_reply
+{
+    struct reply_header __header;
     unsigned int message_id;
     unsigned int message_type;
     process_id_t sender_pid;
@@ -6712,6 +6731,7 @@ enum request
     REQ_d3dkmt_mutex_release,
     REQ_alpc_create_port,
     REQ_alpc_send_receive,
+    REQ_alpc_get_message_result,
     REQ_alpc_connect_port,
     REQ_alpc_get_connect_result,
     REQ_alpc_accept_connect_port,
@@ -7035,6 +7055,7 @@ union generic_request
     struct d3dkmt_mutex_release_request d3dkmt_mutex_release_request;
     struct alpc_create_port_request alpc_create_port_request;
     struct alpc_send_receive_request alpc_send_receive_request;
+    struct alpc_get_message_result_request alpc_get_message_result_request;
     struct alpc_connect_port_request alpc_connect_port_request;
     struct alpc_get_connect_result_request alpc_get_connect_result_request;
     struct alpc_accept_connect_port_request alpc_accept_connect_port_request;
@@ -7356,12 +7377,13 @@ union generic_reply
     struct d3dkmt_mutex_release_reply d3dkmt_mutex_release_reply;
     struct alpc_create_port_reply alpc_create_port_reply;
     struct alpc_send_receive_reply alpc_send_receive_reply;
+    struct alpc_get_message_result_reply alpc_get_message_result_reply;
     struct alpc_connect_port_reply alpc_connect_port_reply;
     struct alpc_get_connect_result_reply alpc_get_connect_result_reply;
     struct alpc_accept_connect_port_reply alpc_accept_connect_port_reply;
     struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 966
+#define SERVER_PROTOCOL_VERSION 967
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

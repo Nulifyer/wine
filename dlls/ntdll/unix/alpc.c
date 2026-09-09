@@ -216,10 +216,11 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
 {
     SIZE_T capacity = recv_buffer_size ? *recv_buffer_size : 0;
     NTSTATUS status;
+    HANDLE wait_handle = NULL;
 
     TRACE( "%p, %#x, %p, %p, %p, %p, %p, %p.\n", port_handle, (unsigned int)flags,
            send_msg, send_msg_attr, recv_msg, recv_buffer_size, recv_msg_attr, timeout );
-    if (send_msg_attr || recv_msg_attr || flags & ~(1 | 0x10000)) return STATUS_NOT_IMPLEMENTED;
+    if (send_msg_attr || recv_msg_attr || flags & ~(1 | 0x10000 | 0x20000)) return STATUS_NOT_IMPLEMENTED;
     if (recv_msg && !recv_buffer_size) return STATUS_INVALID_PARAMETER;
     if (recv_msg && capacity < sizeof(*recv_msg)) return STATUS_BUFFER_TOO_SMALL;
     if (capacity > ~(data_size_t)0) return STATUS_INVALID_PARAMETER;
@@ -237,6 +238,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         if (send_msg) wine_server_add_data( req, send_msg + 1, send_msg->DataLength );
         if (recv_msg) wine_server_set_reply( req, recv_msg + 1, capacity - sizeof(*recv_msg) );
         status = wine_server_call( req );
+        if (status == STATUS_PENDING) wait_handle = wine_server_ptr_handle( reply->wait_handle );
         if (recv_msg && status == STATUS_BUFFER_TOO_SMALL)
             *recv_buffer_size = reply->message_size + sizeof(*recv_msg);
         if (recv_msg && !status)
@@ -251,6 +253,33 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         }
     }
     SERVER_END_REQ;
+    if (wait_handle)
+    {
+        status = NtWaitForSingleObject( wait_handle, FALSE, timeout );
+        if (!status)
+        {
+            SERVER_START_REQ( alpc_get_message_result )
+            {
+                req->handle = wine_server_obj_handle( wait_handle );
+                wine_server_set_reply( req, recv_msg + 1, capacity - sizeof(*recv_msg) );
+                status = wine_server_call( req );
+                if (!status || status == STATUS_BUFFER_TOO_SMALL)
+                    *recv_buffer_size = reply->message_size + sizeof(*recv_msg);
+                if (!status)
+                {
+                    memset( recv_msg, 0, sizeof(*recv_msg) );
+                    recv_msg->DataLength = reply->message_size;
+                    recv_msg->TotalLength = sizeof(*recv_msg) + reply->message_size;
+                    recv_msg->Type = reply->message_type;
+                    recv_msg->ClientId.UniqueProcess = ULongToHandle( reply->sender_pid );
+                    recv_msg->ClientId.UniqueThread = ULongToHandle( reply->sender_tid );
+                    recv_msg->MessageId = reply->message_id;
+                }
+            }
+            SERVER_END_REQ;
+        }
+        NtClose( wait_handle );
+    }
     return status;
 }
 

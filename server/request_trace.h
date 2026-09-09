@@ -3587,6 +3587,22 @@ static void dump_alpc_send_receive_request( const struct alpc_send_receive_reque
 
 static void dump_alpc_send_receive_reply( const struct alpc_send_receive_reply *req )
 {
+    fprintf( stderr, " wait_handle=%04x", req->wait_handle );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", message_type=%08x", req->message_type );
+    fprintf( stderr, ", sender_pid=%04x", req->sender_pid );
+    fprintf( stderr, ", sender_tid=%04x", req->sender_tid );
+    fprintf( stderr, ", message_size=%u", req->message_size );
+    dump_varargs_bytes( ", message=", cur_size );
+}
+
+static void dump_alpc_get_message_result_request( const struct alpc_get_message_result_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_get_message_result_reply( const struct alpc_get_message_result_reply *req )
+{
     fprintf( stderr, " message_id=%08x", req->message_id );
     fprintf( stderr, ", message_type=%08x", req->message_type );
     fprintf( stderr, ", sender_pid=%04x", req->sender_pid );
@@ -3969,6 +3985,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_mutex_release_request,
     (dump_func)dump_alpc_create_port_request,
     (dump_func)dump_alpc_send_receive_request,
+    (dump_func)dump_alpc_get_message_result_request,
     (dump_func)dump_alpc_connect_port_request,
     (dump_func)dump_alpc_get_connect_result_request,
     (dump_func)dump_alpc_accept_connect_port_request,
@@ -4289,6 +4306,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_alpc_create_port_reply,
     (dump_func)dump_alpc_send_receive_reply,
+    (dump_func)dump_alpc_get_message_result_reply,
     (dump_func)dump_alpc_connect_port_reply,
     (dump_func)dump_alpc_get_connect_result_reply,
     (dump_func)dump_alpc_accept_connect_port_reply,
@@ -4609,6 +4627,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "d3dkmt_mutex_release",
     "alpc_create_port",
     "alpc_send_receive",
+    "alpc_get_message_result",
     "alpc_connect_port",
     "alpc_get_connect_result",
     "alpc_accept_connect_port",
@@ -4757,6 +4776,7 @@ static const struct
     { "PROCESS_NOT_IN_JOB",          STATUS_PROCESS_NOT_IN_JOB },
     { "RANGE_NOT_LOCKED",            STATUS_RANGE_NOT_LOCKED },
     { "REPARSE_POINT_NOT_RESOLVED",  STATUS_REPARSE_POINT_NOT_RESOLVED },
+    { "REQUEST_CANCELED",            STATUS_REQUEST_CANCELED },
     { "SECTION_TOO_BIG",             STATUS_SECTION_TOO_BIG },
     { "SEMAPHORE_LIMIT_EXCEEDED",    STATUS_SEMAPHORE_LIMIT_EXCEEDED },
     { "SERVER_SID_MISMATCH",         STATUS_SERVER_SID_MISMATCH },

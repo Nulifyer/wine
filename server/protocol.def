@@ -4385,6 +4385,20 @@ enum inproc_sync_type
     int wow64;
     VARARG(message,bytes);
 @REPLY
+    obj_handle_t wait_handle;
+    unsigned int message_id;
+    unsigned int message_type;
+    process_id_t sender_pid;
+    thread_id_t sender_tid;
+    data_size_t message_size;
+    VARARG(message,bytes);
+@END
+
+
+/* Fetch the result of one private synchronous ALPC message wait. */
+@REQ(alpc_get_message_result)
+    obj_handle_t handle;
+@REPLY
     unsigned int message_id;
     unsigned int message_type;
     process_id_t sender_pid;

@@ -319,6 +319,7 @@ DECL_HANDLER(d3dkmt_mutex_acquire);
 DECL_HANDLER(d3dkmt_mutex_release);
 DECL_HANDLER(alpc_create_port);
 DECL_HANDLER(alpc_send_receive);
+DECL_HANDLER(alpc_get_message_result);
 DECL_HANDLER(alpc_connect_port);
 DECL_HANDLER(alpc_get_connect_result);
 DECL_HANDLER(alpc_accept_connect_port);
@@ -639,6 +640,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_d3dkmt_mutex_release,
     (req_handler)req_alpc_create_port,
     (req_handler)req_alpc_send_receive,
+    (req_handler)req_alpc_get_message_result,
     (req_handler)req_alpc_connect_port,
     (req_handler)req_alpc_get_connect_result,
     (req_handler)req_alpc_accept_connect_port,
@@ -2437,12 +2439,21 @@ C_ASSERT( offsetof(struct alpc_send_receive_request, send) == 24 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, receive) == 28 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, wow64) == 32 );
 C_ASSERT( sizeof(struct alpc_send_receive_request) == 40 );
-C_ASSERT( offsetof(struct alpc_send_receive_reply, message_id) == 8 );
-C_ASSERT( offsetof(struct alpc_send_receive_reply, message_type) == 12 );
-C_ASSERT( offsetof(struct alpc_send_receive_reply, sender_pid) == 16 );
-C_ASSERT( offsetof(struct alpc_send_receive_reply, sender_tid) == 20 );
-C_ASSERT( offsetof(struct alpc_send_receive_reply, message_size) == 24 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, wait_handle) == 8 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, message_id) == 12 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, message_type) == 16 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, sender_pid) == 20 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, sender_tid) == 24 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, message_size) == 28 );
 C_ASSERT( sizeof(struct alpc_send_receive_reply) == 32 );
+C_ASSERT( offsetof(struct alpc_get_message_result_request, handle) == 12 );
+C_ASSERT( sizeof(struct alpc_get_message_result_request) == 16 );
+C_ASSERT( offsetof(struct alpc_get_message_result_reply, message_id) == 8 );
+C_ASSERT( offsetof(struct alpc_get_message_result_reply, message_type) == 12 );
+C_ASSERT( offsetof(struct alpc_get_message_result_reply, sender_pid) == 16 );
+C_ASSERT( offsetof(struct alpc_get_message_result_reply, sender_tid) == 20 );
+C_ASSERT( offsetof(struct alpc_get_message_result_reply, message_size) == 24 );
+C_ASSERT( sizeof(struct alpc_get_message_result_reply) == 32 );
 C_ASSERT( offsetof(struct alpc_connect_port_request, rootdir) == 12 );
 C_ASSERT( offsetof(struct alpc_connect_port_request, attributes) == 16 );
 C_ASSERT( offsetof(struct alpc_connect_port_request, flags) == 20 );

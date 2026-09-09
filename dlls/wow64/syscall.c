@@ -623,6 +623,8 @@ NTSTATUS WINAPI wow64_NtAlpcSendWaitReceivePort( UINT *args )
                                         alpc_port_message_attributes_32to64( &recv_msg_attr, recv_msg_attr32, FALSE ), timeout );
     if (status == STATUS_SUCCESS)
     {
+        if (size32 && (flags & 0x20000))
+            put_size( size32, size - (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)) );
         alpc_port_message_64to32( recv_msg32, recv_msg );
         alpc_port_message_attributes_64to32( recv_msg_attr32, recv_msg_attr );
     }
