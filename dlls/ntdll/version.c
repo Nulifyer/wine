@@ -541,6 +541,70 @@ done:
            current_version->wProductType );
 }
 
+/* Prefix of the silo user shared data referenced by PEB.SharedData.  These
+ * readers do not create a silo or provision its system capability flags. */
+struct silo_shared_data
+{
+    ULONG service_session_id;
+    ULONG active_console_id;
+    LONGLONG foreground_process_id;
+    ULONG product_type;
+    ULONG suite_mask;
+    ULONG shared_user_session_id;
+    BOOLEAN multi_session_sku;
+    BOOLEAN state_separation_enabled;
+};
+
+static const struct silo_shared_data *active_silo_shared_data(void)
+{
+    const struct silo_shared_data *data = NtCurrentTeb()->Peb->SharedData;
+    return data && data->service_session_id ? data : NULL;
+}
+
+/***********************************************************************
+ *           RtlGetCurrentServiceSessionId    (NTDLL.@)
+ */
+ULONG WINAPI RtlGetCurrentServiceSessionId(void)
+{
+    const struct silo_shared_data *data = active_silo_shared_data();
+    return data ? data->service_session_id : 0;
+}
+
+/***********************************************************************
+ *           RtlGetSuiteMask    (NTDLL.@)
+ */
+ULONG WINAPI RtlGetSuiteMask(void)
+{
+    const struct silo_shared_data *data = active_silo_shared_data();
+    return data ? data->suite_mask : user_shared_data->SuiteMask;
+}
+
+/***********************************************************************
+ *           RtlIsMultiSessionSku    (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlIsMultiSessionSku(void)
+{
+    const struct silo_shared_data *data = active_silo_shared_data();
+    return data ? data->multi_session_sku : (user_shared_data->SharedDataFlags >> 8) & 1;
+}
+
+/***********************************************************************
+ *           RtlIsMultiUsersInSessionSku    (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlIsMultiUsersInSessionSku(void)
+{
+    return (user_shared_data->SharedDataFlags >> 9) & 1;
+}
+
+/***********************************************************************
+ *           RtlIsStateSeparationEnabled    (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlIsStateSeparationEnabled(void)
+{
+    const struct silo_shared_data *data = active_silo_shared_data();
+    return data ? data->state_separation_enabled : (user_shared_data->SharedDataFlags >> 10) & 1;
+}
+
 /***********************************************************************
  *           RtlGetProductInfo    (NTDLL.@)
  *
@@ -625,14 +689,6 @@ BOOLEAN WINAPI RtlGetNtProductType( LPDWORD type )
 {
     if (type) *type = current_version->wProductType;
     return TRUE;
-}
-
-/******************************************************************************
- *  RtlGetCurrentServiceSessionId   (NTDLL.@)
- */
-ULONG WINAPI RtlGetCurrentServiceSessionId(void)
-{
-    return 0;
 }
 
 /******************************************************************************

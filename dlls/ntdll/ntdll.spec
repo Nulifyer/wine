@@ -751,8 +751,8 @@
 @ stdcall RtlGetControlSecurityDescriptor(ptr ptr ptr)
 @ stdcall RtlGetCurrentDirectory_U(long ptr)
 @ stdcall RtlGetCurrentPeb()
-@ stdcall RtlGetCurrentServiceSessionId()
 @ stdcall RtlGetCurrentProcessorNumberEx(ptr)
+@ stdcall RtlGetCurrentServiceSessionId()
 @ stdcall RtlGetCurrentTransaction()
 @ stdcall RtlGetDaclSecurityDescriptor(ptr ptr ptr ptr)
 @ stdcall RtlGetElementGenericTable(ptr long)
@@ -789,6 +789,7 @@
 # @ stub RtlGetSecurityDescriptorRMControl
 # @ stub RtlGetSetBootStatusData
 @ stdcall RtlGetSystemPreferredUILanguages(long long ptr ptr ptr)
+@ stdcall RtlGetSuiteMask()
 @ stdcall -ret64 RtlGetSystemTimePrecise()
 @ stdcall RtlGetThreadErrorMode()
 @ stdcall RtlGetThreadPreferredUILanguages(long ptr ptr ptr)
@@ -879,11 +880,14 @@
 @ stdcall RtlIsGenericTableEmpty(ptr)
 @ stdcall RtlIsFeatureEnabledForEnterprise(long)
 # @ stub RtlIsGenericTableEmptyAvl
+@ stdcall RtlIsMultiSessionSku()
+@ stdcall RtlIsMultiUsersInSessionSku()
 @ stdcall RtlIsNameLegalDOS8Dot3(ptr ptr ptr)
 @ stdcall RtlIsNormalizedString(long wstr long ptr)
 @ stdcall RtlIsPartialPlaceholder(long long)
 @ stdcall RtlIsProcessorFeaturePresent(long)
 # @ stub RtlIsRangeAvailable
+@ stdcall RtlIsStateSeparationEnabled()
 @ stdcall RtlIsTextUnicode(ptr long ptr)
 @ stdcall RtlIsThreadWithinLoaderCallout()
 @ stdcall RtlIsValidHandle(ptr ptr)
