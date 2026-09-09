@@ -372,11 +372,11 @@ void wake_up_completion_packets( struct object *obj )
     if (list_empty( &obj->completion_packet_queue ))
         return;
 
-    if (!is_obj_signaled( obj ))
-        return;
-
     LIST_FOR_EACH_ENTRY( packet, &obj->completion_packet_queue, struct completion_packet, entry )
     {
+        if (!is_obj_signaled( obj ))
+            break;
+
         assert( packet->in_target_packet_queue );
         assert( packet->target );
         assert( !packet->in_completion_queue );
