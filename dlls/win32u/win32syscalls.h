@@ -1336,7 +1336,7 @@
     SYSCALL_ENTRY( 0x1534, NtUserSetAppImeLevel, 0 ) \
     SYSCALL_ENTRY( 0x1535, NtUserSetAutoRotation, 0 ) \
     SYSCALL_ENTRY( 0x1536, NtUserSetBridgeWindowChild, 0 ) \
-    SYSCALL_ENTRY( 0x1537, NtUserSetBrokeredForeground, 0 ) \
+    SYSCALL_ENTRY( 0x1537, NtUserSetBrokeredForeground, 4 ) \
     SYSCALL_ENTRY( 0x1538, NtUserSetCalibrationData, 0 ) \
     SYSCALL_ENTRY( 0x1539, NtUserSetCancelRotationDelayHintWindow, 0 ) \
     SYSCALL_ENTRY( 0x153a, NtUserSetCapture, 4 ) \
@@ -1446,7 +1446,7 @@
     SYSCALL_ENTRY( 0x15a2, NtUserSetWindowGroup, 0 ) \
     SYSCALL_ENTRY( 0x15a3, NtUserSetWindowLong, 16 ) \
     SYSCALL_ENTRY( 0x15a4, NtUserSetWindowLongPtr, 16 ) \
-    SYSCALL_ENTRY( 0x15a5, NtUserSetWindowMessageCapability, 0 ) \
+    SYSCALL_ENTRY( 0x15a5, NtUserSetWindowMessageCapability, 16 ) \
     SYSCALL_ENTRY( 0x15a6, NtUserSetWindowPlacement, 8 ) \
     SYSCALL_ENTRY( 0x15a7, NtUserSetWindowPos, 28 ) \
     SYSCALL_ENTRY( 0x15a8, NtUserSetWindowRgn, 12 ) \
@@ -2878,7 +2878,7 @@
     SYSCALL_ENTRY( 0x1534, NtUserSetAppImeLevel, 0 ) \
     SYSCALL_ENTRY( 0x1535, NtUserSetAutoRotation, 0 ) \
     SYSCALL_ENTRY( 0x1536, NtUserSetBridgeWindowChild, 0 ) \
-    SYSCALL_ENTRY( 0x1537, NtUserSetBrokeredForeground, 0 ) \
+    SYSCALL_ENTRY( 0x1537, NtUserSetBrokeredForeground, 8 ) \
     SYSCALL_ENTRY( 0x1538, NtUserSetCalibrationData, 0 ) \
     SYSCALL_ENTRY( 0x1539, NtUserSetCancelRotationDelayHintWindow, 0 ) \
     SYSCALL_ENTRY( 0x153a, NtUserSetCapture, 8 ) \
@@ -2988,7 +2988,7 @@
     SYSCALL_ENTRY( 0x15a2, NtUserSetWindowGroup, 0 ) \
     SYSCALL_ENTRY( 0x15a3, NtUserSetWindowLong, 32 ) \
     SYSCALL_ENTRY( 0x15a4, NtUserSetWindowLongPtr, 32 ) \
-    SYSCALL_ENTRY( 0x15a5, NtUserSetWindowMessageCapability, 0 ) \
+    SYSCALL_ENTRY( 0x15a5, NtUserSetWindowMessageCapability, 32 ) \
     SYSCALL_ENTRY( 0x15a6, NtUserSetWindowPlacement, 16 ) \
     SYSCALL_ENTRY( 0x15a7, NtUserSetWindowPos, 56 ) \
     SYSCALL_ENTRY( 0x15a8, NtUserSetWindowRgn, 24 ) \
@@ -4012,7 +4012,6 @@
     SYSCALL_STUB( NtUserSetAppImeLevel ) \
     SYSCALL_STUB( NtUserSetAutoRotation ) \
     SYSCALL_STUB( NtUserSetBridgeWindowChild ) \
-    SYSCALL_STUB( NtUserSetBrokeredForeground ) \
     SYSCALL_STUB( NtUserSetCalibrationData ) \
     SYSCALL_STUB( NtUserSetCancelRotationDelayHintWindow ) \
     SYSCALL_STUB( NtUserSetChildWindowNoActivate ) \
@@ -4082,7 +4081,6 @@
     SYSCALL_STUB( NtUserSetWindowDisplayAffinity ) \
     SYSCALL_STUB( NtUserSetWindowFeedbackSetting ) \
     SYSCALL_STUB( NtUserSetWindowGroup ) \
-    SYSCALL_STUB( NtUserSetWindowMessageCapability ) \
     SYSCALL_STUB( NtUserSetWindowRgnEx ) \
     SYSCALL_STUB( NtUserSetWindowShowState ) \
     SYSCALL_STUB( NtUserSetWindowState ) \

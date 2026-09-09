@@ -976,6 +976,7 @@ W32KAPI INT     WINAPI NtUserScrollWindowEx( HWND hwnd, INT dx, INT dy, const RE
 W32KAPI HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE palette, WORD force_background );
 W32KAPI UINT     WINAPI NtUserSendInput( UINT count, INPUT *inputs, int size );
 W32KAPI HWND     WINAPI NtUserSetActiveWindow( HWND hwnd );
+W32KAPI BOOL     WINAPI NtUserSetBrokeredForeground( HWND hwnd );
 W32KAPI BOOL     WINAPI NtUserSetAdditionalForegroundBoostProcesses( HWND hwnd, DWORD count, HANDLE *handles );
 W32KAPI HWND     WINAPI NtUserSetCapture( HWND hwnd );
 W32KAPI BOOL     WINAPI NtUserSetCaretBlinkTime( unsigned int time );
@@ -1017,6 +1018,7 @@ W32KAPI BOOL    WINAPI NtUserSetWindowContextHelpId( HWND hwnd, DWORD id );
 W32KAPI BOOL    WINAPI NtUserSetWindowFNID( HWND hwnd, WORD fnid );
 W32KAPI LONG    WINAPI NtUserSetWindowLong( HWND hwnd, INT offset, LONG newval, BOOL ansi );
 W32KAPI LONG_PTR WINAPI NtUserSetWindowLongPtr( HWND hwnd, INT offset, LONG_PTR newval, BOOL ansi );
+W32KAPI BOOL     WINAPI NtUserSetWindowMessageCapability( HWND hwnd, UINT message, PSID sid, ULONG action );
 W32KAPI BOOL    WINAPI NtUserSetWindowPlacement( HWND hwnd, const WINDOWPLACEMENT *wpl );
 W32KAPI BOOL    WINAPI NtUserSetWindowPos( HWND hwnd, HWND after, INT x, INT y, INT cx, INT cy, UINT flags );
 W32KAPI int     WINAPI NtUserSetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw );

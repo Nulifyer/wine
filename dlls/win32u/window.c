@@ -656,6 +656,18 @@ DWORD get_window_thread( HWND hwnd, DWORD *process )
     return entry.tid;
 }
 
+/*****************************************************************
+ *           NtUserSetWindowMessageCapability (win32u.@)
+ */
+BOOL WINAPI NtUserSetWindowMessageCapability( HWND hwnd, UINT message, PSID sid, ULONG action )
+{
+    /* Wine does not enforce SID-based window-message capabilities. Reject
+     * the operation without claiming to register or remove a permission. */
+    FIXME( "unsupported window-message capability %p %x %p %lu\n", hwnd, message, sid, action );
+    RtlSetLastWin32Error( ERROR_NOT_SUPPORTED );
+    return FALSE;
+}
+
 /* see GetParent */
 HWND get_parent( HWND hwnd )
 {

@@ -4361,6 +4361,23 @@ NTSTATUS WINAPI wow64_NtUserSendInput( UINT *args )
     return NtUserSendInput( count, inputs, sizeof(*inputs) );
 }
 
+NTSTATUS WINAPI wow64_NtUserSetBrokeredForeground( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+
+    return NtUserSetBrokeredForeground( hwnd );
+}
+
+NTSTATUS WINAPI wow64_NtUserSetWindowMessageCapability( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    UINT message = get_ulong( &args );
+    PSID sid = get_ptr( &args );
+    ULONG action = get_ulong( &args );
+
+    return NtUserSetWindowMessageCapability( hwnd, message, sid, action );
+}
+
 NTSTATUS WINAPI wow64_NtUserSetActiveWindow( UINT *args )
 {
     HWND hwnd = get_handle( &args );

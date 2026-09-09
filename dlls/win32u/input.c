@@ -2321,6 +2321,19 @@ HWND WINAPI NtUserSetFocus( HWND hwnd )
 }
 
 /*****************************************************************
+ *           NtUserSetBrokeredForeground  (win32u.@)
+ */
+BOOL WINAPI NtUserSetBrokeredForeground( HWND hwnd )
+{
+    /* All Wine windows use ordinary bands. Windows rejects these here;
+     * brokered foreground requires privileged bands and broker authority.
+     * Do not substitute an unrestricted SetForegroundWindow call. */
+    FIXME( "unsupported brokered foreground %p\n", hwnd );
+    RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+    return FALSE;
+}
+
+/*****************************************************************
  *           NtUserSetForegroundWindow  (win32u.@)
  */
 BOOL WINAPI NtUserSetForegroundWindow( HWND hwnd )

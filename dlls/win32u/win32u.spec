@@ -1334,7 +1334,7 @@
 @ stub -syscall NtUserSetAppImeLevel
 @ stub -syscall NtUserSetAutoRotation
 @ stub -syscall NtUserSetBridgeWindowChild
-@ stub -syscall NtUserSetBrokeredForeground
+@ stdcall -syscall NtUserSetBrokeredForeground(long)
 @ stub -syscall NtUserSetCalibrationData
 @ stub -syscall NtUserSetCancelRotationDelayHintWindow
 @ stdcall -syscall NtUserSetCapture(long)
@@ -1444,7 +1444,7 @@
 @ stub -syscall NtUserSetWindowGroup
 @ stdcall -syscall NtUserSetWindowLong(long long long long)
 @ stdcall -syscall NtUserSetWindowLongPtr(long long long long)
-@ stub -syscall NtUserSetWindowMessageCapability
+@ stdcall -syscall NtUserSetWindowMessageCapability(long long ptr long)
 @ stdcall -syscall NtUserSetWindowPlacement(long ptr)
 @ stdcall -syscall NtUserSetWindowPos(long long long long long long long)
 @ stdcall -syscall NtUserSetWindowRgn(long long long)

@@ -33,7 +33,7 @@
 2519 stub -noname EnableMouseInputForCursorSuppression  # NtUserEnableMouseInputForCursorSuppression
 2520 stub -noname IsMouseInputEnabled  # NtUserIsMouseInputEnabled
 2521 stub GetProcessUIContextInformation  # NtUserGetProcessUIContextInformation
-2522 stub -noname SetBrokeredForeground  # NtUserSetBrokeredForeground
+2522 stdcall -noname SetBrokeredForeground(long) NtUserSetBrokeredForeground
 2523 stub @
 2524 stub @
 2525 stub @
@@ -172,7 +172,7 @@
 2670 stub -noname DrainThreadCoreMessagingCompletions2  # NtUserDrainThreadCoreMessagingCompletions2
 2671 stub ShellRegisterHotKey  # NtUserShellRegisterHotKey
 2672 stub SetUserObjectCapability  # NtUserSetUserObjectCapability
-2673 stub SetWindowMessageCapability  # NtUserSetWindowMessageCapability
+2673 stdcall SetWindowMessageCapability(long long ptr long) NtUserSetWindowMessageCapability
 2674 stub ShellForegroundBoostProcess  # NtUserShellForegroundBoostProcess
 2675 stub SuppressWindowActions  # NtUserSuppressWindowActions
 2676 stub GetSuppressedWindowActions  # NtUserGetSuppressedWindowActions
