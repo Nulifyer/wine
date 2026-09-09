@@ -32,6 +32,34 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dwmapi);
 
+/* Windows DWM transition transactions are not implemented by Wine's host
+ * presentation path. Reject requests without claiming animation state. */
+HRESULT WINAPI DwmpBeginTransitionRequest( UINT transition )
+{
+    FIXME( "unsupported transition begin %u\n", transition );
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI DwmpEndTransitionRequest( UINT transition )
+{
+    FIXME( "unsupported transition end %u\n", transition );
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI DwmpTransitionWindowWithRects( HWND hwnd, UINT transition, const void *rect1,
+                                              const void *rect2, const void *rect3,
+                                              const void *rect4, const void *rect5 )
+{
+    FIXME( "unsupported window transition %p %#x %p %p %p %p %p\n",
+           hwnd, transition, rect1, rect2, rect3, rect4, rect5 );
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI DwmpTransitionWindow( HWND hwnd, UINT transition )
+{
+    return DwmpTransitionWindowWithRects( hwnd, transition, NULL, NULL, NULL, NULL, NULL );
+}
+
 
 /**********************************************************************
  *           DwmIsCompositionEnabled         (DWMAPI.@)
