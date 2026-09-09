@@ -6299,6 +6299,21 @@ struct alpc_create_port_reply
 
 
 
+struct alpc_message_info
+{
+    client_ptr_t port_context;
+    client_ptr_t message_context;
+    unsigned int id;
+    unsigned int type;
+    process_id_t pid;
+    thread_id_t tid;
+    data_size_t size;
+    unsigned int sequence;
+    unsigned int callback_id;
+    unsigned int context_valid;
+};
+
+
 struct alpc_send_receive_request
 {
     struct request_header __header;
@@ -6309,17 +6324,15 @@ struct alpc_send_receive_request
     int receive;
     int wow64;
     int no_wait;
+    client_ptr_t message_context;
     /* VARARG(message,bytes); */
 };
 struct alpc_send_receive_reply
 {
     struct reply_header __header;
     obj_handle_t wait_handle;
-    unsigned int message_id;
-    unsigned int message_type;
-    process_id_t sender_pid;
-    thread_id_t sender_tid;
-    data_size_t message_size;
+    char __pad_12[4];
+    struct alpc_message_info info;
     /* VARARG(message,bytes); */
 };
 
@@ -6335,13 +6348,8 @@ struct alpc_get_message_result_request
 struct alpc_get_message_result_reply
 {
     struct reply_header __header;
-    unsigned int message_id;
-    unsigned int message_type;
-    process_id_t sender_pid;
-    thread_id_t sender_tid;
-    data_size_t message_size;
+    struct alpc_message_info info;
     /* VARARG(message,bytes); */
-    char __pad_28[4];
 };
 
 
@@ -6358,8 +6366,9 @@ struct alpc_connect_port_request
     data_size_t name_size;
     data_size_t sid_size;
     int wow64;
-    /* VARARG(data,bytes); */
     char __pad_52[4];
+    client_ptr_t message_context;
+    /* VARARG(data,bytes); */
 };
 struct alpc_connect_port_reply
 {
@@ -6377,11 +6386,8 @@ struct alpc_get_connect_result_reply
 {
     struct reply_header __header;
     unsigned int status;
-    unsigned int message_id;
-    unsigned int message_type;
-    process_id_t sender_pid;
-    thread_id_t sender_tid;
-    data_size_t message_size;
+    char __pad_12[4];
+    struct alpc_message_info info;
     /* VARARG(message,bytes); */
 };
 
@@ -7386,6 +7392,6 @@ union generic_reply
     struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 969
+#define SERVER_PROTOCOL_VERSION 970
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

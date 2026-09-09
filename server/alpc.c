@@ -89,6 +89,8 @@ struct alpc_port
     unsigned int            counted_sync;
     obj_handle_t            connecting_handle;
     unsigned int            wow64;
+    unsigned int            receive_sequence;
+    client_ptr_t            initial_message_context;
     client_ptr_t            context;
     enum alpc_port_enum_type type;                  /* communication port or connection port */
     enum alpc_port_status    status;                /* port status */
@@ -107,6 +109,7 @@ struct alpc_request
     struct alpc_message *message;
     struct alpc_wait *wait; /* weak; its private handle owns the blocking call */
     unsigned int id, wow64, canceled, released;
+    client_ptr_t message_context;
     process_id_t pid;
     thread_id_t tid;
 };
@@ -122,7 +125,8 @@ struct alpc_wait
     struct list receive_entry;
     struct alpc_request *request; /* weak; cleared when request ownership changes */
     struct alpc_message *reply; /* owned reply for a successful blocking call */
-    data_size_t capacity, required_size;
+    data_size_t capacity;
+    struct alpc_message_info info;
     unsigned int status;
 };
 static struct list message_waits = LIST_INIT(message_waits);
@@ -136,10 +140,7 @@ struct alpc_message
 {
     struct list entry;
     struct alpc_request *request;
-    unsigned int id, type;
-    process_id_t pid;
-    thread_id_t tid;
-    data_size_t size;
+    struct alpc_message_info info;
     unsigned char data[];
 };
 
@@ -208,6 +209,8 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     port->counted_sync = !data->server && (data->flags & 0x40000);
     port->wow64 = 0;
     port->context = 0;
+    port->receive_sequence = 0;
+    port->initial_message_context = 0;
     return !!(port->sync = port->counted_sync ? create_semaphore_sync( 0, 0x7fffffff ) :
                                               create_internal_sync( 1, 1 ));
 }
@@ -281,13 +284,27 @@ static struct alpc_message *new_message( const void *data, data_size_t size, uns
     if (!(message = mem_alloc( sizeof(*message) + size ))) return NULL;
     if (!id && !(id = ++next_message_id)) id = ++next_message_id;
     message->request = NULL;
-    message->id = id;
-    message->type = type;
-    message->pid = sender->process->id;
-    message->tid = sender->id;
-    message->size = size;
+    memset( &message->info, 0, sizeof(message->info) );
+    message->info.callback_id = id;
+    message->info.id = id;
+    message->info.type = type;
+    message->info.pid = sender->process->id;
+    message->info.tid = sender->id;
+    message->info.size = size;
     if (size) memcpy( message->data, data, size );
     return message;
+}
+
+/* Metadata is assigned once when a message is destined for an endpoint.
+ * Short results and retries retain the same sequence and context. */
+static void set_message_destination( struct alpc_message *message, struct alpc_port *port,
+                                     client_ptr_t message_context )
+{
+    message->info.port_context = port->context;
+    message->info.message_context = message_context;
+    message->info.sequence = ++port->receive_sequence;
+    message->info.context_valid = ALPC_MESSAGE_CONTEXT_ATTRIBUTE;
+    port->initial_message_context = 0;
 }
 
 static void unlink_pending( struct alpc_port *client )
@@ -325,8 +342,8 @@ static struct alpc_message *new_cancellation( struct alpc_request *request )
     struct alpc_message *message;
     if (!(message = new_message( NULL, 0, ALPC_MESSAGE_TYPE_CANCELED |
                                 (request->wow64 ? 0x1000 : 0), request->id, request->target->thread ))) return NULL;
-    message->pid = request->pid;
-    message->tid = request->tid;
+    message->info.pid = request->pid;
+    message->info.tid = request->tid;
     return message;
 }
 
@@ -340,17 +357,21 @@ static void cancel_message_request( struct alpc_request *request, struct alpc_po
          * another queue entry. Moving ownership to a closing listener's peer
          * does publish a cancellation there. */
         if (queue != request->queue && (message = new_cancellation( request )))
+        {
+            set_message_destination( message, queue, request->message_context );
             list_add_tail( &queue->messages, &message->entry );
+        }
     }
     else
     {
         if (queue != request->queue)
         {
             list_remove( &message->entry );
+            set_message_destination( message, queue, request->message_context );
             list_add_tail( &queue->messages, &message->entry );
         }
-        message->size = 0;
-        message->type = ALPC_MESSAGE_TYPE_CANCELED | (message->type & 0x1000);
+        message->info.size = 0;
+        message->info.type = ALPC_MESSAGE_TYPE_CANCELED | (message->info.type & 0x1000);
     }
     if (message && (delivered || queue != request->queue)) notify_port( queue );
     if (delivered && queue == request->queue)
@@ -437,7 +458,7 @@ static struct alpc_wait *create_message_wait( data_size_t capacity )
     list_init( &wait->receive_entry );
     wait->reply = NULL;
     wait->capacity = capacity;
-    wait->required_size = 0;
+    memset( &wait->info, 0, sizeof(wait->info) );
     wait->status = STATUS_PENDING;
     list_init( &wait->entry );
     if (!(wait->sync = create_internal_sync( 1, 0 )) ||
@@ -461,11 +482,11 @@ static void cleanup_thread_message_waits( struct thread *thread )
 static struct alpc_message *take_message( struct alpc_port *port )
 {
     struct alpc_message *message = LIST_ENTRY( list_head( &port->messages ), struct alpc_message, entry );
-    if ((message->type & 0xff) == ALPC_MESSAGE_TYPE_CONNECTION_REQUEST)
+    if ((message->info.type & 0xff) == ALPC_MESSAGE_TYPE_CONNECTION_REQUEST)
     {
         struct alpc_port *client;
         LIST_FOR_EACH_ENTRY( client, &port->pending_connections, struct alpc_port, pending_entry )
-            if (client->connection_id == message->id) client->request_delivered = 1;
+            if (client->connection_id == message->info.id) client->request_delivered = 1;
     }
     if (message->request)
     {
@@ -485,8 +506,8 @@ static void dispatch_receives( struct alpc_port *port )
         struct alpc_message *message = LIST_ENTRY( list_head( &port->messages ), struct alpc_message, entry );
         list_remove( &wait->receive_entry );
         wait->receive_port = NULL;
-        wait->required_size = message->size;
-        if (message->size > wait->capacity) wait->status = STATUS_BUFFER_TOO_SMALL;
+        wait->info = message->info;
+        if (message->info.size > wait->capacity) wait->status = STATUS_BUFFER_TOO_SMALL;
         else
         {
             wait->reply = take_message( port );
@@ -553,6 +574,7 @@ static void disconnect_message_requests( struct alpc_port *port )
             lose_message_wait( request );
             if (!synchronous && (copy = new_cancellation( request )))
             {
+                set_message_destination( copy, port, request->message_context );
                 list_add_tail( &message_queue( port )->messages, &copy->entry );
                 notify_port( message_queue( port ) );
             }
@@ -569,7 +591,8 @@ static void queue_port_closed( struct alpc_port *port )
     queue = message_queue( port->peer );
     if (!(message = new_message( &start_time, sizeof(start_time), ALPC_MESSAGE_TYPE_PORT_CLOSED |
                                 (port->wow64 ? 0x1000 : 0), 0, port->thread ))) return;
-    message->pid = message->tid = 0;
+    set_message_destination( message, port->peer, port->peer->initial_message_context );
+    message->info.pid = message->info.tid = 0;
     list_add_tail( &queue->messages, &message->entry );
     notify_port( queue );
 }
@@ -582,12 +605,13 @@ static struct alpc_port *message_queue( struct alpc_port *endpoint )
 }
 
 static int send_message( struct alpc_port *port, unsigned int flags, unsigned int id,
-                         int wow64, const void *data, data_size_t size, struct alpc_wait *wait )
+                         int wow64, client_ptr_t message_context, const void *data, data_size_t size, struct alpc_wait *wait )
 {
     struct alpc_port *target = port, *queue, *origin = port;
     struct alpc_request *request = NULL, *candidate;
     struct alpc_message *message;
     unsigned int type = flags & 0x10000 ? 3 : 0x2001;
+    client_ptr_t received_context;
 
     if (port->type == COMMUNICATION_PORT)
     {
@@ -645,22 +669,25 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
         return 0;
     }
     if (!(message = new_message( data, size, type | (wow64 ? 0x1000 : 0), id, current ))) return 0;
+    received_context = request ? request->message_context : target->initial_message_context;
     if (!request && !(flags & 0x10000) && port->type == COMMUNICATION_PORT)
     {
         if (!(request = mem_alloc( sizeof(*request) ))) { free( message ); return 0; }
         request->wait = NULL;
+        request->message_context = message_context;
         request->released = 0;
-        request->id = message->id;
+        request->id = message->info.id;
         request->message = NULL;
         list_add_tail( &message_requests, &request->entry );
     }
+    set_message_destination( message, target, received_context );
     if (request && request->wait)
     {
         struct alpc_wait *receiver = request->wait;
-        receiver->required_size = message->size;
+        receiver->info = message->info;
         receiver->request = NULL;
         request->wait = NULL;
-        if (message->size <= receiver->capacity)
+        if (message->info.size <= receiver->capacity)
         {
             receiver->reply = message;
             receiver->status = STATUS_SUCCESS;
@@ -668,6 +695,7 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
             if (flags & 0x10000) free_message_request( request );
             else
             {
+                request->message_context = message_context;
                 request->source = origin;
                 request->target = target;
                 request->queue = queue;
@@ -691,6 +719,7 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
         {
             request->wait = wait;
             if (wait) wait->request = request;
+            request->message_context = message_context;
             request->source = origin;
             request->wow64 = wow64;
             request->canceled = 0;
@@ -735,11 +764,11 @@ static int alpc_port_close_handle( struct object *obj, struct process *process, 
         /* Convert an undelivered request to a cancellation notification.
          * If it was already received, publish a new notification with its ID. */
         LIST_FOR_EACH_ENTRY( message, &listener->messages, struct alpc_message, entry )
-            if (message->id == port->connection_id) break;
+            if (message->info.id == port->connection_id) break;
         if (&message->entry != &listener->messages)
         {
-            message->size = 0;
-            message->type = ALPC_MESSAGE_TYPE_CANCELED | (port->wow64 ? 0x1000 : 0);
+            message->info.size = 0;
+            message->info.type = ALPC_MESSAGE_TYPE_CANCELED | (port->wow64 ? 0x1000 : 0);
         }
         else if ((message = new_message( NULL, 0, ALPC_MESSAGE_TYPE_CANCELED |
                                          (port->wow64 ? 0x1000 : 0), port->connection_id, port->thread )))
@@ -806,7 +835,7 @@ DECL_HANDLER(alpc_send_receive)
         goto done;
     }
     if ((req->flags & 0x20000) && !(wait = create_message_wait( get_reply_max_size() ))) goto done;
-    if (req->send && !send_message( port, req->flags, req->message_id, req->wow64,
+    if (req->send && !send_message( port, req->flags, req->message_id, req->wow64, req->message_context,
                                     get_req_data(), size, wait )) goto done;
     if (wait)
     {
@@ -834,17 +863,14 @@ DECL_HANDLER(alpc_send_receive)
         goto done;
     }
     message = LIST_ENTRY( list_head( &port->messages ), struct alpc_message, entry );
-    reply->message_size = message->size;
-    if (message->size > get_reply_max_size())
+    reply->info = message->info;
+    if (message->info.size > get_reply_max_size())
     {
         set_error( STATUS_BUFFER_TOO_SMALL );
         goto done;
     }
-    reply->message_id = message->id;
-    reply->message_type = message->type;
-    reply->sender_pid = message->pid;
-    reply->sender_tid = message->tid;
-    if (message->size && !set_reply_data( message->data, message->size )) goto done;
+
+    if (message->info.size && !set_reply_data( message->data, message->info.size )) goto done;
     free( take_message( port ) );
 
 done:
@@ -870,17 +896,13 @@ DECL_HANDLER(alpc_get_message_result)
             wait->status = req->wait_status;
             cancel_message_wait( wait );
         }
-        reply->message_size = wait->required_size;
+        reply->info = wait->info;
         set_error( wait->status );
         if (!wait->status && (message = wait->reply))
         {
-            if (message->size > get_reply_max_size()) set_error( STATUS_BUFFER_TOO_SMALL );
-            else if (!message->size || set_reply_data( message->data, message->size ))
+            if (message->info.size > get_reply_max_size()) set_error( STATUS_BUFFER_TOO_SMALL );
+            else if (!message->info.size || set_reply_data( message->data, message->info.size ))
             {
-                reply->message_id = message->id;
-                reply->message_type = message->type;
-                reply->sender_pid = message->pid;
-                reply->sender_tid = message->tid;
                 free( wait->reply );
                 wait->reply = NULL;
             }
@@ -961,10 +983,13 @@ DECL_HANDLER(alpc_connect_port)
         close_handle( current->process, handle );
         goto done;
     }
+    client->context = handle;
+    client->initial_message_context = req->message_context;
+    message->info.sequence = ++listener->receive_sequence;
     client->connecting_handle = handle;
     list_add_tail( &connecting_ports, &client->connecting_entry );
     client->want_reply = req->flags & 0x20000;
-    client->connection_id = message->id;
+    client->connection_id = message->info.id;
     client->wow64 = req->wow64;
     client->pending_listener = listener;
     list_add_tail( &listener->pending_connections, &client->pending_entry );
@@ -1004,17 +1029,14 @@ DECL_HANDLER(alpc_get_connect_result)
         set_error( STATUS_INVALID_MESSAGE );
         goto done;
     }
-    reply->message_size = message->size;
-    if (message->size > get_reply_max_size())
+    reply->info = message->info;
+    if (message->info.size > get_reply_max_size())
     {
         set_error( STATUS_BUFFER_TOO_SMALL );
         goto done;
     }
-    if (message->size && !set_reply_data( message->data, message->size )) goto done;
-    reply->message_id = message->id;
-    reply->message_type = message->type;
-    reply->sender_pid = message->pid;
-    reply->sender_tid = message->tid;
+    if (message->info.size && !set_reply_data( message->data, message->info.size )) goto done;
+
     free( message );
     client->connect_reply = NULL;
     finish_connect_operation( client );
@@ -1051,8 +1073,8 @@ DECL_HANDLER(alpc_accept_connect_port)
         /* Consuming the canceled request reports REQUEST_CANCELED once. Later
          * attempts no longer identify a live or canceled admission. */
         LIST_FOR_EACH_ENTRY( message, &listener->messages, struct alpc_message, entry )
-            if (message->id == req->message_id && message->pid == req->sender_pid &&
-                message->tid == req->sender_tid && (message->type & 0xff) == ALPC_MESSAGE_TYPE_CANCELED)
+            if (message->info.id == req->message_id && message->info.pid == req->sender_pid &&
+                message->info.tid == req->sender_tid && (message->info.type & 0xff) == ALPC_MESSAGE_TYPE_CANCELED)
             {
                 list_remove( &message->entry );
                 set_error( STATUS_REQUEST_CANCELED );
@@ -1081,13 +1103,14 @@ DECL_HANDLER(alpc_accept_connect_port)
     server->connection_port = (struct alpc_port *)grab_object( listener );
     list_add_tail( &listener->accepted_connections, &server->accepted_entry );
     server->wow64 = client->wow64;
-    server->context = req->context;
+    server->context = req->context ? req->context : handle;
     server->peer = (struct alpc_port *)grab_object( client );
     client->peer = (struct alpc_port *)grab_object( server );
     server->status = client->status = CONNECTED;
     client->connect_status = STATUS_SUCCESS;
     if (client->want_reply)
     {
+        set_message_destination( message, client, client->initial_message_context );
         client->connect_reply = message;
         message = NULL;
     }

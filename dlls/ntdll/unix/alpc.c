@@ -29,6 +29,60 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(alpc);
 
+/* Only context and empty attribute buffers belong to the current contract. */
+static NTSTATUS validate_message_attributes( const ALPC_MESSAGE_ATTRIBUTES *send,
+                                             const ALPC_MESSAGE_ATTRIBUTES *receive )
+{
+    if ((send && (send->AllocatedAttributes & ~ALPC_MESSAGE_CONTEXT_ATTRIBUTE)) ||
+        (receive && (receive->AllocatedAttributes & ~ALPC_MESSAGE_CONTEXT_ATTRIBUTE)))
+        return STATUS_NOT_IMPLEMENTED;
+    if (send && (send->ValidAttributes & ~send->AllocatedAttributes)) return STATUS_INVALID_PARAMETER;
+    return STATUS_SUCCESS;
+}
+
+static client_ptr_t get_message_context( const ALPC_MESSAGE_ATTRIBUTES *attributes )
+{
+    const ALPC_CONTEXT_ATTR *context;
+    if (!attributes || !(attributes->ValidAttributes & ALPC_MESSAGE_CONTEXT_ATTRIBUTE)) return 0;
+    context = (const ALPC_CONTEXT_ATTR *)(attributes + 1);
+    return wine_server_client_ptr( context->MessageContext );
+}
+
+/* Admission, ordinary receives, and private waits serialize one result shape.
+ * Sequence zero means no message metadata was produced; preserve attributes. */
+static void receive_message_info( NTSTATUS status, const struct alpc_message_info *info,
+                                  ALPC_PORT_MESSAGE *message, SIZE_T *size, BOOL actual_size,
+                                  ALPC_MESSAGE_ATTRIBUTES *attributes )
+{
+    ALPC_CONTEXT_ATTR *context;
+    if (status && status != STATUS_BUFFER_TOO_SMALL) return;
+    if (message && (actual_size || status == STATUS_BUFFER_TOO_SMALL)) *size = sizeof(*message) + info->size;
+    if (attributes && info->sequence)
+    {
+        attributes->ValidAttributes = info->context_valid & attributes->AllocatedAttributes;
+        if (attributes->AllocatedAttributes & ALPC_MESSAGE_CONTEXT_ATTRIBUTE)
+        {
+            context = (ALPC_CONTEXT_ATTR *)(attributes + 1);
+            context->PortContext = wine_server_get_ptr( info->port_context );
+            context->MessageContext = wine_server_get_ptr( info->message_context );
+            context->Sequence = info->sequence;
+            context->MessageId = info->id;
+            context->CallbackId = info->callback_id;
+        }
+    }
+    if (message && !status)
+    {
+        memset( message, 0, sizeof(*message) );
+        message->DataLength = info->size;
+        message->TotalLength = sizeof(*message) + info->size;
+        message->Type = info->type;
+        message->MessageId = info->id;
+        message->ClientId.UniqueProcess = ULongToHandle( info->pid );
+        message->ClientId.UniqueThread = ULongToHandle( info->tid );
+        message->ClientViewSize = info->callback_id;
+    }
+}
+
 NTSTATUS WINAPI NtAlpcAcceptConnectPort( HANDLE *communication_port, HANDLE connection_port,
                                          DWORD flags, OBJECT_ATTRIBUTES *obj_attr,
                                          ALPC_PORT_ATTRIBUTES *port_attr, void *port_context,
@@ -37,8 +91,9 @@ NTSTATUS WINAPI NtAlpcAcceptConnectPort( HANDLE *communication_port, HANDLE conn
 {
     NTSTATUS status;
     if (!communication_port || !send_msg) return STATUS_ACCESS_VIOLATION;
-    if (flags || send_msg_attr || (obj_attr && (obj_attr->ObjectName || obj_attr->SecurityDescriptor)))
+    if (flags || (obj_attr && (obj_attr->ObjectName || obj_attr->SecurityDescriptor)))
         return STATUS_NOT_IMPLEMENTED;
+    if ((status = validate_message_attributes( send_msg_attr, NULL ))) return status;
     if (send_msg->TotalLength != sizeof(*send_msg) + send_msg->DataLength) return STATUS_INVALID_PARAMETER;
     SERVER_START_REQ( alpc_accept_connect_port )
     {
@@ -72,9 +127,10 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
     ULONG sid_size = 0;
 
     if (!port_handle || !port_name) return STATUS_ACCESS_VIOLATION;
-    if (send_msg_attr || recv_msg_attr || flags & ~ALPC_SYNC_CONNECTION || !port_attr ||
+    if (flags & ~ALPC_SYNC_CONNECTION || !port_attr ||
         (obj_attr && obj_attr->SecurityDescriptor))
         return STATUS_NOT_IMPLEMENTED;
+    if ((status = validate_message_attributes( send_msg_attr, recv_msg_attr ))) return status;
     if (!port_name->Buffer || port_name->Length % sizeof(WCHAR)) return STATUS_OBJECT_NAME_INVALID;
     if (connect_msg && (!connect_msg_size || capacity < sizeof(*connect_msg) || capacity > ~(data_size_t)0 ||
                         connect_msg->TotalLength != sizeof(*connect_msg) + connect_msg->DataLength))
@@ -96,6 +152,7 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
         req->name_size = port_name->Length;
         req->sid_size = sid_size;
         req->wow64 = is_wow64();
+        req->message_context = get_message_context( send_msg_attr );
         wine_server_add_data( req, port_name->Buffer, port_name->Length );
         if (sid_size) wine_server_add_data( req, required_server_sid, sid_size );
         if (connect_msg) wine_server_add_data( req, connect_msg + 1, connect_msg->DataLength );
@@ -121,18 +178,8 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
                 wine_server_set_reply( req, connect_msg + 1, capacity - sizeof(*connect_msg) );
             status = wine_server_call( req );
             if (!status) status = reply->status;
-            if (connect_msg && (flags & ALPC_SYNC_CONNECTION) && (!status || status == STATUS_BUFFER_TOO_SMALL))
-                *connect_msg_size = sizeof(*connect_msg) + reply->message_size;
-            if (connect_msg && !status && (flags & ALPC_SYNC_CONNECTION))
-            {
-                memset( connect_msg, 0, sizeof(*connect_msg) );
-                connect_msg->DataLength = reply->message_size;
-                connect_msg->TotalLength = sizeof(*connect_msg) + reply->message_size;
-                connect_msg->Type = reply->message_type;
-                connect_msg->MessageId = reply->message_id;
-                connect_msg->ClientId.UniqueProcess = ULongToHandle( reply->sender_pid );
-                connect_msg->ClientId.UniqueThread = ULongToHandle( reply->sender_tid );
-            }
+            if (flags & ALPC_SYNC_CONNECTION)
+                receive_message_info( status, &reply->info, connect_msg, connect_msg_size, TRUE, recv_msg_attr );
         }
         SERVER_END_REQ;
     }
@@ -224,7 +271,8 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
 
     TRACE( "%p, %#x, %p, %p, %p, %p, %p, %p.\n", port_handle, (unsigned int)flags,
            send_msg, send_msg_attr, recv_msg, recv_buffer_size, recv_msg_attr, timeout );
-    if (send_msg_attr || recv_msg_attr || flags & ~(1 | 0x10000 | 0x20000)) return STATUS_NOT_IMPLEMENTED;
+    if (flags & ~(1 | 0x10000 | 0x20000)) return STATUS_NOT_IMPLEMENTED;
+    if ((status = validate_message_attributes( send_msg_attr, recv_msg_attr ))) return status;
     if ((flags & 0x20000) && (!send_msg || send_msg->MessageId || (flags & 0x10000)))
         return STATUS_INVALID_PARAMETER_2;
     if (recv_msg && !recv_buffer_size) return STATUS_INVALID_PARAMETER;
@@ -241,23 +289,14 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         req->send = !!send_msg;
         req->receive = !!recv_msg;
         req->wow64 = is_wow64();
+        req->message_context = get_message_context( send_msg_attr );
         req->no_wait = timeout && !timeout->QuadPart;
         if (send_msg) wine_server_add_data( req, send_msg + 1, send_msg->DataLength );
         if (recv_msg) wine_server_set_reply( req, recv_msg + 1, capacity - sizeof(*recv_msg) );
         status = wine_server_call( req );
         if (status == STATUS_PENDING) wait_handle = wine_server_ptr_handle( reply->wait_handle );
-        if (recv_msg && status == STATUS_BUFFER_TOO_SMALL)
-            *recv_buffer_size = reply->message_size + sizeof(*recv_msg);
-        if (recv_msg && !status)
-        {
-            memset( recv_msg, 0, sizeof(*recv_msg) );
-            recv_msg->DataLength = reply->message_size;
-            recv_msg->TotalLength = sizeof(*recv_msg) + reply->message_size;
-            recv_msg->Type = reply->message_type;
-            recv_msg->ClientId.UniqueProcess = ULongToHandle( reply->sender_pid );
-            recv_msg->ClientId.UniqueThread = ULongToHandle( reply->sender_tid );
-            recv_msg->MessageId = reply->message_id;
-        }
+        if (recv_msg)
+            receive_message_info( status, &reply->info, recv_msg, recv_buffer_size, FALSE, recv_msg_attr );
     }
     SERVER_END_REQ;
     if (wait_handle)
@@ -269,18 +308,8 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
             req->wait_status = wait_status;
             wine_server_set_reply( req, recv_msg + 1, capacity - sizeof(*recv_msg) );
             status = wine_server_call( req );
-            if ((!status && (flags & 0x20000)) || status == STATUS_BUFFER_TOO_SMALL)
-                *recv_buffer_size = reply->message_size + sizeof(*recv_msg);
-            if (!status)
-            {
-                memset( recv_msg, 0, sizeof(*recv_msg) );
-                recv_msg->DataLength = reply->message_size;
-                recv_msg->TotalLength = sizeof(*recv_msg) + reply->message_size;
-                recv_msg->Type = reply->message_type;
-                recv_msg->ClientId.UniqueProcess = ULongToHandle( reply->sender_pid );
-                recv_msg->ClientId.UniqueThread = ULongToHandle( reply->sender_tid );
-                recv_msg->MessageId = reply->message_id;
-            }
+            receive_message_info( status, &reply->info, recv_msg, recv_buffer_size,
+                                  !!(flags & 0x20000), recv_msg_attr );
         }
         SERVER_END_REQ;
         NtClose( wait_handle );

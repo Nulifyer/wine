@@ -42,6 +42,7 @@ my %formats =
     # structures and unions
     "union apc_call"           => [ 64, 8 ],
     "union apc_result"         => [ 40, 8 ],
+    "struct alpc_message_info" => [ 48, 8 ],
     "struct async_data"        => [ 40, 8 ],
     "struct context_data"      => [ 1720, 8 ],
     "struct cursor_pos"        => [ 24, 8 ],

@@ -257,14 +257,36 @@ static inline ALPC_MESSAGE_ATTRIBUTES *alpc_port_message_attributes_32to64( ALPC
 
     attr->AllocatedAttributes = in->AllocatedAttributes;
 
+    attr->ValidAttributes = in->ValidAttributes;
     if (!copy_attributes)
     {
-        attr->ValidAttributes = 0;
+        /* The x86 output retains fields when no metadata is returned. Copy
+         * context inputs without interpreting them as input attribute rights. */
+        if (in->AllocatedAttributes & ALPC_MESSAGE_CONTEXT_ATTRIBUTE)
+        {
+            const unsigned char *from = (const unsigned char *)(in + 1);
+            const ALPC_CONTEXT_ATTR32 *context;
+            ALPC_CONTEXT_ATTR *to = AlpcGetMessageAttribute( attr, ALPC_MESSAGE_CONTEXT_ATTRIBUTE );
+            if (in->AllocatedAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE) from += sizeof(ALPC_SECURITY_ATTR32);
+            if (in->AllocatedAttributes & ALPC_MESSAGE_VIEW_ATTRIBUTE) from += sizeof(ALPC_VIEW_ATTR32);
+            context = (const ALPC_CONTEXT_ATTR32 *)from;
+            to->PortContext = UlongToPtr( context->PortContext );
+            to->MessageContext = UlongToPtr( context->MessageContext );
+            to->Sequence = context->Sequence;
+            to->MessageId = context->MessageId;
+            to->CallbackId = context->CallbackId;
+        }
+        *out = attr;
+        return attr;
+    }
+    /* Let the NT owner reject this mask without accessing an unallocated
+     * attribute while converting the caller's buffer. */
+    if (in->ValidAttributes & ~in->AllocatedAttributes)
+    {
         *out = attr;
         return attr;
     }
 
-    attr->ValidAttributes = in->ValidAttributes;
     current_from_attr = (const unsigned char *)in + sizeof(*in);
 
     if (in->ValidAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE)
@@ -385,7 +407,7 @@ static inline ALPC_PORT_MESSAGE32 *alpc_port_message_64to32( ALPC_PORT_MESSAGE32
 }
 
 static inline ALPC_MESSAGE_ATTRIBUTES32 *alpc_port_message_attributes_64to32( ALPC_MESSAGE_ATTRIBUTES32 *out,
-                                                                              ALPC_MESSAGE_ATTRIBUTES *in )
+                                                                              ALPC_MESSAGE_ATTRIBUTES *in, BOOL copy_context_ids )
 {
     unsigned char *current_to_attr;
 
@@ -396,7 +418,7 @@ static inline ALPC_MESSAGE_ATTRIBUTES32 *alpc_port_message_attributes_64to32( AL
 
     current_to_attr = (unsigned char *)out + sizeof(*out);
 
-    if (in->ValidAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE)
+    if (in->ValidAttributes & in->AllocatedAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE)
     {
         const ALPC_SECURITY_ATTR *from_attr = AlpcGetMessageAttribute( in, ALPC_MESSAGE_SECURITY_ATTRIBUTE );
         ALPC_SECURITY_ATTR32 *to_attr = (ALPC_SECURITY_ATTR32 *)current_to_attr;
@@ -414,7 +436,7 @@ static inline ALPC_MESSAGE_ATTRIBUTES32 *alpc_port_message_attributes_64to32( AL
     if (out->AllocatedAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE)
         current_to_attr += sizeof(ALPC_SECURITY_ATTR32);
 
-    if (in->ValidAttributes & ALPC_MESSAGE_VIEW_ATTRIBUTE)
+    if (in->ValidAttributes & in->AllocatedAttributes & ALPC_MESSAGE_VIEW_ATTRIBUTE)
     {
         const ALPC_VIEW_ATTR *from_attr = AlpcGetMessageAttribute( in, ALPC_MESSAGE_VIEW_ATTRIBUTE );
         ALPC_VIEW_ATTR32 *to_attr = (ALPC_VIEW_ATTR32 *)current_to_attr;
@@ -427,7 +449,7 @@ static inline ALPC_MESSAGE_ATTRIBUTES32 *alpc_port_message_attributes_64to32( AL
     if (out->AllocatedAttributes & ALPC_MESSAGE_VIEW_ATTRIBUTE)
         current_to_attr += sizeof(ALPC_VIEW_ATTR32);
 
-    if (in->ValidAttributes & ALPC_MESSAGE_CONTEXT_ATTRIBUTE)
+    if (in->AllocatedAttributes & ALPC_MESSAGE_CONTEXT_ATTRIBUTE)
     {
         const ALPC_CONTEXT_ATTR *from_attr = AlpcGetMessageAttribute( in, ALPC_MESSAGE_CONTEXT_ATTRIBUTE );
         ALPC_CONTEXT_ATTR32 *to_attr = (ALPC_CONTEXT_ATTR32 *)current_to_attr;
@@ -435,14 +457,18 @@ static inline ALPC_MESSAGE_ATTRIBUTES32 *alpc_port_message_attributes_64to32( AL
         to_attr->PortContext = PtrToUlong( from_attr->PortContext );
         to_attr->MessageContext = PtrToUlong( from_attr->MessageContext );
         to_attr->Sequence = from_attr->Sequence;
-        /* Should be from_attr->MessageId. But tests show that it's always 0 on 32-bit */
-        to_attr->MessageId = 0;
-        to_attr->CallbackId = from_attr->CallbackId;
+        /* Native x86 preserves these fields on success, but a short result
+         * writes the identities of the message left available for recovery. */
+        if (copy_context_ids)
+        {
+            to_attr->MessageId = from_attr->MessageId;
+            to_attr->CallbackId = from_attr->CallbackId;
+        }
     }
     if (out->AllocatedAttributes & ALPC_MESSAGE_CONTEXT_ATTRIBUTE)
         current_to_attr += sizeof(ALPC_CONTEXT_ATTR32);
 
-    if (in->ValidAttributes & ALPC_MESSAGE_HANDLE_ATTRIBUTE)
+    if (in->ValidAttributes & in->AllocatedAttributes & ALPC_MESSAGE_HANDLE_ATTRIBUTE)
     {
         const ALPC_HANDLE_ATTR *from_attr = AlpcGetMessageAttribute( in, ALPC_MESSAGE_HANDLE_ATTRIBUTE );
         ALPC_HANDLE_ATTR32 *to_attr = (ALPC_HANDLE_ATTR32 *)current_to_attr;
@@ -455,7 +481,7 @@ static inline ALPC_MESSAGE_ATTRIBUTES32 *alpc_port_message_attributes_64to32( AL
     if (out->AllocatedAttributes & ALPC_MESSAGE_HANDLE_ATTRIBUTE)
         current_to_attr += sizeof(ALPC_HANDLE_ATTR32);
 
-    if (in->ValidAttributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE)
+    if (in->ValidAttributes & in->AllocatedAttributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE)
     {
         const ALPC_TOKEN_ATTR *from_attr = AlpcGetMessageAttribute( in, ALPC_MESSAGE_TOKEN_ATTRIBUTE );
         ALPC_TOKEN_ATTR32 *to_attr = (ALPC_TOKEN_ATTR32 *)current_to_attr;
@@ -467,7 +493,7 @@ static inline ALPC_MESSAGE_ATTRIBUTES32 *alpc_port_message_attributes_64to32( AL
     if (out->AllocatedAttributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE)
         current_to_attr += sizeof(ALPC_TOKEN_ATTR32);
 
-    if (in->ValidAttributes & ALPC_MESSAGE_DIRECT_ATTRIBUTE)
+    if (in->ValidAttributes & in->AllocatedAttributes & ALPC_MESSAGE_DIRECT_ATTRIBUTE)
     {
         const ALPC_DIRECT_ATTR *from_attr = AlpcGetMessageAttribute( in, ALPC_MESSAGE_DIRECT_ATTRIBUTE );
         ALPC_DIRECT_ATTR32 *to_attr = (ALPC_DIRECT_ATTR32 *)current_to_attr;
@@ -477,7 +503,7 @@ static inline ALPC_MESSAGE_ATTRIBUTES32 *alpc_port_message_attributes_64to32( AL
     if (out->AllocatedAttributes & ALPC_MESSAGE_DIRECT_ATTRIBUTE)
         current_to_attr += sizeof(ALPC_DIRECT_ATTR32);
 
-    if (in->ValidAttributes & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)
+    if (in->ValidAttributes & in->AllocatedAttributes & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)
     {
         const ALPC_WORK_ON_BEHALF_ATTR *from_attr = AlpcGetMessageAttribute( in, ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE );
         ALPC_WORK_ON_BEHALF_ATTR32 *to_attr = (ALPC_WORK_ON_BEHALF_ATTR32 *)current_to_attr;

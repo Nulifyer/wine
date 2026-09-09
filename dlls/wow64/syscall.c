@@ -540,12 +540,13 @@ NTSTATUS WINAPI wow64_NtAlpcConnectPort( UINT *args )
         put_handle( handle_ptr, handle );
         if (size32) put_size( size32, size - (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)) );
         alpc_port_message_64to32( msg32, msg );
-        alpc_port_message_attributes_64to32( recv_msg_attr32, recv_msg_attr );
     }
     else if (status == STATUS_BUFFER_TOO_SMALL && size32)
     {
         put_size( size32, size - (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)));
     }
+    if (status == STATUS_SUCCESS || status == STATUS_BUFFER_TOO_SMALL)
+        alpc_port_message_attributes_64to32( recv_msg_attr32, recv_msg_attr, status == STATUS_BUFFER_TOO_SMALL );
     return status;
 }
 
@@ -626,12 +627,13 @@ NTSTATUS WINAPI wow64_NtAlpcSendWaitReceivePort( UINT *args )
         if (size32 && (flags & 0x20000))
             put_size( size32, size - (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)) );
         alpc_port_message_64to32( recv_msg32, recv_msg );
-        alpc_port_message_attributes_64to32( recv_msg_attr32, recv_msg_attr );
     }
     else if (status == STATUS_BUFFER_TOO_SMALL && size32)
     {
         put_size( size32, size - (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)) );
     }
+    if (status == STATUS_SUCCESS || status == STATUS_BUFFER_TOO_SMALL)
+        alpc_port_message_attributes_64to32( recv_msg_attr32, recv_msg_attr, status == STATUS_BUFFER_TOO_SMALL );
     return status;
 }
 

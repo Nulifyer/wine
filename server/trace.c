@@ -399,6 +399,16 @@ static void dump_apc_result( const char *prefix, const union apc_result *result 
     fputc( '}', stderr );
 }
 
+static void dump_alpc_message_info( const char *prefix, const struct alpc_message_info *info )
+{
+    fprintf( stderr, "%s{id=%08x,type=%08x,pid=%04x,tid=%04x,size=%u,sequence=%u,callback=%08x,valid=%08x",
+             prefix, info->id, info->type, info->pid, info->tid, info->size, info->sequence,
+             info->callback_id, info->context_valid );
+    dump_uint64( ",port_context=", &info->port_context );
+    dump_uint64( ",message_context=", &info->message_context );
+    fputc( '}', stderr );
+}
+
 static void dump_async_data( const char *prefix, const struct async_data *data )
 {
     fprintf( stderr, "%s{handle=%04x,event=%04x", prefix, data->handle, data->event );

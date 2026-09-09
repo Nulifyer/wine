@@ -6,6 +6,7 @@
  */
 
 static void dump_abstime( const char *prefix, const abstime_t *val );
+static void dump_alpc_message_info( const char *prefix, const struct alpc_message_info *val );
 static void dump_apc_result( const char *prefix, const union apc_result *val );
 static void dump_async_data( const char *prefix, const struct async_data *val );
 static void dump_generic_map( const char *prefix, const struct generic_map *val );
@@ -3583,17 +3584,14 @@ static void dump_alpc_send_receive_request( const struct alpc_send_receive_reque
     fprintf( stderr, ", receive=%d", req->receive );
     fprintf( stderr, ", wow64=%d", req->wow64 );
     fprintf( stderr, ", no_wait=%d", req->no_wait );
+    dump_uint64( ", message_context=", &req->message_context );
     dump_varargs_bytes( ", message=", cur_size );
 }
 
 static void dump_alpc_send_receive_reply( const struct alpc_send_receive_reply *req )
 {
     fprintf( stderr, " wait_handle=%04x", req->wait_handle );
-    fprintf( stderr, ", message_id=%08x", req->message_id );
-    fprintf( stderr, ", message_type=%08x", req->message_type );
-    fprintf( stderr, ", sender_pid=%04x", req->sender_pid );
-    fprintf( stderr, ", sender_tid=%04x", req->sender_tid );
-    fprintf( stderr, ", message_size=%u", req->message_size );
+    dump_alpc_message_info( ", info=", &req->info );
     dump_varargs_bytes( ", message=", cur_size );
 }
 
@@ -3605,11 +3603,7 @@ static void dump_alpc_get_message_result_request( const struct alpc_get_message_
 
 static void dump_alpc_get_message_result_reply( const struct alpc_get_message_result_reply *req )
 {
-    fprintf( stderr, " message_id=%08x", req->message_id );
-    fprintf( stderr, ", message_type=%08x", req->message_type );
-    fprintf( stderr, ", sender_pid=%04x", req->sender_pid );
-    fprintf( stderr, ", sender_tid=%04x", req->sender_tid );
-    fprintf( stderr, ", message_size=%u", req->message_size );
+    dump_alpc_message_info( " info=", &req->info );
     dump_varargs_bytes( ", message=", cur_size );
 }
 
@@ -3623,6 +3617,7 @@ static void dump_alpc_connect_port_request( const struct alpc_connect_port_reque
     fprintf( stderr, ", name_size=%u", req->name_size );
     fprintf( stderr, ", sid_size=%u", req->sid_size );
     fprintf( stderr, ", wow64=%d", req->wow64 );
+    dump_uint64( ", message_context=", &req->message_context );
     dump_varargs_bytes( ", data=", cur_size );
 }
 
@@ -3640,11 +3635,7 @@ static void dump_alpc_get_connect_result_request( const struct alpc_get_connect_
 static void dump_alpc_get_connect_result_reply( const struct alpc_get_connect_result_reply *req )
 {
     fprintf( stderr, " status=%08x", req->status );
-    fprintf( stderr, ", message_id=%08x", req->message_id );
-    fprintf( stderr, ", message_type=%08x", req->message_type );
-    fprintf( stderr, ", sender_pid=%04x", req->sender_pid );
-    fprintf( stderr, ", sender_tid=%04x", req->sender_tid );
-    fprintf( stderr, ", message_size=%u", req->message_size );
+    dump_alpc_message_info( ", info=", &req->info );
     dump_varargs_bytes( ", message=", cur_size );
 }
 

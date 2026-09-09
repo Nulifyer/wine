@@ -4375,6 +4375,21 @@ enum inproc_sync_type
 @END
 
 
+/* Shared ALPC result, including metadata returned for an undersized buffer. */
+struct alpc_message_info
+{
+    client_ptr_t port_context;
+    client_ptr_t message_context;
+    unsigned int id;
+    unsigned int type;
+    process_id_t pid;
+    thread_id_t tid;
+    data_size_t size;
+    unsigned int sequence;
+    unsigned int callback_id;
+    unsigned int context_valid;
+};
+
 /* Send to or receive from a listening ALPC port queue. */
 @REQ(alpc_send_receive)
     obj_handle_t handle;
@@ -4384,14 +4399,11 @@ enum inproc_sync_type
     int receive;
     int wow64;
     int no_wait;
+    client_ptr_t message_context;
     VARARG(message,bytes);
 @REPLY
     obj_handle_t wait_handle;
-    unsigned int message_id;
-    unsigned int message_type;
-    process_id_t sender_pid;
-    thread_id_t sender_tid;
-    data_size_t message_size;
+    struct alpc_message_info info;
     VARARG(message,bytes);
 @END
 
@@ -4401,11 +4413,7 @@ enum inproc_sync_type
     obj_handle_t handle;
     unsigned int wait_status;
 @REPLY
-    unsigned int message_id;
-    unsigned int message_type;
-    process_id_t sender_pid;
-    thread_id_t sender_tid;
-    data_size_t message_size;
+    struct alpc_message_info info;
     VARARG(message,bytes);
 @END
 
@@ -4420,6 +4428,7 @@ enum inproc_sync_type
     data_size_t name_size;
     data_size_t sid_size;
     int wow64;
+    client_ptr_t message_context;
     VARARG(data,bytes);
 @REPLY
     obj_handle_t handle;
@@ -4430,11 +4439,7 @@ enum inproc_sync_type
     obj_handle_t handle;
 @REPLY
     unsigned int status;
-    unsigned int message_id;
-    unsigned int message_type;
-    process_id_t sender_pid;
-    thread_id_t sender_tid;
-    data_size_t message_size;
+    struct alpc_message_info info;
     VARARG(message,bytes);
 @END
 
