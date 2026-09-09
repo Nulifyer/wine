@@ -2449,7 +2449,7 @@ static BOOL context_sync_drawables( struct opengl_context *context, HDC draw_hdc
 {
     struct opengl_drawable *new_draw, *new_read, *old_draw = NULL, *old_read = NULL;
     struct opengl_context *previous = NtCurrentTeb()->glContext;
-    BOOL ret = FALSE;
+    BOOL ret = FALSE, flush_drawables = FALSE;
 
     if (!(new_draw = get_updated_drawable( draw_hdc, context->format, context->draw ))) return FALSE;
     if (!draw_hdc && context->draw == context->read) opengl_drawable_add_ref( (new_read = new_draw) );
@@ -2480,8 +2480,7 @@ static BOOL context_sync_drawables( struct opengl_context *context, HDC draw_hdc
         if (old_draw) opengl_drawable_release( old_draw );
         if (old_read) opengl_drawable_release( old_read );
 
-        opengl_drawable_flush( new_read, new_read->interval, 0 );
-        opengl_drawable_flush( new_draw, new_draw->interval, 0 );
+        flush_drawables = TRUE;
     }
 
     if (ret)
@@ -2489,6 +2488,13 @@ static BOOL context_sync_drawables( struct opengl_context *context, HDC draw_hdc
         /* update the current window drawable to the last used draw surface */
         if (new_draw->client) set_window_opengl_drawable( new_draw->client->hwnd, new_draw, TRUE );
         context_exchange_drawables( context, &new_draw, &new_read );
+        /* Flushing can bind an internal framebuffer context and restore the
+         * client context. Publish its drawables before that re-entry. */
+        if (flush_drawables)
+        {
+            opengl_drawable_flush( context->read, context->read->interval, 0 );
+            opengl_drawable_flush( context->draw, context->draw->interval, 0 );
+        }
     }
     else if (previous)
     {
