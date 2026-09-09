@@ -1,5 +1,5 @@
 MODULE    = svchost.exe
-IMPORTS   = advapi32
+IMPORTS   = advapi32 rpcrt4
 
 EXTRADLLFLAGS = -mwindows -municode
 
