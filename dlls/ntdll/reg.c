@@ -238,7 +238,7 @@ NTSTATUS WINAPI RtlOpenCurrentUser(
 }
 
 
-static NTSTATUS RTL_ReportRegistryValue(PKEY_VALUE_FULL_INFORMATION pInfo,
+static NTSTATUS RTL_DeliverRegistryValue(PKEY_VALUE_FULL_INFORMATION pInfo,
                                         PRTL_QUERY_REGISTRY_TABLE pQuery, PVOID pContext, PVOID pEnvironment)
 {
     PUNICODE_STRING str = pQuery->EntryContext;
@@ -413,6 +413,25 @@ static NTSTATUS RTL_ReportRegistryValue(PKEY_VALUE_FULL_INFORMATION pInfo,
 }
 
 
+static NTSTATUS RTL_ReportRegistryValue(PKEY_VALUE_FULL_INFORMATION info,
+                                        PRTL_QUERY_REGISTRY_TABLE query, PVOID context, PVOID environment)
+{
+    RTL_QUERY_REGISTRY_TABLE named_query;
+    NTSTATUS status;
+    WCHAR *name;
+
+    if (!info) return RTL_DeliverRegistryValue(info, query, context, environment);
+    if (!(name = RtlAllocateHeap(GetProcessHeap(), 0, (SIZE_T)info->NameLength + sizeof(WCHAR))))
+        return STATUS_NO_MEMORY;
+    memcpy(name, info->Name, info->NameLength);
+    name[info->NameLength / sizeof(WCHAR)] = 0;
+    named_query = *query;
+    named_query.Name = name;
+    status = RTL_DeliverRegistryValue(info, &named_query, context, environment);
+    RtlFreeHeap(GetProcessHeap(), 0, name);
+    return status;
+}
+
 static NTSTATUS RTL_KeyHandleCreateObject(ULONG RelativeTo, PCWSTR Path, POBJECT_ATTRIBUTES regkey, PUNICODE_STRING str)
 {
     PCWSTR base;
@@ -518,8 +537,12 @@ NTSTATUS WINAPI RtlQueryRegistryValues(IN ULONG RelativeTo, IN PCWSTR Path,
 
             if (QueryTable->Flags & RTL_QUERY_REGISTRY_SUBKEY)
             {
+                OBJECT_ATTRIBUTES attr;
+
                 handle = 0;
-                status = RTL_GetKeyHandle(PtrToUlong(QueryTable->Name), Path, &handle);
+                RtlInitUnicodeString(&Value, QueryTable->Name);
+                InitializeObjectAttributes(&attr, &Value, OBJ_CASE_INSENSITIVE, topkey, NULL);
+                status = NtOpenKey(&handle, KEY_ALL_ACCESS, &attr);
                 if(status != STATUS_SUCCESS)
                 {
                     ret = status;
@@ -528,6 +551,8 @@ NTSTATUS WINAPI RtlQueryRegistryValues(IN ULONG RelativeTo, IN PCWSTR Path,
             }
             else
                 handle = topkey;
+
+            if (!QueryTable->QueryRoutine) continue;
         }
 
         if (!QueryTable->Name && (QueryTable->Flags & RTL_QUERY_REGISTRY_NOVALUE))
@@ -547,7 +572,7 @@ NTSTATUS WINAPI RtlQueryRegistryValues(IN ULONG RelativeTo, IN PCWSTR Path,
             continue;
         }
 
-        if (QueryTable->Name == NULL)
+        if (QueryTable->Name == NULL || (QueryTable->Flags & RTL_QUERY_REGISTRY_SUBKEY))
         {
             if (QueryTable->Flags & RTL_QUERY_REGISTRY_DIRECT)
             {
@@ -640,7 +665,7 @@ out:
     RtlFreeHeap(GetProcessHeap(), 0, pInfo);
     if (handle != topkey)
         NtClose(handle);
-    NtClose(topkey);
+    if (!(RelativeTo & RTL_REGISTRY_HANDLE)) NtClose(topkey);
     return ret;
 }
 
