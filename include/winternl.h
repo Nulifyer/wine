@@ -2643,6 +2643,13 @@ typedef struct _KEY_NAME_INFORMATION {
     WCHAR         Name[1];
 } KEY_NAME_INFORMATION, *PKEY_NAME_INFORMATION;
 
+typedef struct _KEY_FLAGS_INFORMATION
+{
+    ULONG Wow64Flags;
+    ULONG KeyFlags;
+    ULONG ControlFlags;
+} KEY_FLAGS_INFORMATION, *PKEY_FLAGS_INFORMATION;
+
 typedef struct _KEY_CACHED_INFORMATION
 {
     LARGE_INTEGER LastWriteTime;

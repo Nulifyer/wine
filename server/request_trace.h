@@ -1154,8 +1154,18 @@ static void dump_enum_key_reply( const struct enum_key_reply *req )
     dump_timeout( ", modif=", &req->modif );
     fprintf( stderr, ", total=%u", req->total );
     fprintf( stderr, ", namelen=%u", req->namelen );
+    fprintf( stderr, ", wow64_flags=%08x", req->wow64_flags );
+    fprintf( stderr, ", key_flags=%08x", req->key_flags );
+    fprintf( stderr, ", control_flags=%08x", req->control_flags );
     dump_varargs_unicode_str( ", name=", min( cur_size, req->namelen ));
     dump_varargs_unicode_str( ", class=", cur_size );
+}
+
+static void dump_set_key_flags_request( const struct set_key_flags_request *req )
+{
+    fprintf( stderr, " hkey=%04x", req->hkey );
+    fprintf( stderr, ", info_class=%d", req->info_class );
+    fprintf( stderr, ", flags=%08x", req->flags );
 }
 
 static void dump_set_key_value_request( const struct set_key_value_request *req )
@@ -3786,6 +3796,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_delete_key_request,
     (dump_func)dump_flush_key_request,
     (dump_func)dump_enum_key_request,
+    (dump_func)dump_set_key_flags_request,
     (dump_func)dump_set_key_value_request,
     (dump_func)dump_get_key_value_request,
     (dump_func)dump_enum_key_value_request,
@@ -4110,6 +4121,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_enum_key_reply,
     NULL,
+    NULL,
     (dump_func)dump_get_key_value_reply,
     (dump_func)dump_enum_key_value_reply,
     NULL,
@@ -4432,6 +4444,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "delete_key",
     "flush_key",
     "enum_key",
+    "set_key_flags",
     "set_key_value",
     "get_key_value",
     "enum_key_value",

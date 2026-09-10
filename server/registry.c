@@ -91,6 +91,8 @@ struct key
     int               nb_values;   /* count of allocated values in array */
     struct key_value *values;      /* values array */
     unsigned int      flags;       /* flags */
+    unsigned int      wow64_flags; /* key WOW64 information */
+    unsigned int      control_flags; /* key control information */
     timeout_t         modif;       /* last modification time */
     struct list       notify_list; /* list of notifications */
 };
@@ -396,6 +398,8 @@ static bool key_init( struct object *obj, const void *init_data )
 
     key->class       = NULL;
     key->flags       = 0;
+    key->wow64_flags = 0;
+    key->control_flags = 0;
     key->last_subkey = -1;
     key->nb_subkeys  = 0;
     key->subkeys     = NULL;
@@ -874,6 +878,12 @@ static void enum_key( struct key *key, int index, int info_class, struct enum_ke
 
     switch(info_class)
     {
+    case KeyFlagsInformation:
+        reply->wow64_flags = key->wow64_flags;
+        reply->key_flags = (key->flags & KEY_VOLATILE ? 1 : 0) |
+                           (key->flags & KEY_SYMLINK ? 2 : 0);
+        reply->control_flags = key->control_flags;
+        return;
     case KeyNameInformation:
         if (!(fullname = key_get_full_name( &key->obj, ~0u, &namelen ))) return;
         /* fall through */
@@ -2220,11 +2230,42 @@ DECL_HANDLER(enum_key)
 {
     struct key *key;
 
-    if ((key = get_hkey_obj( req->hkey, req->index == -1 ? 0 : KEY_ENUMERATE_SUB_KEYS )))
+    unsigned int access = req->index == -1 ? 0 : KEY_ENUMERATE_SUB_KEYS;
+
+    if (req->info_class == KeyFlagsInformation)
+    {
+        if (req->index != -1)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
+        access = KEY_QUERY_VALUE;
+    }
+    if ((key = get_hkey_obj( req->hkey, access )))
     {
         enum_key( key, req->index, req->info_class, reply );
         release_object( key );
     }
+}
+
+/* Set key-owned WOW64 and control information. */
+DECL_HANDLER(set_key_flags)
+{
+    struct key *key;
+
+    if (req->info_class != 1 && req->info_class != 2)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(key = get_hkey_obj( req->hkey, KEY_SET_VALUE ))) return;
+    if (req->info_class == 1)
+    {
+        if (req->flags & ~0x0f) set_error( STATUS_INVALID_PARAMETER );
+        else key->wow64_flags = req->flags;
+    }
+    else key->control_flags = req->flags & 0x0f;
+    release_object( key );
 }
 
 /* set a value of a registry key */

@@ -2693,8 +2693,26 @@ struct enum_key_reply
     timeout_t    modif;
     data_size_t  total;
     data_size_t  namelen;
+    unsigned int wow64_flags;
+    unsigned int key_flags;
+    unsigned int control_flags;
     /* VARARG(name,unicode_str,namelen); */
     /* VARARG(class,unicode_str); */
+    char __pad_60[4];
+};
+
+
+
+struct set_key_flags_request
+{
+    struct request_header __header;
+    obj_handle_t hkey;
+    int          info_class;
+    unsigned int flags;
+};
+struct set_key_flags_reply
+{
+    struct reply_header __header;
 };
 
 
@@ -6557,6 +6575,7 @@ enum request
     REQ_delete_key,
     REQ_flush_key,
     REQ_enum_key,
+    REQ_set_key_flags,
     REQ_set_key_value,
     REQ_get_key_value,
     REQ_enum_key_value,
@@ -6883,6 +6902,7 @@ union generic_request
     struct delete_key_request delete_key_request;
     struct flush_key_request flush_key_request;
     struct enum_key_request enum_key_request;
+    struct set_key_flags_request set_key_flags_request;
     struct set_key_value_request set_key_value_request;
     struct get_key_value_request get_key_value_request;
     struct enum_key_value_request enum_key_value_request;
@@ -7207,6 +7227,7 @@ union generic_reply
     struct delete_key_reply delete_key_reply;
     struct flush_key_reply flush_key_reply;
     struct enum_key_reply enum_key_reply;
+    struct set_key_flags_reply set_key_flags_reply;
     struct set_key_value_reply set_key_value_reply;
     struct get_key_value_reply get_key_value_reply;
     struct enum_key_value_reply enum_key_value_reply;
@@ -7437,6 +7458,6 @@ union generic_reply
     struct get_process_protection_reply get_process_protection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 975
+#define SERVER_PROTOCOL_VERSION 976
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

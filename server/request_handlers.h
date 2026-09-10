@@ -98,6 +98,7 @@ DECL_HANDLER(open_key);
 DECL_HANDLER(delete_key);
 DECL_HANDLER(flush_key);
 DECL_HANDLER(enum_key);
+DECL_HANDLER(set_key_flags);
 DECL_HANDLER(set_key_value);
 DECL_HANDLER(get_key_value);
 DECL_HANDLER(enum_key_value);
@@ -421,6 +422,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_delete_key,
     (req_handler)req_flush_key,
     (req_handler)req_enum_key,
+    (req_handler)req_set_key_flags,
     (req_handler)req_set_key_value,
     (req_handler)req_get_key_value,
     (req_handler)req_enum_key_value,
@@ -1258,7 +1260,14 @@ C_ASSERT( offsetof(struct enum_key_reply, max_data) == 28 );
 C_ASSERT( offsetof(struct enum_key_reply, modif) == 32 );
 C_ASSERT( offsetof(struct enum_key_reply, total) == 40 );
 C_ASSERT( offsetof(struct enum_key_reply, namelen) == 44 );
-C_ASSERT( sizeof(struct enum_key_reply) == 48 );
+C_ASSERT( offsetof(struct enum_key_reply, wow64_flags) == 48 );
+C_ASSERT( offsetof(struct enum_key_reply, key_flags) == 52 );
+C_ASSERT( offsetof(struct enum_key_reply, control_flags) == 56 );
+C_ASSERT( sizeof(struct enum_key_reply) == 64 );
+C_ASSERT( offsetof(struct set_key_flags_request, hkey) == 12 );
+C_ASSERT( offsetof(struct set_key_flags_request, info_class) == 16 );
+C_ASSERT( offsetof(struct set_key_flags_request, flags) == 20 );
+C_ASSERT( sizeof(struct set_key_flags_request) == 24 );
 C_ASSERT( offsetof(struct set_key_value_request, hkey) == 12 );
 C_ASSERT( offsetof(struct set_key_value_request, type) == 16 );
 C_ASSERT( offsetof(struct set_key_value_request, namelen) == 20 );

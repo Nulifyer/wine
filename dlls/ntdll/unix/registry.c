@@ -267,6 +267,10 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
     case KeyNodeInformation:   data_ptr = ((KEY_NODE_INFORMATION *)info)->Name;  break;
     case KeyNameInformation:   data_ptr = ((KEY_NAME_INFORMATION *)info)->Name;  break;
     case KeyCachedInformation: data_ptr = ((KEY_CACHED_INFORMATION *)info)+1;    break;
+    case KeyFlagsInformation:
+        if (index != -1) return STATUS_INVALID_PARAMETER;
+        data_ptr = ((KEY_FLAGS_INFORMATION *)info) + 1;
+        break;
     default:
         FIXME( "Information class %d not implemented\n", info_class );
         return STATUS_INVALID_PARAMETER;
@@ -338,6 +342,16 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
                 break;
             }
 
+            case KeyFlagsInformation:
+            {
+                KEY_FLAGS_INFORMATION keyinfo;
+                keyinfo.Wow64Flags = reply->wow64_flags;
+                keyinfo.KeyFlags = reply->key_flags;
+                keyinfo.ControlFlags = reply->control_flags;
+                if (length >= sizeof(keyinfo)) memcpy( info, &keyinfo, sizeof(keyinfo) );
+                break;
+            }
+
             case KeyCachedInformation:
             {
                 KEY_CACHED_INFORMATION keyinfo;
@@ -393,8 +407,23 @@ NTSTATUS WINAPI NtQueryKey( HANDLE handle, KEY_INFORMATION_CLASS info_class,
  */
 NTSTATUS WINAPI NtSetInformationKey( HANDLE key, int class, void *info, ULONG length )
 {
-    FIXME( "(%p,0x%08x,%p,0x%08x) stub\n", key, class, info, length );
-    return STATUS_SUCCESS;
+    unsigned int ret;
+
+    if (class != 1 && class != 2)
+    {
+        FIXME( "(%p,0x%08x,%p,0x%08x) stub\n", key, class, info, length );
+        return STATUS_SUCCESS;
+    }
+    if (length != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+    SERVER_START_REQ( set_key_flags )
+    {
+        req->hkey = wine_server_obj_handle( key );
+        req->info_class = class;
+        req->flags = *(ULONG *)info;
+        ret = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return ret;
 }
 
 

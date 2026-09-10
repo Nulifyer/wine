@@ -2145,8 +2145,19 @@ struct process_info
     timeout_t    modif;        /* last modification time */
     data_size_t  total;        /* total length needed for full name and class */
     data_size_t  namelen;      /* length of key name in bytes */
+    unsigned int wow64_flags;  /* key WOW64 information */
+    unsigned int key_flags;    /* volatile and symbolic-link flags */
+    unsigned int control_flags; /* key control information */
     VARARG(name,unicode_str,namelen);  /* key name */
     VARARG(class,unicode_str);         /* class name */
+@END
+
+
+/* Set key-owned WOW64 or control information */
+@REQ(set_key_flags)
+    obj_handle_t hkey;         /* handle to registry key */
+    int          info_class;   /* KeyWow64FlagsInformation or KeyControlFlagsInformation */
+    unsigned int flags;        /* requested flags */
 @END
 
 
