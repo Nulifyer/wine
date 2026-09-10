@@ -69,6 +69,7 @@ WOW_PEB *wow_peb = NULL;
 USHORT *uctable = NULL, *lctable = NULL;
 SIZE_T startup_info_size = 0;
 BOOL is_prefix_bootstrap = FALSE;
+BOOL is_native_machine = FALSE;
 
 static const WCHAR bootstrapW[] = {'W','I','N','E','B','O','O','T','S','T','R','A','P','M','O','D','E'};
 
@@ -1906,7 +1907,8 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     set_env_var( &env, &env_pos, &env_size, bootstrapW, ARRAY_SIZE(bootstrapW), valueW );
     is_prefix_bootstrap = TRUE;
     env[env_pos] = 0;
-    run_wineboot( env, env_pos );
+    if (is_native_machine) virtual_init_user_shared_data();
+    else run_wineboot( env, env_pos );
 
     /* reload environment now that wineboot has run */
     set_env_var( &env, &env_pos, &env_size, pathW, 4, path );  /* reset PATH */

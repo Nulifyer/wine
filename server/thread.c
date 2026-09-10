@@ -1741,6 +1741,11 @@ DECL_HANDLER(init_first_thread)
     process->page_size = req->page_size;
     if (!init_thread( current, req->reply_fd, req->wait_fd )) return;
 
+    if (process->native_bootstrap_pid && process->native_bootstrap_pid != req->unix_pid)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
     current->unix_pid = process->unix_pid = req->unix_pid;
     current->unix_tid = req->unix_tid;
 
@@ -1758,6 +1763,7 @@ DECL_HANDLER(init_first_thread)
     reply->session_id   = process->session_id;
     reply->info_size    = get_process_startup_info_size( process );
     reply->server_start = server_start_time;
+    reply->native_machine = is_native_machine();
     set_reply_data( supported_machines,
                     min( supported_machines_count * sizeof(unsigned short), get_reply_max_size() ));
 

@@ -32,6 +32,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <poll.h>
 #ifdef HAVE_SYS_PARAM_H
@@ -612,6 +613,9 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->sigkill_delay   = TICKS_PER_SEC / 64;
     process->machine         = native_machine;
     process->page_size       = get_page_size();
+    process->native_bootstrap_pid = 0;
+    process->native_bootstrap_image = -1;
+    process->native_bootstrap_mapped = 0;
     process->unix_pid        = -1;
     process->exit_code       = STILL_ACTIVE;
     process->running_threads = 0;
@@ -705,6 +709,48 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     return NULL;
 }
 
+static int native_machine_mode;
+
+int is_native_machine(void)
+{
+    return native_machine_mode;
+}
+
+/* The host supplies a private channel and an immutable image before any PE runs. */
+int init_native_bootstrap( int socket, int image, int pid )
+{
+    struct process *process;
+    struct thread *thread;
+
+    if (!(process = create_process( socket, NULL, 0, NULL, NULL, NULL, 0, NULL )))
+    {
+        close( image );
+        return 0;
+    }
+    native_machine_mode = 1;
+    process->native_bootstrap_pid = pid;
+    process->native_bootstrap_image = image;
+    thread = create_thread( -1, process, NULL );
+    if (thread) add_process_thread( process, thread );
+    release_object( process );
+    return !!thread;
+}
+
+int validate_native_bootstrap_image( struct process *process, int fd )
+{
+    struct stat expected, actual;
+
+    if (!process->native_bootstrap_pid || is_process_init_done( process )) return 1;
+    if (fd == -1 || fstat( process->native_bootstrap_image, &expected ) == -1 ||
+        fstat( fd, &actual ) == -1 || expected.st_dev != actual.st_dev ||
+        expected.st_ino != actual.st_ino)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return 0;
+    }
+    return 1;
+}
+
 /* get the process data size */
 data_size_t get_process_startup_info_size( struct process *process )
 {
@@ -726,6 +772,7 @@ static void process_destroy( struct object *obj )
 
     assert( !process->sigkill_timeout );  /* timeout should hold a reference to the process */
 
+    if (process->native_bootstrap_image != -1) close( process->native_bootstrap_image );
     close_process_handles( process );
     set_process_startup_state( process, STARTUP_ABORTED );
 
@@ -1430,6 +1477,11 @@ DECL_HANDLER(init_process_done)
         return;
     }
 
+    if (process->native_bootstrap_pid && !process->native_bootstrap_mapped)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
     current->teb = req->teb;
     process->peb = req->peb;
 

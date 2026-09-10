@@ -51,6 +51,9 @@ struct process
     timeout_t            sigkill_delay;   /* delay before final SIGKILL */
     unsigned short       machine;         /* client machine type */
     unsigned int         page_size;       /* client page size */
+    int                  native_bootstrap_pid; /* host-reserved initial process, or zero */
+    int                  native_bootstrap_image; /* retained sealed image fd, or -1 */
+    int                  native_bootstrap_mapped; /* expected main image was mapped */
     int                  unix_pid;        /* Unix pid for final SIGKILL */
     int                  exit_code;       /* process exit code */
     int                  running_threads; /* number of threads running in this process */
@@ -99,6 +102,9 @@ struct process
 extern unsigned int alloc_ptid( void *ptr );
 extern void free_ptid( unsigned int id );
 extern void *get_ptid_entry( unsigned int id );
+extern int is_native_machine(void);
+extern int init_native_bootstrap( int socket, int image, int pid );
+extern int validate_native_bootstrap_image( struct process *process, int fd );
 extern struct process *create_process( int fd, struct process *parent, unsigned int flags,
                                        const struct startup_info_data *info,
                                        const struct security_descriptor *sd, const obj_handle_t *handles,

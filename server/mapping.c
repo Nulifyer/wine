@@ -1665,6 +1665,9 @@ DECL_HANDLER(map_image_view)
         goto done;
     }
 
+    if (!(mapping->image.image_charact & IMAGE_FILE_DLL) &&
+        !validate_native_bootstrap_image( current->process, get_unix_fd( mapping->fd ))) goto done;
+
     if ((view = mem_alloc( sizeof(*view) )))
     {
         view->base      = req->base;
@@ -1678,6 +1681,7 @@ DECL_HANDLER(map_image_view)
         view->image     = mapping->image;
         if (add_process_view( current, view ))
         {
+            if (current->process->native_bootstrap_pid) current->process->native_bootstrap_mapped = 1;
             current->entry_point = view->base + req->entry;
             if (view->image.image_flags & IMAGE_FLAGS_ComPlusNativeReady)
                 current->process->machine = is_machine_64bit( native_machine )
@@ -1714,6 +1718,9 @@ DECL_HANDLER(map_builtin_view)
         set_error( STATUS_INVALID_PARAMETER );
         return;
     }
+
+    if (!(image->image_charact & IMAGE_FILE_DLL) &&
+        !validate_native_bootstrap_image( current->process, -1 )) return;
 
     if ((view = mem_alloc( sizeof(struct memory_view) + namelen )))
     {

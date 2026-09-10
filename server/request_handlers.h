@@ -757,6 +757,7 @@ C_ASSERT( offsetof(struct init_first_thread_reply, server_start) == 16 );
 C_ASSERT( offsetof(struct init_first_thread_reply, session_id) == 24 );
 C_ASSERT( offsetof(struct init_first_thread_reply, inproc_device) == 28 );
 C_ASSERT( offsetof(struct init_first_thread_reply, info_size) == 32 );
+C_ASSERT( offsetof(struct init_first_thread_reply, native_machine) == 36 );
 C_ASSERT( sizeof(struct init_first_thread_reply) == 40 );
 C_ASSERT( offsetof(struct init_thread_request, unix_tid) == 12 );
 C_ASSERT( offsetof(struct init_thread_request, reply_fd) == 16 );

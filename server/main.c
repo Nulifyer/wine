@@ -27,6 +27,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #ifdef HAVE_SYS_RESOURCE_H
 # include <sys/resource.h>
@@ -38,6 +40,7 @@
 #include "object.h"
 #include "file.h"
 #include "thread.h"
+#include "process.h"
 #include "request.h"
 #include "unicode.h"
 
@@ -46,6 +49,38 @@ int debug_level = 0;
 int foreground = 0;
 timeout_t master_socket_timeout = 3 * -TICKS_PER_SEC;  /* master socket timeout, default is 3 seconds */
 const char *server_argv0;
+static int bootstrap_socket = -1, bootstrap_image = -1, bootstrap_pid;
+
+static void parse_native_bootstrap( const char *arg )
+{
+#ifdef __linux__
+    char extra;
+    int type, seals;
+    socklen_t len = sizeof(type);
+    struct stat st;
+    struct sockaddr_storage address;
+    socklen_t address_len = sizeof(address);
+
+    if (bootstrap_socket != -1 ||
+        sscanf( arg, "%d,%d,%d%c", &bootstrap_socket, &bootstrap_image, &bootstrap_pid, &extra ) != 3 ||
+        bootstrap_socket < 3 || bootstrap_image < 3 || bootstrap_socket == bootstrap_image || bootstrap_pid <= 0 ||
+        getsockopt( bootstrap_socket, SOL_SOCKET, SO_TYPE, &type, &len ) || type != SOCK_STREAM ||
+        getpeername( bootstrap_socket, (struct sockaddr *)&address, &address_len ) || address.ss_family != AF_UNIX ||
+        fstat( bootstrap_image, &st ) || !S_ISREG(st.st_mode) ||
+        (seals = fcntl( bootstrap_image, F_GET_SEALS )) == -1 ||
+        (seals & (F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)) !=
+                 (F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL))
+        fatal_error( "invalid native bootstrap descriptors\n" );
+    foreground = 1;
+    if (fcntl( bootstrap_socket, F_SETFD, FD_CLOEXEC ) == -1 ||
+        fcntl( bootstrap_socket, F_SETFL, O_NONBLOCK ) == -1 ||
+        fcntl( bootstrap_image, F_SETFD, FD_CLOEXEC ) == -1)
+        fatal_error( "could not configure native bootstrap descriptors\n" );
+#else
+    fatal_error( "native bootstrap requires Linux sealed files\n" );
+#endif
+}
+
 
 /* parse-line args */
 
@@ -53,6 +88,7 @@ static void usage( FILE *fh )
 {
     fprintf(fh, "Usage: %s [options]\n\n", server_argv0);
     fprintf(fh, "Options:\n");
+    fprintf(fh, "         --native-bootstrap=SOCKET,IMAGE,PID  reserve a host-provided initial process\n");
     fprintf(fh, "   -d[n], --debug[=n]       set debug level to n or +1 if n not specified\n");
     fprintf(fh, "   -f,    --foreground      remain in the foreground for debugging\n");
     fprintf(fh, "   -h,    --help            display this help message\n");
@@ -94,6 +130,9 @@ static void option_callback( int optc, char *optarg )
         else
             master_socket_timeout = TIMEOUT_INFINITE;
         break;
+    case 'B':
+        parse_native_bootstrap( optarg );
+        break;
     case 'v':
         fprintf( stderr, "%s\n", PACKAGE_STRING );
         exit(0);
@@ -113,6 +152,7 @@ static struct long_option
     int val;
 } long_options[] =
 {
+    {"native-bootstrap", 1, 'B'},
     {"debug",       2, 'd'},
     {"foreground",  0, 'f'},
     {"help",        0, 'h'},
@@ -266,6 +306,8 @@ int main( int argc, char *argv[] )
     init_directories( load_intl_file() );
     init_threading();
     init_registry();
+    if (bootstrap_socket != -1 && !init_native_bootstrap( bootstrap_socket, bootstrap_image, bootstrap_pid ))
+        fatal_error( "could not reserve native bootstrap process\n" );
     main_loop();
     return 0;
 }

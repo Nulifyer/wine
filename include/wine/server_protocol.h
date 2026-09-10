@@ -1227,8 +1227,8 @@ struct init_first_thread_reply
     unsigned int session_id;
     obj_handle_t inproc_device;
     data_size_t  info_size;
+    int          native_machine;
     /* VARARG(machines,ushorts); */
-    char __pad_36[4];
 };
 
 
@@ -7416,6 +7416,6 @@ union generic_reply
     struct get_process_critical_state_reply get_process_critical_state_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 972
+#define SERVER_PROTOCOL_VERSION 973
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

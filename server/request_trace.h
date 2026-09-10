@@ -156,6 +156,7 @@ static void dump_init_first_thread_reply( const struct init_first_thread_reply *
     fprintf( stderr, ", session_id=%08x", req->session_id );
     fprintf( stderr, ", inproc_device=%04x", req->inproc_device );
     fprintf( stderr, ", info_size=%u", req->info_size );
+    fprintf( stderr, ", native_machine=%d", req->native_machine );
     dump_varargs_ushorts( ", machines=", cur_size );
 }
 

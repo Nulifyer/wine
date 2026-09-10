@@ -1205,6 +1205,7 @@ typedef volatile struct
     unsigned int session_id;   /* process session id */
     obj_handle_t inproc_device;/* inproc device fd in flight with this handle */
     data_size_t  info_size;    /* total size of startup info */
+    int          native_machine; /* host owns boot; do not start wineboot */
     VARARG(machines,ushorts);  /* array of supported machines */
 @END
 
