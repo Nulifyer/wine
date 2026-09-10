@@ -602,7 +602,7 @@
 @ stdcall RtlCreateServiceSid(ptr ptr ptr)
 @ stdcall RtlCreateSecurityDescriptor(ptr long)
 # @ stub RtlCreateSystemVolumeInformationFolder
-@ stub RtlCreateTagHeap
+@ stdcall RtlCreateTagHeap(ptr long ptr ptr)
 @ stdcall RtlCreateTimer(ptr ptr ptr ptr long long long)
 @ stdcall RtlCreateTimerQueue(ptr)
 @ stdcall RtlCreateUnicodeString(ptr wstr)

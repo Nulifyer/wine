@@ -2757,3 +2757,17 @@ BOOLEAN WINAPI RtlSetUserFlagsHeap( HANDLE handle, ULONG flags, void *ptr, ULONG
 
     return ret;
 }
+
+/***********************************************************************
+ *           RtlCreateTagHeap   (NTDLL.@)
+ */
+ULONG WINAPI RtlCreateTagHeap( HANDLE heap, ULONG flags, const WCHAR *prefix, const WCHAR *names )
+{
+    TRACE( "%p, %#lx, %p, %p\n", heap, flags, prefix, names );
+
+    /* Disabled instrumentation produces no tag identifier. Allocation tag
+     * bits remain accepted by the heap allocator. */
+    if (NtCurrentTeb()->Peb->NtGlobalFlag & (FLG_HEAP_ENABLE_TAGGING | FLG_HEAP_ENABLE_TAG_BY_DLL))
+        FIXME( "Enabled heap tagging is not implemented\n" );
+    return 0;
+}
