@@ -638,18 +638,23 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         break;
 
     case TokenIntegrityLevel:
+        SERVER_START_REQ( get_token_sid )
         {
-            /* report always "S-1-16-12288" (high mandatory level) for now */
-            static const SID high_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
-                                                            {SECURITY_MANDATORY_HIGH_RID}};
+            TOKEN_MANDATORY_LABEL *label = info;
+            PSID sid = label + 1;
 
-            TOKEN_MANDATORY_LABEL *tml = info;
-            PSID psid = tml + 1;
-
-            tml->Label.Sid = psid;
-            tml->Label.Attributes = SE_GROUP_INTEGRITY | SE_GROUP_INTEGRITY_ENABLED;
-            memcpy( psid, &high_level, sizeof(SID) );
+            req->handle = wine_server_obj_handle( token );
+            req->which_sid = class;
+            wine_server_set_reply( req, sid, length - sizeof(*label) );
+            status = wine_server_call( req );
+            if (retlen) *retlen = sizeof(*label) + reply->sid_len;
+            if (!status)
+            {
+                label->Label.Sid = sid;
+                label->Label.Attributes = SE_GROUP_INTEGRITY | SE_GROUP_INTEGRITY_ENABLED;
+            }
         }
+        SERVER_END_REQ;
         break;
 
     case TokenUIAccess:

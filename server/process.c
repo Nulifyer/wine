@@ -727,6 +727,18 @@ int init_native_bootstrap( int socket, int image, int pid )
         close( image );
         return 0;
     }
+    {
+        struct token *token = token_create_native_system();
+        if (!token)
+        {
+            close( image );
+            release_object( process );
+            return 0;
+        }
+        release_object( process->token );
+        process->token = token;
+        process->session_id = token_get_session_id( token );
+    }
     native_machine_mode = 1;
     process->native_bootstrap_pid = pid;
     process->native_bootstrap_image = image;

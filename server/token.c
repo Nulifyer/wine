@@ -601,8 +601,10 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
         return NULL;
     }
 
+    /* Owner and primary group may independently refer to the user or a group. */
+    token->owner = src_token->owner == src_token->user ? token->user : NULL;
+    token->primary_group = src_token->primary_group == src_token->user ? token->user : NULL;
     /* copy groups */
-    token->primary_group = NULL;
     LIST_FOR_EACH_ENTRY( group, &src_token->groups, struct group, entry )
     {
         size_t size = offsetof( struct group, sid.sub_auth[group->sid.sub_count] );
@@ -619,11 +621,8 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
             newgroup->attrs |= SE_GROUP_USE_FOR_DENY_ONLY;
         }
         list_add_tail( &token->groups, &newgroup->entry );
-        if (src_token->primary_group == &group->sid)
-        {
-            token->owner = &newgroup->sid;
-            token->primary_group = &newgroup->sid;
-        }
+        if (src_token->owner == &group->sid) token->owner = &newgroup->sid;
+        if (src_token->primary_group == &group->sid) token->primary_group = &newgroup->sid;
     }
     assert( token->primary_group );
 
@@ -822,6 +821,49 @@ struct token *token_create_admin( unsigned primary, int impersonation_level, int
     }
 
     free( default_dacl );
+    return token;
+}
+
+/* Host bootstrap policy: native identity with explicit enabled privileges.
+ * Process trust remains absent until protected admission is implemented. */
+struct token *token_create_native_system(void)
+{
+    static const struct sid system_label = { SID_REVISION, 1, SECURITY_MANDATORY_LABEL_AUTHORITY,
+                                            { SECURITY_MANDATORY_SYSTEM_RID } };
+    static const struct sid_attrs groups[] =
+    {
+        { &builtin_admins_sid, SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_OWNER },
+        { &world_sid, SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY },
+        { &authenticated_user_sid, SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY },
+        { &system_label, SE_GROUP_INTEGRITY | SE_GROUP_INTEGRITY_ENABLED },
+    };
+    /* Availability is taken from the live reference System token, not its
+     * post-boot enabled/default attributes. */
+    static const unsigned int privilege_ids[] =
+        { 2,3,4,5,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,25,28,29,30,31,32,33,34,35,36 };
+    struct luid_attr privileges[ARRAY_SIZE(privilege_ids)];
+    struct acl *dacl = create_default_dacl( &local_system_sid );
+    struct token *token;
+    unsigned int i;
+
+    if (!dacl) return NULL;
+    for (i = 0; i < ARRAY_SIZE(privilege_ids); i++)
+    {
+        privileges[i].luid.low_part = privilege_ids[i];
+        privileges[i].luid.high_part = 0;
+        privileges[i].attrs = (privilege_ids[i] == 7 || privilege_ids[i] == 16 ||
+                               privilege_ids[i] == 20) ? SE_PRIVILEGE_ENABLED : 0;
+    }
+    token = create_token( TRUE, 0, &local_system_sid, groups, ARRAY_SIZE(groups),
+                          privileges, ARRAY_SIZE(privileges), dacl, NULL, 0, -1, TokenElevationTypeDefault );
+    free( dacl );
+    if (!token) return NULL;
+    token->primary_group = token->user;
+    if (!token_assign_label( token, &system_label ))
+    {
+        release_object( token );
+        return NULL;
+    }
     return token;
 }
 
@@ -1504,6 +1546,25 @@ DECL_HANDLER(get_token_sid)
         case TokenProcessTrustLevel:
             sid = token->trust_level;
             break;
+        case TokenIntegrityLevel:
+        {
+            const struct acl *sacl;
+            const struct ace *ace;
+            unsigned int i;
+            int present;
+
+            sid = &high_label_sid; /* preserve the existing default for unlabelled tokens */
+            if (!token->obj.sd) break;
+            sacl = sd_get_sacl( token->obj.sd, &present );
+            if (!present || !sacl) break;
+            for (i = 0, ace = ace_first( sacl ); i < sacl->count; i++, ace = ace_next( ace ))
+                if (ace->type == SYSTEM_MANDATORY_LABEL_ACE_TYPE)
+                {
+                    sid = (const struct sid *)(ace + 1);
+                    break;
+                }
+            break;
+        }
         default:
             set_error( STATUS_INVALID_PARAMETER );
             break;
