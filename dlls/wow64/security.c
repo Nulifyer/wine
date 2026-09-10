@@ -439,6 +439,25 @@ NTSTATUS WINAPI wow64_NtQueryInformationToken( UINT *args )
         /* nothing to map */
         return NtQueryInformationToken( handle, class, info, len, retlen );
 
+    case TokenProcessTrustLevel: /* optional SID pointer followed by SID */
+    {
+        ULONG_PTR buffer[(sizeof(PSID) + SECURITY_MAX_SID_SIZE) / sizeof(ULONG_PTR)];
+        PSID *trust = (PSID *)buffer;
+        ULONG *trust32 = info;
+
+        ret_size = 0;
+        status = NtQueryInformationToken( handle, class, buffer, sizeof(buffer), &ret_size );
+        /* Native WoW64 translates even an untouched zero return length on error. */
+        ret_size = ret_size - sizeof(PSID) + sizeof(*trust32);
+        if (retlen) *retlen = ret_size;
+        if (status) return status;
+        if (len < ret_size) return STATUS_BUFFER_TOO_SMALL;
+        sid_len = ret_size - sizeof(*trust32);
+        *trust32 = sid_len ? PtrToUlong( trust32 + 1 ) : 0;
+        if (sid_len) memcpy( trust32 + 1, *trust, sid_len );
+        return STATUS_SUCCESS;
+    }
+
     case TokenUser:  /* TOKEN_USER + SID */
     case TokenIntegrityLevel:  /* TOKEN_MANDATORY_LABEL + SID */
     {

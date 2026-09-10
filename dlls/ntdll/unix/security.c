@@ -374,6 +374,32 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
 
     TRACE( "(%p,%s,%p,%d,%p)\n", token, debugstr_TokenInformationClass(class), info, length, retlen );
 
+    if (class == TokenProcessTrustLevel)
+    {
+        BYTE sid[SECURITY_MAX_SID_SIZE];
+        ULONG sid_size = 0;
+
+        if (!retlen) return STATUS_ACCESS_VIOLATION;
+
+        /* Resolve and authorize the token before reporting buffer requirements. */
+        SERVER_START_REQ( get_token_sid )
+        {
+            req->handle = wine_server_obj_handle( token );
+            req->which_sid = class;
+            wine_server_set_reply( req, sid, sizeof(sid) );
+            status = wine_server_call( req );
+            sid_size = reply->sid_len;
+        }
+        SERVER_END_REQ;
+        if (status) return status;
+        len = sizeof(PSID) + sid_size;
+        if (retlen) *retlen = len;
+        if (length < len) return STATUS_BUFFER_TOO_SMALL;
+        *(PSID *)info = sid_size ? (PSID *)info + 1 : NULL;
+        if (sid_size) memcpy( (PSID *)info + 1, sid, sid_size );
+        return STATUS_SUCCESS;
+    }
+
     if (class < MaxTokenInfoClass) len = info_len[class];
     if (retlen) *retlen = len;
     if (length < len) return STATUS_BUFFER_TOO_SMALL;

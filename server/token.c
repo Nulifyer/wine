@@ -107,6 +107,7 @@ struct token
     struct list    privileges;      /* privileges available to the token */
     struct list    groups;          /* groups that the user of this token belongs to (sid_and_attributes) */
     struct sid    *user;            /* SID of user this token represents */
+    struct sid    *trust_level;     /* optional process-trust SID; owned by this token */
     struct sid    *owner;           /* SID of owner (points to user or one of groups) */
     struct sid    *primary_group;   /* SID of user's primary group (points to one of groups) */
     unsigned int   primary;         /* is this a primary or impersonation token? */
@@ -433,6 +434,7 @@ static void token_destroy( struct object *obj )
     token = (struct token *)obj;
 
     free( token->user );
+    free( token->trust_level );
 
     LIST_FOR_EACH_SAFE( cursor, cursor_next, &token->privileges )
     {
@@ -484,6 +486,7 @@ static struct token *create_token( unsigned int primary, unsigned int session_id
             token->impersonation_level = -1;
         else
             token->impersonation_level = impersonation_level;
+        token->trust_level = NULL;
         token->default_dacl = NULL;
         token->primary_group = NULL;
         token->elevation = elevation;
@@ -591,6 +594,12 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
                           NULL, 0, src_token->default_dacl, modified_id,
                           0, impersonation_level, src_token->elevation );
     if (!token) return token;
+    if (src_token->trust_level && !(token->trust_level = memdup( src_token->trust_level,
+                                                              sid_len( src_token->trust_level ))))
+    {
+        release_object( token );
+        return NULL;
+    }
 
     /* copy groups */
     token->primary_group = NULL;
@@ -1491,6 +1500,9 @@ DECL_HANDLER(get_token_sid)
             break;
         case TokenOwner:
             sid = token->owner;
+            break;
+        case TokenProcessTrustLevel:
+            sid = token->trust_level;
             break;
         default:
             set_error( STATUS_INVALID_PARAMETER );
