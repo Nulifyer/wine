@@ -278,20 +278,9 @@ struct completion *get_completion_obj( struct process *process, obj_handle_t han
     return (struct completion *) get_handle_obj( process, handle, access, &completion_ops );
 }
 
-void add_completion( struct completion *completion, apc_param_t ckey, apc_param_t cvalue,
-                     unsigned int status, apc_param_t information, struct completion_packet *packet )
+static void queue_completion( struct completion *completion, struct comp_msg *msg )
 {
-    struct comp_msg *msg = mem_alloc( sizeof( *msg ) );
     struct completion_wait *wait;
-
-    if (!msg)
-        return;
-
-    msg->packet = packet;
-    msg->ckey = ckey;
-    msg->cvalue = cvalue;
-    msg->status = status;
-    msg->information = information;
 
     list_add_tail( &completion->queue, &msg->queue_entry );
     completion->depth++;
@@ -301,6 +290,50 @@ void add_completion( struct completion *completion, apc_param_t ckey, apc_param_
         if (list_empty( &completion->queue )) return;
     }
     if (!list_empty( &completion->queue )) signal_sync( completion->sync );
+}
+
+void add_completion( struct completion *completion, apc_param_t ckey, apc_param_t cvalue,
+                     unsigned int status, apc_param_t information, struct completion_packet *packet )
+{
+    struct comp_msg *msg = mem_alloc( sizeof(*msg) );
+    if (!msg) return;
+    msg->packet = packet;
+    msg->ckey = ckey;
+    msg->cvalue = cvalue;
+    msg->status = status;
+    msg->information = information;
+    queue_completion( completion, msg );
+}
+
+/* Publish preexisting notifications only after all queue entries are allocated. */
+int add_completion_notifications( struct completion *completion, apc_param_t key, unsigned int count )
+{
+    struct list pending = LIST_INIT(pending);
+    struct comp_msg *msg, *next;
+    unsigned int i;
+
+    for (i = 0; i < count; ++i)
+    {
+        if (!(msg = mem_alloc( sizeof(*msg) )))
+        {
+            LIST_FOR_EACH_ENTRY_SAFE( msg, next, &pending, struct comp_msg, queue_entry )
+            {
+                list_remove( &msg->queue_entry );
+                free( msg );
+            }
+            return 0;
+        }
+        msg->packet = NULL;
+        msg->ckey = key;
+        msg->cvalue = msg->information = msg->status = 0;
+        list_add_tail( &pending, &msg->queue_entry );
+    }
+    LIST_FOR_EACH_ENTRY_SAFE( msg, next, &pending, struct comp_msg, queue_entry )
+    {
+        list_remove( &msg->queue_entry );
+        queue_completion( completion, msg );
+    }
+    return 1;
 }
 
 static const WCHAR completion_packet_name[] = {'W','a','i','t','C','o','m','p','l','e','t','i','o','n','P','a','c','k','e','t'};

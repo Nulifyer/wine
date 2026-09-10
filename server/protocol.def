@@ -4388,7 +4388,18 @@ enum inproc_sync_type
 @END
 
 
-/* Create a new ALPC object */
+/* Associate an ALPC port with an I/O completion queue */
+@REQ(alpc_set_completion)
+    obj_handle_t handle;       /* ALPC port */
+    obj_handle_t completion;   /* I/O completion port */
+    apc_param_t  key;          /* completion key */
+    unsigned int lease;        /* request private thread-pool registration lifetime */
+@REPLY
+    obj_handle_t lease;        /* private registration, closed at TP release */
+@END
+
+
+/* Create an ALPC port */
 @REQ(alpc_create_port)
     unsigned int        flags;          /* flags in port attributes */
     mem_size_t          max_msg_len;    /* max message length in port attributes */

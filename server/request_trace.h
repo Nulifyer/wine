@@ -3581,6 +3581,19 @@ static void dump_d3dkmt_mutex_release_request( const struct d3dkmt_mutex_release
     dump_varargs_bytes( ", runtime=", cur_size );
 }
 
+static void dump_alpc_set_completion_request( const struct alpc_set_completion_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", completion=%04x", req->completion );
+    dump_uint64( ", key=", &req->key );
+    fprintf( stderr, ", lease=%08x", req->lease );
+}
+
+static void dump_alpc_set_completion_reply( const struct alpc_set_completion_reply *req )
+{
+    fprintf( stderr, " lease=%04x", req->lease );
+}
+
 static void dump_alpc_create_port_request( const struct alpc_create_port_request *req )
 {
     fprintf( stderr, " flags=%08x", req->flags );
@@ -4016,6 +4029,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_object_open_name_request,
     (dump_func)dump_d3dkmt_mutex_acquire_request,
     (dump_func)dump_d3dkmt_mutex_release_request,
+    (dump_func)dump_alpc_set_completion_request,
     (dump_func)dump_alpc_create_port_request,
     (dump_func)dump_alpc_send_receive_request,
     (dump_func)dump_alpc_get_message_result_request,
@@ -4340,6 +4354,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_object_open_name_reply,
     (dump_func)dump_d3dkmt_mutex_acquire_reply,
     NULL,
+    (dump_func)dump_alpc_set_completion_reply,
     (dump_func)dump_alpc_create_port_reply,
     (dump_func)dump_alpc_send_receive_reply,
     (dump_func)dump_alpc_get_message_result_reply,
@@ -4664,6 +4679,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "d3dkmt_object_open_name",
     "d3dkmt_mutex_acquire",
     "d3dkmt_mutex_release",
+    "alpc_set_completion",
     "alpc_create_port",
     "alpc_send_receive",
     "alpc_get_message_result",
@@ -4808,6 +4824,7 @@ static const struct
     { "PIPE_EMPTY",                  STATUS_PIPE_EMPTY },
     { "PIPE_LISTENING",              STATUS_PIPE_LISTENING },
     { "PIPE_NOT_AVAILABLE",          STATUS_PIPE_NOT_AVAILABLE },
+    { "PORT_ALREADY_SET",            STATUS_PORT_ALREADY_SET },
     { "PORT_CLOSED",                 STATUS_PORT_CLOSED },
     { "PORT_CONNECTION_REFUSED",     STATUS_PORT_CONNECTION_REFUSED },
     { "PORT_DISCONNECTED",           STATUS_PORT_DISCONNECTED },

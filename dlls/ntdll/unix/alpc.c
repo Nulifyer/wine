@@ -322,3 +322,24 @@ NTSTATUS WINAPI NtAlpcImpersonateClientOfPort( HANDLE port_handle, ALPC_PORT_MES
     FIXME( "%p, %p, %p stub!\n", port_handle, msg, reserved );
     return STATUS_NOT_IMPLEMENTED;
 }
+
+NTSTATUS WINAPI NtAlpcSetInformation( HANDLE handle, ULONG class, void *info, ULONG length )
+{
+    const ALPC_PORT_ASSOCIATE_COMPLETION_PORT *association = info;
+    NTSTATUS status;
+
+    if (!handle) return STATUS_INVALID_PARAMETER;
+    if (class != 2) return STATUS_NOT_IMPLEMENTED;
+    if (length != sizeof(*association)) return STATUS_INFO_LENGTH_MISMATCH;
+    if (!association->CompletionPort) return STATUS_INVALID_PARAMETER;
+    SERVER_START_REQ( alpc_set_completion )
+    {
+        req->handle = wine_server_obj_handle( handle );
+        req->completion = wine_server_obj_handle( association->CompletionPort );
+        req->key = (ULONG_PTR)association->CompletionKey;
+        req->lease = 0;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}

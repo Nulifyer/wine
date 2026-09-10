@@ -160,6 +160,7 @@
 @ stdcall -syscall NtAlpcConnectPort(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtAlpcCreatePort(ptr ptr ptr)
 @ stdcall -syscall NtAlpcDisconnectPort(ptr long)
+@ stdcall -syscall NtAlpcSetInformation(ptr long ptr long)
 @ stdcall -syscall NtAlpcImpersonateClientOfPort(ptr ptr ptr)
 @ stdcall -syscall NtAlpcSendWaitReceivePort(ptr long ptr ptr ptr ptr ptr ptr)
 @ stub -syscall=0x004c NtApphelpCacheControl
@@ -1191,6 +1192,7 @@
 @ stdcall RtlxOemStringToUnicodeSize(ptr) RtlOemStringToUnicodeSize
 @ stdcall RtlxUnicodeStringToAnsiSize(ptr) RtlUnicodeStringToAnsiSize
 @ stdcall RtlxUnicodeStringToOemSize(ptr) RtlUnicodeStringToOemSize
+@ stdcall TpAllocAlpcCompletion(ptr ptr ptr ptr ptr)
 @ stdcall TpAllocCleanupGroup(ptr)
 @ stdcall TpAllocIoCompletion(ptr ptr ptr ptr ptr)
 @ stdcall TpAllocPool(ptr ptr)
@@ -1208,6 +1210,7 @@
 @ stdcall TpIsTimerSet(ptr)
 @ stdcall TpPostWork(ptr)
 @ stdcall TpQueryPoolStackInformation(ptr ptr)
+@ stdcall TpReleaseAlpcCompletion(ptr)
 @ stdcall TpReleaseCleanupGroup(ptr)
 @ stdcall TpReleaseCleanupGroupMembers(ptr long ptr)
 @ stdcall TpReleaseIoCompletion(ptr)
@@ -1223,6 +1226,7 @@
 @ stdcall TpSetWait(ptr long ptr)
 @ stdcall TpSimpleTryPost(ptr ptr ptr)
 @ stdcall TpStartAsyncIoOperation(ptr)
+@ stdcall TpWaitForAlpcCompletion(ptr)
 @ stdcall TpWaitForIoCompletion(ptr long)
 @ stdcall TpWaitForTimer(ptr long)
 @ stdcall TpWaitForWait(ptr long)
@@ -1261,6 +1265,7 @@
 @ stdcall -private ZwAlpcConnectPort(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr) NtAlpcConnectPort
 @ stdcall -private ZwAlpcCreatePort(ptr ptr ptr) NtAlpcCreatePort
 @ stdcall -private ZwAlpcDisconnectPort(ptr long) NtAlpcDisconnectPort
+@ stdcall -private ZwAlpcSetInformation(ptr long ptr long) NtAlpcSetInformation
 @ stdcall -private ZwAlpcImpersonateClientOfPort(ptr ptr ptr) NtAlpcImpersonateClientOfPort
 @ stdcall -private ZwAlpcSendWaitReceivePort(ptr long ptr ptr ptr ptr ptr ptr) NtAlpcSendWaitReceivePort
 @ stdcall -private ZwApphelpCacheControl() NtApphelpCacheControl

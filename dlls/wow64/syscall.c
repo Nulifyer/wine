@@ -573,6 +573,24 @@ NTSTATUS WINAPI wow64_NtAlpcCreatePort( UINT *args )
 }
 
 /**********************************************************************
+ *           wow64_NtAlpcSetInformation
+ */
+NTSTATUS WINAPI wow64_NtAlpcSetInformation( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    ULONG class = get_ulong( &args );
+    const ULONG *info = get_ptr( &args );
+    ULONG length = get_ulong( &args );
+    ALPC_PORT_ASSOCIATE_COMPLETION_PORT association;
+
+    if (class != 2) return STATUS_NOT_IMPLEMENTED;
+    if (length < 2 * sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+    association.CompletionKey = ULongToPtr( info[0] );
+    association.CompletionPort = LongToHandle( info[1] );
+    return NtAlpcSetInformation( handle, class, &association, sizeof(association) );
+}
+
+/**********************************************************************
  *           wow64_NtAlpcDisconnectPort
  */
 NTSTATUS WINAPI wow64_NtAlpcDisconnectPort( UINT *args )

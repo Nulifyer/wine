@@ -6314,6 +6314,25 @@ struct d3dkmt_mutex_release_reply
 
 
 
+struct alpc_set_completion_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    obj_handle_t completion;
+    char __pad_20[4];
+    apc_param_t  key;
+    unsigned int lease;
+    char __pad_36[4];
+};
+struct alpc_set_completion_reply
+{
+    struct reply_header __header;
+    obj_handle_t lease;
+    char __pad_12[4];
+};
+
+
+
 struct alpc_create_port_request
 {
     struct request_header __header;
@@ -6795,6 +6814,7 @@ enum request
     REQ_d3dkmt_object_open_name,
     REQ_d3dkmt_mutex_acquire,
     REQ_d3dkmt_mutex_release,
+    REQ_alpc_set_completion,
     REQ_alpc_create_port,
     REQ_alpc_send_receive,
     REQ_alpc_get_message_result,
@@ -7122,6 +7142,7 @@ union generic_request
     struct d3dkmt_object_open_name_request d3dkmt_object_open_name_request;
     struct d3dkmt_mutex_acquire_request d3dkmt_mutex_acquire_request;
     struct d3dkmt_mutex_release_request d3dkmt_mutex_release_request;
+    struct alpc_set_completion_request alpc_set_completion_request;
     struct alpc_create_port_request alpc_create_port_request;
     struct alpc_send_receive_request alpc_send_receive_request;
     struct alpc_get_message_result_request alpc_get_message_result_request;
@@ -7447,6 +7468,7 @@ union generic_reply
     struct d3dkmt_object_open_name_reply d3dkmt_object_open_name_reply;
     struct d3dkmt_mutex_acquire_reply d3dkmt_mutex_acquire_reply;
     struct d3dkmt_mutex_release_reply d3dkmt_mutex_release_reply;
+    struct alpc_set_completion_reply alpc_set_completion_reply;
     struct alpc_create_port_reply alpc_create_port_reply;
     struct alpc_send_receive_reply alpc_send_receive_reply;
     struct alpc_get_message_result_reply alpc_get_message_result_reply;
@@ -7458,6 +7480,6 @@ union generic_reply
     struct get_process_protection_reply get_process_protection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 976
+#define SERVER_PROTOCOL_VERSION 977
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

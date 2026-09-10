@@ -318,6 +318,7 @@ DECL_HANDLER(d3dkmt_share_objects);
 DECL_HANDLER(d3dkmt_object_open_name);
 DECL_HANDLER(d3dkmt_mutex_acquire);
 DECL_HANDLER(d3dkmt_mutex_release);
+DECL_HANDLER(alpc_set_completion);
 DECL_HANDLER(alpc_create_port);
 DECL_HANDLER(alpc_send_receive);
 DECL_HANDLER(alpc_get_message_result);
@@ -642,6 +643,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_d3dkmt_object_open_name,
     (req_handler)req_d3dkmt_mutex_acquire,
     (req_handler)req_d3dkmt_mutex_release,
+    (req_handler)req_alpc_set_completion,
     (req_handler)req_alpc_create_port,
     (req_handler)req_alpc_send_receive,
     (req_handler)req_alpc_get_message_result,
@@ -2448,6 +2450,13 @@ C_ASSERT( offsetof(struct d3dkmt_mutex_release_request, key_value) == 20 );
 C_ASSERT( offsetof(struct d3dkmt_mutex_release_request, fence_value) == 24 );
 C_ASSERT( offsetof(struct d3dkmt_mutex_release_request, runtime_size) == 32 );
 C_ASSERT( sizeof(struct d3dkmt_mutex_release_request) == 40 );
+C_ASSERT( offsetof(struct alpc_set_completion_request, handle) == 12 );
+C_ASSERT( offsetof(struct alpc_set_completion_request, completion) == 16 );
+C_ASSERT( offsetof(struct alpc_set_completion_request, key) == 24 );
+C_ASSERT( offsetof(struct alpc_set_completion_request, lease) == 32 );
+C_ASSERT( sizeof(struct alpc_set_completion_request) == 40 );
+C_ASSERT( offsetof(struct alpc_set_completion_reply, lease) == 8 );
+C_ASSERT( sizeof(struct alpc_set_completion_reply) == 16 );
 C_ASSERT( offsetof(struct alpc_create_port_request, flags) == 12 );
 C_ASSERT( offsetof(struct alpc_create_port_request, max_msg_len) == 16 );
 C_ASSERT( sizeof(struct alpc_create_port_request) == 24 );

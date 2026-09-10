@@ -32,6 +32,7 @@
 #include "ntstatus.h"
 
 #include "handle.h"
+#include "file.h"
 #include "process.h"
 #include "thread.h"
 #include "security.h"
@@ -68,6 +69,10 @@ enum alpc_port_status
 struct alpc_port
 {
     struct object            obj;                   /* object header */
+    struct completion       *completion;            /* owned I/O completion association */
+    struct alpc_completion_lease *completion_lease; /* weak; lease retains this port */
+    apc_param_t              completion_key;
+    unsigned int             completion_associated; /* one-shot, including released registrations */
     struct object           *sync;                  /* public port notification state */
     struct list              receive_waiters;       /* weak private receive operations */
     struct list              messages;              /* owned copies, in send order */
@@ -210,6 +215,10 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     port->wow64 = 0;
     port->context = 0;
     port->receive_sequence = 0;
+    port->completion = NULL;
+    port->completion_lease = NULL;
+    port->completion_key = 0;
+    port->completion_associated = 0;
     port->initial_message_context = 0;
     return !!(port->sync = port->counted_sync ? create_semaphore_sync( 0, 0x7fffffff ) :
                                               create_internal_sync( 1, 1 ));
@@ -226,6 +235,7 @@ static struct object *alpc_port_get_sync( struct object *obj )
 static void notify_port( struct alpc_port *port )
 {
     if (port->counted_sync) release_semaphore_sync( port->sync, 1 );
+    if (port->completion) add_completion( port->completion, port->completion_key, 0, 0, 0, NULL );
 }
 
 static void alpc_port_destroy( struct object *obj )
@@ -234,6 +244,8 @@ static void alpc_port_destroy( struct object *obj )
     struct alpc_message *message, *next;
 
     assert( obj->ops == &alpc_port_ops );
+    assert( !port->completion_lease );
+    if (port->completion) release_object( port->completion );
 
     LIST_FOR_EACH_ENTRY_SAFE( message, next, &port->messages, struct alpc_message, entry )
     {
@@ -793,6 +805,107 @@ static int alpc_port_close_handle( struct object *obj, struct process *process, 
     detach_peer( port );
     dispatch_all_receives();
     return 1;
+}
+
+/* A thread-pool registration keeps the object alive without adding a port
+ * handle. Closing the last real port handle must still disconnect its peers. */
+struct alpc_completion_lease
+{
+    struct object obj;
+    struct alpc_port *port;
+};
+
+static void alpc_completion_lease_dump( struct object *obj, int verbose )
+{
+    fprintf( stderr, "ALPC completion registration port=%p\n", ((struct alpc_completion_lease *)obj)->port );
+}
+
+static void alpc_completion_lease_destroy( struct object *obj )
+{
+    struct alpc_completion_lease *lease = (struct alpc_completion_lease *)obj;
+    struct alpc_port *port = lease->port;
+
+    if (!port) return;
+    assert( port->completion_lease == lease );
+    port->completion_lease = NULL;
+    if (port->completion) release_object( port->completion );
+    port->completion = NULL;
+    /* The Windows-visible association remains consumed after TP release. */
+    release_object( port );
+}
+
+static const struct object_ops alpc_completion_lease_ops =
+{
+    .size = sizeof(struct alpc_completion_lease),
+    .type = &no_type,
+    .dump = alpc_completion_lease_dump,
+    .destroy = alpc_completion_lease_destroy
+};
+
+/* Associate an I/O completion queue, optionally retaining a private TP lease. */
+DECL_HANDLER(alpc_set_completion)
+{
+    struct alpc_completion_lease *lease = NULL;
+    struct completion *completion;
+    struct alpc_port *port;
+    struct alpc_message *message;
+    unsigned int count = 0;
+
+    if (!req->handle || !req->completion || req->lease > 1)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                    ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
+    if (port->completion_associated)
+    {
+        set_error( STATUS_PORT_ALREADY_SET );
+        goto done;
+    }
+    if (!(completion = get_completion_obj( current->process, req->completion, IO_COMPLETION_MODIFY_STATE )))
+        goto done;
+    if (req->lease)
+    {
+        if (!(lease = alloc_object( &alpc_completion_lease_ops )))
+        {
+            release_object( completion );
+            goto done;
+        }
+        lease->port = NULL;
+        if (!(reply->lease = alloc_handle_no_access_check( current->process, lease, 0, 0 )))
+        {
+            release_object( lease );
+            release_object( completion );
+            goto done;
+        }
+        lease->port = (struct alpc_port *)grab_object( port );
+        port->completion_lease = lease;
+        release_object( lease );
+    }
+    port->completion = completion;
+    port->completion_key = req->key;
+    port->completion_associated = 1;
+    LIST_FOR_EACH_ENTRY( message, &port->messages, struct alpc_message, entry ) ++count;
+    if (!add_completion_notifications( completion, req->key, count ))
+    {
+        unsigned int status = get_error();
+        if (reply->lease)
+        {
+            close_handle( current->process, reply->lease );
+            reply->lease = 0;
+        }
+        else
+        {
+            release_object( port->completion );
+            port->completion = NULL;
+        }
+        port->completion_associated = 0;
+        port->completion_key = 0;
+        set_error( status );
+    }
+done:
+    release_object( port );
 }
 
 /* Create an ALPC port */

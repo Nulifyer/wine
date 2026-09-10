@@ -28,6 +28,7 @@
 
 #include "wine/debug.h"
 #include "wine/list.h"
+#include "wine/server.h"
 
 #include "ntdll_misc.h"
 
@@ -124,6 +125,7 @@ enum threadpool_objtype
     TP_OBJECT_TYPE_TIMER,
     TP_OBJECT_TYPE_WAIT,
     TP_OBJECT_TYPE_IO,
+    TP_OBJECT_TYPE_ALPC,
 };
 
 struct io_completion
@@ -197,6 +199,13 @@ struct threadpool_object
             DWORD           flags;
             RTL_WAITORTIMERCALLBACKFUNC rtl_callback;
         } wait;
+        struct
+        {
+            PTP_ALPC_CALLBACK callback;
+            HANDLE lease;
+            ULONG_PTR key;
+            struct list entry; /* active registrations, locked via ioqueue.cs */
+        } alpc;
         struct
         {
             PTP_IO_CALLBACK callback;
@@ -314,10 +323,14 @@ static struct
     BOOL                    thread_running;
     HANDLE                  port;
     RTL_CONDITION_VARIABLE  update_event;
+    struct list             alpc_objects;
+    ULONG_PTR               next_alpc_key;
 }
 ioqueue =
 {
     .cs = { &ioqueue_debug, -1, 0, 0, 0, 0 },
+    .alpc_objects = LIST_INIT(ioqueue.alpc_objects),
+    .next_alpc_key = 1,
 };
 
 static RTL_CRITICAL_SECTION_DEBUG ioqueue_debug =
@@ -1627,6 +1640,19 @@ static void CALLBACK ioqueue_thread_proc( void *param )
             ERR("NtRemoveIoCompletion failed, status %#lx.\n", status);
         RtlEnterCriticalSection( &ioqueue.cs );
 
+        /* ALPC keys are tagged, never-reused integers. A released registration
+         * may still have queued packets, which must not dereference old memory. */
+        if (key & 1)
+        {
+            LIST_FOR_EACH_ENTRY( io, &ioqueue.alpc_objects, struct threadpool_object, u.alpc.entry )
+            {
+                if (io->u.alpc.key != key) continue;
+                tp_object_submit( io, FALSE );
+                break;
+            }
+            goto check_idle;
+        }
+
         destroy = skip = FALSE;
         io = (struct threadpool_object *)key;
 
@@ -1682,6 +1708,7 @@ static void CALLBACK ioqueue_thread_proc( void *param )
             RtlLeaveCriticalSection( &io->pool->cs );
         }
 
+check_idle:
         if (!ioqueue.objcount)
         {
             /* All I/O objects have been destroyed; if no new objects are
@@ -1702,25 +1729,16 @@ static void CALLBACK ioqueue_thread_proc( void *param )
     RtlExitUserThread( 0 );
 }
 
-static NTSTATUS tp_ioqueue_lock( struct threadpool_object *io, HANDLE file )
+/* Caller holds ioqueue.cs. Both file I/O and ALPC use this one reader. */
+static NTSTATUS tp_ioqueue_initialize(void)
 {
     NTSTATUS status = STATUS_SUCCESS;
 
-    assert( io->type == TP_OBJECT_TYPE_IO );
-
-    RtlEnterCriticalSection( &ioqueue.cs );
-
     if (!ioqueue.port && (status = NtCreateIoCompletion( &ioqueue.port,
-            IO_COMPLETION_ALL_ACCESS, NULL, 0 )))
-    {
-        RtlLeaveCriticalSection( &ioqueue.cs );
-        return status;
-    }
-
+            IO_COMPLETION_ALL_ACCESS, NULL, 0 ))) return status;
     if (!ioqueue.thread_running)
     {
         HANDLE thread;
-
         if (!(status = RtlCreateUserThread( GetCurrentProcess(), NULL, FALSE,
                                             0, 0, 0, ioqueue_thread_proc, NULL, &thread, NULL )))
         {
@@ -1728,6 +1746,16 @@ static NTSTATUS tp_ioqueue_lock( struct threadpool_object *io, HANDLE file )
             NtClose( thread );
         }
     }
+    return status;
+}
+
+static NTSTATUS tp_ioqueue_lock( struct threadpool_object *io, HANDLE file )
+{
+    NTSTATUS status;
+
+    assert( io->type == TP_OBJECT_TYPE_IO );
+    RtlEnterCriticalSection( &ioqueue.cs );
+    status = tp_ioqueue_initialize();
 
     if (status == STATUS_SUCCESS)
     {
@@ -2187,6 +2215,22 @@ static void tp_ioqueue_unlock( struct threadpool_object *io )
     RtlLeaveCriticalSection( &ioqueue.cs );
 }
 
+static void tp_alpcqueue_unlock( struct threadpool_object *object )
+{
+    RtlEnterCriticalSection( &ioqueue.cs );
+    if (object->u.alpc.lease)
+    {
+        list_remove( &object->u.alpc.entry );
+        /* The server stops new notifications before release can free the
+         * object. Already queued integer keys are harmless after removal. */
+        NtClose( object->u.alpc.lease );
+        object->u.alpc.lease = NULL;
+        assert( ioqueue.objcount );
+        if (!--ioqueue.objcount) NtSetIoCompletion( ioqueue.port, 0, 0, STATUS_SUCCESS, 0 );
+    }
+    RtlLeaveCriticalSection( &ioqueue.cs );
+}
+
 /***********************************************************************
  *           tp_object_prepare_shutdown    (internal)
  *
@@ -2200,6 +2244,8 @@ static void tp_object_prepare_shutdown( struct threadpool_object *object )
         tp_waitqueue_unlock( object );
     else if (object->type == TP_OBJECT_TYPE_IO)
         tp_ioqueue_unlock( object );
+    else if (object->type == TP_OBJECT_TYPE_ALPC)
+        tp_alpcqueue_unlock( object );
 }
 
 static void tp_wait_close_duped_handle( struct threadpool_object *wait )
@@ -2359,6 +2405,14 @@ static void tp_object_execute( struct threadpool_object *object, BOOL wait_threa
             break;
         }
 
+        case TP_OBJECT_TYPE_ALPC:
+        {
+            TRACE( "executing ALPC callback %p(%p, %p, %p)\n", object->u.alpc.callback,
+                   callback_instance, object->userdata, object );
+            object->u.alpc.callback( callback_instance, object->userdata, (TP_ALPC *)object );
+            break;
+        }
+
         case TP_OBJECT_TYPE_IO:
         {
             TRACE( "executing I/O callback %p(%p, %p, %#Ix, %p, %p)\n",
@@ -2499,6 +2553,83 @@ NTSTATUS WINAPI TpAllocCleanupGroup( TP_CLEANUP_GROUP **out )
     TRACE( "%p\n", out );
 
     return tp_group_alloc( (struct threadpool_group **)out );
+}
+
+/***********************************************************************
+ *           TpAllocAlpcCompletion    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpAllocAlpcCompletion( TP_ALPC **out, HANDLE port, PTP_ALPC_CALLBACK callback,
+                                       void *userdata, TP_CALLBACK_ENVIRON *environment )
+{
+    struct threadpool_object *object;
+    struct threadpool *pool;
+    NTSTATUS status;
+
+    TRACE( "%p %p %p %p %p\n", out, port, callback, userdata, environment );
+    *out = NULL;
+    if (!(object = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object) )))
+        return STATUS_NO_MEMORY;
+    if ((status = tp_threadpool_lock( &pool, environment )))
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, object );
+        return status;
+    }
+    object->type = TP_OBJECT_TYPE_ALPC;
+    object->u.alpc.callback = callback;
+    tp_object_initialize( object, pool, userdata, environment );
+
+    RtlEnterCriticalSection( &ioqueue.cs );
+    if (!ioqueue.next_alpc_key) status = STATUS_INSUFFICIENT_RESOURCES;
+    else if (!(status = tp_ioqueue_initialize()))
+    {
+        object->u.alpc.key = ioqueue.next_alpc_key;
+        /* Exhaustion is terminal for key allocation, rather than reusing an
+         * identity that a stale completion packet may still contain. */
+        ioqueue.next_alpc_key += 2;
+        if (ioqueue.next_alpc_key == 1) ioqueue.next_alpc_key = 0;
+        SERVER_START_REQ( alpc_set_completion )
+        {
+            req->handle = wine_server_obj_handle( port );
+            req->completion = wine_server_obj_handle( ioqueue.port );
+            req->key = object->u.alpc.key;
+            req->lease = 1;
+            if (!(status = wine_server_call( req )))
+                object->u.alpc.lease = wine_server_ptr_handle( reply->lease );
+        }
+        SERVER_END_REQ;
+        if (!status)
+        {
+            list_add_tail( &ioqueue.alpc_objects, &object->u.alpc.entry );
+            if (!ioqueue.objcount++) RtlWakeConditionVariable( &ioqueue.update_event );
+        }
+        else if (!ioqueue.objcount)
+            NtSetIoCompletion( ioqueue.port, 0, 0, STATUS_SUCCESS, 0 );
+    }
+    RtlLeaveCriticalSection( &ioqueue.cs );
+    if (status)
+    {
+        object->shutdown = TRUE;
+        tp_object_release( object );
+        return status;
+    }
+    *out = (TP_ALPC *)object;
+    return STATUS_SUCCESS;
+}
+
+void WINAPI TpReleaseAlpcCompletion( TP_ALPC *alpc )
+{
+    struct threadpool_object *object = (struct threadpool_object *)alpc;
+    assert( object->type == TP_OBJECT_TYPE_ALPC );
+    tp_object_prepare_shutdown( object );
+    object->shutdown = TRUE;
+    tp_object_release( object );
+}
+
+void WINAPI TpWaitForAlpcCompletion( TP_ALPC *alpc )
+{
+    struct threadpool_object *object = (struct threadpool_object *)alpc;
+    assert( object->type == TP_OBJECT_TYPE_ALPC );
+    tp_object_wait( object, FALSE );
 }
 
 /***********************************************************************
