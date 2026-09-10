@@ -22,7 +22,6 @@
 @ stdcall AddConsoleAliasA(str str str)
 @ stdcall AddConsoleAliasW(wstr wstr wstr)
 @ stdcall AddDllDirectory(wstr)
-@ stdcall AddDependencyToProcessPackageGraph(wstr int64 long long)
 @ stdcall AddMandatoryAce(ptr long long long ptr)
 @ stdcall AddRefActCtx(ptr)
 # @ stub AddResourceAttributeAce
