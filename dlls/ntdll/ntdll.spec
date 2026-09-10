@@ -509,7 +509,7 @@
 # @ stub RtlAddCompoundAce
 @ cdecl -arch=!i386 RtlAddFunctionTable(ptr long long)
 @ stdcall -arch=!i386 RtlAddGrowableFunctionTable(ptr ptr long long long long)
-@ stdcall RtlAddMandatoryAce(ptr long long long long ptr)
+@ stdcall RtlAddMandatoryAce(ptr long long ptr long long)
 @ stdcall RtlAddProcessTrustLabelAce(ptr long long ptr long long)
 # @ stub RtlAddRange
 @ stdcall RtlAddRefActivationContext(ptr)

@@ -1451,40 +1451,56 @@ NTSTATUS WINAPI RtlAddAuditAccessObjectAce(
     return STATUS_NOT_IMPLEMENTED;
 }
 
-/**************************************************************************
- *  RtlAddMandatoryAce     [NTDLL.@]
- */
-NTSTATUS WINAPI RtlAddMandatoryAce(
-    IN OUT PACL pAcl,
-    IN DWORD dwAceRevision,
-    IN DWORD dwAceFlags,
-    IN DWORD dwMandatoryFlags,
-    IN DWORD dwAceType,
-    IN PSID pSid)
+/* Validate label-specific policy before appending an ordinary SID-bearing ACE. */
+static NTSTATUS add_label_ace( ACL *acl, DWORD revision, DWORD flags, PSID sid,
+                               BYTE type, DWORD mask )
 {
-    TRACE("(%p, %lu, 0x%08lx, 0x%08lx, %lu, %p)\n",
-          pAcl, dwAceRevision, dwAceFlags, dwMandatoryFlags, dwAceType, pSid);
+    static const SID_IDENTIFIER_AUTHORITY mandatory_authority = SECURITY_MANDATORY_LABEL_AUTHORITY;
+    static const SID_IDENTIFIER_AUTHORITY trust_authority = {{0, 0, 0, 0, 0, 19}};
 
-    if (dwAceType != SYSTEM_MANDATORY_LABEL_ACE_TYPE)
-        return STATUS_INVALID_PARAMETER;
-    if (dwMandatoryFlags & ~SYSTEM_MANDATORY_LABEL_VALID_MASK)
-        return STATUS_INVALID_PARAMETER;
+    if (!RtlValidSid( sid )) return STATUS_INVALID_SID;
+    if (acl->AclRevision > MAX_ACL_REVISION || revision > MAX_ACL_REVISION)
+        return STATUS_REVISION_MISMATCH;
+    if (flags & ~VALID_INHERIT_FLAGS) return STATUS_INVALID_PARAMETER;
 
-    return add_access_ace(pAcl, dwAceRevision, dwAceFlags, dwMandatoryFlags, pSid, dwAceType);
+    if (type == SYSTEM_MANDATORY_LABEL_ACE_TYPE)
+    {
+        if (mask & ~SYSTEM_MANDATORY_LABEL_VALID_MASK) return STATUS_INVALID_PARAMETER;
+        if (memcmp( RtlIdentifierAuthoritySid( sid ), &mandatory_authority, sizeof(mandatory_authority) ))
+            return STATUS_INVALID_PARAMETER;
+    }
+    else
+    {
+        if (mask & ~SYSTEM_PROCESS_TRUST_LABEL_VALID_MASK) return STATUS_INVALID_PARAMETER;
+        if (*RtlSubAuthorityCountSid( sid ) != 2 ||
+            memcmp( RtlIdentifierAuthoritySid( sid ), &trust_authority, sizeof(trust_authority) ))
+            return STATUS_INVALID_PARAMETER;
+    }
+    return add_access_ace( acl, revision, flags, mask, sid, type );
 }
 
 /**************************************************************************
- *  RtlAddProcessTrustLabelAce		[NTDLL.@]
+ *  RtlAddMandatoryAce     [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlAddMandatoryAce( ACL *acl, DWORD revision, DWORD flags,
+                                    PSID sid, BYTE type, DWORD mask )
+{
+    TRACE( "%p %lx %lx %p %x %lx\n", acl, revision, flags, sid, type, mask );
+
+    if (type != SYSTEM_MANDATORY_LABEL_ACE_TYPE) return STATUS_INVALID_PARAMETER;
+    return add_label_ace( acl, revision, flags, sid, type, mask );
+}
+
+/**************************************************************************
+ *  RtlAddProcessTrustLabelAce     [NTDLL.@]
  */
 NTSTATUS WINAPI RtlAddProcessTrustLabelAce( ACL *acl, DWORD revision, DWORD flags,
-                                            PSID sid, DWORD type, DWORD mask )
+                                            PSID sid, BYTE type, DWORD mask )
 {
-    TRACE( "%p %lx %lx %p %lx %lx\n", acl, revision, flags, sid, type, mask );
+    TRACE( "%p %lx %lx %p %x %lx\n", acl, revision, flags, sid, type, mask );
 
     if (type != SYSTEM_PROCESS_TRUST_LABEL_ACE_TYPE) return STATUS_INVALID_PARAMETER;
-    if (mask & ~SYSTEM_PROCESS_TRUST_LABEL_VALID_MASK) return STATUS_INVALID_PARAMETER;
-
-    return add_access_ace( acl, revision, flags, mask, sid, type );
+    return add_label_ace( acl, revision, flags, sid, type, mask );
 }
 
 /******************************************************************************
