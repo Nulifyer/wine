@@ -261,7 +261,7 @@
 @ stdcall -syscall=0x001f NtImpersonateClientOfPort(long ptr)
 # @ stub NtImpersonateThread
 @ stdcall -syscall NtInitializeNlsFiles(ptr ptr ptr)
-# @ stub NtInitializeRegistry
+@ stdcall -syscall NtInitializeRegistry(long)
 @ stdcall -syscall NtInitiatePowerAction (long long long long)
 @ stdcall -syscall=0x004f NtIsProcessInJob(long long)
 # @ stub NtIsSystemResumeAutomatic
@@ -1353,7 +1353,7 @@
 @ stdcall -private ZwImpersonateClientOfPort(long ptr) NtImpersonateClientOfPort
 # @ stub ZwImpersonateThread
 @ stdcall -private ZwInitializeNlsFiles(ptr ptr ptr) NtInitializeNlsFiles
-# @ stub ZwInitializeRegistry
+@ stdcall -private ZwInitializeRegistry(long) NtInitializeRegistry
 @ stdcall -private ZwInitiatePowerAction(long long long long) NtInitiatePowerAction
 @ stdcall -private ZwIsProcessInJob(long long) NtIsProcessInJob
 # @ stub ZwIsSystemResumeAutomatic

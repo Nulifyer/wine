@@ -32,6 +32,17 @@ WINE_DEFAULT_DEBUG_CHANNEL(wow);
 
 
 /**********************************************************************
+ *           wow64_NtInitializeRegistry
+ */
+NTSTATUS WINAPI wow64_NtInitializeRegistry( UINT *args )
+{
+    BOOLEAN boot_condition = get_ulong( &args );
+
+    return NtInitializeRegistry( boot_condition );
+}
+
+
+/**********************************************************************
  *           wow64_NtCreateKey
  */
 NTSTATUS WINAPI wow64_NtCreateKey( UINT *args )

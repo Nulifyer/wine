@@ -69,6 +69,21 @@ NTSTATUS open_hkcu_key( const char *path, HANDLE *key )
 
 
 /******************************************************************************
+ *              NtInitializeRegistry  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtInitializeRegistry( BOOLEAN boot_condition )
+{
+    TRACE( "%u\n", boot_condition );
+
+    if (boot_condition > 2) return STATUS_INVALID_PARAMETER;
+
+    /* The server loads the registry before admitting any client, including
+     * the native bootstrap process. Registry initialization is already over. */
+    return STATUS_ACCESS_DENIED;
+}
+
+
+/******************************************************************************
  *              NtCreateKey  (NTDLL.@)
  */
 NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
