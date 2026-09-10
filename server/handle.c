@@ -725,6 +725,14 @@ DECL_HANDLER(set_security_object)
         return;
     }
 
+    /* Dedicated trust-label replacement needs a measured merge/removal
+     * contract. Never report success while leaving the label unchanged. */
+    if (req->security_info & PROCESS_TRUST_LABEL_SECURITY_INFORMATION)
+    {
+        set_error( STATUS_NOT_SUPPORTED );
+        return;
+    }
+
     if (req->security_info & OWNER_SECURITY_INFORMATION ||
         req->security_info & GROUP_SECURITY_INFORMATION ||
         req->security_info & LABEL_SECURITY_INFORMATION)
@@ -762,6 +770,15 @@ DECL_HANDLER(get_security_object)
     if (sd)
     {
         req_sd.control = sd->control & ~SE_SELF_RELATIVE;
+        if (!(req->security_info & OWNER_SECURITY_INFORMATION)) req_sd.control &= ~SE_OWNER_DEFAULTED;
+        if (!(req->security_info & GROUP_SECURITY_INFORMATION)) req_sd.control &= ~SE_GROUP_DEFAULTED;
+        if (!(req->security_info & DACL_SECURITY_INFORMATION))
+            req_sd.control &= ~(SE_DACL_PRESENT | SE_DACL_DEFAULTED | SE_DACL_AUTO_INHERIT_REQ |
+                                SE_DACL_AUTO_INHERITED | SE_DACL_PROTECTED);
+        if (!(req->security_info & (SACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION |
+                                    PROCESS_TRUST_LABEL_SECURITY_INFORMATION)))
+            req_sd.control &= ~(SE_SACL_PRESENT | SE_SACL_DEFAULTED | SE_SACL_AUTO_INHERIT_REQ |
+                                SE_SACL_AUTO_INHERITED | SE_SACL_PROTECTED);
 
         owner = sd_get_owner( sd );
         if (req->security_info & OWNER_SECURITY_INFORMATION)
@@ -776,11 +793,11 @@ DECL_HANDLER(get_security_object)
             req_sd.group_len = 0;
 
         sacl = sd_get_sacl( sd, &present );
-        if (req->security_info & SACL_SECURITY_INFORMATION && present)
-            req_sd.sacl_len = sd->sacl_len;
-        else if (req->security_info & LABEL_SECURITY_INFORMATION && present && sacl)
+        if (!sacl) req_sd.control &= ~SE_SACL_PRESENT;
+        if (req->security_info & (SACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION |
+                                  PROCESS_TRUST_LABEL_SECURITY_INFORMATION) && present && sacl)
         {
-            if (!(label_acl = extract_security_labels( sacl ))) goto done;
+            if (!(label_acl = extract_security_labels( sacl, req->security_info ))) goto done;
             req_sd.sacl_len = label_acl->size;
             sacl = label_acl;
         }

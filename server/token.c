@@ -228,7 +228,7 @@ static int acl_is_valid( const struct acl *acl, data_size_t size )
 
     for (i = 0, ace = ace_first( acl ); i < acl->count; i++, ace = ace_next( ace ))
     {
-        if (size < sizeof(*ace) || size < ace->size) return FALSE;
+        if (size < sizeof(*ace) || ace->size < sizeof(*ace) || size < ace->size) return FALSE;
         size -= ace->size;
         switch (ace->type)
         {
@@ -237,11 +237,19 @@ static int acl_is_valid( const struct acl *acl, data_size_t size )
         case SYSTEM_AUDIT_ACE_TYPE:
         case SYSTEM_ALARM_ACE_TYPE:
         case SYSTEM_MANDATORY_LABEL_ACE_TYPE:
+        case SYSTEM_PROCESS_TRUST_LABEL_ACE_TYPE:
             break;
         default:
             return FALSE;
         }
         if (!sid_valid_size( (const struct sid *)(ace + 1), ace->size - sizeof(*ace) )) return FALSE;
+        if (ace->type == SYSTEM_PROCESS_TRUST_LABEL_ACE_TYPE)
+        {
+            static const unsigned char authority[6] = {0,0,0,0,0,19};
+            const struct sid *sid = (const struct sid *)(ace + 1);
+            if (sid->sub_count != 2 || memcmp( sid->id_auth, authority, sizeof(authority) ) ||
+                ace->mask & ~0x00ffffff) return FALSE;
+        }
     }
     return TRUE;
 }
@@ -298,8 +306,33 @@ int sd_is_valid( const struct security_descriptor *sd, data_size_t size )
     return TRUE;
 }
 
+/* Reserved-profile creation policy: only the effective trusted token may
+ * install its own label or the zero label. Unknown trust ordering is not
+ * inferred from arbitrary SID subauthorities. */
+int token_authorize_trust_labels( struct token *token, const struct security_descriptor *sd )
+{
+    const struct acl *sacl;
+    const struct ace *ace;
+    unsigned int i;
+    int present;
+
+    if (!sd || !(sacl = sd_get_sacl( sd, &present )) || !present) return 1;
+    for (i = 0, ace = ace_first( sacl ); i < sacl->count; i++, ace = ace_next( ace ))
+    {
+        const struct sid *label = (const struct sid *)(ace + 1);
+        if (ace->type != SYSTEM_PROCESS_TRUST_LABEL_ACE_TYPE) continue;
+        if (!token->trust_level ||
+            ((!equal_sid( token->trust_level, label )) && (label->sub_auth[0] || label->sub_auth[1])))
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* extract security labels from SACL */
-struct acl *extract_security_labels( const struct acl *sacl )
+struct acl *extract_security_labels( const struct acl *sacl, unsigned int info )
 {
     size_t size = sizeof(*sacl);
     const struct ace *ace;
@@ -309,7 +342,9 @@ struct acl *extract_security_labels( const struct acl *sacl )
 
     for (i = 0, ace = ace_first( sacl ); i < sacl->count; i++, ace = ace_next( ace ))
     {
-        if (ace->type == SYSTEM_MANDATORY_LABEL_ACE_TYPE)
+        if ((info & SACL_SECURITY_INFORMATION) ||
+            (ace->type == SYSTEM_MANDATORY_LABEL_ACE_TYPE && (info & LABEL_SECURITY_INFORMATION)) ||
+            (ace->type == SYSTEM_PROCESS_TRUST_LABEL_ACE_TYPE && (info & PROCESS_TRUST_LABEL_SECURITY_INFORMATION)))
         {
             size += ace->size;
             count++;
@@ -327,7 +362,9 @@ struct acl *extract_security_labels( const struct acl *sacl )
 
     label_ace = ace_first( label_acl );
     for (i = 0, ace = ace_first( sacl ); i < sacl->count; i++, ace = ace_next( ace ))
-        if (ace->type == SYSTEM_MANDATORY_LABEL_ACE_TYPE)
+        if ((info & SACL_SECURITY_INFORMATION) ||
+            (ace->type == SYSTEM_MANDATORY_LABEL_ACE_TYPE && (info & LABEL_SECURITY_INFORMATION)) ||
+            (ace->type == SYSTEM_PROCESS_TRUST_LABEL_ACE_TYPE && (info & PROCESS_TRUST_LABEL_SECURITY_INFORMATION)))
             label_ace = mem_append( label_ace, ace, ace->size );
 
     return label_acl;
@@ -1201,10 +1238,29 @@ unsigned int token_get_session_id( struct token *token )
     return token->session_id;
 }
 
+static unsigned int token_trust_access_mask( struct token *token, const struct security_descriptor *sd )
+{
+    const struct acl *sacl;
+    const struct ace *ace;
+    unsigned int i, mask = ~0u;
+    int present;
+
+    if (!sd || !(sacl = sd_get_sacl( sd, &present )) || !present) return mask;
+    for (i = 0, ace = ace_first( sacl ); i < sacl->count; i++, ace = ace_next( ace ))
+    {
+        const struct sid *label = (const struct sid *)(ace + 1);
+        if (ace->type != SYSTEM_PROCESS_TRUST_LABEL_ACE_TYPE || ace->flags & INHERIT_ONLY_ACE) continue;
+        if (!label->sub_auth[0] && !label->sub_auth[1]) continue;
+        if (token->trust_level && equal_sid( token->trust_level, label )) continue;
+        mask &= ace->mask;
+    }
+    return mask;
+}
+
 int check_object_access(struct token *token, struct object *obj, unsigned int *access)
 {
     struct generic_map mapping;
-    unsigned int status;
+    unsigned int status, trust_mask;
     int res;
 
     if (!token)
@@ -1212,6 +1268,12 @@ int check_object_access(struct token *token, struct object *obj, unsigned int *a
 
     if (obj->ops->check_access && !obj->ops->check_access( obj, token, access )) return FALSE;
 
+    trust_mask = token_trust_access_mask( token, obj->sd );
+    if ((*access & ~MAXIMUM_ALLOWED) & ~trust_mask)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return FALSE;
+    }
     mapping.all = map_obj_access( obj, GENERIC_ALL );
 
     if (!obj->sd)
@@ -1228,6 +1290,11 @@ int check_object_access(struct token *token, struct object *obj, unsigned int *a
                               &mapping, access, &status ) == STATUS_SUCCESS &&
           status == STATUS_SUCCESS;
 
+    if (res)
+    {
+        *access &= trust_mask;
+        if (trust_mask != ~0u && !*access) res = FALSE;
+    }
     if (!res) set_error( STATUS_ACCESS_DENIED );
     return res;
 }

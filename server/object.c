@@ -436,6 +436,12 @@ static struct object *create_object_with_name( const struct object_params *param
                                        DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION ))
         goto failed;
 
+    /* Named creation with an omitted, unprotected SACL records the automatic
+     * inheritance result even when there are no inherited audit/label ACEs. */
+    if (obj->sd && params->sd &&
+        !(params->sd->control & (SE_SACL_PRESENT | SE_SACL_PROTECTED)))
+        obj->sd->control |= SE_SACL_AUTO_INHERITED;
+
     if (!(obj->ops->link_name ? obj->ops->link_name( obj, name_ptr, parent ) :
                                 directory_link_name( obj, name_ptr, parent )))
         goto failed;
@@ -664,6 +670,13 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     char *ptr;
 
     if (!set_info) return 1;
+    if (set_info & SACL_SECURITY_INFORMATION)
+    {
+        struct token *effective = thread_get_impersonation_token( current );
+        if (!token_authorize_trust_labels( effective, sd ) ||
+            !token_authorize_trust_labels( effective, obj->sd )) return 0;
+    }
+
 
     new_sd.control = sd->control & ~SE_SELF_RELATIVE;
 

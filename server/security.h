@@ -127,6 +127,7 @@ extern int security_assign_unprotected_process_token( struct process *process, s
 extern int security_assign_thread_token( struct thread *thread, struct token *token );
 extern void security_set_thread_token( struct thread *thread, obj_handle_t handle );
 extern const struct sid *security_unix_uid_to_sid( uid_t uid );
+extern int token_authorize_trust_labels( struct token *token, const struct security_descriptor *sd );
 extern int check_object_access( struct token *token, struct object *obj, unsigned int *access );
 
 static inline int thread_single_check_privilege( struct thread *thread, struct luid priv )
@@ -143,7 +144,7 @@ static inline int thread_single_check_privilege( struct thread *thread, struct l
 /* security descriptor helper functions */
 
 extern int sd_is_valid( const struct security_descriptor *sd, data_size_t size );
-extern struct acl *extract_security_labels( const struct acl *sacl );
+extern struct acl *extract_security_labels( const struct acl *sacl, unsigned int info );
 extern struct acl *replace_security_labels( const struct acl *old_sacl, const struct acl *new_sacl );
 
 /* gets the discretionary access control list from a security descriptor */
