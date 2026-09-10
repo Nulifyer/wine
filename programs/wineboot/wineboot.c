@@ -644,24 +644,27 @@ static void create_id_reg_keys_arm64( HKEY core_key, UINT core, const char *buf,
 
 #endif
 
-static void create_bios_processor_values( HKEY system_key, const char *buf, UINT len )
+static DWORD create_bios_processor_values( HKEY system_key, const char *buf, UINT len )
 {
     const struct smbios_header *hdr;
     const struct smbios_processor *proc;
     unsigned int pkg, core, offset, i, thread_count;
-    HKEY hkey, cpu_key, fpu_key = 0, env_key;
+    HKEY hkey, cpu_key = 0, fpu_key = 0, env_key;
+    DWORD ret = ERROR_SUCCESS;
+    NTSTATUS status;
     SYSTEM_CPU_INFORMATION sci;
     PROCESSOR_POWER_INFORMATION* power_info;
     ULONG sizeof_power_info = sizeof(PROCESSOR_POWER_INFORMATION) * NtCurrentTeb()->Peb->NumberOfProcessors;
     UINT64 tsc_frequency = read_tsc_frequency();
     const WCHAR *arch;
-    WCHAR id[60], buffer[128], *version, *vendorid;
+    WCHAR id[60], buffer[128], *version = NULL, *vendorid = NULL;
 
-    NtQuerySystemInformation( SystemCpuInformation, &sci, sizeof(sci), NULL );
+    if ((status = NtQuerySystemInformation( SystemCpuInformation, &sci, sizeof(sci), NULL )))
+        return RtlNtStatusToDosError( status );
 
     power_info = malloc( sizeof_power_info );
     if (power_info == NULL)
-        return;
+        return ERROR_NOT_ENOUGH_MEMORY;
     if (NtPowerInformation( ProcessorInformation, NULL, 0, power_info, sizeof_power_info ))
         memset( power_info, 0, sizeof_power_info );
 
@@ -683,9 +686,8 @@ static void create_bios_processor_values( HKEY system_key, const char *buf, UINT
     }
     set_reg_value( system_key, L"SystemBiosDate", L"01/01/70" );
 
-    if (RegCreateKeyExW( system_key, L"CentralProcessor", 0, NULL, REG_OPTION_VOLATILE,
-                         KEY_ALL_ACCESS, NULL, &cpu_key, NULL ))
-        cpu_key = 0;
+    if ((ret = RegCreateKeyExW( system_key, L"CentralProcessor", 0, NULL, REG_OPTION_VOLATILE,
+                                KEY_ALL_ACCESS, NULL, &cpu_key, NULL ))) goto done;
 
     for (pkg = core = 0; ; pkg++)
     {
@@ -723,25 +725,33 @@ static void create_bios_processor_values( HKEY system_key, const char *buf, UINT
         }
 
         thread_count = (proc->hdr.length >= 0x30) ? proc->thread_count2 : proc->thread_count;
+        if (core > NtCurrentTeb()->Peb->NumberOfProcessors ||
+            thread_count > NtCurrentTeb()->Peb->NumberOfProcessors - core)
+        {
+            ret = ERROR_INVALID_DATA;
+            goto done;
+        }
         for (i = 0; i < thread_count; i++, core++)
         {
             swprintf( buffer, ARRAY_SIZE(buffer), L"%u", core );
-            if (!RegCreateKeyExW( cpu_key, buffer, 0, NULL, REG_OPTION_VOLATILE,
-                                  KEY_ALL_ACCESS, NULL, &hkey, NULL ))
+            if ((ret = RegCreateKeyExW( cpu_key, buffer, 0, NULL, REG_OPTION_VOLATILE,
+                                       KEY_ALL_ACCESS, NULL, &hkey, NULL ))) goto done;
             {
                 DWORD tsc_freq_mhz = (DWORD)(tsc_frequency / 1000000ull); /* Hz -> Mhz */
                 if (!tsc_freq_mhz) tsc_freq_mhz = power_info[core].MaxMhz;
 
-                RegSetValueExW( hkey, L"FeatureSet", 0, REG_DWORD,
-                                (BYTE *)&sci.ProcessorFeatureBits, sizeof(DWORD) );
-                set_reg_value( hkey, L"Identifier", id );
-                if (vendorid) set_reg_value( hkey, L"VendorIdentifier", vendorid );
-                if (version) set_reg_value( hkey, L"ProcessorNameString", version );
-                RegSetValueExW( hkey, L"~MHz", 0, REG_DWORD, (BYTE *)&tsc_freq_mhz, sizeof(DWORD) );
+                ret = RegSetValueExW( hkey, L"FeatureSet", 0, REG_DWORD,
+                                      (BYTE *)&sci.ProcessorFeatureBits, sizeof(DWORD) );
+                if (!ret) ret = set_reg_value( hkey, L"Identifier", id );
+                if (!ret && vendorid) ret = set_reg_value( hkey, L"VendorIdentifier", vendorid );
+                if (!ret && version) ret = set_reg_value( hkey, L"ProcessorNameString", version );
+                if (!ret) ret = RegSetValueExW( hkey, L"~MHz", 0, REG_DWORD,
+                                               (BYTE *)&tsc_freq_mhz, sizeof(DWORD) );
 #ifdef __aarch64__
                 create_id_reg_keys_arm64( hkey, core, buf, len );
 #endif
                 RegCloseKey( hkey );
+                if (ret) goto done;
             }
             if (fpu_key && !RegCreateKeyExW( fpu_key, buffer, 0, NULL, REG_OPTION_VOLATILE,
                                              KEY_ALL_ACCESS, NULL, &hkey, NULL ))
@@ -773,29 +783,45 @@ static void create_bios_processor_values( HKEY system_key, const char *buf, UINT
 
         free( version );
         free( vendorid );
+        version = vendorid = NULL;
     }
 
+    if (!core) ret = ERROR_NOT_FOUND;
+
+done:
+    free( version );
+    free( vendorid );
     RegCloseKey( fpu_key );
     RegCloseKey( cpu_key );
     free( power_info );
+    return ret;
 }
 
 /* create the volatile hardware registry keys */
-static void create_hardware_registry_keys(void)
+static DWORD create_hardware_registry_keys(void)
 {
     HKEY system_key, bios_key;
-    UINT len;
+    UINT len, capacity;
+    DWORD ret;
     char *buf;
 
     len = GetSystemFirmwareTable( RSMB, 0, NULL, 0 );
-    if (!(buf = malloc( len ))) return;
-    len = GetSystemFirmwareTable( RSMB, 0, buf, len );
+    if (!len) return (ret = GetLastError()) ? ret : ERROR_INVALID_DATA;
+    if (!(buf = malloc( len ))) return ERROR_NOT_ENOUGH_MEMORY;
+    capacity = len;
+    len = GetSystemFirmwareTable( RSMB, 0, buf, capacity );
+    if (!len || len > capacity)
+    {
+        ret = len ? ERROR_INSUFFICIENT_BUFFER : GetLastError();
+        free( buf );
+        return ret ? ret : ERROR_INVALID_DATA;
+    }
 
-    if (RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"Hardware\\Description\\System", 0, NULL,
-                         REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &system_key, NULL ))
+    if ((ret = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"Hardware\\Description\\System", 0, NULL,
+                                REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &system_key, NULL )))
     {
         free( buf );
-        return;
+        return ret;
     }
     if (!RegCreateKeyExW( system_key, L"BIOS", 0, NULL, REG_OPTION_VOLATILE,
                           KEY_ALL_ACCESS, NULL, &bios_key, NULL ))
@@ -805,9 +831,10 @@ static void create_hardware_registry_keys(void)
         create_bios_system_values( bios_key, buf, len );
         RegCloseKey( bios_key );
     }
-    create_bios_processor_values( system_key, buf, len );
+    ret = create_bios_processor_values( system_key, buf, len );
     RegCloseKey( system_key );
     free( buf );
+    return ret;
 }
 
 
@@ -1818,6 +1845,7 @@ static void usage( int status )
     WINE_MESSAGE( "    -e,--end-session  End the current session cleanly\n" );
     WINE_MESSAGE( "    -f,--force        Force exit for processes that don't exit cleanly\n" );
     WINE_MESSAGE( "    -i,--init         Perform initialization for first Wine instance\n" );
+    WINE_MESSAGE( "       --init-hardware Populate volatile host hardware data only\n" );
     WINE_MESSAGE( "    -k,--kill         Kill running processes without any cleanup\n" );
     WINE_MESSAGE( "    -r,--restart      Restart only, don't do normal startup operations\n" );
     WINE_MESSAGE( "    -s,--shutdown     Shutdown only, don't reboot\n" );
@@ -1864,6 +1892,13 @@ int __cdecl main( int argc, char *argv[] )
         }
         else WINE_ERR( "failed to restart 64-bit %s, err %ld\n", wine_dbgstr_w(filename), GetLastError() );
         Wow64RevertWow64FsRedirection( redir );
+    }
+
+    /* Native startup needs the volatile host description in this server
+     * lifetime, without Wine's service and session startup policy. */
+    if (argc == 2 && !strcmp( argv[1], "--init-hardware" ))
+    {
+        return create_hardware_registry_keys();
     }
 
     for (i = 1; i < argc; i++)

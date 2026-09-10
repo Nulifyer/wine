@@ -17,6 +17,11 @@ End the current session cleanly.
 Force exit for processes that don't exit cleanly
 .IP \fB\-i\fR,\fB\ \-\-init
 Initialize the WINEPREFIX.
+.IP \fB\-\-init-hardware
+Populate the volatile host hardware description and processor environment values.
+This standalone option performs no service, session, startup-program or prefix-update work.
+The caller must keep the same wineserver alive for the consumer of volatile data.
+A firmware, processor-discovery or required CPU registry-write failure returns a nonzero status.
 .IP \fB\-k\fR,\fB\ \-\-kill
 Kill running processes without any cleanup.
 .IP \fB\-r\fR,\fB\ \-\-restart
