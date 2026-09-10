@@ -44,6 +44,7 @@
 #include "file.h"
 #include "handle.h"
 #include "thread.h"
+#include "security.h"
 #include "request.h"
 
 struct mailslot_message
@@ -164,6 +165,16 @@ struct mailslot_device_file
     struct mailslot_device *device; /* mailslot device */
 };
 
+struct mailslot_prefix
+{
+    struct object obj;
+    struct fd *fd;
+};
+
+static const struct object_ops mailslot_prefix_ops;
+static struct object *mailslot_create_file( struct object *, const struct object_params *,
+    struct unicode_str, unsigned int, unsigned int, unsigned int, unsigned int * );
+
 static void mailslot_device_dump( struct object *obj, int verbose );
 static bool mailslot_device_init( struct object *obj, const void *init_data );
 static struct object *mailslot_device_lookup_name( struct object *obj, struct unicode_str *name,
@@ -180,6 +191,7 @@ static const struct object_ops mailslot_device_ops =
     .init        = mailslot_device_init,
     .lookup_name = mailslot_device_lookup_name,
     .open_file   = mailslot_device_open_file,
+    .create_file = mailslot_create_file,
     .destroy     = mailslot_device_destroy,
 };
 
@@ -369,6 +381,29 @@ static int mailslot_link_name( struct object *obj, struct object_name *name, str
         set_error( STATUS_OBJECT_NAME_INVALID );
         return 0;
     }
+    /* Prefixes constrain creation, but child names stay in the device's flat
+     * namespace and do not hold a prefix reference. */
+    {
+        data_size_t len = name->len / sizeof(WCHAR);
+        struct object *prefix;
+        while (len)
+        {
+            struct unicode_str part;
+            if (name->name[--len] != '\\') continue;
+            part.str = name->name;
+            part.len = len * sizeof(WCHAR);
+            if (!(prefix = find_object( dev->mailslots, part, OBJ_CASE_INSENSITIVE ))) continue;
+            if (prefix->ops == &mailslot_prefix_ops)
+            {
+                unsigned int access = FILE_ADD_FILE;
+                int allowed = check_object_access( thread_get_impersonation_token( current ), prefix, &access );
+                release_object( prefix );
+                if (!allowed) return 0;
+                break;
+            }
+            release_object( prefix );
+        }
+    }
     namespace_add( dev->mailslots, name );
     name->parent = grab_object( parent );
     return 1;
@@ -460,6 +495,108 @@ static struct object *mailslot_device_open_file( struct object *obj, unsigned in
     }
     allow_fd_caching( file->fd );
     return &file->obj;
+}
+
+static void mailslot_prefix_dump( struct object *obj, int verbose )
+{
+    fputs( "Mailslot prefix\n", stderr );
+}
+
+static const struct fd_ops mailslot_prefix_fd_ops =
+{
+    .get_file_info = default_fd_get_file_info,
+    .queue_async = default_fd_queue_async,
+};
+
+static bool mailslot_prefix_init( struct object *obj, const void *data )
+{
+    struct mailslot_prefix *prefix = (struct mailslot_prefix *)obj;
+    prefix->fd = alloc_pseudo_fd( &mailslot_prefix_fd_ops, obj, *(const unsigned int *)data );
+    return !!prefix->fd;
+}
+
+static struct fd *mailslot_prefix_get_fd( struct object *obj )
+{
+    return (struct fd *)grab_object( ((struct mailslot_prefix *)obj)->fd );
+}
+
+static struct object *mailslot_prefix_lookup( struct object *obj, struct unicode_str *name,
+                                             unsigned int attr, struct object *root )
+{
+    if (name && name->len) set_error( STATUS_OBJECT_NAME_INVALID );
+    return NULL;
+}
+
+static int mailslot_prefix_link( struct object *obj, struct object_name *name, struct object *parent )
+{
+    if (parent->ops != &mailslot_device_ops)
+    {
+        set_error( STATUS_OBJECT_NAME_INVALID );
+        return 0;
+    }
+    if (!thread_single_check_privilege( current, SeTcbPrivilege ))
+    {
+        set_error( STATUS_PRIVILEGE_NOT_HELD );
+        return 0;
+    }
+    namespace_add( ((struct mailslot_device *)parent)->mailslots, name );
+    name->parent = grab_object( parent );
+    return 1;
+}
+
+static int mailslot_prefix_close( struct object *obj, struct process *process, obj_handle_t handle )
+{
+    if (obj->handle_count == 1) unlink_named_object( obj );
+    return 1;
+}
+
+static void mailslot_prefix_destroy( struct object *obj )
+{
+    release_object( ((struct mailslot_prefix *)obj)->fd );
+}
+
+static const struct object_ops mailslot_prefix_ops =
+{
+    .size = sizeof(struct mailslot_prefix),
+    .type = &file_type,
+    .dump = mailslot_prefix_dump,
+    .init = mailslot_prefix_init,
+    .get_fd = mailslot_prefix_get_fd,
+    .get_sync = default_fd_get_sync,
+    .get_full_name = default_get_full_name,
+    .lookup_name = mailslot_prefix_lookup,
+    .link_name = mailslot_prefix_link,
+    .create_file = mailslot_create_file,
+    .close_handle = mailslot_prefix_close,
+    .destroy = mailslot_prefix_destroy,
+};
+
+static struct object *mailslot_create_file( struct object *obj, const struct object_params *params,
+    struct unicode_str remaining, unsigned int disposition, unsigned int sharing,
+    unsigned int options, unsigned int *information )
+{
+    struct object_params create = *params;
+    struct object *prefix;
+
+    if (!remaining.len && obj->ops == &mailslot_device_ops)
+        return mailslot_device_open_file( obj, params->access, sharing, options );
+    if (!(options & FILE_DIRECTORY_FILE) || disposition != FILE_CREATE)
+    {
+        set_error( !remaining.len || (options & FILE_DIRECTORY_FILE) ?
+                   STATUS_OBJECT_NAME_INVALID : STATUS_OBJECT_NAME_NOT_FOUND );
+        return NULL;
+    }
+    if (!remaining.len)
+    {
+        set_error( STATUS_OBJECT_NAME_COLLISION );
+        return NULL;
+    }
+    create.ops = &mailslot_prefix_ops;
+    create.init_data = &options;
+    create.attr &= ~OBJ_OPENIF;
+    if (!(prefix = create_named_object( &create ))) return NULL;
+    *information = FILE_CREATED;
+    return prefix;
 }
 
 static void mailslot_device_destroy( struct object *obj )
