@@ -505,6 +505,7 @@ NTSTATUS WINAPI wow64_NtQueryInformationToken( UINT *args )
     }
 
     case TokenGroups:  /* TOKEN_GROUPS */
+    case TokenRestrictedSids: /* TOKEN_GROUPS */
     case TokenLogonSid:   /* TOKEN_GROUPS */
     {
         TOKEN_GROUPS32 *groups32 = info;

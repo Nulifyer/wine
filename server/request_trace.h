@@ -649,21 +649,21 @@ static void dump_create_file_reply( const struct create_file_reply *req )
 static void dump_open_file_object_request( const struct open_file_object_request *req )
 {
     fprintf( stderr, " access=%08x", req->access );
-    fprintf( stderr, ", attributes=%08x", req->attributes );
-    fprintf( stderr, ", rootdir=%04x", req->rootdir );
+    fprintf( stderr, ", disposition=%08x", req->disposition );
     fprintf( stderr, ", sharing=%08x", req->sharing );
     fprintf( stderr, ", options=%08x", req->options );
     dump_uint64( ", async_user=", &req->async_user );
     fprintf( stderr, ", impersonation_level=%d", req->impersonation_level );
     fprintf( stderr, ", context_tracking=%d", req->context_tracking );
     fprintf( stderr, ", effective_only=%d", req->effective_only );
-    dump_varargs_unicode_str( ", filename=", cur_size );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
 }
 
 static void dump_open_file_object_reply( const struct open_file_object_reply *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", wait=%04x", req->wait );
+    fprintf( stderr, ", information=%08x", req->information );
 }
 
 static void dump_alloc_file_handle_request( const struct alloc_file_handle_request *req )
@@ -2692,7 +2692,9 @@ static void dump_filter_token_request( const struct filter_token_request *req )
     fprintf( stderr, ", flags=%08x", req->flags );
     fprintf( stderr, ", privileges_size=%u", req->privileges_size );
     dump_varargs_luid_attr( ", privileges=", min( cur_size, req->privileges_size ));
-    dump_varargs_sid( ", disable_sids=", cur_size );
+    fprintf( stderr, ", disable_size=%u", req->disable_size );
+    dump_varargs_sid( ", disable_sids=", min( cur_size, req->disable_size ));
+    dump_varargs_sid( ", restrict_sids=", cur_size );
 }
 
 static void dump_filter_token_reply( const struct filter_token_reply *req )
@@ -2732,6 +2734,7 @@ static void dump_get_token_groups_request( const struct get_token_groups_request
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", attr_mask=%08x", req->attr_mask );
+    fprintf( stderr, ", restricted=%d", req->restricted );
 }
 
 static void dump_get_token_groups_reply( const struct get_token_groups_reply *req )

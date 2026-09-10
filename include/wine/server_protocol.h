@@ -1913,15 +1913,15 @@ struct open_file_object_request
 {
     struct request_header __header;
     unsigned int access;
-    unsigned int attributes;
-    obj_handle_t rootdir;
+    unsigned int disposition;
     unsigned int sharing;
     unsigned int options;
+    char __pad_28[4];
     client_ptr_t async_user;
     int impersonation_level;
     int context_tracking;
     int effective_only;
-    /* VARARG(filename,unicode_str); */
+    /* VARARG(objattr,object_attributes); */
     char __pad_52[4];
 };
 struct open_file_object_reply
@@ -1929,6 +1929,8 @@ struct open_file_object_reply
     struct reply_header __header;
     obj_handle_t handle;
     obj_handle_t wait;
+    unsigned int information;
+    char __pad_20[4];
 };
 
 
@@ -4960,7 +4962,10 @@ struct filter_token_request
     unsigned int  flags;
     data_size_t   privileges_size;
     /* VARARG(privileges,luid_attr,privileges_size); */
-    /* VARARG(disable_sids,sid); */
+    data_size_t   disable_size;
+    /* VARARG(disable_sids,sid,disable_size); */
+    /* VARARG(restrict_sids,sid); */
+    char __pad_28[4];
 };
 struct filter_token_reply
 {
@@ -5008,7 +5013,7 @@ struct get_token_groups_request
     struct request_header __header;
     obj_handle_t    handle;
     unsigned int    attr_mask;
-    char __pad_20[4];
+    int             restricted;
 };
 struct get_token_groups_reply
 {
@@ -7432,6 +7437,6 @@ union generic_reply
     struct get_process_protection_reply get_process_protection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 974
+#define SERVER_PROTOCOL_VERSION 975
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

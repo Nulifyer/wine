@@ -106,6 +106,8 @@ struct token
     struct luid    modified_id;     /* new id allocated every time token is modified */
     struct list    privileges;      /* privileges available to the token */
     struct list    groups;          /* groups that the user of this token belongs to (sid_and_attributes) */
+    struct list    restricting;     /* SIDs used by the second DACL pass */
+    int            restricted;     /* enforce the restricting SID set */
     struct sid    *user;            /* SID of user this token represents */
     struct sid    *trust_level;     /* optional process-trust SID; owned by this token */
     struct sid    *owner;           /* SID of owner (points to user or one of groups) */
@@ -254,7 +256,7 @@ static int acl_is_valid( const struct acl *acl, data_size_t size )
     return TRUE;
 }
 
-static unsigned int get_sid_count( const struct sid *sid, data_size_t size )
+static int get_sid_count( const struct sid *sid, data_size_t size )
 {
     unsigned int count;
 
@@ -263,7 +265,7 @@ static unsigned int get_sid_count( const struct sid *sid, data_size_t size )
         size -= sid_len( sid );
         sid = (const struct sid *)((char *)sid + sid_len( sid ));
     }
-    return count;
+    return size ? -1 : count;
 }
 
 /* checks whether all members of a security descriptor fit inside the size
@@ -501,6 +503,12 @@ static void token_destroy( struct object *obj )
         free( group );
     }
 
+    LIST_FOR_EACH_SAFE( cursor, cursor_next, &token->restricting )
+    {
+        struct group *group = LIST_ENTRY( cursor, struct group, entry );
+        list_remove( &group->entry );
+        free( group );
+    }
     free( token->default_dacl );
 }
 
@@ -530,7 +538,9 @@ static struct token *create_token( unsigned int primary, unsigned int session_id
             allocate_luid( &token->modified_id );
         list_init( &token->privileges );
         list_init( &token->groups );
+        list_init( &token->restricting );
         list_init( &token->kernel_object );
+        token->restricted = 0;
         token->primary = primary;
         token->session_id = session_id;
         /* primary tokens don't have impersonation levels */
@@ -651,6 +661,14 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
     {
         release_object( token );
         return NULL;
+    }
+
+    token->restricted = src_token->restricted;
+    LIST_FOR_EACH_ENTRY( group, &src_token->restricting, struct group, entry )
+    {
+        struct group *copy = memdup( group, offsetof( struct group, sid ) + sid_len( &group->sid ));
+        if (!copy) { release_object( token ); return NULL; }
+        list_add_tail( &token->restricting, &copy->entry );
     }
 
     /* Owner and primary group may independently refer to the user or a group. */
@@ -1062,7 +1080,16 @@ int token_sid_present( struct token *token, const struct sid *sid, int deny )
  *
  * If both returned value and 'status' are STATUS_SUCCESS then access is granted.
  */
-static unsigned int token_access_check( struct token *token,
+static int access_sid_present( struct token *token, const struct sid *sid, int deny, int restricted )
+{
+    struct group *group;
+    if (!restricted) return token_sid_present( token, sid, deny );
+    LIST_FOR_EACH_ENTRY( group, &token->restricting, struct group, entry )
+        if (equal_sid( &group->sid, sid )) return TRUE;
+    return FALSE;
+}
+
+static unsigned int token_access_check_pass( struct token *token, int restricted,
                                  const struct security_descriptor *sd,
                                  unsigned int desired_access,
                                  struct luid_attr *privs,
@@ -1150,7 +1177,7 @@ static unsigned int token_access_check( struct token *token,
     /* NOTE: SeTakeOwnershipPrivilege is not checked for here - it is instead
      * checked when a "set owner" call is made, overriding the access rights
      * determined here. */
-    if (token_sid_present( token, owner, FALSE ))
+    if (access_sid_present( token, owner, FALSE, restricted ))
     {
         current_access |= (STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE);
         if (desired_access == current_access)
@@ -1170,7 +1197,7 @@ static unsigned int token_access_check( struct token *token,
         switch (ace->type)
         {
         case ACCESS_DENIED_ACE_TYPE:
-            if (token_sid_present( token, sid, TRUE ))
+            if (access_sid_present( token, sid, TRUE, restricted ))
             {
                 unsigned int access = map_access( ace->mask, mapping );
                 if (desired_access & MAXIMUM_ALLOWED)
@@ -1183,7 +1210,7 @@ static unsigned int token_access_check( struct token *token,
             }
             break;
         case ACCESS_ALLOWED_ACE_TYPE:
-            if (token_sid_present( token, sid, FALSE ))
+            if (access_sid_present( token, sid, FALSE, restricted ))
             {
                 unsigned int access = map_access( ace->mask, mapping );
                 if (desired_access & MAXIMUM_ALLOWED)
@@ -1210,6 +1237,21 @@ done:
             *granted_access = 0;
 
     *status = *granted_access ? STATUS_SUCCESS : STATUS_ACCESS_DENIED;
+    return STATUS_SUCCESS;
+}
+
+static unsigned int token_access_check( struct token *token, const struct security_descriptor *sd,
+    unsigned int desired, struct luid_attr *privs, unsigned int *priv_count,
+    const struct generic_map *mapping, unsigned int *granted, unsigned int *status )
+{
+    unsigned int ret, restricted_access, restricted_status;
+    ret = token_access_check_pass( token, 0, sd, desired, privs, priv_count, mapping, granted, status );
+    if (ret || *status || !token->restricted) return ret;
+    ret = token_access_check_pass( token, 1, sd, desired, NULL, NULL, mapping,
+                                  &restricted_access, &restricted_status );
+    if (ret) return ret;
+    *granted &= restricted_access;
+    if (restricted_status || !*granted) *status = STATUS_ACCESS_DENIED;
     return STATUS_SUCCESS;
 }
 
@@ -1541,19 +1583,65 @@ DECL_HANDLER(filter_token)
     if ((src_token = (struct token *)get_handle_obj( current->process, req->handle, TOKEN_DUPLICATE, &token_ops )))
     {
         const struct luid_attr *filter_privileges = get_req_data();
-        unsigned int priv_count, group_count;
+        unsigned int priv_count, i;
+        int group_count, restrict_count;
+        const struct sid *restrict_sids, *sid;
         const struct sid *filter_groups;
         struct token *token;
 
+        if (req->privileges_size % sizeof(struct luid_attr) ||
+            req->privileges_size > get_req_data_size() ||
+            req->disable_size > get_req_data_size() - req->privileges_size)
+        {
+            release_object( src_token );
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
         priv_count = min( req->privileges_size, get_req_data_size() ) / sizeof(struct luid_attr);
         filter_groups = (const struct sid *)((char *)filter_privileges + priv_count * sizeof(struct luid_attr));
-        group_count = get_sid_count( filter_groups, get_req_data_size() - priv_count * sizeof(struct luid_attr) );
+        group_count = get_sid_count( filter_groups, req->disable_size );
+        restrict_sids = (const struct sid *)((const char *)filter_groups + req->disable_size);
+        restrict_count = get_sid_count( restrict_sids, get_req_data_size() - req->privileges_size - req->disable_size );
+        if (group_count < 0 || restrict_count < 0)
+        {
+            release_object( src_token );
+            set_error( STATUS_INVALID_SID );
+            return;
+        }
 
         token = token_duplicate( src_token, src_token->primary, src_token->impersonation_level, NULL,
-                                 filter_privileges, priv_count, filter_groups, group_count );
+                                 (req->flags & DISABLE_MAX_PRIVILEGE) ? NULL : filter_privileges,
+                                 (req->flags & DISABLE_MAX_PRIVILEGE) ? 0 : priv_count, filter_groups, group_count );
         if (token)
         {
             unsigned int access = get_handle_access( current->process, req->handle );
+            struct privilege *privilege, *next;
+            struct group *group, *next_group;
+            if (req->flags & DISABLE_MAX_PRIVILEGE)
+                LIST_FOR_EACH_ENTRY_SAFE( privilege, next, &token->privileges, struct privilege, entry )
+                    if (privilege->luid.low_part != SeChangeNotifyPrivilege.low_part ||
+                        privilege->luid.high_part != SeChangeNotifyPrivilege.high_part)
+                        privilege_remove( privilege );
+            if (restrict_count)
+            {
+                LIST_FOR_EACH_ENTRY_SAFE( group, next_group, &token->restricting, struct group, entry )
+                { list_remove( &group->entry ); free( group ); }
+                token->restricted = 1;
+                for (i = 0, sid = restrict_sids; i < restrict_count; i++, sid = (const struct sid *)((const char *)sid + sid_len( sid )))
+                {
+                    if (src_token->restricted && !access_sid_present( src_token, sid, FALSE, 1 )) continue;
+                    if (!(group = mem_alloc( offsetof( struct group, sid ) + sid_len( sid )))) break;
+                    group->attrs = SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED;
+                    memcpy( &group->sid, sid, sid_len( sid ));
+                    list_add_tail( &token->restricting, &group->entry );
+                }
+                if (i != restrict_count || list_empty( &token->restricting ))
+                {
+                    if (i == restrict_count) set_error( STATUS_INVALID_PARAMETER );
+                    release_object( token ); release_object( src_token ); return;
+                }
+            }
+            allocate_luid( &token->modified_id );
             reply->new_handle = alloc_handle_no_access_check( current->process, token, access, 0 );
             release_object( token );
         }
@@ -1709,8 +1797,9 @@ DECL_HANDLER(get_token_groups)
     {
         unsigned int group_count = 0;
         const struct group *group;
+        const struct list *groups = req->restricted ? &token->restricting : &token->groups;
 
-        LIST_FOR_EACH_ENTRY( group, &token->groups, const struct group, entry )
+        LIST_FOR_EACH_ENTRY( group, groups, const struct group, entry )
         {
             if (req->attr_mask && !(group->attrs & req->attr_mask)) continue;
             group_count++;
@@ -1725,7 +1814,7 @@ DECL_HANDLER(get_token_groups)
 
             if (attr_ptr)
             {
-                LIST_FOR_EACH_ENTRY( group, &token->groups, const struct group, entry )
+                LIST_FOR_EACH_ENTRY( group, groups, const struct group, entry )
                 {
                     if (req->attr_mask && !(group->attrs & req->attr_mask)) continue;
                     sid = copy_sid( sid, &group->sid );

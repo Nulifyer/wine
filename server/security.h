@@ -24,6 +24,7 @@
 #include <sys/types.h>
 
 extern const struct luid SeIncreaseQuotaPrivilege;
+extern const struct luid SeTcbPrivilege;
 extern const struct luid SeSecurityPrivilege;
 extern const struct luid SeTakeOwnershipPrivilege;
 extern const struct luid SeLoadDriverPrivilege;

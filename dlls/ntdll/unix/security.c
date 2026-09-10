@@ -428,6 +428,7 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         break;
 
     case TokenGroups:
+    case TokenRestrictedSids:
     case TokenLogonSid:
     {
         /* reply buffer is always shorter than output one */
@@ -439,6 +440,7 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         {
             req->handle = wine_server_obj_handle( token );
             req->attr_mask = (class == TokenLogonSid) ? SE_GROUP_LOGON_ID : 0;
+            req->restricted = class == TokenRestrictedSids;
             wine_server_set_reply( req, buffer, length );
             status = wine_server_call( req );
 
@@ -830,17 +832,33 @@ NTSTATUS WINAPI NtFilterToken( HANDLE token, ULONG flags, TOKEN_GROUPS *disable_
 {
     data_size_t privileges_len = 0;
     data_size_t sids_len = 0;
-    SID *sids = NULL;
+    SID *sids = NULL, *restricted = NULL;
+    data_size_t restricted_len = 0;
     unsigned int status;
 
     TRACE( "%p %#x %p %p %p %p\n", token, flags, disable_sids, privileges,
            restrict_sids, new_token );
 
-    if (flags)
+    if (flags & ~DISABLE_MAX_PRIVILEGE)
         FIXME( "flags %#x unsupported\n", flags );
 
-    if (restrict_sids)
-        FIXME( "support for restricting sids not yet implemented\n" );
+    if (restrict_sids && restrict_sids->GroupCount)
+    {
+        DWORD i, size;
+        BYTE *ptr;
+        for (i = 0; i < restrict_sids->GroupCount; i++)
+        {
+            SID *sid = restrict_sids->Groups[i].Sid;
+            restricted_len += offsetof( SID, SubAuthority[sid->SubAuthorityCount] );
+        }
+        if (!(restricted = malloc( restricted_len ))) return STATUS_NO_MEMORY;
+        for (i = 0, ptr = (BYTE *)restricted; i < restrict_sids->GroupCount; i++, ptr += size)
+        {
+            SID *sid = restrict_sids->Groups[i].Sid;
+            size = offsetof( SID, SubAuthority[sid->SubAuthorityCount] );
+            memcpy( ptr, sid, size );
+        }
+    }
 
     if (privileges)
         privileges_len = privileges->PrivilegeCount * sizeof(LUID_AND_ATTRIBUTES);
@@ -857,7 +875,7 @@ NTSTATUS WINAPI NtFilterToken( HANDLE token, ULONG flags, TOKEN_GROUPS *disable_
         }
 
         sids = malloc( sids_len );
-        if (!sids) return STATUS_NO_MEMORY;
+        if (!sids) { free( restricted ); return STATUS_NO_MEMORY; }
 
         for (i = 0, tmp = (BYTE *)sids; i < disable_sids->GroupCount; i++, tmp += len)
         {
@@ -872,13 +890,16 @@ NTSTATUS WINAPI NtFilterToken( HANDLE token, ULONG flags, TOKEN_GROUPS *disable_
         req->handle          = wine_server_obj_handle( token );
         req->flags           = flags;
         req->privileges_size = privileges_len;
+        req->disable_size = sids_len;
         wine_server_add_data( req, privileges->Privileges, privileges_len );
         wine_server_add_data( req, sids, sids_len );
+        wine_server_add_data( req, restricted, restricted_len );
         status = wine_server_call( req );
         if (!status) *new_token = wine_server_ptr_handle( reply->new_handle );
     }
     SERVER_END_REQ;
 
+    free( restricted );
     free( sids );
     return status;
 }

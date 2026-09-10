@@ -109,6 +109,20 @@ struct named_pipe_device_file
     struct named_pipe_device *device;      /* named pipe device */
 };
 
+/* Prefix names and directory handles share this owner. Pipe endpoints do not
+ * keep its namespace alive after the last directory handle closes. */
+struct named_pipe_prefix
+{
+    struct object obj;
+    struct namespace *children;
+    struct fd *fd;
+};
+
+static const struct object_ops named_pipe_prefix_ops;
+static struct object *named_pipe_create_file( struct object *, const struct object_params *,
+    struct unicode_str, unsigned int, unsigned int, unsigned int, unsigned int * );
+static struct object *pipe_namespace_lookup( struct namespace *, struct unicode_str *, unsigned int );
+
 struct named_pipe_init_data
 {
     unsigned int   maxinstances;
@@ -251,6 +265,7 @@ static const struct object_ops named_pipe_device_ops =
     .get_full_name = named_pipe_device_get_full_name,
     .lookup_name   = named_pipe_device_lookup_name,
     .open_file     = named_pipe_device_open_file,
+    .create_file   = named_pipe_create_file,
     .destroy       = named_pipe_device_destroy,
 };
 
@@ -553,8 +568,7 @@ static struct object *named_pipe_device_lookup_name( struct object *obj, struct 
         return &dir->obj;
     }
 
-    if ((found = find_object( device->pipes, *name, attr | OBJ_CASE_INSENSITIVE )))
-        name->len = 0;
+    found = pipe_namespace_lookup( device->pipes, name, attr );
 
     return found;
 }
@@ -1470,9 +1484,199 @@ int set_named_pipe_client_security( struct object *obj, int level, int tracking,
     return 1;
 }
 
+static struct object *pipe_namespace_lookup( struct namespace *space, struct unicode_str *name,
+                                             unsigned int attr )
+{
+    struct object *obj;
+    struct unicode_str prefix = *name;
+    data_size_t i;
+
+    if ((obj = find_object( space, *name, attr | OBJ_CASE_INSENSITIVE )))
+    {
+        name->len = 0;
+        return obj;
+    }
+    for (i = 0; i < name->len / sizeof(WCHAR); i++)
+    {
+        if (name->str[i] != '\\') continue;
+        prefix.len = i * sizeof(WCHAR);
+        if (!(obj = find_object( space, prefix, attr | OBJ_CASE_INSENSITIVE ))) continue;
+        if (obj->ops == &named_pipe_prefix_ops)
+        {
+            name->str += i + 1;
+            name->len -= (i + 1) * sizeof(WCHAR);
+            return obj;
+        }
+        release_object( obj );
+    }
+    return NULL;
+}
+
+static int pipe_prefix_access( struct object *obj, unsigned int access )
+{
+    return check_object_access( thread_get_impersonation_token( current ), obj, &access );
+}
+
+static void pipe_prefix_dump( struct object *obj, int verbose )
+{
+    fputs( "Named pipe prefix\n", stderr );
+}
+
+static bool pipe_prefix_init( struct object *obj, const void *data )
+{
+    struct named_pipe_prefix *prefix = (struct named_pipe_prefix *)obj;
+    prefix->fd = NULL;
+    return !!(prefix->children = create_namespace( 7 ));
+}
+
+static struct fd *pipe_prefix_get_fd( struct object *obj )
+{
+    struct named_pipe_prefix *prefix = (struct named_pipe_prefix *)obj;
+    return prefix->fd ? (struct fd *)grab_object( prefix->fd ) : NULL;
+}
+
+static struct object *pipe_prefix_lookup( struct object *obj, struct unicode_str *name,
+                                          unsigned int attr, struct object *root )
+{
+    if (!name || !name->len) return NULL;
+    if (root == obj)
+    {
+        set_error( STATUS_OBJECT_NAME_INVALID );
+        return NULL;
+    }
+    return pipe_namespace_lookup( ((struct named_pipe_prefix *)obj)->children, name, attr );
+}
+
+static int pipe_prefix_link( struct object *obj, struct object_name *name, struct object *parent )
+{
+    struct namespace *space;
+    if (parent->ops == &named_pipe_prefix_ops)
+    {
+        if (!thread_single_check_privilege( current, SeTcbPrivilege ) &&
+            !pipe_prefix_access( parent, FILE_ADD_SUBDIRECTORY )) return 0;
+        space = ((struct named_pipe_prefix *)parent)->children;
+    }
+    else if (parent->ops == &named_pipe_device_ops)
+    {
+        if (!thread_single_check_privilege( current, SeTcbPrivilege ))
+        {
+            set_error( STATUS_PRIVILEGE_NOT_HELD );
+            return 0;
+        }
+        space = ((struct named_pipe_device *)parent)->pipes;
+    }
+    else
+    {
+        set_error( STATUS_OBJECT_NAME_INVALID );
+        return 0;
+    }
+    namespace_add( space, name );
+    name->parent = grab_object( parent );
+    return 1;
+}
+
+static int pipe_prefix_close( struct object *obj, struct process *process, obj_handle_t handle )
+{
+    struct named_pipe_prefix *prefix = (struct named_pipe_prefix *)obj;
+    struct object *child;
+    if (obj->handle_count != 1) return 1;
+    while ((child = find_object_index( prefix->children, 0 )))
+    {
+        unlink_named_object( child );
+        release_object( child );
+    }
+    unlink_named_object( obj );
+    return 1;
+}
+
+static void pipe_prefix_destroy( struct object *obj )
+{
+    struct named_pipe_prefix *prefix = (struct named_pipe_prefix *)obj;
+    if (prefix->fd) release_object( prefix->fd );
+    free( prefix->children );
+}
+
+static const struct fd_ops pipe_prefix_fd_ops =
+{
+    .get_file_info = default_fd_get_file_info,
+    .queue_async = default_fd_queue_async,
+};
+
+static const struct object_ops named_pipe_prefix_ops =
+{
+    .size = sizeof(struct named_pipe_prefix),
+    .type = &file_type,
+    .dump = pipe_prefix_dump,
+    .init = pipe_prefix_init,
+    .get_fd = pipe_prefix_get_fd,
+    .get_sync = default_fd_get_sync,
+    .get_full_name = default_get_full_name,
+    .lookup_name = pipe_prefix_lookup,
+    .link_name = pipe_prefix_link,
+    .create_file = named_pipe_create_file,
+    .close_handle = pipe_prefix_close,
+    .destroy = pipe_prefix_destroy,
+};
+
+static struct object *named_pipe_create_file( struct object *obj, const struct object_params *params,
+    struct unicode_str remaining, unsigned int disposition, unsigned int sharing,
+    unsigned int options, unsigned int *information )
+{
+    struct object_params create = *params;
+    struct named_pipe_prefix *prefix;
+    if (!remaining.len && obj->ops == &named_pipe_device_ops)
+        return named_pipe_device_open_file( obj, params->access, sharing, options );
+    if (!(options & FILE_DIRECTORY_FILE))
+    {
+        set_error( remaining.len ? STATUS_OBJECT_NAME_NOT_FOUND : STATUS_OBJECT_NAME_INVALID );
+        return NULL;
+    }
+    if (!remaining.len)
+    {
+        if (disposition == FILE_CREATE)
+        {
+            set_error( STATUS_OBJECT_NAME_COLLISION );
+            return NULL;
+        }
+        if (disposition != FILE_OPEN && disposition != FILE_OPEN_IF)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return NULL;
+        }
+        return grab_object( obj );
+    }
+    if (disposition == FILE_OPEN)
+    {
+        set_error( STATUS_OBJECT_NAME_NOT_FOUND );
+        return NULL;
+    }
+    if (disposition != FILE_CREATE && disposition != FILE_OPEN_IF)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return NULL;
+    }
+    create.ops = &named_pipe_prefix_ops;
+    create.attr &= ~OBJ_OPENIF;
+    if (!(prefix = create_named_object( &create ))) return NULL;
+    if (!(prefix->fd = alloc_pseudo_fd( &pipe_prefix_fd_ops, &prefix->obj, options )))
+    {
+        release_object( prefix );
+        return NULL;
+    }
+    *information = FILE_CREATED;
+    return &prefix->obj;
+}
+
 static int named_pipe_link_name( struct object *obj, struct object_name *name, struct object *parent )
 {
     if (parent->ops == &named_pipe_dir_ops) parent = &((struct named_pipe_device_file *)parent)->device->obj;
+    if (parent->ops == &named_pipe_prefix_ops)
+    {
+        if (!pipe_prefix_access( parent, FILE_ADD_FILE )) return 0;
+        namespace_add( ((struct named_pipe_prefix *)parent)->children, name );
+        name->parent = grab_object( parent );
+        return 1;
+    }
     if (parent->ops != &named_pipe_device_ops)
     {
         set_error( STATUS_OBJECT_NAME_INVALID );

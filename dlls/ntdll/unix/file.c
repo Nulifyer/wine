@@ -2298,7 +2298,8 @@ static NTSTATUS server_get_file_info( HANDLE handle, IO_STATUS_BLOCK *io, void *
 
 
 static unsigned int server_open_file_object( HANDLE *ret_handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
-                                             ULONG sharing, ULONG options );
+                                             ULONG sharing, ULONG options, ULONG disposition,
+                                             ULONG_PTR *information );
 
 
 /* retrieve device/inode number for all the drives */
@@ -2426,7 +2427,7 @@ static NTSTATUS get_mountmgr_fs_info( HANDLE handle, int fd, struct mountmgr_uni
     init_unicode_string( &string, MOUNTMGR_DEVICE_NAME );
     InitializeObjectAttributes( &attr, &string, 0, NULL, NULL );
     status = server_open_file_object( &mountmgr, GENERIC_READ | SYNCHRONIZE, &attr,
-                                      FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_SYNCHRONOUS_IO_NONALERT );
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_SYNCHRONOUS_IO_NONALERT, FILE_OPEN, NULL );
     if (status) return status;
 
     status = sync_ioctl( mountmgr, IOCTL_MOUNTMGR_QUERY_UNIX_DRIVE, drive, sizeof(*drive), drive, size );
@@ -4677,8 +4678,8 @@ NTSTATUS WINAPI NtCreateFile( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBU
 
     if (status == STATUS_BAD_DEVICE_TYPE)
     {
-        status = server_open_file_object( handle, access, &new_attr, sharing, options );
-        if (status == STATUS_SUCCESS) io->Information = FILE_OPENED;
+        status = server_open_file_object( handle, access, &new_attr, sharing, options,
+                                          disposition, &io->Information );
         goto done;
     }
 
@@ -4881,7 +4882,7 @@ NTSTATUS WINAPI NtQueryFullAttributesFile( const OBJECT_ATTRIBUTES *attr,
 
     status = get_nt_and_unix_names( &new_attr, &nt_name, &unix_name, FILE_OPEN, TRUE );
     if (status == STATUS_BAD_DEVICE_TYPE &&
-        !(status = server_open_file_object( &file, 0, &new_attr, 0, 0 )))
+        !(status = server_open_file_object( &file, 0, &new_attr, 0, 0, FILE_OPEN, NULL )))
     {
         NtClose( file );
         status = STATUS_INVALID_INFO_CLASS;
@@ -5721,37 +5722,50 @@ static void set_sync_iosb( IO_STATUS_BLOCK *io, NTSTATUS status, ULONG_PTR info,
 
 
 static unsigned int server_open_file_object( HANDLE *ret_handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
-                                             ULONG sharing, ULONG options )
+                                             ULONG sharing, ULONG options, ULONG disposition,
+                                             ULONG_PTR *information )
 {
     const SECURITY_QUALITY_OF_SERVICE *qos = attr->SecurityQualityOfService;
+    struct object_attributes *objattr;
+    data_size_t len;
     HANDLE handle, wait_handle;
     struct async_irp *async;
+    ULONG_PTR result_information = 0;
     unsigned int status;
 
+    if ((status = wine_server_alloc_object_attributes( attr, &objattr, &len ))) return status;
     if (!(async = (struct async_irp *)alloc_fileio( sizeof(*async), irp_completion )))
+    {
+        free( objattr );
         return STATUS_NO_MEMORY;
+    }
 
     SERVER_START_REQ( open_file_object )
     {
         req->access     = access;
-        req->attributes = attr->Attributes;
-        req->rootdir    = wine_server_obj_handle( attr->RootDirectory );
+        req->disposition = disposition;
         req->sharing    = sharing;
         req->options    = options;
         req->async_user = wine_server_client_ptr( &async->io );
         req->impersonation_level = qos ? qos->ImpersonationLevel : SecurityImpersonation;
         req->context_tracking = qos ? qos->ContextTrackingMode : SECURITY_DYNAMIC_TRACKING;
         req->effective_only = qos ? qos->EffectiveOnly : TRUE;
-        wine_server_add_data( req, attr->ObjectName->Buffer, attr->ObjectName->Length );
+        wine_server_add_data( req, objattr, len );
         status = wine_server_call( req );
         handle = wine_server_ptr_handle( reply->handle );
         wait_handle = wine_server_ptr_handle( reply->wait );
+        result_information = reply->information;
     }
     SERVER_END_REQ;
+    free( objattr );
 
     if (wait_handle) status = wait_async( wait_handle, FALSE );
     if (status) NtClose( handle );
-    else *ret_handle = handle;
+    else
+    {
+        *ret_handle = handle;
+        if (information) *information = result_information;
+    }
     return status;
 }
 

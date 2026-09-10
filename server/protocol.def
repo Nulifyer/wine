@@ -1653,18 +1653,18 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 /* Open a file object */
 @REQ(open_file_object)
     unsigned int access;        /* wanted access rights */
-    unsigned int attributes;    /* open attributes */
-    obj_handle_t rootdir;       /* root directory */
+    unsigned int disposition;   /* file creation disposition */
     unsigned int sharing;       /* sharing flags */
     unsigned int options;       /* file options */
     client_ptr_t async_user;    /* async user ptr, same as async_data.user */
     int impersonation_level;    /* client security quality of service */
     int context_tracking;       /* dynamic client token tracking */
     int effective_only;         /* retain only enabled privileges */
-    VARARG(filename,unicode_str); /* file name */
+    VARARG(objattr,object_attributes); /* name, root and security descriptor */
 @REPLY
     obj_handle_t handle;        /* handle to the file */
     obj_handle_t wait;          /* handle to wait on for blocking create */
+    unsigned int information;   /* FILE_OPENED or FILE_CREATED */
 @END
 
 
@@ -3574,7 +3574,9 @@ enum caret_state
     unsigned int  flags;           /* flags */
     data_size_t   privileges_size; /* size of privileges */
     VARARG(privileges,luid_attr,privileges_size); /* privileges to remove from new token */
-    VARARG(disable_sids,sid);      /* array of groups to remove from new token */
+    data_size_t   disable_size;    /* size of disabled SID array */
+    VARARG(disable_sids,sid,disable_size); /* groups to disable */
+    VARARG(restrict_sids,sid);     /* restricting SID array */
 @REPLY
     obj_handle_t  new_handle;      /* filtered handle */
 @END
@@ -3602,6 +3604,7 @@ enum caret_state
 @REQ(get_token_groups)
     obj_handle_t    handle;       /* handle to the token */
     unsigned int    attr_mask;    /* mask for wanted attributes */
+    int             restricted;   /* query restricting SIDs */
 @REPLY
     data_size_t     attr_len;     /* length needed to store attrs */
     data_size_t     sid_len;      /* length needed to store sids */

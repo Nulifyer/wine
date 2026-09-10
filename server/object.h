@@ -123,6 +123,11 @@ struct object_ops
     /* open a file object to access this object */
     struct object *(*open_file)(struct object *, unsigned int access, unsigned int sharing,
                                 unsigned int options);
+    /* create/open a file in a device-owned namespace */
+    struct object *(*create_file)(struct object *, const struct object_params *,
+                                  struct unicode_str, unsigned int disposition,
+                                  unsigned int sharing, unsigned int options,
+                                  unsigned int *information);
     /* return list of kernel objects */
     struct list *(*get_kernel_obj_list)(struct object *);
     /* close a handle to this object */
