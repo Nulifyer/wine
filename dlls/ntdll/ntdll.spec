@@ -124,6 +124,7 @@
 @ stdcall LdrUnlockLoaderLock(long long)
 @ stdcall LdrUnregisterDllNotification(ptr)
 @ stub LdrVerifyImageMatchesChecksum
+@ stdcall LdrVerifyImageMatchesChecksumEx(ptr ptr)
 @ stdcall MD4Final(ptr)
 @ stdcall MD4Init(ptr)
 @ stdcall MD4Update(ptr ptr long)

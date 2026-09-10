@@ -2982,6 +2982,7 @@ NTSTATUS WINAPI NtCreateSection( HANDLE *handle, ACCESS_MASK access, const OBJEC
     struct object_attributes *objattr;
 
     *handle = 0;
+    if (!sec_flags) return STATUS_INVALID_PARAMETER_6;
 
     switch (protect & 0xff)
     {
@@ -3002,6 +3003,12 @@ NTSTATUS WINAPI NtCreateSection( HANDLE *handle, ACCESS_MASK access, const OBJEC
         break;
     default:
         return STATUS_INVALID_PAGE_PROTECTION;
+    }
+
+    if (!file && !(sec_flags & SEC_IMAGE))
+    {
+        if (!size || !size->QuadPart) return STATUS_INVALID_PARAMETER_4;
+        if (size->QuadPart < 0) return STATUS_SECTION_TOO_BIG;
     }
 
     if ((ret = wine_server_alloc_object_attributes( attr, &objattr, &len ))) return ret;

@@ -4610,6 +4610,136 @@ void loader_init( CONTEXT *context, void **entry )
 }
 
 
+/* Layout consumed by LdrVerifyImageMatchesChecksumEx. */
+struct image_verify_info
+{
+    ULONG size, flags;
+    void (WINAPI *callback)(void *, const char *);
+    void *context;
+    HANDLE section;
+    ACCESS_MASK access;
+    OBJECT_ATTRIBUTES *attributes;
+    ULONG protection, allocation;
+    USHORT characteristics;
+};
+
+static const IMAGE_NT_HEADERS *verify_image_header( const BYTE *base, SIZE_T size )
+{
+    const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)base;
+    const IMAGE_NT_HEADERS *nt;
+    SIZE_T offset;
+
+    if (size < sizeof(*dos) || dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+    offset = dos->e_lfanew;
+    if (offset > size || size - offset < offsetof( IMAGE_NT_HEADERS, OptionalHeader )) return NULL;
+    nt = (const IMAGE_NT_HEADERS *)(base + offset);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->FileHeader.SizeOfOptionalHeader < offsetof( IMAGE_OPTIONAL_HEADER, CheckSum ) + sizeof(DWORD) ||
+        size - offset - offsetof( IMAGE_NT_HEADERS, OptionalHeader ) < nt->FileHeader.SizeOfOptionalHeader)
+        return NULL;
+    return nt;
+}
+
+static BOOL verify_view_checksum( const BYTE *base, SIZE_T size, ULONG file_size )
+{
+    const IMAGE_NT_HEADERS *nt = verify_image_header( base, size );
+    SIZE_T i, checksum_offset;
+    ULONG sum = 0;
+
+    if (!nt || !nt->OptionalHeader.CheckSum) return TRUE;
+    checksum_offset = (const BYTE *)&nt->OptionalHeader.CheckSum - base;
+    for (i = 0; i < size; i += 2)
+    {
+        unsigned int value = base[i];
+        if (i + 1 < size) value |= (unsigned int)base[i + 1] << 8;
+        if (i >= checksum_offset && i < checksum_offset + sizeof(DWORD)) value = 0;
+        sum += value;
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    sum = (sum & 0xffff) + (sum >> 16);
+    return sum + file_size == nt->OptionalHeader.CheckSum;
+}
+
+/***********************************************************************
+ *           LdrVerifyImageMatchesChecksumEx   (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrVerifyImageMatchesChecksumEx( HANDLE file, struct image_verify_info *info )
+{
+    HANDLE section;
+    void *base = NULL;
+    SIZE_T size = 0;
+    NTSTATUS status;
+    IO_STATUS_BLOCK io;
+    FILE_STANDARD_INFORMATION file_info;
+    const IMAGE_NT_HEADERS *nt;
+    IMAGE_IMPORT_DESCRIPTOR *imports;
+    IMAGE_SECTION_HEADER *import_section = NULL;
+    ULONG import_size, allocation = SEC_COMMIT, protection = PAGE_READONLY;
+    ACCESS_MASK access = SECTION_MAP_READ;
+    OBJECT_ATTRIBUTES *attributes = NULL;
+    BOOL image;
+
+    TRACE( "%p %p\n", file, info );
+    if (info->size != sizeof(*info) || (info->flags & ~7)) return STATUS_INVALID_PARAMETER_2;
+    if (info->flags & 2)
+    {
+        allocation = info->allocation;
+        protection = info->protection;
+        access = info->access;
+        attributes = info->attributes;
+    }
+    image = !!(allocation & SEC_IMAGE);
+    if ((status = NtCreateSection( &section, access, attributes, NULL, protection, allocation, file )) < 0)
+        return status;
+    status = NtMapViewOfSection( section, GetCurrentProcess(), &base, 0, 0, NULL, &size,
+                                ViewShare, 0, PAGE_READONLY );
+    if (status >= 0)
+    {
+        status = STATUS_SUCCESS;
+        __TRY
+        {
+            if (!((ULONG_PTR)file & 1))
+            {
+                status = NtQueryInformationFile( file, &io, &file_info, sizeof(file_info), FileStandardInformation );
+                if (!status && !verify_view_checksum( base, size, file_info.EndOfFile.LowPart ))
+                    status = STATUS_IMAGE_CHECKSUM_MISMATCH;
+            }
+            if (!status && (info->flags & 5))
+            {
+                if (!(nt = verify_image_header( base, size ))) status = STATUS_INVALID_IMAGE_FORMAT;
+                else
+                {
+                    if (info->flags & 4) info->characteristics = nt->FileHeader.Characteristics;
+                    if ((info->flags & 1) && info->callback &&
+                        (imports = RtlImageDirectoryEntryToData( base, image, IMAGE_DIRECTORY_ENTRY_IMPORT, &import_size )))
+                    {
+                        while (imports->Name)
+                        {
+                            const char *name = image ? (char *)base + imports->Name :
+                                RtlImageRvaToVa( nt, base, imports->Name, &import_section );
+                            info->callback( info->context, name );
+                            imports++;
+                        }
+                    }
+                }
+            }
+        }
+        __EXCEPT_ALL
+        {
+            status = STATUS_IMAGE_CHECKSUM_MISMATCH;
+        }
+        __ENDTRY
+        NtUnmapViewOfSection( GetCurrentProcess(), base );
+    }
+    if (status >= 0 && (info->flags & 2)) info->section = section;
+    else
+    {
+        if (attributes && (attributes->Attributes & OBJ_PERMANENT)) NtMakeTemporaryObject( section );
+        NtClose( section );
+    }
+    return status;
+}
+
 /***********************************************************************
  *           RtlImageDirectoryEntryToData   (NTDLL.@)
  */
