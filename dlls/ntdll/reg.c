@@ -270,7 +270,11 @@ static NTSTATUS RTL_ReportRegistryValue(PKEY_VALUE_FULL_INFORMATION pInfo,
         data = pQuery->DefaultData;
         len = pQuery->DefaultLength;
 
-        if (!data)
+        if (type == REG_NONE)
+            return STATUS_SUCCESS;
+
+        /* Zero-length DWORD defaults carry the value in DefaultData itself. */
+        if (!data && !(type == REG_DWORD && !len))
             return STATUS_DATA_OVERRUN;
 
         if (!len)
@@ -526,7 +530,7 @@ NTSTATUS WINAPI RtlQueryRegistryValues(IN ULONG RelativeTo, IN PCWSTR Path,
                 handle = topkey;
         }
 
-        if (QueryTable->Flags & RTL_QUERY_REGISTRY_NOVALUE)
+        if (!QueryTable->Name && (QueryTable->Flags & RTL_QUERY_REGISTRY_NOVALUE))
         {
             QueryTable->QueryRoutine(QueryTable->Name, REG_NONE, NULL, 0,
                 Context, QueryTable->EntryContext);
@@ -605,7 +609,8 @@ NTSTATUS WINAPI RtlQueryRegistryValues(IN ULONG RelativeTo, IN PCWSTR Path,
             }
             if (status != STATUS_SUCCESS)
             {
-                if (QueryTable->Flags & RTL_QUERY_REGISTRY_REQUIRED)
+                if ((QueryTable->Flags & RTL_QUERY_REGISTRY_REQUIRED) &&
+                    QueryTable->DefaultType == REG_NONE)
                 {
                     ret = STATUS_OBJECT_NAME_NOT_FOUND;
                     goto out;
