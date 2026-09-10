@@ -158,6 +158,7 @@ struct type_descr thread_type =
 
 static void thread_dump( struct object *obj, int verbose );
 static struct object *thread_get_sync( struct object *obj );
+static int thread_check_access( struct object *obj, struct token *token, unsigned int *access );
 static unsigned int thread_map_access( struct object *obj, unsigned int access );
 static void thread_poll_event( struct fd *fd, int event );
 static struct list *thread_get_kernel_obj_list( struct object *obj );
@@ -170,6 +171,7 @@ static const struct object_ops thread_ops =
     .dump                = thread_dump,
     .get_sync            = thread_get_sync,
     .map_access          = thread_map_access,
+    .check_access        = thread_check_access,
     .get_kernel_obj_list = thread_get_kernel_obj_list,
     .destroy             = thread_destroy,
 };
@@ -632,11 +634,35 @@ static struct object *thread_get_sync( struct object *obj )
     return grab_object( thread->sync );
 }
 
+static int thread_check_access( struct object *obj, struct token *token, unsigned int *access )
+{
+    struct thread *thread = (struct thread *)obj;
+    struct luid_attr debug = { SeDebugPrivilege, SE_PRIVILEGE_ENABLED };
+    unsigned int allowed = THREAD_QUERY_LIMITED_INFORMATION | THREAD_RESUME | SYNCHRONIZE;
+    int has_debug;
+
+    if (!thread->process->protection || thread->process == current->process) return 1;
+    has_debug = token_check_privileges( token, TRUE, &debug, 1, NULL );
+    if (has_debug) allowed |= THREAD_SET_LIMITED_INFORMATION;
+    if (*access == MAXIMUM_ALLOWED && !has_debug)
+    {
+        *access = allowed;
+        return 1;
+    }
+    if (*access & ~allowed)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return 0;
+    }
+    return 1;
+}
+
 static unsigned int thread_map_access( struct object *obj, unsigned int access )
 {
     access = default_map_access( obj, access );
     if (access & THREAD_QUERY_INFORMATION) access |= THREAD_QUERY_LIMITED_INFORMATION;
     if (access & THREAD_SET_INFORMATION) access |= THREAD_SET_LIMITED_INFORMATION;
+    if (access & THREAD_SUSPEND_RESUME) access |= THREAD_RESUME;
     return access;
 }
 

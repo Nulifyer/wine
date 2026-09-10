@@ -72,6 +72,7 @@ extern struct token *token_duplicate( struct token *src_token, unsigned primary,
 extern int token_check_privileges( struct token *token, int all_required,
                                    const struct luid_attr *reqprivs,
                                    unsigned int count, struct luid_attr *usedprivs );
+extern struct token *token_duplicate_for_unprotected_process( struct token *source );
 extern struct token *token_duplicate_impersonation( struct token *token, int level, int effective_only );
 extern const struct acl *token_get_default_dacl( struct token *token );
 extern const struct sid *token_get_owner( struct token *token );
@@ -122,6 +123,8 @@ static inline struct ace *set_ace( struct ace *ace, const struct sid *sid, unsig
     return ace;
 }
 
+extern int security_assign_unprotected_process_token( struct process *process, struct token *source );
+extern int security_assign_thread_token( struct thread *thread, struct token *token );
 extern void security_set_thread_token( struct thread *thread, obj_handle_t handle );
 extern const struct sid *security_unix_uid_to_sid( uid_t uid );
 extern int check_object_access( struct token *token, struct object *obj, unsigned int *access );

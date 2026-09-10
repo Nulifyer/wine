@@ -3678,6 +3678,16 @@ static void dump_get_process_critical_state_reply( const struct get_process_crit
     fprintf( stderr, " critical=%d", req->critical );
 }
 
+static void dump_get_process_protection_request( const struct get_process_protection_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_process_protection_reply( const struct get_process_protection_reply *req )
+{
+    fprintf( stderr, " protection=%08x", req->protection );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4000,6 +4010,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_accept_connect_port_request,
     (dump_func)dump_alpc_disconnect_port_request,
     (dump_func)dump_get_process_critical_state_request,
+    (dump_func)dump_get_process_protection_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4322,6 +4333,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_accept_connect_port_reply,
     NULL,
     (dump_func)dump_get_process_critical_state_reply,
+    (dump_func)dump_get_process_protection_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -4644,6 +4656,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "alpc_accept_connect_port",
     "alpc_disconnect_port",
     "get_process_critical_state",
+    "get_process_protection",
 };
 
 static const struct
@@ -4660,6 +4673,7 @@ static const struct
     { "ALERTED",                     STATUS_ALERTED },
     { "BAD_DEVICE_TYPE",             STATUS_BAD_DEVICE_TYPE },
     { "BAD_IMPERSONATION_LEVEL",     STATUS_BAD_IMPERSONATION_LEVEL },
+    { "BAD_TOKEN_TYPE",              STATUS_BAD_TOKEN_TYPE },
     { "BUFFER_OVERFLOW",             STATUS_BUFFER_OVERFLOW },
     { "BUFFER_TOO_SMALL",            STATUS_BUFFER_TOO_SMALL },
     { "CANCELLED",                   STATUS_CANCELLED },

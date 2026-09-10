@@ -613,6 +613,7 @@ NTSTATUS WINAPI wow64_NtQueryInformationProcess( UINT *args )
     case ProcessBreakOnTermination:  /* ULONG */
     case ProcessPriorityBoost:  /* ULONG */
     case ProcessHandleCount:  /* ULONG */
+    case ProcessProtectionInformation:  /* BYTE */
     case ProcessSessionInformation:  /* ULONG */
     case ProcessDebugFlags:  /* ULONG */
     case ProcessExecuteFlags:  /* ULONG */

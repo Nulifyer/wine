@@ -92,6 +92,7 @@ struct type_descr process_type =
 static void process_dump( struct object *obj, int verbose );
 static struct object *process_get_sync( struct object *obj );
 static unsigned int process_map_access( struct object *obj, unsigned int access );
+static int process_check_access( struct object *obj, struct token *token, unsigned int *access );
 static struct security_descriptor *process_get_sd( struct object *obj );
 static void process_poll_event( struct fd *fd, int event );
 static struct list *process_get_kernel_obj_list( struct object *obj );
@@ -106,6 +107,7 @@ static const struct object_ops process_ops =
     .get_sync            = process_get_sync,
     .map_access          = process_map_access,
     .get_sd              = process_get_sd,
+    .check_access        = process_check_access,
     .get_kernel_obj_list = process_get_kernel_obj_list,
     .destroy             = process_destroy,
 };
@@ -625,6 +627,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->disable_boost   = 0;
     process->handle_checking_mode = 0;
     process->critical        = 0;
+    process->protection      = 0;
     process->suspend         = 0;
     process->is_system       = 0;
     process->debug_children  = 1;
@@ -693,7 +696,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
             process->handles = alloc_handle_table( process, 0 );
         /* Note: for security reasons, starting a new process does not attempt
          * to use the current impersonation token for the new process */
-        process->token = token_duplicate( token ? token : parent->token, TRUE, 0, NULL, NULL, 0, NULL, 0 );
+        process->token = token_duplicate_for_unprotected_process( token ? token : parent->token );
         process->affinity = parent->affinity;
     }
     if (!process->handles || !process->token) goto error;
@@ -738,6 +741,7 @@ int init_native_bootstrap( int socket, int image, int pid )
         release_object( process->token );
         process->token = token;
         process->session_id = token_get_session_id( token );
+        process->protection = 0x61;
     }
     native_machine_mode = 1;
     process->native_bootstrap_pid = pid;
@@ -829,6 +833,25 @@ static unsigned int process_map_access( struct object *obj, unsigned int access 
     if ((access & (PROCESS_VM_OPERATION | PROCESS_VM_WRITE)) == (PROCESS_VM_OPERATION | PROCESS_VM_WRITE))
         access |= PROCESS_QUERY_LIMITED_INFORMATION;
     return access;
+}
+
+/* Admission for the reserved native profile. This is additional to the DACL;
+ * SeDebugPrivilege does not bypass the protected process boundary. */
+static int process_check_access( struct object *obj, struct token *token, unsigned int *access )
+{
+    struct process *process = (struct process *)obj;
+    struct luid_attr debug = { SeDebugPrivilege, SE_PRIVILEGE_ENABLED };
+    unsigned int allowed = PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE;
+
+    if (!process->protection || process == current->process) return 1;
+    if (token_check_privileges( token, TRUE, &debug, 1, NULL ))
+        allowed |= PROCESS_SUSPEND_RESUME | PROCESS_SET_LIMITED_INFORMATION;
+    if (*access & ~allowed)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return 0;
+    }
+    return 1;
 }
 
 static struct list *process_get_kernel_obj_list( struct object *obj )
@@ -1779,10 +1802,16 @@ DECL_HANDLER(set_process_info)
         {
             struct token *token;
 
+            if (process->protection)
+            {
+                set_error( STATUS_ACCESS_DENIED );
+                release_object( process );
+                return;
+            }
             if ((token = get_token_obj( current->process, req->token, TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY )))
             {
-                release_object( process->token );
-                process->token = token;
+                security_assign_unprotected_process_token( process, token );
+                release_object( token );
             }
         }
         release_object( process );
@@ -1880,6 +1909,12 @@ DECL_HANDLER(grant_process_admin_token)
     if (!(process = get_process_from_handle( req->handle, PROCESS_SET_INFORMATION )))
         return;
 
+    if (process->protection)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        release_object( process );
+        return;
+    }
     if ((token = token_create_admin( TRUE, SecurityIdentification,
                                      TokenElevationTypeDefault, default_session_id )))
     {
@@ -2134,6 +2169,17 @@ DECL_HANDLER(get_process_critical_state)
     if ((process = get_process_from_handle( req->handle, PROCESS_QUERY_INFORMATION )))
     {
         reply->critical = process->critical;
+        release_object( process );
+    }
+}
+
+DECL_HANDLER(get_process_protection)
+{
+    struct process *process;
+
+    if ((process = get_process_from_handle( req->handle, PROCESS_QUERY_LIMITED_INFORMATION )))
+    {
+        reply->protection = process->protection;
         release_object( process );
     }
 }

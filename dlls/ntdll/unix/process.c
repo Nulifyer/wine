@@ -1109,6 +1109,18 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
     UNIMPLEMENTED_INFO_CLASS(ProcessLUIDDeviceMapsEnabled);
     UNIMPLEMENTED_INFO_CLASS(ProcessHandleTracing);
 
+    case ProcessProtectionInformation:
+        if (size != sizeof(BYTE)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info) return STATUS_ACCESS_VIOLATION;
+        SERVER_START_REQ( get_process_protection )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            if (!(ret = wine_server_call( req ))) *(BYTE *)info = reply->protection;
+        }
+        SERVER_END_REQ;
+        if (!ret && ret_len) *ret_len = sizeof(BYTE);
+        return ret;
+
     case ProcessBreakOnTermination:
         if (size != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
         if (!info) return STATUS_ACCESS_VIOLATION;

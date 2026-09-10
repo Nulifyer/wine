@@ -6446,6 +6446,19 @@ struct get_process_critical_state_reply
 };
 
 
+struct get_process_protection_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_process_protection_reply
+{
+    struct reply_header __header;
+    unsigned int protection;
+    char __pad_12[4];
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -6766,6 +6779,7 @@ enum request
     REQ_alpc_accept_connect_port,
     REQ_alpc_disconnect_port,
     REQ_get_process_critical_state,
+    REQ_get_process_protection,
     REQ_NB_REQUESTS
 };
 
@@ -7091,6 +7105,7 @@ union generic_request
     struct alpc_accept_connect_port_request alpc_accept_connect_port_request;
     struct alpc_disconnect_port_request alpc_disconnect_port_request;
     struct get_process_critical_state_request get_process_critical_state_request;
+    struct get_process_protection_request get_process_protection_request;
 };
 union generic_reply
 {
@@ -7414,8 +7429,9 @@ union generic_reply
     struct alpc_accept_connect_port_reply alpc_accept_connect_port_reply;
     struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
     struct get_process_critical_state_reply get_process_critical_state_reply;
+    struct get_process_protection_reply get_process_protection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 973
+#define SERVER_PROTOCOL_VERSION 974
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

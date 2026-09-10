@@ -4477,3 +4477,10 @@ struct alpc_message_info
 @REPLY
     int critical;
 @END
+
+/* Query process protection from its authoritative owner. */
+@REQ(get_process_protection)
+    obj_handle_t handle;
+@REPLY
+    unsigned int protection;
+@END

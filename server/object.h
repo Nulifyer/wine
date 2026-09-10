@@ -106,6 +106,8 @@ struct object_ops
     struct object *(*get_sync)(struct object *);
     /* map access rights to the specific rights for this object */
     unsigned int (*map_access)(struct object *, unsigned int);
+    /* enforce object-specific admission before the ordinary DACL check */
+    int (*check_access)(struct object *, struct token *, unsigned int *);
     /* returns the security descriptor of the object */
     struct security_descriptor *(*get_sd)( struct object * );
     /* sets the security descriptor of the object */

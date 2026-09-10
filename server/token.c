@@ -169,26 +169,41 @@ static struct list *token_get_kernel_obj_list( struct object *obj )
     return &token->kernel_object;
 }
 
+/* Borrow the supplied token; publish a new reference only after preparation succeeds. */
+int security_assign_thread_token( struct thread *thread, struct token *source )
+{
+    struct token *token = NULL;
+
+    if (source)
+    {
+        if (source->primary)
+        {
+            set_error( STATUS_BAD_TOKEN_TYPE );
+            return 0;
+        }
+        if (source->trust_level && !thread->process->protection)
+        {
+            if (!(token = token_duplicate( source, FALSE, source->impersonation_level,
+                                           NULL, NULL, 0, NULL, 0 ))) return 0;
+            free( token->trust_level );
+            token->trust_level = NULL;
+        }
+        else token = (struct token *)grab_object( source );
+    }
+    if (thread->token) release_object( thread->token );
+    thread->token = token;
+    return 1;
+}
+
 void security_set_thread_token( struct thread *thread, obj_handle_t handle )
 {
-    if (!handle)
+    struct token *token;
+
+    if (!handle) security_assign_thread_token( thread, NULL );
+    else if ((token = get_token_obj( current->process, handle, TOKEN_IMPERSONATE )))
     {
-        if (thread->token)
-            release_object( thread->token );
-        thread->token = NULL;
-    }
-    else
-    {
-        struct token *token = (struct token *)get_handle_obj( current->process,
-                                                              handle,
-                                                              TOKEN_IMPERSONATE,
-                                                              &token_ops );
-        if (token)
-        {
-            if (thread->token)
-                release_object( thread->token );
-            thread->token = token;
-        }
+        security_assign_thread_token( thread, token );
+        release_object( token );
     }
 }
 
@@ -661,6 +676,36 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
     return token;
 }
 
+/* Ordinary process creation does not admit protected images. Keep the copied
+ * security identity, but do not turn a token's queryable trust into admission. */
+struct token *token_duplicate_for_unprotected_process( struct token *source )
+{
+    struct token *token = token_duplicate( source, TRUE, 0, NULL, NULL, 0, NULL, 0 );
+
+    if (token)
+    {
+        free( token->trust_level );
+        token->trust_level = NULL;
+    }
+    return token;
+}
+
+/* Assignment must not mutate a caller-owned trusted token or admit a protected
+ * process. Ordinary untrusted assignment retains the existing token identity. */
+int security_assign_unprotected_process_token( struct process *process, struct token *source )
+{
+    struct token *token;
+
+    if (source->trust_level)
+    {
+        if (!(token = token_duplicate_for_unprotected_process( source ))) return 0;
+    }
+    else token = (struct token *)grab_object( source );
+    release_object( process->token );
+    process->token = token;
+    return 1;
+}
+
 struct token *token_duplicate_impersonation( struct token *source, int level, int effective_only )
 {
     struct token *token = token_duplicate( source, 0, level, NULL, NULL, 0, NULL, 0 );
@@ -825,9 +870,10 @@ struct token *token_create_admin( unsigned primary, int impersonation_level, int
 }
 
 /* Host bootstrap policy: native identity with explicit enabled privileges.
- * Process trust remains absent until protected admission is implemented. */
+ * Reserved admission supplies process protection separately from this token. */
 struct token *token_create_native_system(void)
 {
+    static const struct sid native_trust = { SID_REVISION, 2, {0,0,0,0,0,19}, {0x200,0x2000} };
     static const struct sid system_label = { SID_REVISION, 1, SECURITY_MANDATORY_LABEL_AUTHORITY,
                                             { SECURITY_MANDATORY_SYSTEM_RID } };
     static const struct sid_attrs groups[] =
@@ -859,6 +905,11 @@ struct token *token_create_native_system(void)
     free( dacl );
     if (!token) return NULL;
     token->primary_group = token->user;
+    if (!(token->trust_level = memdup( &native_trust, sid_len( &native_trust ) )))
+    {
+        release_object( token );
+        return NULL;
+    }
     if (!token_assign_label( token, &system_label ))
     {
         release_object( token );
@@ -1158,6 +1209,8 @@ int check_object_access(struct token *token, struct object *obj, unsigned int *a
 
     if (!token)
         token = current->token ? current->token : current->process->token;
+
+    if (obj->ops->check_access && !obj->ops->check_access( obj, token, access )) return FALSE;
 
     mapping.all = map_obj_access( obj, GENERIC_ALL );
 

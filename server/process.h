@@ -63,6 +63,7 @@ struct process
     affinity_t           affinity;        /* process affinity mask */
     int                  priority;        /* priority class */
     int                  base_priority;   /* base priority to calculate thread priority */
+    unsigned int         protection;      /* host-admitted process protection, zero for ordinary creation */
     int                  critical;        /* break-on-termination policy */
     int                  disable_boost;   /* disable priority boost */
     unsigned int         handle_checking_mode; /* process handle checking policy */
