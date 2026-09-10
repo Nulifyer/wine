@@ -1042,7 +1042,7 @@
 @ stdcall RtlSetLastWin32ErrorAndNtStatusFromNtStatus(long)
 # @ stub RtlSetMemoryStreamSize
 @ stdcall RtlSetOwnerSecurityDescriptor(ptr ptr long)
-# @ stub RtlSetProcessIsCritical
+@ stdcall RtlSetProcessIsCritical(long ptr long)
 @ stdcall RtlSetProcessPlaceholderCompatibilityMode(long)
 @ stdcall RtlSetProcessPreferredUILanguages(long ptr ptr)
 @ stub RtlSetProperties
@@ -1055,7 +1055,7 @@
 @ stub RtlSetSecurityObject
 # @ stub RtlSetSecurityObjectEx
 @ stdcall RtlSetThreadErrorMode(long ptr)
-# @ stub RtlSetThreadIsCritical
+@ stdcall RtlSetThreadIsCritical(long ptr long)
 @ stdcall RtlSetThreadPlaceholderCompatibilityMode(long)
 @ stdcall RtlSetThreadPreferredUILanguages(long ptr ptr)
 # @ stub RtlSetThreadPoolStartFunc

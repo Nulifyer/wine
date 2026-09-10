@@ -610,6 +610,7 @@ NTSTATUS WINAPI wow64_NtQueryInformationProcess( UINT *args )
     case ProcessTimes:  /* KERNEL_USER_TIMES */
     case ProcessDefaultHardErrorMode:  /* ULONG */
     case ProcessPriorityClass:  /* PROCESS_PRIORITY_CLASS */
+    case ProcessBreakOnTermination:  /* ULONG */
     case ProcessPriorityBoost:  /* ULONG */
     case ProcessHandleCount:  /* ULONG */
     case ProcessSessionInformation:  /* ULONG */
@@ -765,6 +766,7 @@ NTSTATUS WINAPI wow64_NtQueryInformationThread( UINT *args )
     case ThreadIsTerminated: /* ULONG */
     case ThreadHideFromDebugger:  /* BOOLEAN */
     case ThreadSuspendCount:  /* ULONG */
+    case ThreadBreakOnTermination:   /* ULONG */
     case ThreadPriorityBoost:   /* ULONG */
     case ThreadIdealProcessorEx: /* PROCESSOR_NUMBER */
         /* FIXME: check buffer alignment */
@@ -940,6 +942,7 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
     case ProcessDefaultHardErrorMode:   /* ULONG */
     case ProcessPriorityClass:   /* PROCESS_PRIORITY_CLASS */
     case ProcessBasePriority:   /* ULONG */
+    case ProcessBreakOnTermination:  /* ULONG */
     case ProcessPriorityBoost:  /* ULONG */
     case ProcessPagePriority:   /* MEMORY_PRIORITY_INFORMATION */
     case ProcessPowerThrottlingState:   /* PROCESS_POWER_THROTTLING_STATE */
@@ -1049,6 +1052,7 @@ NTSTATUS WINAPI wow64_NtSetInformationThread( UINT *args )
     case ThreadEnableAlignmentFaultFixup:   /* BOOLEAN */
     case ThreadPowerThrottlingState:  /* THREAD_POWER_THROTTLING_STATE */
     case ThreadIdealProcessor:   /* ULONG */
+    case ThreadBreakOnTermination:   /* ULONG */
     case ThreadPriorityBoost:   /* ULONG */
         return NtSetInformationThread( handle, class, ptr, len );
 

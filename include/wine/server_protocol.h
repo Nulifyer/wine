@@ -1371,6 +1371,8 @@ struct set_process_info_request
     obj_handle_t token;
     int          mask;
     unsigned int handle_checking_mode;
+    int          critical;
+    char __pad_52[4];
 };
 struct set_process_info_reply
 {
@@ -1382,6 +1384,7 @@ struct set_process_info_reply
 #define SET_PROCESS_INFO_AFFINITY      0x08
 #define SET_PROCESS_INFO_TOKEN         0x10
 #define SET_PROCESS_INFO_HANDLE_CHECKING 0x20
+#define SET_PROCESS_INFO_CRITICAL      0x40
 
 
 
@@ -1412,6 +1415,7 @@ struct get_thread_info_reply
 #define GET_THREAD_INFO_FLAG_TERMINATED    0x02
 #define GET_THREAD_INFO_FLAG_LAST          0x04
 #define GET_THREAD_INFO_FLAG_DISABLE_BOOST 0x08
+#define GET_THREAD_INFO_FLAG_CRITICAL      0x10
 
 
 
@@ -1441,9 +1445,9 @@ struct set_thread_info_request
     client_ptr_t entry_point;
     obj_handle_t token;
     int          disable_boost;
+    int          critical;
     unsigned int mask;
     /* VARARG(desc,unicode_str); */
-    char __pad_52[4];
 };
 struct set_thread_info_reply
 {
@@ -1457,6 +1461,7 @@ struct set_thread_info_reply
 #define SET_THREAD_INFO_DESCRIPTION     0x20
 #define SET_THREAD_INFO_DBG_HIDDEN      0x40
 #define SET_THREAD_INFO_DISABLE_BOOST   0x80
+#define SET_THREAD_INFO_CRITICAL        0x100
 
 
 
@@ -6428,6 +6433,19 @@ struct alpc_disconnect_port_reply
 };
 
 
+struct get_process_critical_state_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_process_critical_state_reply
+{
+    struct reply_header __header;
+    int critical;
+    char __pad_12[4];
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -6747,6 +6765,7 @@ enum request
     REQ_alpc_get_connect_result,
     REQ_alpc_accept_connect_port,
     REQ_alpc_disconnect_port,
+    REQ_get_process_critical_state,
     REQ_NB_REQUESTS
 };
 
@@ -7071,6 +7090,7 @@ union generic_request
     struct alpc_get_connect_result_request alpc_get_connect_result_request;
     struct alpc_accept_connect_port_request alpc_accept_connect_port_request;
     struct alpc_disconnect_port_request alpc_disconnect_port_request;
+    struct get_process_critical_state_request get_process_critical_state_request;
 };
 union generic_reply
 {
@@ -7393,8 +7413,9 @@ union generic_reply
     struct alpc_get_connect_result_reply alpc_get_connect_result_reply;
     struct alpc_accept_connect_port_reply alpc_accept_connect_port_reply;
     struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
+    struct get_process_critical_state_reply get_process_critical_state_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 970
+#define SERVER_PROTOCOL_VERSION 972
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

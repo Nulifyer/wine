@@ -324,6 +324,7 @@ DECL_HANDLER(alpc_connect_port);
 DECL_HANDLER(alpc_get_connect_result);
 DECL_HANDLER(alpc_accept_connect_port);
 DECL_HANDLER(alpc_disconnect_port);
+DECL_HANDLER(get_process_critical_state);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -645,6 +646,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_alpc_get_connect_result,
     (req_handler)req_alpc_accept_connect_port,
     (req_handler)req_alpc_disconnect_port,
+    (req_handler)req_get_process_critical_state,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -818,7 +820,8 @@ C_ASSERT( offsetof(struct set_process_info_request, disable_boost) == 32 );
 C_ASSERT( offsetof(struct set_process_info_request, token) == 36 );
 C_ASSERT( offsetof(struct set_process_info_request, mask) == 40 );
 C_ASSERT( offsetof(struct set_process_info_request, handle_checking_mode) == 44 );
-C_ASSERT( sizeof(struct set_process_info_request) == 48 );
+C_ASSERT( offsetof(struct set_process_info_request, critical) == 48 );
+C_ASSERT( sizeof(struct set_process_info_request) == 56 );
 C_ASSERT( offsetof(struct get_thread_info_request, handle) == 12 );
 C_ASSERT( offsetof(struct get_thread_info_request, access) == 16 );
 C_ASSERT( sizeof(struct get_thread_info_request) == 24 );
@@ -848,7 +851,8 @@ C_ASSERT( offsetof(struct set_thread_info_request, affinity) == 24 );
 C_ASSERT( offsetof(struct set_thread_info_request, entry_point) == 32 );
 C_ASSERT( offsetof(struct set_thread_info_request, token) == 40 );
 C_ASSERT( offsetof(struct set_thread_info_request, disable_boost) == 44 );
-C_ASSERT( offsetof(struct set_thread_info_request, mask) == 48 );
+C_ASSERT( offsetof(struct set_thread_info_request, critical) == 48 );
+C_ASSERT( offsetof(struct set_thread_info_request, mask) == 52 );
 C_ASSERT( sizeof(struct set_thread_info_request) == 56 );
 C_ASSERT( offsetof(struct suspend_thread_request, handle) == 12 );
 C_ASSERT( sizeof(struct suspend_thread_request) == 16 );
@@ -2484,3 +2488,7 @@ C_ASSERT( offsetof(struct alpc_accept_connect_port_reply, handle) == 8 );
 C_ASSERT( sizeof(struct alpc_accept_connect_port_reply) == 16 );
 C_ASSERT( offsetof(struct alpc_disconnect_port_request, handle) == 12 );
 C_ASSERT( sizeof(struct alpc_disconnect_port_request) == 16 );
+C_ASSERT( offsetof(struct get_process_critical_state_request, handle) == 12 );
+C_ASSERT( sizeof(struct get_process_critical_state_request) == 16 );
+C_ASSERT( offsetof(struct get_process_critical_state_reply, critical) == 8 );
+C_ASSERT( sizeof(struct get_process_critical_state_reply) == 16 );

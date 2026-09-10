@@ -620,6 +620,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->base_priority   = 8;
     process->disable_boost   = 0;
     process->handle_checking_mode = 0;
+    process->critical        = 0;
     process->suspend         = 0;
     process->is_system       = 0;
     process->debug_children  = 1;
@@ -1696,6 +1697,14 @@ DECL_HANDLER(set_process_info)
 
     if ((process = get_process_from_handle( req->handle, PROCESS_SET_INFORMATION )))
     {
+        if ((req->mask & SET_PROCESS_INFO_CRITICAL) &&
+            !thread_single_check_privilege( current, SeDebugPrivilege ))
+        {
+            set_error( STATUS_PRIVILEGE_NOT_HELD );
+            release_object( process );
+            return;
+        }
+        if (req->mask & SET_PROCESS_INFO_CRITICAL) process->critical = !!req->critical;
         if (req->mask & SET_PROCESS_INFO_PRIORITY) set_process_priority( process, req->priority );
         if (req->mask & SET_PROCESS_INFO_BASE_PRIORITY) set_process_base_priority( process, req->base_priority );
         if (req->mask & SET_PROCESS_INFO_DISABLE_BOOST) set_process_disable_boost( process, req->disable_boost );
@@ -2050,5 +2059,17 @@ DECL_HANDLER(list_processes)
             thread_info->teb = thread->teb;
             pos += sizeof(*thread_info);
         }
+    }
+}
+
+/* Retrieve process break-on-termination state. */
+DECL_HANDLER(get_process_critical_state)
+{
+    struct process *process;
+
+    if ((process = get_process_from_handle( req->handle, PROCESS_QUERY_INFORMATION )))
+    {
+        reply->critical = process->critical;
+        release_object( process );
     }
 }

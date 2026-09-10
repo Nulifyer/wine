@@ -369,6 +369,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->priority        = 0;
     thread->base_priority   = 0;
     thread->disable_boost   = 0;
+    thread->critical       = 0;
     thread->suspend         = 0;
     thread->dbg_hidden      = 0;
     thread->bypass_proc_suspend = 0;
@@ -1848,6 +1849,8 @@ DECL_HANDLER(get_thread_info)
             reply->flags |= GET_THREAD_INFO_FLAG_LAST;
         if (thread->disable_boost)
             reply->flags |= GET_THREAD_INFO_FLAG_DISABLE_BOOST;
+        if (thread->critical)
+            reply->flags |= GET_THREAD_INFO_FLAG_CRITICAL;
 
         if (thread->desc && get_reply_max_size())
         {
@@ -1886,6 +1889,14 @@ DECL_HANDLER(set_thread_info)
 
     if ((thread = get_thread_from_handle( req->handle, access )))
     {
+        if ((req->mask & SET_THREAD_INFO_CRITICAL) &&
+            !thread_single_check_privilege( current, SeDebugPrivilege ))
+        {
+            set_error( STATUS_PRIVILEGE_NOT_HELD );
+            release_object( thread );
+            return;
+        }
+        if (req->mask & SET_THREAD_INFO_CRITICAL) thread->critical = !!req->critical;
         set_thread_info( thread, req );
         release_object( thread );
     }

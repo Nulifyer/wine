@@ -752,3 +752,26 @@ NTSTATUS WINAPI DbgUiIssueRemoteBreakin( HANDLE process )
     if (!status) NtClose( handle );
     return status;
 }
+
+/**********************************************************************
+ *           RtlSetProcessIsCritical  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSetProcessIsCritical( BOOLEAN value, BOOLEAN *old_value, BOOLEAN check_flag )
+{
+    ULONG critical = 0;
+    NTSTATUS status;
+
+    if (old_value) *old_value = FALSE;
+    if (check_flag && !(NtCurrentTeb()->Peb->NtGlobalFlag & FLG_ENABLE_SYSTEM_CRIT_BREAKS))
+        return STATUS_UNSUCCESSFUL;
+    if (old_value)
+    {
+        status = NtQueryInformationProcess( NtCurrentProcess(), ProcessBreakOnTermination,
+                                           &critical, sizeof(critical), NULL );
+        if (status) return status;
+        *old_value = !!critical;
+    }
+    critical = value;
+    return NtSetInformationProcess( NtCurrentProcess(), ProcessBreakOnTermination,
+                                   &critical, sizeof(critical) );
+}

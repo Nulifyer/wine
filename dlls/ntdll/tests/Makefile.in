@@ -4,6 +4,7 @@ IMPORTS   = user32 advapi32
 SOURCES = \
 	alpc.c \
 	atom.c \
+	critical.c \
 	change.c \
 	directory.c \
 	env.c \

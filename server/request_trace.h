@@ -268,6 +268,7 @@ static void dump_set_process_info_request( const struct set_process_info_request
     fprintf( stderr, ", token=%04x", req->token );
     fprintf( stderr, ", mask=%d", req->mask );
     fprintf( stderr, ", handle_checking_mode=%08x", req->handle_checking_mode );
+    fprintf( stderr, ", critical=%d", req->critical );
 }
 
 static void dump_get_thread_info_request( const struct get_thread_info_request *req )
@@ -314,6 +315,7 @@ static void dump_set_thread_info_request( const struct set_thread_info_request *
     dump_uint64( ", entry_point=", &req->entry_point );
     fprintf( stderr, ", token=%04x", req->token );
     fprintf( stderr, ", disable_boost=%d", req->disable_boost );
+    fprintf( stderr, ", critical=%d", req->critical );
     fprintf( stderr, ", mask=%08x", req->mask );
     dump_varargs_unicode_str( ", desc=", cur_size );
 }
@@ -3665,6 +3667,16 @@ static void dump_alpc_disconnect_port_request( const struct alpc_disconnect_port
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_get_process_critical_state_request( const struct get_process_critical_state_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_process_critical_state_reply( const struct get_process_critical_state_reply *req )
+{
+    fprintf( stderr, " critical=%d", req->critical );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -3986,6 +3998,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_get_connect_result_request,
     (dump_func)dump_alpc_accept_connect_port_request,
     (dump_func)dump_alpc_disconnect_port_request,
+    (dump_func)dump_get_process_critical_state_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4307,6 +4320,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_get_connect_result_reply,
     (dump_func)dump_alpc_accept_connect_port_reply,
     NULL,
+    (dump_func)dump_get_process_critical_state_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -4628,6 +4642,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "alpc_get_connect_result",
     "alpc_accept_connect_port",
     "alpc_disconnect_port",
+    "get_process_critical_state",
 };
 
 static const struct

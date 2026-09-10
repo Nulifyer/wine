@@ -1107,8 +1107,19 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
     UNIMPLEMENTED_INFO_CLASS(ProcessDeviceMap);
     UNIMPLEMENTED_INFO_CLASS(ProcessForegroundInformation);
     UNIMPLEMENTED_INFO_CLASS(ProcessLUIDDeviceMapsEnabled);
-    UNIMPLEMENTED_INFO_CLASS(ProcessBreakOnTermination);
     UNIMPLEMENTED_INFO_CLASS(ProcessHandleTracing);
+
+    case ProcessBreakOnTermination:
+        if (size != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info) return STATUS_ACCESS_VIOLATION;
+        SERVER_START_REQ( get_process_critical_state )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            if (!(ret = wine_server_call( req ))) *(ULONG *)info = reply->critical;
+        }
+        SERVER_END_REQ;
+        if (!ret && ret_len) *ret_len = sizeof(ULONG);
+        return ret;
 
     case ProcessBasicInformation:
         {
@@ -1755,6 +1766,19 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
             SERVER_END_REQ;
         }
         break;
+
+    case ProcessBreakOnTermination:
+        if (size != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info) return STATUS_ACCESS_VIOLATION;
+        SERVER_START_REQ( set_process_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            req->mask = SET_PROCESS_INFO_CRITICAL;
+            req->critical = *(ULONG *)info;
+            ret = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        return ret;
 
     case ProcessPriorityBoost:
         if (size != sizeof(ULONG)) return STATUS_INVALID_PARAMETER;

@@ -2428,6 +2428,20 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
     case ThreadWow64Context:
         return get_thread_wow64_context( handle, data, length );
 
+    case ThreadBreakOnTermination:
+        if (length != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!data) return STATUS_ACCESS_VIOLATION;
+        SERVER_START_REQ( get_thread_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            req->access = THREAD_QUERY_INFORMATION;
+            if (!(status = wine_server_call( req )))
+                *(ULONG *)data = !!(reply->flags & GET_THREAD_INFO_FLAG_CRITICAL);
+        }
+        SERVER_END_REQ;
+        if (!status && ret_len) *ret_len = sizeof(ULONG);
+        return status;
+
     case ThreadHideFromDebugger:
         /* TP Shell Service depends on ThreadHideFromDebugger returning
          * STATUS_ACCESS_VIOLATION if *ret_len is not writable, before
@@ -2582,6 +2596,19 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
         SERVER_END_REQ;
         return status;
     }
+
+    case ThreadBreakOnTermination:
+        if (length != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!data) return STATUS_ACCESS_VIOLATION;
+        SERVER_START_REQ( set_thread_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            req->mask = SET_THREAD_INFO_CRITICAL;
+            req->critical = *(const ULONG *)data;
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        return status;
 
     case ThreadHideFromDebugger:
         if (length) return STATUS_INFO_LENGTH_MISMATCH;

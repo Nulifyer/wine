@@ -1304,6 +1304,7 @@ typedef volatile struct
     obj_handle_t token;        /* primary token */
     int          mask;         /* setting mask (see below) */
     unsigned int handle_checking_mode; /* process handle checking policy */
+    int          critical;     /* break-on-termination policy */
 @END
 #define SET_PROCESS_INFO_PRIORITY      0x01
 #define SET_PROCESS_INFO_BASE_PRIORITY 0x02
@@ -1311,6 +1312,7 @@ typedef volatile struct
 #define SET_PROCESS_INFO_AFFINITY      0x08
 #define SET_PROCESS_INFO_TOKEN         0x10
 #define SET_PROCESS_INFO_HANDLE_CHECKING 0x20
+#define SET_PROCESS_INFO_CRITICAL      0x40
 
 
 /* Retrieve information about a thread */
@@ -1335,6 +1337,7 @@ typedef volatile struct
 #define GET_THREAD_INFO_FLAG_TERMINATED    0x02
 #define GET_THREAD_INFO_FLAG_LAST          0x04
 #define GET_THREAD_INFO_FLAG_DISABLE_BOOST 0x08
+#define GET_THREAD_INFO_FLAG_CRITICAL      0x10
 
 
 /* Retrieve information about thread times */
@@ -1357,6 +1360,7 @@ typedef volatile struct
     client_ptr_t entry_point;  /* thread entry point */
     obj_handle_t token;        /* impersonation token */
     int          disable_boost;/* disable thread priority boost */
+    int          critical;     /* break-on-termination policy */
     unsigned int mask;         /* setting mask (see below) */
     VARARG(desc,unicode_str);  /* description string */
 @END
@@ -1368,6 +1372,7 @@ typedef volatile struct
 #define SET_THREAD_INFO_DESCRIPTION     0x20
 #define SET_THREAD_INFO_DBG_HIDDEN      0x40
 #define SET_THREAD_INFO_DISABLE_BOOST   0x80
+#define SET_THREAD_INFO_CRITICAL        0x100
 
 
 /* Suspend a thread */
@@ -4463,4 +4468,11 @@ struct alpc_message_info
 
 @REQ(alpc_disconnect_port)
     obj_handle_t handle;
+@END
+
+/* Retrieve process break-on-termination state. */
+@REQ(get_process_critical_state)
+    obj_handle_t handle;
+@REPLY
+    int critical;
 @END

@@ -728,3 +728,26 @@ void WINAPI DECLSPEC_HOTPATCH RtlProcessFlsData( void *teb_fls_data, ULONG flags
         RtlFreeHeap( GetProcessHeap(), 0, fls );
     }
 }
+
+/**********************************************************************
+ *           RtlSetThreadIsCritical  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSetThreadIsCritical( BOOLEAN value, BOOLEAN *old_value, BOOLEAN check_flag )
+{
+    ULONG critical = 0;
+    NTSTATUS status;
+
+    if (old_value) *old_value = FALSE;
+    if (check_flag && !(NtCurrentTeb()->Peb->NtGlobalFlag & FLG_ENABLE_SYSTEM_CRIT_BREAKS))
+        return STATUS_UNSUCCESSFUL;
+    if (old_value)
+    {
+        status = NtQueryInformationThread( NtCurrentThread(), ThreadBreakOnTermination,
+                                           &critical, sizeof(critical), NULL );
+        if (status) return status;
+        *old_value = !!critical;
+    }
+    critical = value;
+    return NtSetInformationThread( NtCurrentThread(), ThreadBreakOnTermination,
+                                   &critical, sizeof(critical) );
+}
