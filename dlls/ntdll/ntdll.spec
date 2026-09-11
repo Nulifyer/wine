@@ -436,6 +436,7 @@
 @ stdcall -syscall NtSetVolumeInformationFile(long ptr ptr long long)
 @ stdcall -syscall NtShutdownSystem(long)
 @ stdcall -syscall NtSignalAndWaitForSingleObject(long long long ptr)
+@ stdcall NtSerializeBoot()
 # @ stub NtStartProfile
 # @ stub NtStopProfile
 @ stdcall -syscall NtSuspendProcess(long)
@@ -520,6 +521,7 @@
 @ stdcall RtlAddVectoredContinueHandler(long ptr)
 @ stdcall RtlAddVectoredExceptionHandler(long ptr)
 @ stdcall RtlAddressInSectionTable(ptr long long)
+@ stdcall RtlAcquirePrivilege(ptr long long ptr)
 @ stdcall RtlAdjustPrivilege(long long long ptr)
 @ stdcall RtlAllocateAndInitializeSid (ptr long long long long long long long long long ptr)
 @ stdcall RtlAllocateHandle(ptr ptr)
@@ -1006,6 +1008,7 @@
 @ stub RtlRegisterSecureMemoryCacheCallback
 @ stdcall RtlRegisterWait(ptr ptr ptr ptr long long)
 @ stdcall RtlReleaseActivationContext(ptr)
+@ stdcall RtlReleasePrivilege(ptr)
 @ stub RtlReleaseMemoryStream
 @ stdcall RtlReleasePath(ptr)
 @ stdcall RtlReleasePebLock()

@@ -1623,8 +1623,98 @@ void WINAPI RtlCopyLuidAndAttributesArray( ULONG count, const LUID_AND_ATTRIBUTE
  *	misc
  */
 
+struct acquired_privilege_state
+{
+    ULONGLONG magic;
+    ULONG privilege;
+    ULONG flags;
+    BOOLEAN was_enabled;
+    BOOLEAN active;
+    BYTE padding[6];
+};
+
 /******************************************************************************
- *  RtlAdjustPrivilege		[NTDLL.@]
+ *  RtlAcquirePrivilege                 [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlAcquirePrivilege( const ULONG *privileges, ULONG count, ULONG flags, void **returned_state )
+{
+    struct acquired_privilege_state *state;
+    DWORD last_error = NtCurrentTeb()->LastErrorValue;
+    NTSTATUS status;
+
+    TRACE( "(%p, %lu, %#lx, %p)\n", privileges, count, flags, returned_state );
+
+    if (!returned_state || !privileges)
+    {
+        status = STATUS_INVALID_PARAMETER;
+        goto done;
+    }
+    *returned_state = NULL;
+    if (count != 1 || flags != 2 || privileges[0] != 10)
+    {
+        FIXME( "unsupported privilege request count %lu flags %#lx privilege %lu\n",
+               count, flags, count ? privileges[0] : 0 );
+        status = STATUS_NOT_IMPLEMENTED;
+        goto done;
+    }
+    if (!(state = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*state) )))
+    {
+        status = STATUS_NO_MEMORY;
+        goto done;
+    }
+    state->magic = 0x4c4e545052495602ULL;
+    state->privilege = privileges[0];
+    state->flags = flags;
+    status = RtlAdjustPrivilege( state->privilege, TRUE, FALSE, &state->was_enabled );
+    if (status)
+    {
+        state->magic = 0;
+        RtlFreeHeap( GetProcessHeap(), 0, state );
+        goto done;
+    }
+    state->active = TRUE;
+    *returned_state = state;
+
+done:
+    NtCurrentTeb()->LastErrorValue = last_error;
+    return status;
+}
+
+/******************************************************************************
+ *  RtlReleasePrivilege                 [NTDLL.@]
+ */
+void WINAPI RtlReleasePrivilege( void *state_ptr )
+{
+    struct acquired_privilege_state *state = state_ptr;
+    DWORD last_error = NtCurrentTeb()->LastErrorValue;
+    BOOLEAN ignored;
+
+    TRACE( "(%p)\n", state_ptr );
+
+    if (!state || RtlSizeHeap( GetProcessHeap(), 0, state ) != sizeof(*state) ||
+        state->magic != 0x4c4e545052495602ULL || !state->active ||
+        state->flags != 2 || state->privilege != 10)
+        goto done;
+
+    RtlAdjustPrivilege( state->privilege, state->was_enabled, FALSE, &ignored );
+    state->active = FALSE;
+    state->magic = 0;
+    RtlFreeHeap( GetProcessHeap(), 0, state );
+
+done:
+    NtCurrentTeb()->LastErrorValue = last_error;
+}
+
+/******************************************************************************
+ *  NtSerializeBoot                     [NTDLL.@]
+ */
+NTSTATUS WINAPI NtSerializeBoot(void)
+{
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ *  RtlAdjustPrivilege                  [NTDLL.@]
  *
  * Enables or disables a privilege from the calling thread or process.
  *
