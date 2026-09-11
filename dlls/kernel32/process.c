@@ -62,6 +62,18 @@ SYSTEM_BASIC_INFORMATION system_info = { 0 };
 static DWORD (WINAPI *wait_input_idle)( HANDLE process, DWORD timeout );
 
 /***********************************************************************
+ *           CheckElevationEnabled    (KERNEL32.@)
+ */
+DWORD WINAPI CheckElevationEnabled( BOOL *enabled )
+{
+    ULONG flags = 0;
+    NTSTATUS status = RtlQueryElevationFlags( &flags );
+
+    if (status >= 0) *enabled = flags & 1;
+    return RtlNtStatusToDosErrorNoTeb( status );
+}
+
+/***********************************************************************
  *           RegisterWaitForInputIdle   (KERNEL32.@)
  */
 void WINAPI RegisterWaitForInputIdle( void *ptr )

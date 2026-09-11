@@ -606,6 +606,18 @@ BOOLEAN WINAPI RtlIsStateSeparationEnabled(void)
 }
 
 /***********************************************************************
+ *           RtlQueryElevationFlags    (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlQueryElevationFlags( ULONG *flags )
+{
+    ULONG shared = user_shared_data->SharedDataFlags;
+
+    *flags = ((shared & 0x02) >> 1) | ((shared & 0x04) >> 1) | ((shared & 0x08) >> 1) |
+             ((shared & 0x1000) ? 0x10 : 0x08);
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
  *           RtlGetProductInfo    (NTDLL.@)
  *
  * Gives info about the current Windows product type, in a format compatible

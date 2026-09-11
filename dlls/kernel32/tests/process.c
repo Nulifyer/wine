@@ -96,6 +96,8 @@ static DWORD  (WINAPI *pGetMaximumProcessorCount)(WORD);
 static BOOL   (WINAPI *pGetProcessInformation)(HANDLE,PROCESS_INFORMATION_CLASS,void*,DWORD);
 static void (WINAPI *pClosePseudoConsole)(HPCON);
 static HRESULT (WINAPI *pCreatePseudoConsole)(COORD,HANDLE,HANDLE,DWORD,HPCON*);
+static DWORD (WINAPI *pCheckElevationEnabled)(BOOL *);
+static NTSTATUS (WINAPI *pRtlQueryElevationFlags)(ULONG *);
 
 #if defined(__x86_64__) || defined(__i386__)
 static NTSTATUS (WINAPI *pNtQueryInformationThread)(HANDLE, THREADINFOCLASS, PVOID, ULONG, PULONG);
@@ -247,11 +249,13 @@ static BOOL init(void)
 
     pNtQueryInformationProcess = (void *)GetProcAddress(hntdll, "NtQueryInformationProcess");
     pNtQuerySystemInformationEx = (void *)GetProcAddress(hntdll, "NtQuerySystemInformationEx");
+    pRtlQueryElevationFlags = (void *)GetProcAddress(hntdll, "RtlQueryElevationFlags");
 #if defined(__x86_64__) || defined(__i386__)
     pNtQueryInformationThread = (void *)GetProcAddress(hntdll, "NtQueryInformationThread");
 #endif
 
     pGetNativeSystemInfo = (void *) GetProcAddress(hkernel32, "GetNativeSystemInfo");
+    pCheckElevationEnabled = (void *)GetProcAddress(hkernel32, "CheckElevationEnabled");
     pGetSystemRegistryQuota = (void *) GetProcAddress(hkernel32, "GetSystemRegistryQuota");
     pIsWow64Process = (void *) GetProcAddress(hkernel32, "IsWow64Process");
     pIsWow64Process2 = (void *) GetProcAddress(hkernel32, "IsWow64Process2");
@@ -1958,6 +1962,34 @@ static void test_GetProcessVersion(void)
 
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+}
+
+static void test_elevation_flags(void)
+{
+    const volatile ULONG *shared_flags = (const ULONG *)0x7ffe02f0;
+    ULONG flags = 0xdeadbeef, expected;
+    NTSTATUS status;
+    DWORD ret;
+    BOOL enabled = 0xdeadbeef;
+
+    if (!pRtlQueryElevationFlags || !pCheckElevationEnabled)
+    {
+        win_skip("Elevation flag functions are unavailable\n");
+        return;
+    }
+
+    expected = ((*shared_flags & 0x02) >> 1) | ((*shared_flags & 0x04) >> 1) |
+               ((*shared_flags & 0x08) >> 1) | ((*shared_flags & 0x1000) ? 0x10 : 0x08);
+    status = pRtlQueryElevationFlags( &flags );
+    ok(!status, "RtlQueryElevationFlags returned %#lx\n", status);
+    ok(flags == expected, "got flags %#lx, expected %#lx from shared flags %#lx\n",
+       flags, expected, *shared_flags);
+
+    SetLastError(0xdeadbeef);
+    ret = pCheckElevationEnabled( &enabled );
+    ok(!ret, "CheckElevationEnabled returned %lu\n", ret);
+    ok(enabled == (expected & 1), "got enabled %d, expected %lu\n", enabled, expected & 1);
+    ok(GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError());
 }
 
 static void test_GetProcessImageFileNameA(void)
@@ -5830,6 +5862,7 @@ START_TEST(process)
     test_ExitCode();
     test_OpenProcess();
     test_GetProcessVersion();
+    test_elevation_flags();
     test_GetProcessImageFileNameA();
     test_QueryFullProcessImageNameA();
     test_QueryFullProcessImageNameW();

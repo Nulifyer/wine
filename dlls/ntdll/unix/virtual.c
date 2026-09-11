@@ -4505,6 +4505,7 @@ void virtual_init_user_shared_data(void)
     data->NXSupportPolicy       = NX_SUPPORT_POLICY_OPTIN;
     data->ActiveProcessorCount  = peb->NumberOfProcessors;
     data->ActiveGroupCount      = 1;
+    data->SharedDataFlags       = 0x10f;
     memcpy(data->NtSystemRoot, system_rootW, sizeof(system_rootW));
 
     switch (native_machine)
