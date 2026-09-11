@@ -331,6 +331,7 @@ DECL_HANDLER(set_default_hard_error_port);
 DECL_HANDLER(set_process_exception_port);
 DECL_HANDLER(get_process_critical_state);
 DECL_HANDLER(get_process_protection);
+DECL_HANDLER(set_session_object);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -659,6 +660,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_process_exception_port,
     (req_handler)req_get_process_critical_state,
     (req_handler)req_get_process_protection,
+    (req_handler)req_set_session_object,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -2540,3 +2542,5 @@ C_ASSERT( offsetof(struct get_process_protection_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_process_protection_request) == 16 );
 C_ASSERT( offsetof(struct get_process_protection_reply, protection) == 8 );
 C_ASSERT( sizeof(struct get_process_protection_reply) == 16 );
+C_ASSERT( offsetof(struct set_session_object_request, handle) == 12 );
+C_ASSERT( sizeof(struct set_session_object_request) == 16 );

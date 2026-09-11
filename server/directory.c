@@ -34,6 +34,7 @@
 #include "handle.h"
 #include "request.h"
 #include "process.h"
+#include "security.h"
 #include "file.h"
 #include "unicode.h"
 
@@ -86,6 +87,7 @@ struct directory
 {
     struct object     obj;        /* object header */
     struct namespace *entries;    /* directory's name space */
+    unsigned int      native_session_initialized : 1;
 };
 
 struct directory_init_data
@@ -111,6 +113,9 @@ static const struct object_ops directory_ops =
 
 static struct directory *root_directory;
 static struct directory *dir_objtype;
+static struct directory *dir_bno_global;
+static struct directory *dir_sessions;
+static struct directory *dir_bnolinks;
 
 
 static struct type_descr *types[] =
@@ -170,6 +175,7 @@ static bool directory_init( struct object *obj, const void *init_data )
     struct directory *dir = (struct directory *)obj;
     const struct directory_init_data *data = init_data;
 
+    dir->native_session_initialized = 0;
     return !!(dir->entries = create_namespace( data->hash_size ));
 }
 
@@ -283,7 +289,6 @@ static void create_session( unsigned int id )
     static const struct unicode_str link_local_str = {link_localW, sizeof(link_localW)};
     static const struct unicode_str link_session_str = {link_sessionW, sizeof(link_sessionW)};
 
-    static struct directory *dir_bno_global, *dir_sessions, *dir_bnolinks;
     struct directory *dir_id, *dir_bno, *dir_dosdevices, *dir_windows, *dir_winstation;
     struct object *link_global, *link_local, *link_session, *link_bno, *link_windows;
     struct unicode_str id_str;
@@ -521,6 +526,63 @@ DECL_HANDLER(open_directory)
 {
     reply->handle = open_object( current->process, req->rootdir, req->access,
                                  &directory_ops, get_req_unicode_str(), req->attributes );
+}
+
+static int is_current_session_directory( const struct directory *dir )
+{
+    const struct object_name *name = dir->obj.name;
+    char id[11];
+    int i, len;
+
+    if (!name || name->parent != &dir_sessions->obj) return 0;
+    len = snprintf( id, sizeof(id), "%u", current->process->session_id );
+    if (name->len != len * sizeof(WCHAR)) return 0;
+    for (i = 0; i < len; ++i)
+        if (name->name[i] != id[i]) return 0;
+    return 1;
+}
+
+static void unlink_precreated_session_directory( struct directory *parent,
+                                                 const WCHAR *name, data_size_t len )
+{
+    struct unicode_str str = {name, len};
+    struct object *obj;
+
+    if (!(obj = find_object( parent->entries, str, OBJ_CASE_INSENSITIVE ))) return;
+    if (obj->ops == &directory_ops) unlink_named_object( obj );
+    release_object( obj );
+}
+
+DECL_HANDLER(set_session_object)
+{
+    static const WCHAR dosdevicesW[] = {'D','o','s','D','e','v','i','c','e','s'};
+    static const WCHAR bnoW[] = {'B','a','s','e','N','a','m','e','d','O','b','j','e','c','t','s'};
+    static const WCHAR windowsW[] = {'W','i','n','d','o','w','s'};
+    struct directory *dir;
+
+    if (!(dir = (struct directory *)get_handle_obj( current->process, req->handle,
+                                                     DIRECTORY_CREATE_SUBDIRECTORY,
+                                                     &directory_ops ))) return;
+    if (!is_native_machine() ||
+        !equal_sid( token_get_user( current->process->token ), &local_system_sid ) ||
+        !is_current_session_directory( dir ))
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        release_object( dir );
+        return;
+    }
+
+    if (!dir->native_session_initialized)
+    {
+        dir->native_session_initialized = 1;
+        if (current->process->session_id)
+        {
+            unlink_precreated_session_directory( dir, dosdevicesW, sizeof(dosdevicesW) );
+            unlink_precreated_session_directory( dir, bnoW, sizeof(bnoW) );
+            unlink_precreated_session_directory( dir, windowsW, sizeof(windowsW) );
+        }
+    }
+    release_object( dir );
 }
 
 /* get directory entries */

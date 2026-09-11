@@ -3741,6 +3741,11 @@ static void dump_get_process_protection_reply( const struct get_process_protecti
     fprintf( stderr, " protection=%08x", req->protection );
 }
 
+static void dump_set_session_object_request( const struct set_session_object_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4069,6 +4074,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_process_exception_port_request,
     (dump_func)dump_get_process_critical_state_request,
     (dump_func)dump_get_process_protection_request,
+    (dump_func)dump_set_session_object_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4397,6 +4403,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_get_process_critical_state_reply,
     (dump_func)dump_get_process_protection_reply,
+    NULL,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -4725,6 +4732,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_process_exception_port",
     "get_process_critical_state",
     "get_process_protection",
+    "set_session_object",
 };
 
 static const struct

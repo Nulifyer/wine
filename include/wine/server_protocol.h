@@ -6544,6 +6544,17 @@ struct get_process_protection_reply
 };
 
 
+struct set_session_object_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+};
+struct set_session_object_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -6870,6 +6881,7 @@ enum request
     REQ_set_process_exception_port,
     REQ_get_process_critical_state,
     REQ_get_process_protection,
+    REQ_set_session_object,
     REQ_NB_REQUESTS
 };
 
@@ -7201,6 +7213,7 @@ union generic_request
     struct set_process_exception_port_request set_process_exception_port_request;
     struct get_process_critical_state_request get_process_critical_state_request;
     struct get_process_protection_request get_process_protection_request;
+    struct set_session_object_request set_session_object_request;
 };
 union generic_reply
 {
@@ -7530,8 +7543,9 @@ union generic_reply
     struct set_process_exception_port_reply set_process_exception_port_reply;
     struct get_process_critical_state_reply get_process_critical_state_reply;
     struct get_process_protection_reply get_process_protection_reply;
+    struct set_session_object_reply set_session_object_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 982
+#define SERVER_PROTOCOL_VERSION 984
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

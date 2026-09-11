@@ -8020,11 +8020,20 @@ NTSTATUS WINAPI NtSetInformationObject( HANDLE handle, OBJECT_INFORMATION_CLASS 
     }
 
     case ObjectSessionInformation:
-    case ObjectSessionObjectInformation:
-        /* wineserver creates the per-session directories up front, so these
-         * registrations have no additional state to update. */
+        /* wineserver creates the per-session named-object directory up front,
+         * so this registration has no additional state to update. */
         if (ptr || len) return STATUS_INVALID_PARAMETER;
         SERVER_START_REQ( get_object_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        break;
+
+    case ObjectSessionObjectInformation:
+        if (ptr || len) return STATUS_INVALID_PARAMETER;
+        SERVER_START_REQ( set_session_object )
         {
             req->handle = wine_server_obj_handle( handle );
             status = wine_server_call( req );

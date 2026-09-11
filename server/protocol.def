@@ -4533,3 +4533,8 @@ struct alpc_message_info
 @REPLY
     unsigned int protection;
 @END
+
+/* Transfer a pre-created session directory to the native session manager. */
+@REQ(set_session_object)
+    obj_handle_t   handle;        /* handle to the session directory */
+@END
