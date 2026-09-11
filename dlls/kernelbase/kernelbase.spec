@@ -691,6 +691,7 @@
 @ stdcall GetQueuedCompletionStatus(long ptr ptr ptr long)
 @ stdcall GetQueuedCompletionStatusEx(ptr ptr long ptr long long)
 # @ stub GetRegistryExtensionFlags
+@ stdcall GetRegistryValueWithFallbackW(long wstr long wstr wstr long ptr ptr long ptr)
 # @ stub GetRoamingLastObservedChangeTime
 @ stdcall GetSecurityDescriptorControl(ptr ptr ptr)
 @ stdcall GetSecurityDescriptorDacl(ptr ptr ptr ptr)
@@ -915,6 +916,7 @@
 # @ stub IsProcessCritical
 @ stdcall IsProcessInJob(long long ptr)
 @ stdcall IsProcessorFeaturePresent(long)
+@ stdcall IsUserCetAvailableInEnvironment(long)
 # @ stub IsSideloadingEnabled
 # @ stub IsSideloadingPolicyApplied
 # @ stub IsSyncForegroundPolicyRefresh

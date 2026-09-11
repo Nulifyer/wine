@@ -409,6 +409,23 @@ NTSTATUS WINAPI wow64_NtPrivilegeCheck( UINT *args )
     return NtPrivilegeCheck( token, privs, res );
 }
 
+/**********************************************************************
+ *           wow64_NtPrivilegeObjectAuditAlarm
+ */
+NTSTATUS WINAPI wow64_NtPrivilegeObjectAuditAlarm( UINT *args )
+{
+    UNICODE_STRING32 *subsystem32 = get_ptr( &args );
+    HANDLE service = get_handle( &args );
+    HANDLE token = get_handle( &args );
+    ACCESS_MASK access = get_ulong( &args );
+    PRIVILEGE_SET *privileges = get_ptr( &args );
+    BOOLEAN granted = get_ulong( &args );
+    UNICODE_STRING subsystem;
+
+    return NtPrivilegeObjectAuditAlarm( unicode_str_32to64( &subsystem, subsystem32 ),
+                                        service, token, access, privileges, granted );
+}
+
 
 /**********************************************************************
  *           wow64_NtQueryInformationToken

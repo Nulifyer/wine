@@ -22,6 +22,10 @@
 typedef NTSTATUS (WINAPI *wnf_callback)( ULONGLONG, ULONG, const GUID *, void *, const void *, ULONG );
 static NTSTATUS (WINAPI *pNtQueryWnfStateData)( const ULONGLONG *, const GUID *, const void *,
                                                ULONG *, void *, ULONG * );
+static NTSTATUS (WINAPI *pRtlPublishWnfStateData)( ULONGLONG, const GUID *, const void *, ULONG,
+                                                  const void * );
+static NTSTATUS (WINAPI *pRtlTestAndPublishWnfStateData)( ULONGLONG, const GUID *, const void *, ULONG,
+                                                         const void *, ULONG );
 static NTSTATUS (WINAPI *pRtlSubscribeWnfStateChangeNotification)( void **, ULONGLONG, ULONG,
                                                                   wnf_callback, void *, const GUID *,
                                                                   ULONG, ULONG );
@@ -47,19 +51,28 @@ START_TEST(wnf)
     NTSTATUS status;
 
     pNtQueryWnfStateData = (void *)GetProcAddress( ntdll, "NtQueryWnfStateData" );
+    pRtlPublishWnfStateData = (void *)GetProcAddress( ntdll, "RtlPublishWnfStateData" );
+    pRtlTestAndPublishWnfStateData =
+        (void *)GetProcAddress( ntdll, "RtlTestAndPublishWnfStateData" );
     pRtlSubscribeWnfStateChangeNotification =
         (void *)GetProcAddress( ntdll, "RtlSubscribeWnfStateChangeNotification" );
     pRtlUnsubscribeWnfNotificationWaitForCompletion =
         (void *)GetProcAddress( ntdll, "RtlUnsubscribeWnfNotificationWaitForCompletion" );
     pRtlUnsubscribeWnfStateChangeNotification =
         (void *)GetProcAddress( ntdll, "RtlUnsubscribeWnfStateChangeNotification" );
-    if (!pNtQueryWnfStateData || !pRtlSubscribeWnfStateChangeNotification ||
+    if (!pNtQueryWnfStateData || !pRtlPublishWnfStateData ||
+        !pRtlTestAndPublishWnfStateData || !pRtlSubscribeWnfStateChangeNotification ||
         !pRtlUnsubscribeWnfNotificationWaitForCompletion ||
         !pRtlUnsubscribeWnfStateChangeNotification)
     {
         win_skip( "WNF functions are unavailable\n" );
         return;
     }
+
+    status = pRtlPublishWnfStateData( name, NULL, NULL, 0, NULL );
+    ok( status == STATUS_ACCESS_DENIED, "expected STATUS_ACCESS_DENIED, got %#lx\n", status );
+    status = pRtlTestAndPublishWnfStateData( name, NULL, NULL, 0, NULL, 0 );
+    ok( status == STATUS_ACCESS_DENIED, "expected STATUS_ACCESS_DENIED, got %#lx\n", status );
 
     stamp = 0xdeadbeef;
     size = 0xdeadbeef;

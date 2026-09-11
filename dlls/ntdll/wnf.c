@@ -161,6 +161,18 @@ static NTSTATUS start_dispatcher(void)
     NtClose( thread );
     return status;
 }
+NTSTATUS WINAPI RtlPublishWnfStateData( ULONGLONG state, const GUID *type, const void *data,
+                                        ULONG length, const void *explicit_scope )
+{
+    return NtUpdateWnfStateData( &state, data, length, type, explicit_scope, 0, FALSE );
+}
+NTSTATUS WINAPI RtlTestAndPublishWnfStateData( ULONGLONG state, const GUID *type,
+                                               const void *data, ULONG length,
+                                               const void *explicit_scope, ULONG matching_stamp )
+{
+    return NtUpdateWnfStateData( &state, data, length, type, explicit_scope,
+                                 matching_stamp, TRUE );
+}
 NTSTATUS WINAPI RtlSubscribeWnfStateChangeNotification( void **subscription, ULONGLONG state,
                                                         ULONG stamp, wnf_callback callback, void *context,
                                                         const GUID *type, ULONG group, ULONG flags )

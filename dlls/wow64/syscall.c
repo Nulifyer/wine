@@ -616,6 +616,30 @@ NTSTATUS WINAPI wow64_NtAlpcImpersonateClientOfPort( UINT *args )
 }
 
 /**********************************************************************
+ *           wow64_NtAlpcOpenSenderProcess
+ */
+NTSTATUS WINAPI wow64_NtAlpcOpenSenderProcess( UINT *args )
+{
+    ULONG *process_handle_ptr = get_ptr( &args );
+    HANDLE port_handle = get_handle( &args );
+    ALPC_PORT_MESSAGE32 *message32 = get_ptr( &args );
+    ULONG flags = get_ulong( &args );
+    ACCESS_MASK access = get_ulong( &args );
+    OBJECT_ATTRIBUTES32 *attr32 = get_ptr( &args );
+    ALPC_PORT_MESSAGE *message;
+    struct object_attr64 attr;
+    HANDLE process_handle = 0;
+    NTSTATUS status;
+
+    status = NtAlpcOpenSenderProcess( process_handle_ptr ? &process_handle : NULL, port_handle,
+                                      alpc_port_message_32to64( &message,
+                                          message32 ? sizeof(*message) : 0, message32, TRUE ),
+                                      flags, access, objattr_32to64( &attr, attr32 ) );
+    if (!status) put_handle( process_handle_ptr, process_handle );
+    return status;
+}
+
+/**********************************************************************
  *           wow64_NtAlpcSendWaitReceivePort
  */
 NTSTATUS WINAPI wow64_NtAlpcSendWaitReceivePort( UINT *args )
@@ -856,6 +880,16 @@ NTSTATUS WINAPI wow64_NtSetDebugFilterState( UINT *args )
     BOOLEAN state = get_ulong( &args );
 
     return NtSetDebugFilterState( component_id, level, state );
+}
+
+/**********************************************************************
+ *           wow64_NtSetDefaultHardErrorPort
+ */
+NTSTATUS WINAPI wow64_NtSetDefaultHardErrorPort( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+
+    return NtSetDefaultHardErrorPort( handle );
 }
 
 

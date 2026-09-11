@@ -188,6 +188,326 @@ NTSTATUS WINAPI RtlResetNtUserPfn(void)
     return STATUS_SUCCESS;
 }
 
+/***********************************************************************
+ *             RtlGetPersistedStateLocation  (NTDLL.@)
+ *
+ * LinuxNT currently supports the state-separation-disabled partition used
+ * by the pinned Services and Wininit callers. In that partition the source
+ * id and custom value do not affect the caller-provided default path.
+ */
+NTSTATUS WINAPI RtlGetPersistedStateLocation( const WCHAR *source_id,
+                                              const WCHAR *custom_value,
+                                              const WCHAR *default_path,
+                                              ULONG location_type,
+                                              WCHAR *target_path,
+                                              ULONG buffer_bytes,
+                                              ULONG *required_bytes )
+{
+    ULONG size;
+
+    UNREFERENCED_PARAMETER(source_id);
+    UNREFERENCED_PARAMETER(custom_value);
+
+    if (location_type > 1) return STATUS_INVALID_PARAMETER_4;
+    if (!default_path) return STATUS_OBJECT_NAME_NOT_FOUND;
+
+    size = (wcslen( default_path ) + 1) * sizeof(WCHAR);
+    if (required_bytes) *required_bytes = size;
+    if (buffer_bytes < size) return STATUS_BUFFER_OVERFLOW;
+
+    memcpy( target_path, default_path, size );
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *             RtlGetSystemBootStatus  (NTDLL.@)
+ *
+ * LinuxNT exposes the feature-configuration state consumed by Wininit.
+ * The remaining boot-status classes need a system-owned persistent store.
+ */
+NTSTATUS WINAPI RtlGetSystemBootStatus( ULONG item_type, void *buffer,
+                                        ULONG buffer_length, ULONG *return_length )
+{
+    static const ULONG feature_configuration_state = 4;
+
+    if (item_type != 17) return STATUS_INVALID_PARAMETER;
+    if (buffer_length < sizeof(feature_configuration_state)) return STATUS_BUFFER_TOO_SMALL;
+    if (!buffer) return STATUS_INVALID_PARAMETER;
+
+    memcpy( buffer, &feature_configuration_state, sizeof(feature_configuration_state) );
+    if (return_length) *return_length = sizeof(feature_configuration_state);
+    return STATUS_SUCCESS;
+}
+
+static LIST_ENTRY *rtl_hash_bucket( RTL_DYNAMIC_HASH_TABLE *table, ULONG_PTR signature )
+{
+    ULONG value = (ULONG)signature >> (table->Shift & 31);
+    ULONG hash = (((value * 0x41c64e6d + 0x3039) >> 16) |
+                  ((value * 0x10dcd + 1) & 0xffff0000));
+    ULONG index = hash & table->DivisorMask;
+
+    if (index < table->Pivot) index = hash & ((table->DivisorMask << 1) | 1);
+    return (LIST_ENTRY *)table->Directory + index;
+}
+
+static void rtl_hash_link_after( LIST_ENTRY *link, LIST_ENTRY *entry )
+{
+    entry->Flink = link->Flink;
+    entry->Blink = link;
+    link->Flink->Blink = entry;
+    link->Flink = entry;
+}
+
+static void rtl_hash_unlink( LIST_ENTRY *entry )
+{
+    entry->Blink->Flink = entry->Flink;
+    entry->Flink->Blink = entry->Blink;
+}
+
+/***********************************************************************
+ *             RtlCreateHashTableEx  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlCreateHashTableEx( RTL_DYNAMIC_HASH_TABLE **out, ULONG initial_size,
+                                     ULONG shift, ULONG flags )
+{
+    RTL_DYNAMIC_HASH_TABLE *table;
+    LIST_ENTRY *buckets;
+    ULONG i;
+
+    if (!out || initial_size < 128 || initial_size > 0x7fff80 ||
+        (initial_size & (initial_size - 1))) return FALSE;
+
+    table = *out;
+    if (!table)
+    {
+        table = RtlAllocateHeap( NtCurrentTeb()->Peb->ProcessHeap, 0, sizeof(*table) );
+        if (!table) return FALSE;
+        flags |= RTL_HASH_ALLOCATED_HEADER;
+    }
+
+    memset( table, 0, sizeof(*table) );
+    table->Flags = flags;
+    table->Shift = shift;
+    table->TableSize = initial_size;
+    table->DivisorMask = initial_size - 1;
+
+    buckets = RtlAllocateHeap( NtCurrentTeb()->Peb->ProcessHeap, 0,
+                               initial_size * sizeof(*buckets) );
+    if (!buckets)
+    {
+        if (flags & RTL_HASH_ALLOCATED_HEADER)
+            RtlFreeHeap( NtCurrentTeb()->Peb->ProcessHeap, 0, table );
+        return FALSE;
+    }
+    for (i = 0; i < initial_size; ++i) InitializeListHead( buckets + i );
+    table->Directory = buckets;
+    *out = table;
+    return TRUE;
+}
+
+/***********************************************************************
+ *             RtlCreateHashTable  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlCreateHashTable( RTL_DYNAMIC_HASH_TABLE **table, ULONG shift, ULONG flags )
+{
+    return RtlCreateHashTableEx( table, 128, shift, flags );
+}
+
+/***********************************************************************
+ *             RtlDeleteHashTable  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlDeleteHashTable( RTL_DYNAMIC_HASH_TABLE *table )
+{
+    ULONG flags;
+
+    if (!table) return FALSE;
+    flags = table->Flags;
+    if (table->Directory)
+        RtlFreeHeap( NtCurrentTeb()->Peb->ProcessHeap, 0, table->Directory );
+    if (flags & RTL_HASH_ALLOCATED_HEADER)
+        RtlFreeHeap( NtCurrentTeb()->Peb->ProcessHeap, 0, table );
+    return TRUE;
+}
+
+/***********************************************************************
+ *             RtlLookupEntryHashTable  (NTDLL.@)
+ */
+RTL_DYNAMIC_HASH_TABLE_ENTRY * WINAPI RtlLookupEntryHashTable(
+    RTL_DYNAMIC_HASH_TABLE *table, ULONG_PTR signature, RTL_DYNAMIC_HASH_TABLE_CONTEXT *context )
+{
+    RTL_DYNAMIC_HASH_TABLE_CONTEXT local;
+    RTL_DYNAMIC_HASH_TABLE_ENTRY *entry;
+    LIST_ENTRY *head, *link, *previous;
+
+    if (!context) context = &local;
+    head = rtl_hash_bucket( table, signature );
+    previous = head;
+    for (link = head->Flink; link != head; link = link->Flink)
+    {
+        entry = CONTAINING_RECORD( link, RTL_DYNAMIC_HASH_TABLE_ENTRY, Linkage );
+        if (entry->Signature && entry->Signature >= signature) break;
+        previous = link;
+    }
+
+    context->ChainHead = head;
+    context->PrevLinkage = previous;
+    context->Signature = signature;
+    if (link == head) return NULL;
+    entry = CONTAINING_RECORD( link, RTL_DYNAMIC_HASH_TABLE_ENTRY, Linkage );
+    return entry->Signature == signature ? entry : NULL;
+}
+
+/***********************************************************************
+ *             RtlGetNextEntryHashTable  (NTDLL.@)
+ */
+RTL_DYNAMIC_HASH_TABLE_ENTRY * WINAPI RtlGetNextEntryHashTable(
+    RTL_DYNAMIC_HASH_TABLE *table, RTL_DYNAMIC_HASH_TABLE_CONTEXT *context )
+{
+    RTL_DYNAMIC_HASH_TABLE_ENTRY *entry;
+    LIST_ENTRY *current, *link;
+
+    current = context->PrevLinkage->Flink;
+    for (link = current->Flink; link != context->ChainHead; link = link->Flink)
+    {
+        entry = CONTAINING_RECORD( link, RTL_DYNAMIC_HASH_TABLE_ENTRY, Linkage );
+        if (table->NumEnumerators && !entry->Signature) continue;
+        if (entry->Signature != context->Signature) return NULL;
+        context->PrevLinkage = current;
+        return entry;
+    }
+    return NULL;
+}
+
+/***********************************************************************
+ *             RtlInsertEntryHashTable  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlInsertEntryHashTable( RTL_DYNAMIC_HASH_TABLE *table,
+                                        RTL_DYNAMIC_HASH_TABLE_ENTRY *entry,
+                                        ULONG_PTR signature,
+                                        RTL_DYNAMIC_HASH_TABLE_CONTEXT *context )
+{
+    RTL_DYNAMIC_HASH_TABLE_CONTEXT local;
+    LIST_ENTRY *head;
+    BOOL was_empty;
+
+    entry->Signature = signature;
+    table->NumEntries++;
+    if (!context)
+    {
+        context = &local;
+        context->ChainHead = NULL;
+    }
+    if (!context->ChainHead) RtlLookupEntryHashTable( table, signature, context );
+
+    head = context->ChainHead;
+    was_empty = IsListEmpty( head );
+    rtl_hash_link_after( context->PrevLinkage, &entry->Linkage );
+    if (was_empty) table->NonEmptyBuckets++;
+    return TRUE;
+}
+
+/***********************************************************************
+ *             RtlRemoveEntryHashTable  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlRemoveEntryHashTable( RTL_DYNAMIC_HASH_TABLE *table,
+                                        RTL_DYNAMIC_HASH_TABLE_ENTRY *entry,
+                                        RTL_DYNAMIC_HASH_TABLE_CONTEXT *context )
+{
+    table->NumEntries--;
+    if (entry->Linkage.Flink == entry->Linkage.Blink) table->NonEmptyBuckets--;
+    rtl_hash_unlink( &entry->Linkage );
+    if (context && !context->ChainHead)
+        RtlLookupEntryHashTable( table, entry->Signature, context );
+    return TRUE;
+}
+
+/***********************************************************************
+ *             RtlInitEnumerationHashTable  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlInitEnumerationHashTable( RTL_DYNAMIC_HASH_TABLE *table,
+                                             RTL_DYNAMIC_HASH_TABLE_ENUMERATOR *enumerator )
+{
+    LIST_ENTRY *head = (LIST_ENTRY *)table->Directory;
+    BOOL was_empty = IsListEmpty( head );
+
+    memset( enumerator, 0, sizeof(*enumerator) );
+    rtl_hash_link_after( head, &enumerator->HashEntry.Linkage );
+    enumerator->ChainHead = head;
+    enumerator->BucketIndex = 0;
+    table->NumEnumerators++;
+    if (was_empty) table->NonEmptyBuckets++;
+    return TRUE;
+}
+
+/***********************************************************************
+ *             RtlEnumerateEntryHashTable  (NTDLL.@)
+ */
+RTL_DYNAMIC_HASH_TABLE_ENTRY * WINAPI RtlEnumerateEntryHashTable(
+    RTL_DYNAMIC_HASH_TABLE *table, RTL_DYNAMIC_HASH_TABLE_ENUMERATOR *enumerator )
+{
+    RTL_DYNAMIC_HASH_TABLE_ENTRY *entry;
+    LIST_ENTRY *marker = &enumerator->HashEntry.Linkage;
+    LIST_ENTRY *head = enumerator->ChainHead;
+    LIST_ENTRY *link;
+    ULONG index;
+
+    if (!head) return NULL;
+    for (;;)
+    {
+        for (link = marker->Flink; link != head; link = link->Flink)
+        {
+            entry = CONTAINING_RECORD( link, RTL_DYNAMIC_HASH_TABLE_ENTRY, Linkage );
+            if (entry->Signature)
+            {
+                rtl_hash_unlink( marker );
+                rtl_hash_link_after( link, marker );
+                return entry;
+            }
+        }
+
+        rtl_hash_unlink( marker );
+        if (IsListEmpty( head )) table->NonEmptyBuckets--;
+        for (index = enumerator->BucketIndex + 1; index < table->TableSize; ++index)
+        {
+            head = (LIST_ENTRY *)table->Directory + index;
+            for (link = head->Flink; link != head; link = link->Flink)
+            {
+                entry = CONTAINING_RECORD( link, RTL_DYNAMIC_HASH_TABLE_ENTRY, Linkage );
+                if (entry->Signature) break;
+            }
+            if (link != head)
+            {
+                rtl_hash_link_after( head, marker );
+                enumerator->ChainHead = head;
+                enumerator->BucketIndex = index;
+                break;
+            }
+        }
+        if (index == table->TableSize)
+        {
+            enumerator->ChainHead = NULL;
+            return NULL;
+        }
+    }
+}
+
+/***********************************************************************
+ *             RtlEndEnumerationHashTable  (NTDLL.@)
+ */
+void WINAPI RtlEndEnumerationHashTable( RTL_DYNAMIC_HASH_TABLE *table,
+                                        RTL_DYNAMIC_HASH_TABLE_ENUMERATOR *enumerator )
+{
+    LIST_ENTRY *head = enumerator->ChainHead;
+
+    if (head)
+    {
+        rtl_hash_unlink( &enumerator->HashEntry.Linkage );
+        if (IsListEmpty( head )) table->NonEmptyBuckets--;
+    }
+    table->NumEnumerators--;
+    memset( enumerator, 0, sizeof(*enumerator) );
+}
+
 /* data is a place holder to align stored data on a 8 byte boundary */
 struct rtl_generic_table_entry
 {

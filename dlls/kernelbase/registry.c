@@ -49,6 +49,37 @@ WINE_DEFAULT_DEBUG_CHANNEL(reg);
 #define HKEY_SPECIAL_ROOT_LAST    HKEY_DYN_DATA
 
 /***********************************************************************
+ * GetRegistryValueWithFallbackW (kernelbase.@)
+ */
+LSTATUS WINAPI GetRegistryValueWithFallbackW( HKEY primary, const WCHAR *primary_subkey,
+                                              HKEY fallback, const WCHAR *fallback_subkey,
+                                              const WCHAR *value, DWORD flags, DWORD *type,
+                                              void *data, DWORD data_size, DWORD *returned_size )
+{
+    DWORD size = data_size;
+    LSTATUS status;
+
+    if (primary)
+    {
+        status = RegGetValueW( primary, primary_subkey, value, flags, type, data, &size );
+        if ((status != ERROR_FILE_NOT_FOUND && status != ERROR_PATH_NOT_FOUND) || !fallback)
+            goto done;
+    }
+    else if (!fallback)
+    {
+        status = ERROR_INVALID_PARAMETER;
+        goto done;
+    }
+
+    size = data_size;
+    status = RegGetValueW( fallback, fallback_subkey, value, flags, type, data, &size );
+
+done:
+    if (returned_size) *returned_size = size;
+    return status;
+}
+
+/***********************************************************************
  * GetPersistedRegistryLocationW (kernelbase.@)
  *
  * State separation is not enabled in Wine.  The persisted location is

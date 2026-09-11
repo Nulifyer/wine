@@ -1,4 +1,5 @@
 TESTDLL   = kernelbase.dll
+IMPORTS   = advapi32
 
 SOURCES = \
 	file.c \
@@ -8,4 +9,5 @@ SOURCES = \
 	process.c \
 	rsrc.rc \
 	security.c \
+	state_helpers.c \
 	sync.c

@@ -312,7 +312,7 @@
 # @ stub NtPlugPlayControl
 @ stdcall -syscall=0x005f NtPowerInformation(long ptr long ptr long)
 @ stdcall -syscall NtPrivilegeCheck(ptr ptr ptr)
-# @ stub NtPrivilegeObjectAuditAlarm
+@ stdcall -syscall NtPrivilegeObjectAuditAlarm(ptr long long long ptr long)
 # @ stub NtPrivilegedServiceAuditAlarm
 @ stdcall -syscall=0x0050 NtProtectVirtualMemory(long ptr ptr long ptr)
 @ stdcall -syscall NtPulseEvent(long ptr)
@@ -600,6 +600,8 @@
 # @ stub RtlCreateBootStatusDataFile
 @ stdcall RtlCreateEnvironment(long ptr)
 @ stdcall RtlCreateHeap(long ptr long long ptr ptr)
+@ stdcall RtlCreateHashTable(ptr long long)
+@ stdcall RtlCreateHashTableEx(ptr long long long)
 @ stdcall RtlCreateProcessParameters(ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RtlCreateProcessParametersEx(ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr long)
 @ stub RtlCreatePropertySet
@@ -634,6 +636,7 @@
 @ stdcall RtlDeleteAtomFromAtomTable(ptr long)
 @ stdcall RtlDeleteBarrier(ptr)
 @ stdcall RtlDeleteCriticalSection(ptr)
+@ stdcall RtlDeleteHashTable(ptr)
 @ stdcall -arch=!i386 RtlDeleteGrowableFunctionTable(ptr)
 @ stdcall RtlDeleteElementGenericTable(ptr ptr)
 @ stub RtlDeleteElementGenericTableAvl
@@ -676,6 +679,7 @@
 # @ stub RtlEnableEarlyCriticalSectionEventCreation
 @ stdcall RtlEncodePointer(ptr)
 @ stdcall RtlEncodeSystemPointer(ptr) RtlEncodePointer
+@ stdcall RtlEndEnumerationHashTable(ptr ptr)
 @ stdcall -arch=win32 -ret64 RtlEnlargedIntegerMultiply(long long)
 @ stdcall -arch=win32 RtlEnlargedUnsignedDivide(int64 long ptr)
 @ stdcall -arch=win32 -ret64 RtlEnlargedUnsignedMultiply(long long)
@@ -686,6 +690,7 @@
 # @ stub RtlEnumerateGenericTableLikeADirectory
 @ stdcall RtlEnumerateGenericTableWithoutSplaying(ptr ptr)
 @ stdcall RtlEnumerateGenericTableWithoutSplayingAvl(ptr ptr)
+@ stdcall RtlEnumerateEntryHashTable(ptr ptr)
 @ stub RtlEnumerateProperties
 @ stdcall RtlEqualComputerName(ptr ptr)
 @ stdcall RtlEqualDomainName(ptr ptr)
@@ -782,11 +787,13 @@
 @ stdcall RtlGetLongestNtPathLength()
 @ stdcall RtlGetNativeSystemInformation(long ptr long ptr)
 # @ stub RtlGetNextRange
+@ stdcall RtlGetNextEntryHashTable(ptr ptr)
 @ stdcall RtlGetNtGlobalFlags()
 @ stdcall RtlGetNtProductType(ptr)
 @ stdcall RtlGetNtSystemRoot()
 @ stdcall RtlGetNtVersionNumbers(ptr ptr ptr)
 @ stdcall RtlGetOwnerSecurityDescriptor(ptr ptr ptr)
+@ stdcall RtlGetPersistedStateLocation(wstr wstr wstr long ptr long ptr)
 @ stdcall RtlGetProductInfo(long long long long ptr)
 @ stdcall RtlGetProcessHeaps(long ptr)
 @ stdcall RtlGetProcessPreferredUILanguages(long ptr ptr ptr)
@@ -794,6 +801,7 @@
 @ stdcall RtlGetSearchPath(ptr)
 # @ stub RtlGetSecurityDescriptorRMControl
 # @ stub RtlGetSetBootStatusData
+@ stdcall RtlGetSystemBootStatus(long ptr long ptr)
 @ stdcall RtlGetSystemPreferredUILanguages(long long ptr ptr ptr)
 @ stdcall RtlGetSuiteMask()
 @ stdcall -ret64 RtlGetSystemTimePrecise()
@@ -820,6 +828,7 @@
 @ stdcall RtlInitAnsiStringEx(ptr str)
 @ stdcall RtlInitBarrier(ptr long long)
 @ stdcall RtlInitCodePageTable(ptr ptr)
+@ stdcall RtlInitEnumerationHashTable(ptr ptr)
 # @ stub RtlInitMemoryStream
 @ stdcall RtlInitNlsTables(ptr ptr ptr ptr)
 # @ stub RtlInitOutOfProcessMemoryStream
@@ -848,6 +857,7 @@
 # @ stub RtlInitializeStackTraceDataBase
 @ stdcall RtlInsertElementGenericTable(ptr ptr long ptr)
 @ stdcall RtlInsertElementGenericTableAvl(ptr ptr long ptr)
+@ stdcall RtlInsertEntryHashTable(ptr ptr long ptr)
 @ cdecl -arch=!i386 RtlInstallFunctionTableCallback(long long long ptr ptr wstr)
 @ stdcall RtlInt64ToUnicodeString(int64 long ptr)
 @ stdcall RtlIntegerToChar(long long long ptr)
@@ -924,6 +934,7 @@
 @ stdcall RtlLookupAtomInAtomTable(ptr wstr ptr)
 @ stdcall RtlLookupElementGenericTable(ptr ptr)
 @ stdcall RtlLookupElementGenericTableAvl(ptr ptr)
+@ stdcall RtlLookupEntryHashTable(ptr long ptr)
 @ stdcall -arch=!i386 RtlLookupFunctionEntry(long ptr ptr)
 @ stdcall -arch=!i386 RtlLookupFunctionTable(long ptr ptr)
 @ stdcall RtlMakeSelfRelativeSD(ptr ptr ptr)
@@ -959,6 +970,7 @@
 @ stdcall RtlPrefixString(ptr ptr long)
 @ stdcall RtlPrefixUnicodeString(ptr ptr long)
 @ stdcall RtlProcessFlsData(ptr long)
+@ stdcall RtlPublishWnfStateData(int64 ptr ptr long ptr)
 @ stub RtlPropertySetNameToGuid
 @ stub RtlProtectHeap
 @ stdcall RtlPushFrame(ptr)
@@ -1017,6 +1029,8 @@
 @ stdcall RtlReleaseSRWLockExclusive(ptr)
 @ stdcall RtlReleaseSRWLockShared(ptr)
 @ stub RtlRemoteCall
+@ stdcall RtlRemoveEntryHashTable(ptr ptr ptr)
+@ stdcall RtlRemovePrivileges(long ptr long)
 @ stdcall RtlRemoveVectoredContinueHandler(ptr)
 @ stdcall RtlRemoveVectoredExceptionHandler(ptr)
 @ stdcall RtlResetNtUserPfn()
@@ -1092,6 +1106,7 @@
 @ stdcall RtlSubtreePredecessor(ptr)
 @ stdcall RtlSubtreeSuccessor(ptr)
 @ stdcall RtlSystemTimeToLocalTime(ptr ptr)
+@ stdcall RtlTestAndPublishWnfStateData(int64 ptr ptr long ptr long)
 @ stdcall RtlTimeFieldsToTime(ptr ptr)
 @ stdcall RtlTimeToElapsedTimeFields(ptr ptr)
 @ stdcall RtlTimeToSecondsSince1970(ptr ptr)
@@ -1418,7 +1433,7 @@
 # @ stub ZwPlugPlayControl
 @ stdcall -private ZwPowerInformation(long ptr long ptr long) NtPowerInformation
 @ stdcall -private ZwPrivilegeCheck(ptr ptr ptr) NtPrivilegeCheck
-# @ stub ZwPrivilegeObjectAuditAlarm
+@ stdcall -private ZwPrivilegeObjectAuditAlarm(ptr long long long ptr long) NtPrivilegeObjectAuditAlarm
 # @ stub ZwPrivilegedServiceAuditAlarm
 @ stdcall -private ZwProtectVirtualMemory(long ptr ptr long ptr) NtProtectVirtualMemory
 @ stdcall -private ZwPulseEvent(long ptr) NtPulseEvent

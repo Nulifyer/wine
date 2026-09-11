@@ -354,12 +354,14 @@ void init_directories( struct fd *intl_fd )
     static const WCHAR dir_objtypeW[] = {'O','b','j','e','c','t','T','y','p','e','s'};
     static const WCHAR dir_kernelW[] = {'K','e','r','n','e','l','O','b','j','e','c','t','s'};
     static const WCHAR dir_nlsW[] = {'N','L','S'};
+    static const WCHAR dir_securityW[] = {'S','e','c','u','r','i','t','y'};
     static const struct unicode_str dir_global_str = {dir_globalW, sizeof(dir_globalW)};
     static const struct unicode_str dir_driver_str = {dir_driverW, sizeof(dir_driverW)};
     static const struct unicode_str dir_device_str = {dir_deviceW, sizeof(dir_deviceW)};
     static const struct unicode_str dir_objtype_str = {dir_objtypeW, sizeof(dir_objtypeW)};
     static const struct unicode_str dir_kernel_str = {dir_kernelW, sizeof(dir_kernelW)};
     static const struct unicode_str dir_nls_str = {dir_nlsW, sizeof(dir_nlsW)};
+    static const struct unicode_str dir_security_str = {dir_securityW, sizeof(dir_securityW)};
 
     /* symlinks */
     static const WCHAR link_dosdevW[] = {'D','o','s','D','e','v','i','c','e','s'};
@@ -409,6 +411,7 @@ void init_directories( struct fd *intl_fd )
     static const WCHAR event_high_memW[] = {'H','i','g','h','M','e','m','o','r','y','C','o','n','d','i','t','i','o','n'};
     static const WCHAR event_high_pagedW[] = {'H','i','g','h','P','a','g','e','d','P','o','o','l','C','o','n','d','i','t','i','o','n'};
     static const WCHAR event_high_nonpgW[] = {'H','i','g','h','N','o','n','P','a','g','e','d','P','o','o','l','C','o','n','d','i','t','i','o','n'};
+    static const WCHAR event_lsa_auth_initializedW[] = {'L','S','A','_','A','U','T','H','E','N','T','I','C','A','T','I','O','N','_','I','N','I','T','I','A','L','I','Z','E','D'};
     static const WCHAR keyed_event_crit_sectW[] = {'C','r','i','t','S','e','c','O','u','t','O','f','M','e','m','o','r','y','E','v','e','n','t'};
     static const struct
     {
@@ -424,6 +427,8 @@ void init_directories( struct fd *intl_fd )
         { { event_high_nonpgW, sizeof(event_high_nonpgW) }, 1 }
     };
     static const struct unicode_str keyed_event_crit_sect_str = {keyed_event_crit_sectW, sizeof(keyed_event_crit_sectW)};
+    static const struct unicode_str event_lsa_auth_initialized_str = {event_lsa_auth_initializedW,
+                                                                      sizeof(event_lsa_auth_initializedW)};
 
     /* mappings */
     static const WCHAR intlW[] = {'N','l','s','S','e','c','t','i','o','n','L','A','N','G','_','I','N','T','L'};
@@ -433,7 +438,7 @@ void init_directories( struct fd *intl_fd )
     static const struct unicode_str user_data_str = {user_dataW, sizeof(user_dataW)};
     static const struct unicode_str session_str = {sessionW, sizeof(sessionW)};
 
-    struct directory *dir_driver, *dir_device, *dir_global, *dir_kernel, *dir_nls;
+    struct directory *dir_driver, *dir_device, *dir_global, *dir_kernel, *dir_nls, *dir_security;
     struct object *named_pipe_device, *mailslot_device, *null_device, *atom_table;
     struct mapping *session_mapping;
     unsigned int i;
@@ -445,6 +450,7 @@ void init_directories( struct fd *intl_fd )
     dir_kernel     = create_directory( &root_directory->obj, dir_kernel_str, OBJ_PERMANENT, HASH_SIZE, NULL );
     dir_global     = create_directory( &root_directory->obj, dir_global_str, OBJ_PERMANENT, HASH_SIZE, NULL );
     dir_nls        = create_directory( &root_directory->obj, dir_nls_str, OBJ_PERMANENT, HASH_SIZE, NULL );
+    dir_security   = create_directory( &root_directory->obj, dir_security_str, OBJ_PERMANENT, HASH_SIZE, NULL );
 
     /* devices */
     named_pipe_device = create_named_pipe_device( &dir_device->obj, named_pipe_str, OBJ_PERMANENT, NULL );
@@ -480,6 +486,8 @@ void init_directories( struct fd *intl_fd )
                                       1, kernel_events[i].initial_state, NULL ));
     }
     release_object( create_keyed_event( &dir_kernel->obj, keyed_event_crit_sect_str, OBJ_PERMANENT, NULL ));
+    release_object( create_event( &dir_security->obj, event_lsa_auth_initialized_str,
+                                  OBJ_PERMANENT, 1, 0, NULL ));
 
     /* mappings */
     release_object( create_fd_mapping( &dir_nls->obj, intl_str, intl_fd, OBJ_PERMANENT, NULL ));
@@ -507,6 +515,7 @@ void init_directories( struct fd *intl_fd )
     release_object( dir_objtype );
     release_object( dir_kernel );
     release_object( dir_nls );
+    release_object( dir_security );
     release_object( dir_global );
 }
 

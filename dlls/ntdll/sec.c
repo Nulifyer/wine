@@ -1801,6 +1801,57 @@ RtlAdjustPrivilege(ULONG Privilege,
 }
 
 /******************************************************************************
+ *  RtlRemovePrivileges                 [NTDLL.@]
+ *
+ * Removes every token privilege whose LUID is absent from the supplied keep
+ * list. Privilege LUIDs accepted by Windows occupy the range 2 through 36.
+ */
+NTSTATUS WINAPI RtlRemovePrivileges(HANDLE token, const ULONG *keep, ULONG keep_count)
+{
+    TOKEN_PRIVILEGES *privileges;
+    ULONG i, j, needed = 0, remove_count = 0;
+    NTSTATUS status;
+
+    if (keep_count && !keep) return STATUS_INVALID_PARAMETER;
+    for (i = 0; i < keep_count; ++i)
+        if (keep[i] < 2 || keep[i] > 36) return STATUS_INVALID_PARAMETER;
+
+    status = NtQueryInformationToken(token, TokenPrivileges, NULL, 0, &needed);
+    if (status != STATUS_BUFFER_TOO_SMALL) return status;
+    if (!(privileges = RtlAllocateHeap(GetProcessHeap(), 0, needed))) return STATUS_NO_MEMORY;
+    status = NtQueryInformationToken(token, TokenPrivileges, privileges, needed, &needed);
+    if (status) goto done;
+
+    for (i = 0; i < keep_count; ++i)
+    {
+        for (j = 0; j < privileges->PrivilegeCount; ++j)
+            if (!privileges->Privileges[j].Luid.HighPart &&
+                privileges->Privileges[j].Luid.LowPart == keep[i]) break;
+        if (j == privileges->PrivilegeCount)
+        {
+            status = STATUS_NOT_ALL_ASSIGNED;
+            goto done;
+        }
+    }
+
+    for (i = 0; i < privileges->PrivilegeCount; ++i)
+    {
+        for (j = 0; j < keep_count; ++j)
+            if (!privileges->Privileges[i].Luid.HighPart &&
+                privileges->Privileges[i].Luid.LowPart == keep[j]) break;
+        if (j != keep_count) continue;
+        privileges->Privileges[remove_count] = privileges->Privileges[i];
+        privileges->Privileges[remove_count++].Attributes = SE_PRIVILEGE_REMOVED;
+    }
+    privileges->PrivilegeCount = remove_count;
+    status = NtAdjustPrivilegesToken(token, FALSE, privileges, 0, NULL, NULL);
+
+done:
+    RtlFreeHeap(GetProcessHeap(), 0, privileges);
+    return status;
+}
+
+/******************************************************************************
  *  RtlImpersonateSelf		[NTDLL.@]
  *
  * Makes an impersonation token that represents the process user and assigns

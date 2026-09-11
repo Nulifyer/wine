@@ -1386,12 +1386,18 @@ DECL_HANDLER(new_process)
     if (req->flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS)
     {
         if (!is_native_machine() ||
-            !equal_sid( token_get_user( process->token ), &local_system_sid ))
+            !equal_sid( token_get_user( process->token ), &local_system_sid ) ||
+            (req->protection != 0x61 && req->protection != 0x41))
         {
             set_error( STATUS_ACCESS_DENIED );
             goto done;
         }
-        process->protection = 0x61; /* PsProtectedSignerWinTcb, protected-light. */
+        process->protection = req->protection;
+    }
+    else if (req->protection)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
     }
     if (native_session_id >= 0) next_native_session_id++;
 

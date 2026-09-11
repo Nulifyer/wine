@@ -260,11 +260,12 @@ static NTSTATUS create_nt_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBUT
                                    RTL_USER_PROCESS_INFORMATION *info,
                                    HANDLE parent, USHORT machine,
                                    const struct proc_thread_attr *handle_list,
-                                   const struct proc_thread_attr *job_list)
+                                   const struct proc_thread_attr *job_list,
+                                   BYTE protection)
 {
     OBJECT_ATTRIBUTES process_attr, thread_attr;
     PS_CREATE_INFO create_info;
-    ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[9] ) / sizeof(ULONG_PTR)];
+    ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[10] ) / sizeof(ULONG_PTR)];
     PS_ATTRIBUTE_LIST *attr = (PS_ATTRIBUTE_LIST *)buffer;
     UNICODE_STRING nameW;
     NTSTATUS status;
@@ -339,6 +340,14 @@ static NTSTATUS create_nt_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBUT
             attr->Attributes[pos].ReturnLength = NULL;
             pos++;
         }
+        if (process_flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS)
+        {
+            attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_PROTECTION_LEVEL;
+            attr->Attributes[pos].Size         = sizeof(protection);
+            attr->Attributes[pos].Value        = protection;
+            attr->Attributes[pos].ReturnLength = NULL;
+            pos++;
+        }
         attr->TotalLength = offsetof( PS_ATTRIBUTE_LIST, Attributes[pos] );
 
         InitializeObjectAttributes( &process_attr, NULL, 0, NULL, psa ? psa->lpSecurityDescriptor : NULL );
@@ -380,7 +389,7 @@ static NTSTATUS create_vdm_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBU
               winevdm, params->ImagePathName.Buffer, params->CommandLine.Buffer );
     RtlInitUnicodeString( &params->ImagePathName, winevdm );
     RtlInitUnicodeString( &params->CommandLine, newcmdline );
-    status = create_nt_process( token, debug, psa, tsa, flags, params, info, 0, 0, NULL, NULL );
+    status = create_nt_process( token, debug, psa, tsa, flags, params, info, 0, 0, NULL, NULL, 0 );
     HeapFree( GetProcessHeap(), 0, newcmdline );
     return status;
 }
@@ -409,7 +418,7 @@ static NTSTATUS create_cmd_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBU
     swprintf( newcmdline, len, L"%s /s/c \"%s\"", comspec, params->CommandLine.Buffer );
     RtlInitUnicodeString( &params->ImagePathName, comspec );
     RtlInitUnicodeString( &params->CommandLine, newcmdline );
-    status = create_nt_process( token, debug, psa, tsa, flags, params, info, 0, 0, NULL, NULL );
+    status = create_nt_process( token, debug, psa, tsa, flags, params, info, 0, 0, NULL, NULL, 0 );
     RtlFreeHeap( GetProcessHeap(), 0, newcmdline );
     return status;
 }
@@ -520,6 +529,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     HANDLE parent = 0, debug = 0;
     ULONG nt_flags = 0;
     DWORD protection_level = 0;
+    BYTE protection = 0;
     BOOL protection_present = FALSE;
     USHORT machine = 0;
     NTSTATUS status;
@@ -656,9 +666,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     if (flags & CREATE_SUSPENDED) nt_flags |= PROCESS_CREATE_FLAGS_SUSPENDED;
     if (flags & CREATE_PROTECTED_PROCESS)
     {
-        /* The native startup partition currently admits WinTcb-light only. */
-        if (!protection_present || protection_level)
+        if (!protection_present)
         {
+            status = STATUS_NOT_SUPPORTED;
+            goto done;
+        }
+        switch (protection_level)
+        {
+        case 0: /* PROTECTION_LEVEL_WINTCB_LIGHT */
+            protection = 0x61;
+            break;
+        case 4: /* PROTECTION_LEVEL_LSA_LIGHT */
+            protection = 0x41;
+            break;
+        default:
             status = STATUS_NOT_SUPPORTED;
             goto done;
         }
@@ -666,7 +687,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     }
 
     status = create_nt_process( token, debug, process_attr, thread_attr,
-                                nt_flags, params, &rtl_info, parent, machine, handle_list, job_list );
+                                nt_flags, params, &rtl_info, parent, machine, handle_list, job_list,
+                                protection );
     switch (status)
     {
     case STATUS_SUCCESS:
@@ -1068,6 +1090,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsProcessInJob( HANDLE process, HANDLE job, BOOL *
 BOOL WINAPI DECLSPEC_HOTPATCH IsProcessorFeaturePresent ( DWORD feature )
 {
     return RtlIsProcessorFeaturePresent( feature );
+}
+
+
+/***********************************************************************
+ *           IsUserCetAvailableInEnvironment   (kernelbase.@)
+ *
+ * Wine does not currently provide user-mode CET shadow stacks. Windows
+ * returns FALSE for unsupported environment selectors and when the active
+ * system policy reports no user CET support.
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH IsUserCetAvailableInEnvironment( DWORD environment )
+{
+    UNREFERENCED_PARAMETER(environment);
+    return FALSE;
 }
 
 

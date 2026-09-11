@@ -1133,6 +1133,7 @@ typedef volatile struct
     unsigned int access;         /* access rights for process object */
     unsigned short machine;      /* architecture that the new process will use */
     int          native_session; /* per-session native child of the reserved bootstrap */
+    unsigned int protection;     /* PS_PROTECTION value requested for the new process */
     data_size_t  info_size;      /* size of startup info */
     data_size_t  handles_size;   /* length of explicit handles list */
     data_size_t  jobs_size;      /* length of jobs list */

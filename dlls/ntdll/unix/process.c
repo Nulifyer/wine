@@ -698,6 +698,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
     struct pe_image_info pe_info;
     ULONG process_id, thread_id;
     USHORT machine = 0;
+    BYTE protection = 0;
     HANDLE parent = 0, debug = 0, token = 0;
     UNICODE_STRING nt_name, path = {0};
     OBJECT_ATTRIBUTES attr, empty_attr = { sizeof(empty_attr) };
@@ -742,6 +743,15 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
             break;
         case PS_ATTRIBUTE_MACHINE_TYPE:
             machine = ps_attr->Attributes[i].Value;
+            break;
+        case PS_ATTRIBUTE_PROTECTION_LEVEL:
+            if (ps_attr->Attributes[i].Size != sizeof(protection) ||
+                ps_attr->Attributes[i].Value > UCHAR_MAX)
+            {
+                status = STATUS_INVALID_PARAMETER;
+                goto done;
+            }
+            protection = ps_attr->Attributes[i].Value;
             break;
         default:
             if (ps_attr->Attributes[i].Attribute & PS_ATTRIBUTE_INPUT)
@@ -827,6 +837,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         req->machine        = machine;
         req->native_session = is_native_machine && pe_info.subsystem == IMAGE_SUBSYSTEM_NATIVE &&
                               (process_flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES);
+        req->protection     = protection;
         req->info_size      = startup_info_size;
         req->handles_size   = handles_size;
         req->jobs_size      = jobs_size;

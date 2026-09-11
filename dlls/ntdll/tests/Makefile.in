@@ -4,6 +4,7 @@ IMPORTS   = user32 advapi32
 SOURCES = \
 	alpc.c \
 	atom.c \
+	boot_status.c \
 	critical.c \
 	change.c \
 	directory.c \
@@ -13,13 +14,18 @@ SOURCES = \
 	exception.c \
 	file.c \
 	generated.c \
+	hash_table.c \
 	heap_tags.c \
 	info.c \
 	large_int.c \
+	lsa_event.c \
 	om.c \
 	path.c \
 	pipe.c \
 	port.c \
+	persisted_state.c \
+	privilege_audit.c \
+	remove_privileges.c \
 	reg.c \
 	rtl.c \
 	rtlbitmap.c \

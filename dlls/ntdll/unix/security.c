@@ -928,6 +928,25 @@ NTSTATUS WINAPI NtPrivilegeCheck( HANDLE token, PRIVILEGE_SET *privs, BOOLEAN *r
 
 
 /***********************************************************************
+ *             NtPrivilegeObjectAuditAlarm  (NTDLL.@)
+ *
+ * Wine does not provide a host audit authority.  Windows still validates
+ * that the supplied token is queryable before accepting this notification.
+ */
+NTSTATUS WINAPI NtPrivilegeObjectAuditAlarm( UNICODE_STRING *subsystem, HANDLE service,
+                                             HANDLE token, ULONG access,
+                                             PRIVILEGE_SET *privileges, BOOLEAN granted )
+{
+    TOKEN_TYPE type;
+    ULONG length;
+
+    TRACE( "(%s,%p,%p,%#x,%p,%u)\n", debugstr_us(subsystem), service, token,
+           access, privileges, granted );
+    return NtQueryInformationToken( token, TokenType, &type, sizeof(type), &length );
+}
+
+
+/***********************************************************************
  *             NtImpersonateAnonymousToken  (NTDLL.@)
  */
 NTSTATUS WINAPI NtImpersonateAnonymousToken( HANDLE thread )
