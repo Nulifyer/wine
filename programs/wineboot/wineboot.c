@@ -1845,7 +1845,7 @@ static void usage( int status )
     WINE_MESSAGE( "    -e,--end-session  End the current session cleanly\n" );
     WINE_MESSAGE( "    -f,--force        Force exit for processes that don't exit cleanly\n" );
     WINE_MESSAGE( "    -i,--init         Perform initialization for first Wine instance\n" );
-    WINE_MESSAGE( "       --init-hardware Populate volatile host hardware data only\n" );
+    WINE_MESSAGE( "       --init-hardware Populate volatile host machine data only\n" );
     WINE_MESSAGE( "    -k,--kill         Kill running processes without any cleanup\n" );
     WINE_MESSAGE( "    -r,--restart      Restart only, don't do normal startup operations\n" );
     WINE_MESSAGE( "    -s,--shutdown     Shutdown only, don't reboot\n" );
@@ -1898,7 +1898,10 @@ int __cdecl main( int argc, char *argv[] )
      * lifetime, without Wine's service and session startup policy. */
     if (argc == 2 && !strcmp( argv[1], "--init-hardware" ))
     {
-        return create_hardware_registry_keys();
+        DWORD ret = create_hardware_registry_keys();
+
+        if (!ret) create_computer_name_keys();
+        return ret;
     }
 
     for (i = 1; i < argc; i++)
