@@ -8020,9 +8020,9 @@ NTSTATUS WINAPI NtSetInformationObject( HANDLE handle, OBJECT_INFORMATION_CLASS 
     }
 
     case ObjectSessionInformation:
-        /* Wine does not model per-session object namespaces yet. Accept the
-         * native startup request in the current namespace after validating
-         * that the caller supplied a live handle. */
+    case ObjectSessionObjectInformation:
+        /* wineserver creates the per-session directories up front, so these
+         * registrations have no additional state to update. */
         if (ptr || len) return STATUS_INVALID_PARAMETER;
         SERVER_START_REQ( get_object_info )
         {
