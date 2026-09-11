@@ -519,6 +519,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     RTL_USER_PROCESS_INFORMATION rtl_info = { 0 };
     HANDLE parent = 0, debug = 0;
     ULONG nt_flags = 0;
+    DWORD protection_level = 0;
+    BOOL protection_present = FALSE;
     USHORT machine = 0;
     NTSTATUS status;
 
@@ -626,6 +628,16 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
                         TRACE( "PROC_THREAD_ATTRIBUTE_JOB_LIST handle count %Iu.\n",
                                attrs->attrs[i].size / sizeof(HANDLE) );
                         break;
+                    case PROC_THREAD_ATTRIBUTE_PROTECTION_LEVEL:
+                        if (!attrs->attrs[i].value)
+                        {
+                            status = STATUS_INVALID_PARAMETER;
+                            goto done;
+                        }
+                        protection_level = *(DWORD *)attrs->attrs[i].value;
+                        protection_present = TRUE;
+                        TRACE( "PROC_THREAD_ATTRIBUTE_PROTECTION_LEVEL %lu.\n", protection_level );
+                        break;
                     case PROC_THREAD_ATTRIBUTE_MACHINE_TYPE:
                         machine = *(USHORT *)attrs->attrs[i].value;
                         TRACE( "PROC_THREAD_ATTRIBUTE_MACHINE %x.\n", machine );
@@ -642,6 +654,16 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     if (flags & DEBUG_ONLY_THIS_PROCESS) nt_flags |= PROCESS_CREATE_FLAGS_NO_DEBUG_INHERIT;
     if (flags & CREATE_BREAKAWAY_FROM_JOB) nt_flags |= PROCESS_CREATE_FLAGS_BREAKAWAY;
     if (flags & CREATE_SUSPENDED) nt_flags |= PROCESS_CREATE_FLAGS_SUSPENDED;
+    if (flags & CREATE_PROTECTED_PROCESS)
+    {
+        /* The native startup partition currently admits WinTcb-light only. */
+        if (!protection_present || protection_level)
+        {
+            status = STATUS_NOT_SUPPORTED;
+            goto done;
+        }
+        nt_flags |= PROCESS_CREATE_FLAGS_PROTECTED_PROCESS;
+    }
 
     status = create_nt_process( token, debug, process_attr, thread_attr,
                                 nt_flags, params, &rtl_info, parent, machine, handle_list, job_list );
@@ -1840,6 +1862,9 @@ static inline DWORD validate_proc_thread_attribute( DWORD_PTR attr, SIZE_T size 
     case PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY:
         if (size != sizeof(DWORD) && size != sizeof(DWORD64) && size != sizeof(DWORD64) * 2)
             return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_PROTECTION_LEVEL:
+        if (size != sizeof(DWORD)) return ERROR_BAD_LENGTH;
         break;
     case PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE:
        if (size != sizeof(HPCON)) return ERROR_BAD_LENGTH;

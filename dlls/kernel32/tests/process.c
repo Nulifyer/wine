@@ -4521,8 +4521,9 @@ static void test_ProcThreadAttributeList(void)
     BOOL ret;
     SIZE_T size, needed;
     int i;
-    struct _PROC_THREAD_ATTRIBUTE_LIST list, expect_list;
+    struct _PROC_THREAD_ATTRIBUTE_LIST list, expect_list, protection_list;
     HANDLE handles[4];
+    DWORD protection = 0;
     GROUP_AFFINITY gaff = {.Group = 0, .Mask = 0xffff};
 
     if (!pInitializeProcThreadAttributeList)
@@ -4637,6 +4638,20 @@ static void test_ProcThreadAttributeList(void)
     ok(!memcmp(&list, &expect_list, size), "mismatch\n");
 
     pDeleteProcThreadAttributeList(&list);
+
+    size = sizeof(protection_list);
+    ret = pInitializeProcThreadAttributeList(&protection_list, 1, 0, &size);
+    ok(ret, "got %d gle %ld\n", ret, GetLastError());
+    ret = pUpdateProcThreadAttribute(&protection_list, 0, PROC_THREAD_ATTRIBUTE_PROTECTION_LEVEL,
+                                     &protection, sizeof(protection) - 1, NULL, NULL);
+    ok(!ret, "got %d\n", ret);
+    ok(GetLastError() == ERROR_BAD_LENGTH, "got %ld\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pUpdateProcThreadAttribute(&protection_list, 0, PROC_THREAD_ATTRIBUTE_PROTECTION_LEVEL,
+                                     &protection, sizeof(protection), NULL, NULL);
+    ok(ret, "got %d gle %ld\n", ret, GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "got %ld\n", GetLastError());
+    pDeleteProcThreadAttributeList(&protection_list);
 }
 
 /* level 0: Main test process

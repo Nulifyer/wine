@@ -1383,6 +1383,16 @@ DECL_HANDLER(new_process)
                                     handles, req->handles_size / sizeof(*handles), token,
                                     native_session_id )))
         goto done;
+    if (req->flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS)
+    {
+        if (!is_native_machine() ||
+            !equal_sid( token_get_user( process->token ), &local_system_sid ))
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto done;
+        }
+        process->protection = 0x61; /* PsProtectedSignerWinTcb, protected-light. */
+    }
     if (native_session_id >= 0) next_native_session_id++;
 
     process->machine = req->machine;
