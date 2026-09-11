@@ -4008,6 +4008,22 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         return ret;
     }
 
+    case SystemBootEnvironmentInformation:  /* 90 */
+        len = 32;
+        if (size < 20) ret = STATUS_INFO_LENGTH_MISMATCH;
+        else if (!info) ret = STATUS_ACCESS_VIOLATION;
+        else
+        {
+            len = 20;
+            memset(info, 0, len);
+            if (size >= 32)
+            {
+                memset((BYTE *)info + len, 0, 12);
+                len = 32;
+            }
+        }
+        break;
+
     case SystemDynamicTimeZoneInformation:  /* 102 */
     {
         RTL_DYNAMIC_TIME_ZONE_INFORMATION tz;
@@ -4079,8 +4095,23 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
 
+    case SystemManufacturingInformation:  /* 157 */
+        len = 24;
+        if (!info && !size) ret = STATUS_INFO_LENGTH_MISMATCH;
+        else if (size != len) ret = STATUS_BUFFER_TOO_SMALL;
+        else if (!info) ret = STATUS_INVALID_PARAMETER;
+        else memset(info, 0, len);
+        break;
+
     case SystemCpuSetInformation:  /* 175 */
         return NtQuerySystemInformationEx(class, NULL, 0, info, size, ret_size);
+
+    case SystemWriteConstraintInformation:  /* 195 */
+        len = 8;
+        if (size != len) ret = STATUS_BUFFER_TOO_SMALL;
+        else if (!info) ret = STATUS_INVALID_PARAMETER;
+        else memset(info, 0, len);
+        break;
 
     case SystemLeapSecondInformation:  /* 206 */
     {

@@ -1234,6 +1234,59 @@ static void test_query_regquota(void)
     ok( sizeof(srqi) == ReturnLength, "Inconsistent length %ld\n", ReturnLength);
 }
 
+static void test_query_startup_system_information(void)
+{
+    BYTE buffer[32];
+    ULONG length;
+    NTSTATUS status;
+
+    length = 0xcccccccc;
+    status = pNtQuerySystemInformation(SystemBootEnvironmentInformation, NULL, 0, &length);
+    ok(status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08lx\n", status);
+    ok(length == 32, "Expected length 32, got %lu\n", length);
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    status = pNtQuerySystemInformation(SystemBootEnvironmentInformation, buffer, 19, &length);
+    ok(status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08lx\n", status);
+    ok(buffer[0] == 0xcc, "Expected untouched buffer, got %#x\n", buffer[0]);
+
+    status = pNtQuerySystemInformation(SystemBootEnvironmentInformation, buffer, 20, &length);
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+    ok(length == 20, "Expected length 20, got %lu\n", length);
+    ok(!memcmp(buffer, (BYTE[20]){0}, 20), "Expected zero boot-environment prefix\n");
+    ok(buffer[20] == 0xcc, "Expected byte 20 to be untouched, got %#x\n", buffer[20]);
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    status = pNtQuerySystemInformation(SystemBootEnvironmentInformation, buffer, sizeof(buffer), &length);
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+    ok(length == sizeof(buffer), "Expected length %Iu, got %lu\n", sizeof(buffer), length);
+    ok(!memcmp(buffer, (BYTE[32]){0}, sizeof(buffer)), "Expected zero boot-environment record\n");
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    status = pNtQuerySystemInformation(SystemManufacturingInformation, NULL, 0, &length);
+    ok(status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08lx\n", status);
+    ok(length == 24, "Expected length 24, got %lu\n", length);
+    status = pNtQuerySystemInformation(SystemManufacturingInformation, buffer, 23, &length);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Expected STATUS_BUFFER_TOO_SMALL, got %08lx\n", status);
+    ok(buffer[0] == 0xcc, "Expected untouched buffer, got %#x\n", buffer[0]);
+    status = pNtQuerySystemInformation(SystemManufacturingInformation, buffer, 24, &length);
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+    ok(length == 24, "Expected length 24, got %lu\n", length);
+    ok(!memcmp(buffer, (BYTE[24]){0}, 24), "Expected zero manufacturing record\n");
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    status = pNtQuerySystemInformation(SystemWriteConstraintInformation, NULL, 0, &length);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Expected STATUS_BUFFER_TOO_SMALL, got %08lx\n", status);
+    ok(length == 8, "Expected length 8, got %lu\n", length);
+    status = pNtQuerySystemInformation(SystemWriteConstraintInformation, buffer, 7, &length);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Expected STATUS_BUFFER_TOO_SMALL, got %08lx\n", status);
+    ok(buffer[0] == 0xcc, "Expected untouched buffer, got %#x\n", buffer[0]);
+    status = pNtQuerySystemInformation(SystemWriteConstraintInformation, buffer, 8, &length);
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+    ok(length == 8, "Expected length 8, got %lu\n", length);
+    ok(!memcmp(buffer, (BYTE[8]){0}, 8), "Expected zero write-constraint record\n");
+}
+
 static void test_query_logicalproc(void)
 {
     NTSTATUS status;
@@ -4774,6 +4827,7 @@ START_TEST(info)
     test_time_adjustment();
     test_query_kerndebug();
     test_query_regquota();
+    test_query_startup_system_information();
     test_query_logicalproc();
     test_query_logicalprocex();
     test_query_cpusetinfo();
