@@ -645,6 +645,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->winstation      = 0;
     process->desktop         = 0;
     process->token           = NULL;
+    process->exception_port  = NULL;
     process->trace_data      = 0;
     process->rawinput_devices = NULL;
     process->rawinput_device_count = 0;
@@ -810,6 +811,7 @@ static void process_destroy( struct object *obj )
     if (process->idle_event) release_object( process->idle_event );
     if (process->id) free_ptid( process->id );
     if (process->token) release_object( process->token );
+    if (process->exception_port) release_object( process->exception_port );
     if (process->sync) release_object( process->sync );
     list_remove( &process->rawinput_entry );
     free( process->rawinput_devices );

@@ -6505,6 +6505,19 @@ struct set_default_hard_error_port_reply
 };
 
 
+struct set_process_exception_port_request
+{
+    struct request_header __header;
+    obj_handle_t process;
+    obj_handle_t port;
+    char __pad_20[4];
+};
+struct set_process_exception_port_reply
+{
+    struct reply_header __header;
+};
+
+
 struct get_process_critical_state_request
 {
     struct request_header __header;
@@ -6854,6 +6867,7 @@ enum request
     REQ_alpc_open_sender_process,
     REQ_alpc_disconnect_port,
     REQ_set_default_hard_error_port,
+    REQ_set_process_exception_port,
     REQ_get_process_critical_state,
     REQ_get_process_protection,
     REQ_NB_REQUESTS
@@ -7184,6 +7198,7 @@ union generic_request
     struct alpc_open_sender_process_request alpc_open_sender_process_request;
     struct alpc_disconnect_port_request alpc_disconnect_port_request;
     struct set_default_hard_error_port_request set_default_hard_error_port_request;
+    struct set_process_exception_port_request set_process_exception_port_request;
     struct get_process_critical_state_request get_process_critical_state_request;
     struct get_process_protection_request get_process_protection_request;
 };
@@ -7512,10 +7527,11 @@ union generic_reply
     struct alpc_open_sender_process_reply alpc_open_sender_process_reply;
     struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
     struct set_default_hard_error_port_reply set_default_hard_error_port_reply;
+    struct set_process_exception_port_reply set_process_exception_port_reply;
     struct get_process_critical_state_reply get_process_critical_state_reply;
     struct get_process_protection_reply get_process_protection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 980
+#define SERVER_PROTOCOL_VERSION 981
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -4513,6 +4513,12 @@ struct alpc_message_info
     obj_handle_t handle;
 @END
 
+/* Associate a process with the ALPC endpoint that receives its exceptions. */
+@REQ(set_process_exception_port)
+    obj_handle_t process;
+    obj_handle_t port;
+@END
+
 /* Retrieve process break-on-termination state. */
 @REQ(get_process_critical_state)
     obj_handle_t handle;

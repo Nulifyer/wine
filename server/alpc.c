@@ -1304,3 +1304,21 @@ DECL_HANDLER(set_default_hard_error_port)
     default_hard_error_process = (struct process *)grab_object( current->process );
     release_object( port );
 }
+
+DECL_HANDLER(set_process_exception_port)
+{
+    struct alpc_port *port;
+    struct process *process;
+
+    if (!(process = get_process_from_handle( req->process, PROCESS_SET_INFORMATION ))) return;
+    if (process->exception_port)
+    {
+        set_error( STATUS_PORT_ALREADY_SET );
+        release_object( process );
+        return;
+    }
+    if ((port = (struct alpc_port *)get_handle_obj( current->process, req->port,
+                                                    ALPC_PORT_ALL_ACCESS, &alpc_port_ops )))
+        process->exception_port = &port->obj;
+    release_object( process );
+}

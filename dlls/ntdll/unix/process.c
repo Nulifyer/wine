@@ -1703,6 +1703,18 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
 
     switch (class)
     {
+    case ProcessExceptionPort:
+        if (size != sizeof(HANDLE)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info) return STATUS_ACCESS_VIOLATION;
+        SERVER_START_REQ( set_process_exception_port )
+        {
+            req->process = wine_server_obj_handle( handle );
+            req->port = wine_server_obj_handle( *(HANDLE *)info );
+            ret = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        break;
+
     case ProcessAccessToken:
     {
         const PROCESS_ACCESS_TOKEN *token = info;
