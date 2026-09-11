@@ -6555,6 +6555,148 @@ struct set_session_object_reply
 };
 
 
+struct create_wnf_state_name_request
+{
+    struct request_header __header;
+    unsigned int name_lifetime;
+    unsigned int data_scope;
+    unsigned int maximum_size;
+    int persist_data;
+    int has_type;
+    unsigned __int64 type_low;
+    unsigned __int64 type_high;
+    /* VARARG(objattr,object_attributes); */
+};
+struct create_wnf_state_name_reply
+{
+    struct reply_header __header;
+    unsigned __int64 state_name;
+};
+
+struct delete_wnf_state_name_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+};
+struct delete_wnf_state_name_reply
+{
+    struct reply_header __header;
+};
+
+struct query_wnf_state_data_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+    unsigned __int64 type_low;
+    unsigned __int64 type_high;
+    int has_type;
+    unsigned int session_id;
+    int explicit_scope;
+    char __pad_52[4];
+};
+struct query_wnf_state_data_reply
+{
+    struct reply_header __header;
+    unsigned int change_stamp;
+    data_size_t total;
+    /* VARARG(data,bytes); */
+};
+
+struct update_wnf_state_data_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+    unsigned __int64 type_low;
+    unsigned __int64 type_high;
+    int has_type;
+    unsigned int session_id;
+    int explicit_scope;
+    unsigned int matching_stamp;
+    int check_stamp;
+    /* VARARG(data,bytes); */
+    char __pad_60[4];
+};
+struct update_wnf_state_data_reply
+{
+    struct reply_header __header;
+};
+
+
+struct subscribe_wnf_state_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+    unsigned int change_stamp;
+    unsigned int events;
+};
+struct subscribe_wnf_state_reply
+{
+    struct reply_header __header;
+    unsigned __int64 subscription_id;
+};
+struct unsubscribe_wnf_state_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+};
+struct unsubscribe_wnf_state_reply
+{
+    struct reply_header __header;
+};
+struct set_wnf_process_event_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct set_wnf_process_event_reply
+{
+    struct reply_header __header;
+};
+struct query_wnf_state_info_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+    unsigned int info_class;
+    unsigned int session_id;
+    int explicit_scope;
+    char __pad_36[4];
+};
+struct query_wnf_state_info_reply
+{
+    struct reply_header __header;
+    unsigned int value;
+    char __pad_12[4];
+};
+struct complete_wnf_subscription_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+    unsigned __int64 subscription_id;
+    unsigned int events;
+    unsigned int completion_status;
+    int acknowledge;
+    int retrieve;
+};
+struct complete_wnf_subscription_reply
+{
+    struct reply_header __header;
+    unsigned __int64 state_name;
+    unsigned __int64 subscription_id;
+    unsigned __int64 type_low;
+    unsigned __int64 type_high;
+    unsigned int change_stamp;
+    unsigned int events;
+    /* VARARG(data,bytes); */
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -6882,6 +7024,15 @@ enum request
     REQ_get_process_critical_state,
     REQ_get_process_protection,
     REQ_set_session_object,
+    REQ_create_wnf_state_name,
+    REQ_delete_wnf_state_name,
+    REQ_query_wnf_state_data,
+    REQ_update_wnf_state_data,
+    REQ_subscribe_wnf_state,
+    REQ_unsubscribe_wnf_state,
+    REQ_set_wnf_process_event,
+    REQ_query_wnf_state_info,
+    REQ_complete_wnf_subscription,
     REQ_NB_REQUESTS
 };
 
@@ -7214,6 +7365,15 @@ union generic_request
     struct get_process_critical_state_request get_process_critical_state_request;
     struct get_process_protection_request get_process_protection_request;
     struct set_session_object_request set_session_object_request;
+    struct create_wnf_state_name_request create_wnf_state_name_request;
+    struct delete_wnf_state_name_request delete_wnf_state_name_request;
+    struct query_wnf_state_data_request query_wnf_state_data_request;
+    struct update_wnf_state_data_request update_wnf_state_data_request;
+    struct subscribe_wnf_state_request subscribe_wnf_state_request;
+    struct unsubscribe_wnf_state_request unsubscribe_wnf_state_request;
+    struct set_wnf_process_event_request set_wnf_process_event_request;
+    struct query_wnf_state_info_request query_wnf_state_info_request;
+    struct complete_wnf_subscription_request complete_wnf_subscription_request;
 };
 union generic_reply
 {
@@ -7544,8 +7704,17 @@ union generic_reply
     struct get_process_critical_state_reply get_process_critical_state_reply;
     struct get_process_protection_reply get_process_protection_reply;
     struct set_session_object_reply set_session_object_reply;
+    struct create_wnf_state_name_reply create_wnf_state_name_reply;
+    struct delete_wnf_state_name_reply delete_wnf_state_name_reply;
+    struct query_wnf_state_data_reply query_wnf_state_data_reply;
+    struct update_wnf_state_data_reply update_wnf_state_data_reply;
+    struct subscribe_wnf_state_reply subscribe_wnf_state_reply;
+    struct unsubscribe_wnf_state_reply unsubscribe_wnf_state_reply;
+    struct set_wnf_process_event_reply set_wnf_process_event_reply;
+    struct query_wnf_state_info_reply query_wnf_state_info_reply;
+    struct complete_wnf_subscription_reply complete_wnf_subscription_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 984
+#define SERVER_PROTOCOL_VERSION 986
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

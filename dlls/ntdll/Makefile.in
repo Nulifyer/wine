@@ -48,6 +48,7 @@ SOURCES = \
 	sync.c \
 	thread.c \
 	threadpool.c \
+	wnf.c \
 	time.c \
 	unix/alpc.c \
 	unix/cdrom.c \
@@ -71,6 +72,7 @@ SOURCES = \
 	unix/system.c \
 	unix/tape.c \
 	unix/thread.c \
+	unix/wnf.c \
 	unix/virtual.c \
 	unwind.c \
 	version.c \

@@ -35,4 +35,5 @@ SOURCES = \
 	time.c \
 	unwind.c \
 	virtual.c \
+	wnf.c \
 	wow64.c

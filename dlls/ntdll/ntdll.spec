@@ -1815,3 +1815,25 @@
 @ cdecl wine_get_version()
 @ cdecl wine_get_build_id()
 @ cdecl wine_get_host_version(ptr ptr)
+
+@ stdcall -syscall NtCreateWnfStateName(ptr long long long ptr long ptr)
+@ stdcall -syscall NtDeleteWnfStateName(ptr)
+@ stdcall -syscall NtQueryWnfStateData(ptr ptr ptr ptr ptr ptr)
+@ stdcall -syscall NtUpdateWnfStateData(ptr ptr long ptr ptr long long)
+@ stdcall -private ZwCreateWnfStateName(ptr long long long ptr long ptr) NtCreateWnfStateName
+@ stdcall -private ZwDeleteWnfStateName(ptr) NtDeleteWnfStateName
+@ stdcall -private ZwQueryWnfStateData(ptr ptr ptr ptr ptr ptr) NtQueryWnfStateData
+@ stdcall -private ZwUpdateWnfStateData(ptr ptr long ptr ptr long long) NtUpdateWnfStateData
+@ stdcall -syscall NtSubscribeWnfStateChange(ptr long long ptr)
+@ stdcall -private ZwSubscribeWnfStateChange(ptr long long ptr) NtSubscribeWnfStateChange
+@ stdcall -syscall NtUnsubscribeWnfStateChange(ptr)
+@ stdcall -private ZwUnsubscribeWnfStateChange(ptr) NtUnsubscribeWnfStateChange
+@ stdcall -syscall NtSetWnfProcessNotificationEvent(long)
+@ stdcall -private ZwSetWnfProcessNotificationEvent(long) NtSetWnfProcessNotificationEvent
+@ stdcall -syscall NtQueryWnfStateNameInformation(ptr long ptr ptr long)
+@ stdcall -private ZwQueryWnfStateNameInformation(ptr long ptr ptr long) NtQueryWnfStateNameInformation
+@ stdcall -syscall NtGetCompleteWnfStateSubscription(ptr ptr long long ptr long)
+@ stdcall -private ZwGetCompleteWnfStateSubscription(ptr ptr long long ptr long) NtGetCompleteWnfStateSubscription
+@ stdcall RtlSubscribeWnfStateChangeNotification(ptr int64 long ptr ptr ptr long long)
+@ stdcall RtlUnsubscribeWnfNotificationWaitForCompletion(ptr)
+@ stdcall RtlUnsubscribeWnfStateChangeNotification(ptr)

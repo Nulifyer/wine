@@ -332,6 +332,15 @@ DECL_HANDLER(set_process_exception_port);
 DECL_HANDLER(get_process_critical_state);
 DECL_HANDLER(get_process_protection);
 DECL_HANDLER(set_session_object);
+DECL_HANDLER(create_wnf_state_name);
+DECL_HANDLER(delete_wnf_state_name);
+DECL_HANDLER(query_wnf_state_data);
+DECL_HANDLER(update_wnf_state_data);
+DECL_HANDLER(subscribe_wnf_state);
+DECL_HANDLER(unsubscribe_wnf_state);
+DECL_HANDLER(set_wnf_process_event);
+DECL_HANDLER(query_wnf_state_info);
+DECL_HANDLER(complete_wnf_subscription);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -661,6 +670,15 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_process_critical_state,
     (req_handler)req_get_process_protection,
     (req_handler)req_set_session_object,
+    (req_handler)req_create_wnf_state_name,
+    (req_handler)req_delete_wnf_state_name,
+    (req_handler)req_query_wnf_state_data,
+    (req_handler)req_update_wnf_state_data,
+    (req_handler)req_subscribe_wnf_state,
+    (req_handler)req_unsubscribe_wnf_state,
+    (req_handler)req_set_wnf_process_event,
+    (req_handler)req_query_wnf_state_info,
+    (req_handler)req_complete_wnf_subscription,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -2544,3 +2562,65 @@ C_ASSERT( offsetof(struct get_process_protection_reply, protection) == 8 );
 C_ASSERT( sizeof(struct get_process_protection_reply) == 16 );
 C_ASSERT( offsetof(struct set_session_object_request, handle) == 12 );
 C_ASSERT( sizeof(struct set_session_object_request) == 16 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, name_lifetime) == 12 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, data_scope) == 16 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, maximum_size) == 20 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, persist_data) == 24 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, has_type) == 28 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, type_low) == 32 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, type_high) == 40 );
+C_ASSERT( sizeof(struct create_wnf_state_name_request) == 48 );
+C_ASSERT( offsetof(struct create_wnf_state_name_reply, state_name) == 8 );
+C_ASSERT( sizeof(struct create_wnf_state_name_reply) == 16 );
+C_ASSERT( offsetof(struct delete_wnf_state_name_request, state_name) == 16 );
+C_ASSERT( sizeof(struct delete_wnf_state_name_request) == 24 );
+C_ASSERT( offsetof(struct query_wnf_state_data_request, state_name) == 16 );
+C_ASSERT( offsetof(struct query_wnf_state_data_request, type_low) == 24 );
+C_ASSERT( offsetof(struct query_wnf_state_data_request, type_high) == 32 );
+C_ASSERT( offsetof(struct query_wnf_state_data_request, has_type) == 40 );
+C_ASSERT( offsetof(struct query_wnf_state_data_request, session_id) == 44 );
+C_ASSERT( offsetof(struct query_wnf_state_data_request, explicit_scope) == 48 );
+C_ASSERT( sizeof(struct query_wnf_state_data_request) == 56 );
+C_ASSERT( offsetof(struct query_wnf_state_data_reply, change_stamp) == 8 );
+C_ASSERT( offsetof(struct query_wnf_state_data_reply, total) == 12 );
+C_ASSERT( sizeof(struct query_wnf_state_data_reply) == 16 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, state_name) == 16 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, type_low) == 24 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, type_high) == 32 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, has_type) == 40 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, session_id) == 44 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, explicit_scope) == 48 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, matching_stamp) == 52 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, check_stamp) == 56 );
+C_ASSERT( sizeof(struct update_wnf_state_data_request) == 64 );
+C_ASSERT( offsetof(struct subscribe_wnf_state_request, state_name) == 16 );
+C_ASSERT( offsetof(struct subscribe_wnf_state_request, change_stamp) == 24 );
+C_ASSERT( offsetof(struct subscribe_wnf_state_request, events) == 28 );
+C_ASSERT( sizeof(struct subscribe_wnf_state_request) == 32 );
+C_ASSERT( offsetof(struct subscribe_wnf_state_reply, subscription_id) == 8 );
+C_ASSERT( sizeof(struct subscribe_wnf_state_reply) == 16 );
+C_ASSERT( offsetof(struct unsubscribe_wnf_state_request, state_name) == 16 );
+C_ASSERT( sizeof(struct unsubscribe_wnf_state_request) == 24 );
+C_ASSERT( offsetof(struct set_wnf_process_event_request, handle) == 12 );
+C_ASSERT( sizeof(struct set_wnf_process_event_request) == 16 );
+C_ASSERT( offsetof(struct query_wnf_state_info_request, state_name) == 16 );
+C_ASSERT( offsetof(struct query_wnf_state_info_request, info_class) == 24 );
+C_ASSERT( offsetof(struct query_wnf_state_info_request, session_id) == 28 );
+C_ASSERT( offsetof(struct query_wnf_state_info_request, explicit_scope) == 32 );
+C_ASSERT( sizeof(struct query_wnf_state_info_request) == 40 );
+C_ASSERT( offsetof(struct query_wnf_state_info_reply, value) == 8 );
+C_ASSERT( sizeof(struct query_wnf_state_info_reply) == 16 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_request, state_name) == 16 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_request, subscription_id) == 24 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_request, events) == 32 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_request, completion_status) == 36 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_request, acknowledge) == 40 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_request, retrieve) == 44 );
+C_ASSERT( sizeof(struct complete_wnf_subscription_request) == 48 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_reply, state_name) == 8 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_reply, subscription_id) == 16 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_reply, type_low) == 24 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_reply, type_high) == 32 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_reply, change_stamp) == 40 );
+C_ASSERT( offsetof(struct complete_wnf_subscription_reply, events) == 44 );
+C_ASSERT( sizeof(struct complete_wnf_subscription_reply) == 48 );

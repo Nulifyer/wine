@@ -1100,6 +1100,7 @@ static unsigned int token_access_check_pass( struct token *token, int restricted
 {
     unsigned int current_access = 0;
     unsigned int denied_access = 0;
+    unsigned int owner_access = 0;
     ULONG i;
     const struct acl *dacl;
     int dacl_present;
@@ -1179,7 +1180,8 @@ static unsigned int token_access_check_pass( struct token *token, int restricted
      * determined here. */
     if (access_sid_present( token, owner, FALSE, restricted ))
     {
-        current_access |= (STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE);
+        owner_access = READ_CONTROL | WRITE_DAC;
+        current_access |= owner_access;
         if (desired_access == current_access)
         {
             *granted_access = current_access;
@@ -1201,7 +1203,7 @@ static unsigned int token_access_check_pass( struct token *token, int restricted
             {
                 unsigned int access = map_access( ace->mask, mapping );
                 if (desired_access & MAXIMUM_ALLOWED)
-                    denied_access |= access;
+                    denied_access |= access & ~owner_access;
                 else
                 {
                     denied_access |= (access & ~current_access);

@@ -39,6 +39,9 @@ struct process
     struct object       *sync;            /* sync object for wait/signal */
     struct list          entry;           /* entry in system-wide process list */
     process_id_t         parent_id;       /* parent process id (at the time of creation) */
+    struct list          wnf_subscriptions; /* process-owned WNF subscriptions */
+    struct event        *wnf_event;         /* retained notification event */
+    struct list          wnf_states;      /* owned temporary WNF names */
     struct list          thread_list;     /* thread list */
     struct debug_obj    *debug_obj;       /* debug object debugging this process */
     struct debug_event  *debug_event;     /* debug event being sent to debugger */
@@ -165,5 +168,7 @@ static inline int is_wow64_process( struct process *process )
 }
 
 static const unsigned int default_session_id = 1;
+
+extern void cleanup_process_wnf_states( struct process *process );
 
 #endif  /* __WINE_SERVER_PROCESS_H */

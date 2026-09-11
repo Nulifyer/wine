@@ -4538,3 +4538,85 @@ struct alpc_message_info
 @REQ(set_session_object)
     obj_handle_t   handle;        /* handle to the session directory */
 @END
+
+/* Create a temporary WNF name with its creator and security descriptor. */
+@REQ(create_wnf_state_name)
+    unsigned int name_lifetime;
+    unsigned int data_scope;
+    unsigned int maximum_size;
+    int persist_data;
+    int has_type;
+    unsigned __int64 type_low;
+    unsigned __int64 type_high;
+    VARARG(objattr,object_attributes);
+@REPLY
+    unsigned __int64 state_name;
+@END
+
+@REQ(delete_wnf_state_name)
+    unsigned __int64 state_name;
+@END
+
+@REQ(query_wnf_state_data)
+    unsigned __int64 state_name;
+    unsigned __int64 type_low;
+    unsigned __int64 type_high;
+    int has_type;
+    unsigned int session_id;
+    int explicit_scope;
+@REPLY
+    unsigned int change_stamp;
+    data_size_t total;
+    VARARG(data,bytes);
+@END
+
+@REQ(update_wnf_state_data)
+    unsigned __int64 state_name;
+    unsigned __int64 type_low;
+    unsigned __int64 type_high;
+    int has_type;
+    unsigned int session_id;
+    int explicit_scope;
+    unsigned int matching_stamp;
+    int check_stamp;
+    VARARG(data,bytes);
+@END
+
+/* Process-owned WNF subscriptions and their shared notification transport. */
+@REQ(subscribe_wnf_state)
+    unsigned __int64 state_name;
+    unsigned int change_stamp;
+    unsigned int events;
+@REPLY
+    unsigned __int64 subscription_id;
+@END
+@REQ(unsubscribe_wnf_state)
+    unsigned __int64 state_name;
+@END
+@REQ(set_wnf_process_event)
+    obj_handle_t handle;
+@END
+@REQ(query_wnf_state_info)
+    unsigned __int64 state_name;
+    unsigned int info_class;
+    unsigned int session_id;
+    int explicit_scope;
+@REPLY
+    unsigned int value;
+@END
+@REQ(complete_wnf_subscription)
+    unsigned __int64 state_name;
+    unsigned __int64 subscription_id;
+    unsigned int events;
+    unsigned int completion_status;
+    int acknowledge;
+    int retrieve;
+@REPLY
+    unsigned __int64 state_name;
+    unsigned __int64 subscription_id;
+    unsigned __int64 type_low;
+    unsigned __int64 type_high;
+    unsigned int change_stamp;
+    unsigned int events;
+    VARARG(data,bytes);
+@END

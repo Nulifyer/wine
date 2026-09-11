@@ -12,4 +12,5 @@ SOURCES = \
 	sync.c \
 	syscall.c \
 	system.c \
+	wnf.c \
 	virtual.c

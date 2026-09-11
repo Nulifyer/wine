@@ -655,6 +655,9 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     memset( &process->image_info, 0, sizeof(process->image_info) );
     list_init( &process->rawinput_entry );
     list_init( &process->kernel_object );
+    list_init( &process->wnf_states );
+    list_init( &process->wnf_subscriptions );
+    process->wnf_event = NULL;
     list_init( &process->thread_list );
     list_init( &process->locks );
     list_init( &process->asyncs );
@@ -800,6 +803,7 @@ static void process_destroy( struct object *obj )
     assert( !process->sigkill_timeout );  /* timeout should hold a reference to the process */
 
     if (process->native_bootstrap_image != -1) close( process->native_bootstrap_image );
+    cleanup_process_wnf_states( process );
     close_process_handles( process );
     set_process_startup_state( process, STARTUP_ABORTED );
 
@@ -1024,6 +1028,7 @@ static void process_killed( struct process *process )
     process->winstation = 0;
     process->desktop = 0;
     cancel_terminating_process_asyncs( process );
+    cleanup_process_wnf_states( process );
     close_process_handles( process );
     if (process->idle_event) release_object( process->idle_event );
     process->idle_event = NULL;

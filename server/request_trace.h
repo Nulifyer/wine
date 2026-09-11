@@ -3746,6 +3746,114 @@ static void dump_set_session_object_request( const struct set_session_object_req
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_create_wnf_state_name_request( const struct create_wnf_state_name_request *req )
+{
+    fprintf( stderr, " name_lifetime=%08x", req->name_lifetime );
+    fprintf( stderr, ", data_scope=%08x", req->data_scope );
+    fprintf( stderr, ", maximum_size=%08x", req->maximum_size );
+    fprintf( stderr, ", persist_data=%d", req->persist_data );
+    fprintf( stderr, ", has_type=%d", req->has_type );
+    dump_uint64( ", type_low=", &req->type_low );
+    dump_uint64( ", type_high=", &req->type_high );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
+}
+
+static void dump_create_wnf_state_name_reply( const struct create_wnf_state_name_reply *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+}
+
+static void dump_delete_wnf_state_name_request( const struct delete_wnf_state_name_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+}
+
+static void dump_query_wnf_state_data_request( const struct query_wnf_state_data_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+    dump_uint64( ", type_low=", &req->type_low );
+    dump_uint64( ", type_high=", &req->type_high );
+    fprintf( stderr, ", has_type=%d", req->has_type );
+    fprintf( stderr, ", session_id=%08x", req->session_id );
+    fprintf( stderr, ", explicit_scope=%d", req->explicit_scope );
+}
+
+static void dump_query_wnf_state_data_reply( const struct query_wnf_state_data_reply *req )
+{
+    fprintf( stderr, " change_stamp=%08x", req->change_stamp );
+    fprintf( stderr, ", total=%u", req->total );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_update_wnf_state_data_request( const struct update_wnf_state_data_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+    dump_uint64( ", type_low=", &req->type_low );
+    dump_uint64( ", type_high=", &req->type_high );
+    fprintf( stderr, ", has_type=%d", req->has_type );
+    fprintf( stderr, ", session_id=%08x", req->session_id );
+    fprintf( stderr, ", explicit_scope=%d", req->explicit_scope );
+    fprintf( stderr, ", matching_stamp=%08x", req->matching_stamp );
+    fprintf( stderr, ", check_stamp=%d", req->check_stamp );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_subscribe_wnf_state_request( const struct subscribe_wnf_state_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+    fprintf( stderr, ", change_stamp=%08x", req->change_stamp );
+    fprintf( stderr, ", events=%08x", req->events );
+}
+
+static void dump_subscribe_wnf_state_reply( const struct subscribe_wnf_state_reply *req )
+{
+    dump_uint64( " subscription_id=", &req->subscription_id );
+}
+
+static void dump_unsubscribe_wnf_state_request( const struct unsubscribe_wnf_state_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+}
+
+static void dump_set_wnf_process_event_request( const struct set_wnf_process_event_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_query_wnf_state_info_request( const struct query_wnf_state_info_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+    fprintf( stderr, ", info_class=%08x", req->info_class );
+    fprintf( stderr, ", session_id=%08x", req->session_id );
+    fprintf( stderr, ", explicit_scope=%d", req->explicit_scope );
+}
+
+static void dump_query_wnf_state_info_reply( const struct query_wnf_state_info_reply *req )
+{
+    fprintf( stderr, " value=%08x", req->value );
+}
+
+static void dump_complete_wnf_subscription_request( const struct complete_wnf_subscription_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+    dump_uint64( ", subscription_id=", &req->subscription_id );
+    fprintf( stderr, ", events=%08x", req->events );
+    fprintf( stderr, ", completion_status=%08x", req->completion_status );
+    fprintf( stderr, ", acknowledge=%d", req->acknowledge );
+    fprintf( stderr, ", retrieve=%d", req->retrieve );
+}
+
+static void dump_complete_wnf_subscription_reply( const struct complete_wnf_subscription_reply *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+    dump_uint64( ", subscription_id=", &req->subscription_id );
+    dump_uint64( ", type_low=", &req->type_low );
+    dump_uint64( ", type_high=", &req->type_high );
+    fprintf( stderr, ", change_stamp=%08x", req->change_stamp );
+    fprintf( stderr, ", events=%08x", req->events );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4075,6 +4183,15 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_process_critical_state_request,
     (dump_func)dump_get_process_protection_request,
     (dump_func)dump_set_session_object_request,
+    (dump_func)dump_create_wnf_state_name_request,
+    (dump_func)dump_delete_wnf_state_name_request,
+    (dump_func)dump_query_wnf_state_data_request,
+    (dump_func)dump_update_wnf_state_data_request,
+    (dump_func)dump_subscribe_wnf_state_request,
+    (dump_func)dump_unsubscribe_wnf_state_request,
+    (dump_func)dump_set_wnf_process_event_request,
+    (dump_func)dump_query_wnf_state_info_request,
+    (dump_func)dump_complete_wnf_subscription_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4404,6 +4521,15 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_process_critical_state_reply,
     (dump_func)dump_get_process_protection_reply,
     NULL,
+    (dump_func)dump_create_wnf_state_name_reply,
+    NULL,
+    (dump_func)dump_query_wnf_state_data_reply,
+    NULL,
+    (dump_func)dump_subscribe_wnf_state_reply,
+    NULL,
+    NULL,
+    (dump_func)dump_query_wnf_state_info_reply,
+    (dump_func)dump_complete_wnf_subscription_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -4733,6 +4859,15 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "get_process_critical_state",
     "get_process_protection",
     "set_session_object",
+    "create_wnf_state_name",
+    "delete_wnf_state_name",
+    "query_wnf_state_data",
+    "update_wnf_state_data",
+    "subscribe_wnf_state",
+    "unsubscribe_wnf_state",
+    "set_wnf_process_event",
+    "query_wnf_state_info",
+    "complete_wnf_subscription",
 };
 
 static const struct
@@ -4747,6 +4882,7 @@ static const struct
     { "ACCESS_VIOLATION",            STATUS_ACCESS_VIOLATION },
     { "ADDRESS_ALREADY_ASSOCIATED",  STATUS_ADDRESS_ALREADY_ASSOCIATED },
     { "ALERTED",                     STATUS_ALERTED },
+    { "ALREADY_REGISTERED",          STATUS_ALREADY_REGISTERED },
     { "BAD_DEVICE_TYPE",             STATUS_BAD_DEVICE_TYPE },
     { "BAD_IMPERSONATION_LEVEL",     STATUS_BAD_IMPERSONATION_LEVEL },
     { "BAD_TOKEN_TYPE",              STATUS_BAD_TOKEN_TYPE },
@@ -4807,6 +4943,7 @@ static const struct
     { "INVALID_IMAGE_PROTECT",       STATUS_INVALID_IMAGE_PROTECT },
     { "INVALID_IMAGE_WIN_16",        STATUS_INVALID_IMAGE_WIN_16 },
     { "INVALID_IMAGE_WIN_64",        STATUS_INVALID_IMAGE_WIN_64 },
+    { "INVALID_INFO_CLASS",          STATUS_INVALID_INFO_CLASS },
     { "INVALID_LOCK_SEQUENCE",       STATUS_INVALID_LOCK_SEQUENCE },
     { "INVALID_MESSAGE",             STATUS_INVALID_MESSAGE },
     { "INVALID_OWNER",               STATUS_INVALID_OWNER },
