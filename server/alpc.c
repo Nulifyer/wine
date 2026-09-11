@@ -1256,8 +1256,11 @@ DECL_HANDLER(alpc_open_sender_process)
             break;
         }
     if (!sender) set_error( STATUS_INVALID_MESSAGE );
-    else reply->handle = alloc_handle( current->process, sender->thread->process,
-                                      req->access, req->attributes );
+    /* The delivered connection message already authenticates and pins the
+     * sender. Opening that correlated process is part of ALPC admission and
+     * does not repeat the target process DACL check. */
+    else reply->handle = alloc_handle_no_access_check( current->process, sender->thread->process,
+                                                       req->access, req->attributes );
 done:
     release_object( listener );
 }

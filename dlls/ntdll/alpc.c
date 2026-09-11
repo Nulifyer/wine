@@ -34,23 +34,60 @@ NTSTATUS WINAPI RtlConnectToSm( UNICODE_STRING *api_port_name, HANDLE api_port_h
 {
     static const WCHAR default_name_buffer[] = L"\\SmApiPort";
     UNICODE_STRING default_name = RTL_CONSTANT_STRING(default_name_buffer);
+    BYTE connection_buffer[0x120] = {0};
+    ALPC_PORT_MESSAGE *message = (ALPC_PORT_MESSAGE *)connection_buffer;
     ALPC_PORT_ATTRIBUTES attributes = {0};
+    SIZE_T message_size = sizeof(connection_buffer);
 
     TRACE( "%s %p %#lx %p\n", api_port_name ?
            wine_dbgstr_wn(api_port_name->Buffer, api_port_name->Length / sizeof(WCHAR)) : "(null)", api_port_handle,
            process_image_type, connection_handle );
 
     if (!connection_handle) return STATUS_ACCESS_VIOLATION;
-    if (api_port_name) return STATUS_INVALID_PORT_ATTRIBUTES;
+    if (api_port_name)
+    {
+        if (!api_port_handle || !process_image_type) return STATUS_INVALID_PARAMETER_MIX;
+        if (api_port_name->Length >= 0xf0) return STATUS_INVALID_PARAMETER;
+        *(ULONG *)(connection_buffer + 0x28) = process_image_type;
+        memcpy( connection_buffer + 0x2c, api_port_name->Buffer, api_port_name->Length );
+    }
 
-    /* The default client form does not admit a subsystem, so Windows ignores
-     * the supplied server handle and image type. The named form carries that
-     * admission data and remains a separate contract. */
-    attributes.Flags = 0x20000;
+    /* The server opens a named subsystem port from the connection payload;
+     * api_port_handle is required by the contract but is not transferred. */
+    message->DataLength = 0xf4;
+    message->TotalLength = 0x11c;
+    attributes.Flags = 0x10000;
+    attributes.SecurityQos.ImpersonationLevel = SecurityImpersonation;
+    attributes.SecurityQos.ContextTrackingMode = SECURITY_DYNAMIC_TRACKING;
+    attributes.SecurityQos.EffectiveOnly = TRUE;
     attributes.MaxMessageLength = 0x148;
-    attributes.MaxPoolUsage = 1000000;
-    return NtAlpcConnectPort( connection_handle, &default_name, NULL, &attributes, 0,
-                              NULL, NULL, NULL, NULL, NULL, NULL );
+    attributes.MaxPoolUsage = 0x2900;
+    return NtAlpcConnectPort( connection_handle, &default_name, NULL, &attributes, 0x20000,
+                              NULL, message, &message_size, NULL, NULL, NULL );
+}
+
+/***********************************************************************
+ *           RtlSendMsgToSm    (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSendMsgToSm( HANDLE connection_handle, ALPC_PORT_MESSAGE *message )
+{
+    static const USHORT data_sizes[] = {0, 8, 0, 0x70, 0x44, 0x118, 4, 0x10, 8};
+    ULONG api_number;
+    SIZE_T reply_size = 0x148;
+    NTSTATUS status;
+
+    if (!message) return STATUS_ACCESS_VIOLATION;
+    api_number = *(ULONG *)((BYTE *)message + 0x28);
+    TRACE( "%p %p api %lu\n", connection_handle, message, api_number );
+    if (api_number >= ARRAY_SIZE(data_sizes)) return STATUS_NOT_IMPLEMENTED;
+
+    memset( message, 0, sizeof(*message) );
+    message->DataLength = data_sizes[api_number] + sizeof(ULONGLONG);
+    message->TotalLength = message->DataLength + sizeof(*message);
+    status = NtAlpcSendWaitReceivePort( connection_handle, 0x20000, message, NULL,
+                                        message, &reply_size, NULL, NULL );
+    if (status < 0) return status;
+    return *(NTSTATUS *)((BYTE *)message + 0x2c);
 }
 
 SIZE_T WINAPI AlpcGetHeaderSize(ULONG attribute_flags)

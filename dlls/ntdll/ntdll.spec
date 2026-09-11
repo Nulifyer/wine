@@ -1032,6 +1032,7 @@
 @ stdcall RtlRunOnceExecuteOnce(ptr ptr ptr ptr)
 @ stdcall RtlRunOnceInitialize(ptr)
 @ stdcall RtlSecondsSince1970ToTime(long ptr)
+@ stdcall RtlSendMsgToSm(long ptr)
 @ stdcall RtlSecondsSince1980ToTime(long ptr)
 # @ stub RtlSeekMemoryStream
 # @ stub RtlSelfRelativeToAbsoluteSD2
