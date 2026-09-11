@@ -5390,10 +5390,52 @@ INT WINAPI DECLSPEC_HOTPATCH FoldStringW( DWORD flags, LPCWSTR src, INT srclen, 
 }
 
 
+static HMODULE load_message_resource_module( HMODULE module, UINT lang )
+{
+    WCHAR module_path[MAX_PATH], locale_name[LOCALE_NAME_MAX_LENGTH], *filename, *path, *p;
+    DWORD module_len, locale_len, filename_len, path_len;
+    HMODULE ret;
+
+    if (!(module_len = GetModuleFileNameW( module, module_path, ARRAY_SIZE(module_path) )) ||
+        module_len >= ARRAY_SIZE(module_path) - 1)
+        return NULL;
+
+    filename = wcsrchr( module_path, '\\' );
+    if (!filename) filename = wcsrchr( module_path, '/' );
+    if (filename) filename++;
+    else filename = module_path;
+
+    if (!lang) lang = GetThreadUILanguage();
+    if (!(locale_len = LCIDToLocaleName( MAKELCID( lang, SORT_DEFAULT ), locale_name,
+                                          ARRAY_SIZE(locale_name), 0 )))
+        return NULL;
+    locale_len--;
+    filename_len = lstrlenW( filename );
+    path_len = filename - module_path + locale_len + 1 + filename_len + 4 + 1;
+    if (!(path = HeapAlloc( GetProcessHeap(), 0, path_len * sizeof(WCHAR) ))) return NULL;
+
+    p = memcpy( path, module_path, (filename - module_path) * sizeof(WCHAR) );
+    p += filename - module_path;
+    memcpy( p, locale_name, locale_len * sizeof(WCHAR) );
+    p += locale_len;
+    *p++ = '\\';
+    memcpy( p, filename, filename_len * sizeof(WCHAR) );
+    p += filename_len;
+    memcpy( p, L".mui", 5 * sizeof(WCHAR) );
+
+    TRACE( "loading message resource module %s\n", debugstr_w(path) );
+    ret = LoadLibraryExW( path, NULL, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE );
+    HeapFree( GetProcessHeap(), 0, path );
+    return ret;
+}
+
+
 static const WCHAR *get_message( DWORD flags, const void *src, UINT id, UINT lang,
-                                 BOOL ansi, WCHAR **buffer )
+                                 BOOL ansi, WCHAR **buffer, HMODULE *resource_module )
 {
     DWORD len;
+
+    *resource_module = NULL;
 
     if (!(flags & FORMAT_MESSAGE_FROM_STRING))
     {
@@ -5405,6 +5447,21 @@ static const WCHAR *get_message( DWORD flags, const void *src, UINT id, UINT lan
             HMODULE module = (HMODULE)src;
             if (!module) module = GetModuleHandleW( 0 );
             status = RtlFindMessage( module, RT_MESSAGETABLE, lang, id, &entry );
+            if (status)
+            {
+                DWORD last_error = GetLastError();
+
+                if ((*resource_module = load_message_resource_module( module, lang )))
+                {
+                    status = RtlFindMessage( *resource_module, RT_MESSAGETABLE, lang, id, &entry );
+                    if (status)
+                    {
+                        FreeLibrary( *resource_module );
+                        *resource_module = NULL;
+                    }
+                    else SetLastError( last_error );
+                }
+            }
         }
         if (status && (flags & FORMAT_MESSAGE_FROM_SYSTEM))
         {
@@ -5421,7 +5478,12 @@ static const WCHAR *get_message( DWORD flags, const void *src, UINT id, UINT lan
 
     if (!ansi) return src;
     len = MultiByteToWideChar( CP_ACP, 0, src, -1, NULL, 0 );
-    if (!(*buffer = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return NULL;
+    if (!(*buffer = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
+    {
+        if (*resource_module) FreeLibrary( *resource_module );
+        *resource_module = NULL;
+        return NULL;
+    }
     MultiByteToWideChar( CP_ACP, 0, src, -1, *buffer, len );
     return *buffer;
 }
@@ -5438,6 +5500,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH FormatMessageA( DWORD flags, const void *source, 
     ULONG width = (flags & FORMAT_MESSAGE_MAX_WIDTH_MASK);
     const WCHAR *src;
     WCHAR *result, *message = NULL;
+    HMODULE resource_module;
     NTSTATUS status;
 
     TRACE( "(0x%lx,%p,%#lx,0x%lx,%p,%lu,%p)\n", flags, source, msgid, langid, buffer, size, args );
@@ -5459,7 +5522,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH FormatMessageA( DWORD flags, const void *source, 
 
     if (width == 0xff) width = ~0u;
 
-    if (!(src = get_message( flags, source, msgid, langid, TRUE, &message ))) return 0;
+    if (!(src = get_message( flags, source, msgid, langid, TRUE, &message, &resource_module ))) return 0;
 
     if (!(result = HeapAlloc( GetProcessHeap(), 0, 65536 )))
         status = STATUS_NO_MEMORY;
@@ -5469,6 +5532,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH FormatMessageA( DWORD flags, const void *source, 
                                    result, 65536, &retsize );
 
     HeapFree( GetProcessHeap(), 0, message );
+    if (resource_module) FreeLibrary( resource_module );
 
     if (status == STATUS_BUFFER_OVERFLOW)
     {
@@ -5520,6 +5584,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH FormatMessageW( DWORD flags, const void *source, 
     ULONG width = (flags & FORMAT_MESSAGE_MAX_WIDTH_MASK);
     const WCHAR *src;
     WCHAR *message = NULL;
+    HMODULE resource_module;
     NTSTATUS status;
 
     TRACE( "(0x%lx,%p,%#lx,0x%lx,%p,%lu,%p)\n", flags, source, msgid, langid, buffer, size, args );
@@ -5534,7 +5599,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH FormatMessageW( DWORD flags, const void *source, 
 
     if (flags & FORMAT_MESSAGE_ALLOCATE_BUFFER) *(LPWSTR *)buffer = NULL;
 
-    if (!(src = get_message( flags, source, msgid, langid, FALSE, &message ))) return 0;
+    if (!(src = get_message( flags, source, msgid, langid, FALSE, &message, &resource_module ))) return 0;
 
     if (flags & FORMAT_MESSAGE_ALLOCATE_BUFFER)
     {
@@ -5577,6 +5642,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH FormatMessageW( DWORD flags, const void *source, 
                                     buffer, size * sizeof(WCHAR), &retsize );
 
     HeapFree( GetProcessHeap(), 0, message );
+    if (resource_module) FreeLibrary( resource_module );
 
     if (status == STATUS_BUFFER_OVERFLOW)
     {

@@ -654,6 +654,22 @@ static struct mui_res
     {'M','U','I',0,0}, {RT_STRING}, {0}, {0}, {'e','n','-','U','S',0}
 };
 
+static const struct mui_message_resource
+{
+    DWORD count;
+    MESSAGE_RESOURCE_BLOCK block;
+    struct
+    {
+        WORD length;
+        WORD flags;
+        WCHAR text[14];
+    } entry;
+} mui_messages = {
+    1, {0x1234, 0x1234, offsetof(struct mui_message_resource, entry)},
+    {sizeof(mui_messages.entry), MESSAGE_RESOURCE_UNICODE,
+     {'M','U','I',' ','m','e','s','s','a','g','e','\r','\n',0}}
+};
+
 static void test_mui(void)
 {
     static const WCHAR ln_dll[] = L"test_mui.dll";
@@ -663,7 +679,10 @@ static void test_mui(void)
     FILEMUIINFO *info = (FILEMUIINFO *)buf;
     const WCHAR *str;
     DWORD size, *id;
+    HMODULE module;
     HANDLE res;
+    WCHAR message[32];
+    DWORD ret;
     BOOL r;
 
     size = 0;
@@ -777,6 +796,10 @@ static void test_mui(void)
     ok( res != NULL, "BeginUpdateResourceW failed: %ld\n", GetLastError() );
     r = UpdateResourceW( res, L"MUI", MAKEINTRESOURCEW(1), 0, &en_mui_res, sizeof(en_mui_res) );
     ok( r, "UpdateResource failed: %ld\n", GetLastError() );
+    r = UpdateResourceW( res, MAKEINTRESOURCEW(11), MAKEINTRESOURCEW(1),
+                         MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
+                         (void *)&mui_messages, sizeof(mui_messages) );
+    ok( r, "UpdateResource failed: %ld\n", GetLastError() );
     r = EndUpdateResourceW( res, FALSE );
     ok( r, "EndUpdateResourceW failed: %ld\n", GetLastError() );
 
@@ -809,6 +832,19 @@ static void test_mui(void)
     ok( !wcscmp(str, L"MUI"), "type name MUI[0] = %s\n", wine_dbgstr_w(str) );
     str += wcslen(str) + 1;
     ok( !str[0], "string list is not NULL terminated: %s\n", wine_dbgstr_w(str) );
+
+    module = LoadLibraryW( ln_dll );
+    ok( module != NULL, "LoadLibraryW failed: %ld\n", GetLastError() );
+    if (module)
+    {
+        SetLastError( 0xdeadbeef );
+        ret = FormatMessageW( FORMAT_MESSAGE_FROM_HMODULE, module, 0x1234, 0, message,
+                              ARRAY_SIZE(message), NULL );
+        ok( ret == 13, "FormatMessageW returned %lu, error %lu\n", ret, GetLastError() );
+        ok( !wcscmp( message, L"MUI message\r\n" ), "unexpected message %s\n", wine_dbgstr_w(message) );
+        ok( GetLastError() == 0xdeadbeef, "last error %lu\n", GetLastError() );
+        FreeLibrary( module );
+    }
 
     DeleteFileW( ln_dll );
     DeleteFileW( en_dll );
