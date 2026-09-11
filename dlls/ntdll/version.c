@@ -627,6 +627,14 @@ BOOLEAN WINAPI RtlGetNtProductType( LPDWORD type )
     return TRUE;
 }
 
+/******************************************************************************
+ *  RtlGetCurrentServiceSessionId   (NTDLL.@)
+ */
+ULONG WINAPI RtlGetCurrentServiceSessionId(void)
+{
+    return 0;
+}
+
 static inline UCHAR version_update_condition(UCHAR *last_condition, UCHAR condition)
 {
     switch (*last_condition)
