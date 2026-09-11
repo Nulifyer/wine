@@ -34,6 +34,28 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(bcrypt);
 
+NTSTATUS WINAPI BCryptSetAuditingInterface(void)
+{
+    PRIVILEGE_SET privileges = {0};
+    BOOL enabled;
+    HANDLE token;
+    DWORD error;
+
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        return HRESULT_FROM_WIN32(GetLastError());
+
+    privileges.PrivilegeCount = 1;
+    privileges.Privilege[0].Luid.LowPart = SE_TCB_PRIVILEGE;
+    if (!PrivilegeCheck(token, &privileges, &enabled))
+    {
+        error = GetLastError();
+        CloseHandle(token);
+        return HRESULT_FROM_WIN32(error);
+    }
+    CloseHandle(token);
+    return enabled ? STATUS_SUCCESS : STATUS_PRIVILEGE_NOT_HELD;
+}
+
 SYMCRYPT_ENVIRONMENT_DEFS( WindowsUsermodeWin8_1nLater );
 
 #define MAGIC_DSS1 ('D' | ('S' << 8) | ('S' << 16) | ('1' << 24))

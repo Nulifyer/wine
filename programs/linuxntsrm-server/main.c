@@ -17,6 +17,8 @@
 
 #define SRM_MAX_MESSAGE 0x200
 #define SRM_PAYLOAD_LIMIT 0x1d4
+#define LSA_CONNECT_RETRY_COUNT 2400
+#define LSA_CONNECT_RETRY_100NS 500000
 
 struct srm_message
 {
@@ -100,18 +102,34 @@ static NTSTATUS send_status_reply( HANDLE port, const ALPC_PORT_MESSAGE *request
                                       NULL, NULL, NULL, NULL );
 }
 
+static NTSTATUS receive_message( HANDLE port, struct srm_message *message, SIZE_T *size )
+{
+    LARGE_INTEGER retry_delay;
+    NTSTATUS status;
+
+    retry_delay.QuadPart = -LSA_CONNECT_RETRY_100NS;
+    for (;;)
+    {
+        zero_memory( message, sizeof(*message) );
+        *size = sizeof(*message);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &message->header,
+                                            size, NULL, NULL );
+        /* Wine can expose STATUS_PENDING while an empty ALPC listener wait is
+         * being armed.  Retry until a message or terminal status is present. */
+        if (status != STATUS_PENDING) return status;
+        NtDelayExecution( FALSE, &retry_delay );
+    }
+}
+
 static NTSTATUS serve_lsa_commands( HANDLE command_port )
 {
     struct srm_message request;
+    SIZE_T size;
     NTSTATUS status;
 
     for (;;)
     {
-        SIZE_T size = sizeof(request);
-
-        zero_memory( &request, sizeof(request) );
-        status = NtAlpcSendWaitReceivePort( command_port, 0, NULL, NULL, &request.header,
-                                            &size, NULL, NULL );
+        status = receive_message( command_port, &request, &size );
         if (status) return status;
         if ((request.header.Type & 0xff) == ALPC_MESSAGE_TYPE_PORT_CLOSED) return STATUS_PORT_DISCONNECTED;
         if ((request.header.Type & 0xff) != ALPC_MESSAGE_TYPE_REQUEST ||
@@ -124,6 +142,26 @@ static NTSTATUS serve_lsa_commands( HANDLE command_port )
         status = send_status_reply( command_port, &request.header, STATUS_NOT_IMPLEMENTED );
         if (status) return status;
     }
+}
+
+static NTSTATUS connect_to_lsa( HANDLE *port, UNICODE_STRING *name,
+                                ALPC_PORT_ATTRIBUTES *attributes )
+{
+    LARGE_INTEGER delay;
+    NTSTATUS status;
+    ULONG attempt;
+
+    delay.QuadPart = -LSA_CONNECT_RETRY_100NS;
+    for (attempt = 0; attempt < LSA_CONNECT_RETRY_COUNT; attempt++)
+    {
+        status = NtAlpcConnectPort( port, name, NULL, attributes, ALPC_SYNC_CONNECTION,
+                                    NULL, NULL, NULL, NULL, NULL, NULL );
+        if (!status) return status;
+        if (status != STATUS_OBJECT_NAME_NOT_FOUND && status != STATUS_OBJECT_PATH_NOT_FOUND)
+            return status;
+        NtDelayExecution( FALSE, &delay );
+    }
+    return STATUS_TIMEOUT;
 }
 
 static NTSTATUS run_server( HANDLE ready_event )
@@ -155,10 +193,9 @@ static NTSTATUS run_server( HANDLE ready_event )
         }
     }
 
-    size = sizeof(connection_request);
-    zero_memory( &connection_request, sizeof(connection_request) );
-    status = NtAlpcSendWaitReceivePort( command_port, 0, NULL, NULL, &connection_request.header,
-                                        &size, NULL, NULL );
+    /* Genuine LSASS creates SeLsaCommandPort, then connects to SeRmCommandPort.
+     * Accept that forward connection before opening the reverse command port. */
+    status = receive_message( command_port, &connection_request, &size );
     if (status) goto done;
     if ((connection_request.header.Type & 0xff) != ALPC_MESSAGE_TYPE_CONNECTION_REQUEST)
     {
@@ -170,8 +207,7 @@ static NTSTATUS run_server( HANDLE ready_event )
                                       NULL, &connection_request.header, NULL, TRUE );
     if (status) goto done;
 
-    status = NtAlpcConnectPort( &lsa_command_port, &lsa_name, NULL, &attributes,
-                                ALPC_SYNC_CONNECTION, NULL, NULL, NULL, NULL, NULL, NULL );
+    status = connect_to_lsa( &lsa_command_port, &lsa_name, &attributes );
     if (status) goto done;
 
     status = serve_lsa_commands( command_port );

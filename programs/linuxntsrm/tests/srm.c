@@ -124,6 +124,9 @@ static void test_lsa_handshake(void)
         return;
     }
 
+    /* The SRM listener must survive an empty blocking receive before LSA opens
+     * the forward connection. */
+    Sleep( 100 );
     thread = CreateThread( NULL, 0, connect_to_rm, &context, 0, NULL );
     ok( !!thread, "CreateThread failed, error %lu\n", GetLastError() );
     if (!thread)

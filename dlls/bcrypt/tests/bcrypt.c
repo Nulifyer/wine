@@ -28,7 +28,44 @@
 
 #include "wine/test.h"
 
+#ifndef SE_TCB_PRIVILEGE
+#define SE_TCB_PRIVILEGE 7
+#endif
+
 static NTSTATUS (WINAPI *pBCryptHash)(BCRYPT_ALG_HANDLE, UCHAR *, ULONG, UCHAR *, ULONG, UCHAR *, ULONG);
+static NTSTATUS (WINAPI *pBCryptSetAuditingInterface)(void);
+
+static void test_BCryptSetAuditingInterface(void)
+{
+    PRIVILEGE_SET privileges = {0};
+    BOOL enabled;
+    HANDLE token;
+    NTSTATUS status;
+
+    if (!pBCryptSetAuditingInterface)
+    {
+        win_skip("BCryptSetAuditingInterface is not available\n");
+        return;
+    }
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+    {
+        win_skip("OpenProcessToken failed, error %lu\n", GetLastError());
+        return;
+    }
+    privileges.PrivilegeCount = 1;
+    privileges.Privilege[0].Luid.LowPart = SE_TCB_PRIVILEGE;
+    if (!PrivilegeCheck(token, &privileges, &enabled))
+    {
+        win_skip("PrivilegeCheck failed, error %lu\n", GetLastError());
+        CloseHandle(token);
+        return;
+    }
+    CloseHandle(token);
+
+    status = pBCryptSetAuditingInterface();
+    ok(status == (enabled ? STATUS_SUCCESS : STATUS_PRIVILEGE_NOT_HELD),
+       "got %#lx with SeTcbPrivilege %u\n", status, enabled);
+}
 
 static void test_BCryptGenRandom(void)
 {
@@ -5589,7 +5626,9 @@ START_TEST(bcrypt)
         return;
     }
     pBCryptHash = (void *)GetProcAddress(module, "BCryptHash");
+    pBCryptSetAuditingInterface = (void *)GetProcAddress(module, "BCryptSetAuditingInterface");
 
+    test_BCryptSetAuditingInterface();
     test_BCryptGenRandom();
     test_BCryptGetFipsAlgorithmMode();
     test_hashes();

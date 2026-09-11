@@ -47,7 +47,7 @@
 @ stdcall BCryptRemoveContextFunctionProvider(long wstr long wstr wstr) bcrypt.BCryptRemoveContextFunctionProvider
 @ stub BCryptResolveProviders
 @ stdcall BCryptSecretAgreement(ptr ptr ptr long) bcrypt.BCryptSecretAgreement
-@ stub BCryptSetAuditingInterface
+@ stdcall BCryptSetAuditingInterface() bcrypt.BCryptSetAuditingInterface
 @ stub BCryptSetContextFunctionProperty
 @ stdcall BCryptSetProperty(ptr wstr ptr long long) bcrypt.BCryptSetProperty
 @ stdcall BCryptSignHash(ptr ptr ptr long ptr long ptr long) bcrypt.BCryptSignHash
@@ -89,7 +89,7 @@
 @ stub NCryptQueryProtectionDescriptorName
 @ stub NCryptRegisterProtectionDescriptorName
 @ stub NCryptSecretAgreement
-@ stub NCryptSetAuditingInterface
+@ stdcall NCryptSetAuditingInterface() bcrypt.BCryptSetAuditingInterface
 @ stdcall NCryptSetProperty(ptr wstr ptr long long)
 @ stdcall NCryptSignHash(long ptr ptr long ptr long ptr long)
 @ stub NCryptStreamClose
