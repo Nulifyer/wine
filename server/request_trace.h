@@ -3709,6 +3709,11 @@ static void dump_alpc_disconnect_port_request( const struct alpc_disconnect_port
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_set_default_hard_error_port_request( const struct set_default_hard_error_port_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
 static void dump_get_process_critical_state_request( const struct get_process_critical_state_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -4053,6 +4058,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_accept_connect_port_request,
     (dump_func)dump_alpc_open_sender_process_request,
     (dump_func)dump_alpc_disconnect_port_request,
+    (dump_func)dump_set_default_hard_error_port_request,
     (dump_func)dump_get_process_critical_state_request,
     (dump_func)dump_get_process_protection_request,
 };
@@ -4378,6 +4384,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_get_connect_result_reply,
     (dump_func)dump_alpc_accept_connect_port_reply,
     (dump_func)dump_alpc_open_sender_process_reply,
+    NULL,
     NULL,
     (dump_func)dump_get_process_critical_state_reply,
     (dump_func)dump_get_process_protection_reply,
@@ -4705,6 +4712,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "alpc_accept_connect_port",
     "alpc_open_sender_process",
     "alpc_disconnect_port",
+    "set_default_hard_error_port",
     "get_process_critical_state",
     "get_process_protection",
 };

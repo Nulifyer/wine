@@ -29,22 +29,37 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(alpc);
 
-/* Only context and empty attribute buffers belong to the current contract. */
+/* Context is transferred today. A receive-only view slot is also accepted so
+ * servers can wait with the standard context+view buffer before any client
+ * submits a section view. */
 static NTSTATUS validate_message_attributes( const ALPC_MESSAGE_ATTRIBUTES *send,
                                              const ALPC_MESSAGE_ATTRIBUTES *receive )
 {
     if ((send && (send->AllocatedAttributes & ~ALPC_MESSAGE_CONTEXT_ATTRIBUTE)) ||
-        (receive && (receive->AllocatedAttributes & ~ALPC_MESSAGE_CONTEXT_ATTRIBUTE)))
+        (receive && (receive->AllocatedAttributes & ~(ALPC_MESSAGE_CONTEXT_ATTRIBUTE |
+                                                      ALPC_MESSAGE_VIEW_ATTRIBUTE))))
         return STATUS_NOT_IMPLEMENTED;
-    if (send && (send->ValidAttributes & ~send->AllocatedAttributes)) return STATUS_INVALID_PARAMETER;
+    if ((send && (send->ValidAttributes & ~send->AllocatedAttributes)) ||
+        (receive && (receive->ValidAttributes & ~receive->AllocatedAttributes)))
+        return STATUS_INVALID_PARAMETER;
     return STATUS_SUCCESS;
+}
+
+static ALPC_CONTEXT_ATTR *get_context_attribute( ALPC_MESSAGE_ATTRIBUTES *attributes )
+{
+    BYTE *ptr = (BYTE *)(attributes + 1);
+
+    if (!(attributes->AllocatedAttributes & ALPC_MESSAGE_CONTEXT_ATTRIBUTE)) return NULL;
+    if (attributes->AllocatedAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE) ptr += sizeof(ALPC_SECURITY_ATTR);
+    if (attributes->AllocatedAttributes & ALPC_MESSAGE_VIEW_ATTRIBUTE) ptr += sizeof(ALPC_VIEW_ATTR);
+    return (ALPC_CONTEXT_ATTR *)ptr;
 }
 
 static client_ptr_t get_message_context( const ALPC_MESSAGE_ATTRIBUTES *attributes )
 {
     const ALPC_CONTEXT_ATTR *context;
     if (!attributes || !(attributes->ValidAttributes & ALPC_MESSAGE_CONTEXT_ATTRIBUTE)) return 0;
-    context = (const ALPC_CONTEXT_ATTR *)(attributes + 1);
+    context = get_context_attribute( (ALPC_MESSAGE_ATTRIBUTES *)attributes );
     return wine_server_client_ptr( context->MessageContext );
 }
 
@@ -62,7 +77,7 @@ static void receive_message_info( NTSTATUS status, const struct alpc_message_inf
         attributes->ValidAttributes = info->context_valid & attributes->AllocatedAttributes;
         if (attributes->AllocatedAttributes & ALPC_MESSAGE_CONTEXT_ATTRIBUTE)
         {
-            context = (ALPC_CONTEXT_ATTR *)(attributes + 1);
+            context = get_context_attribute( attributes );
             context->PortContext = wine_server_get_ptr( info->port_context );
             context->MessageContext = wine_server_get_ptr( info->message_context );
             context->Sequence = info->sequence;
@@ -365,6 +380,19 @@ NTSTATUS WINAPI NtAlpcSetInformation( HANDLE handle, ULONG class, void *info, UL
         req->completion = wine_server_obj_handle( association->CompletionPort );
         req->key = (ULONG_PTR)association->CompletionKey;
         req->lease = 0;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtSetDefaultHardErrorPort( HANDLE handle )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( set_default_hard_error_port )
+    {
+        req->handle = wine_server_obj_handle( handle );
         status = wine_server_call( req );
     }
     SERVER_END_REQ;

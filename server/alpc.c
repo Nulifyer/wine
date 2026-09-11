@@ -140,6 +140,8 @@ static void dispatch_receives( struct alpc_port *port );
 static void dispatch_all_receives( void );
 
 static struct list message_requests = LIST_INIT(message_requests);
+static struct alpc_port *default_hard_error_port;
+static struct process *default_hard_error_process;
 
 struct alpc_message
 {
@@ -1279,5 +1281,26 @@ DECL_HANDLER(alpc_disconnect_port)
         detach_peer( port );
         dispatch_all_receives();
     }
+    release_object( port );
+}
+
+DECL_HANDLER(set_default_hard_error_port)
+{
+    struct alpc_port *port;
+
+    if (!thread_single_check_privilege( current, SeTcbPrivilege ))
+    {
+        set_error( STATUS_PRIVILEGE_NOT_HELD );
+        return;
+    }
+    if (default_hard_error_port)
+    {
+        set_error( STATUS_UNSUCCESSFUL );
+        return;
+    }
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle, 0,
+                                                     &alpc_port_ops ))) return;
+    default_hard_error_port = (struct alpc_port *)grab_object( port );
+    default_hard_error_process = (struct process *)grab_object( current->process );
     release_object( port );
 }

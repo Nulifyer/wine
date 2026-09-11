@@ -1314,6 +1314,7 @@ typedef volatile struct
 #define SET_PROCESS_INFO_TOKEN         0x10
 #define SET_PROCESS_INFO_HANDLE_CHECKING 0x20
 #define SET_PROCESS_INFO_CRITICAL      0x40
+#define SET_PROCESS_INFO_SUBSYSTEM     0x80
 
 
 /* Retrieve information about a thread */
@@ -4504,6 +4505,11 @@ struct alpc_message_info
 @END
 
 @REQ(alpc_disconnect_port)
+    obj_handle_t handle;
+@END
+
+/* Install the one system-wide ALPC endpoint that receives hard errors. */
+@REQ(set_default_hard_error_port)
     obj_handle_t handle;
 @END
 

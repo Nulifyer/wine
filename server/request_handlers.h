@@ -327,6 +327,7 @@ DECL_HANDLER(alpc_get_connect_result);
 DECL_HANDLER(alpc_accept_connect_port);
 DECL_HANDLER(alpc_open_sender_process);
 DECL_HANDLER(alpc_disconnect_port);
+DECL_HANDLER(set_default_hard_error_port);
 DECL_HANDLER(get_process_critical_state);
 DECL_HANDLER(get_process_protection);
 
@@ -653,6 +654,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_alpc_accept_connect_port,
     (req_handler)req_alpc_open_sender_process,
     (req_handler)req_alpc_disconnect_port,
+    (req_handler)req_set_default_hard_error_port,
     (req_handler)req_get_process_critical_state,
     (req_handler)req_get_process_protection,
 };
@@ -2522,6 +2524,8 @@ C_ASSERT( offsetof(struct alpc_open_sender_process_reply, handle) == 8 );
 C_ASSERT( sizeof(struct alpc_open_sender_process_reply) == 16 );
 C_ASSERT( offsetof(struct alpc_disconnect_port_request, handle) == 12 );
 C_ASSERT( sizeof(struct alpc_disconnect_port_request) == 16 );
+C_ASSERT( offsetof(struct set_default_hard_error_port_request, handle) == 12 );
+C_ASSERT( sizeof(struct set_default_hard_error_port_request) == 16 );
 C_ASSERT( offsetof(struct get_process_critical_state_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_process_critical_state_request) == 16 );
 C_ASSERT( offsetof(struct get_process_critical_state_reply, critical) == 8 );

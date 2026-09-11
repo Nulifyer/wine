@@ -1901,6 +1901,17 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
 #endif
     }
 
+    case ProcessSubsystemProcess:
+        if (info || size) return STATUS_INFO_LENGTH_MISMATCH;
+        SERVER_START_REQ( set_process_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            req->mask = SET_PROCESS_INFO_SUBSYSTEM;
+            ret = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        break;
+
     case ProcessWineMakeProcessSystem:
         if (size != sizeof(HANDLE *)) return STATUS_INFO_LENGTH_MISMATCH;
         SERVER_START_REQ( make_process_system )

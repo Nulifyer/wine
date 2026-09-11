@@ -8019,6 +8019,19 @@ NTSTATUS WINAPI NtSetInformationObject( HANDLE handle, OBJECT_INFORMATION_CLASS 
     break;
     }
 
+    case ObjectSessionInformation:
+        /* Wine does not model per-session object namespaces yet. Accept the
+         * native startup request in the current namespace after validating
+         * that the caller supplied a live handle. */
+        if (ptr || len) return STATUS_INVALID_PARAMETER;
+        SERVER_START_REQ( get_object_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        break;
+
     default:
         FIXME("Unsupported information class %u\n", info_class);
         status = STATUS_NOT_IMPLEMENTED;

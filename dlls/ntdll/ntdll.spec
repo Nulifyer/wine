@@ -398,7 +398,7 @@
 # @ stub NtSetBootOptions
 @ stdcall -syscall NtSetContextThread(long ptr)
 @ stdcall -syscall NtSetDebugFilterState(long long long)
-# @ stub NtSetDefaultHardErrorPort
+@ stdcall -syscall NtSetDefaultHardErrorPort(long)
 @ stdcall -syscall NtSetDefaultLocale(long long)
 @ stdcall -syscall NtSetDefaultUILanguage(long)
 @ stdcall -syscall NtSetEaFile(long ptr ptr long)
@@ -1504,7 +1504,7 @@
 # @ stub ZwSetBootOptions
 @ stdcall -private ZwSetContextThread(long ptr) NtSetContextThread
 @ stdcall -private ZwSetDebugFilterState(long long long) NtSetDebugFilterState
-# @ stub ZwSetDefaultHardErrorPort
+@ stdcall -private ZwSetDefaultHardErrorPort(long) NtSetDefaultHardErrorPort
 @ stdcall -private ZwSetDefaultLocale(long long) NtSetDefaultLocale
 @ stdcall -private ZwSetDefaultUILanguage(long) NtSetDefaultUILanguage
 @ stdcall -private ZwSetEaFile(long ptr ptr long) NtSetEaFile

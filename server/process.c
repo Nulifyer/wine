@@ -626,6 +626,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->base_priority   = 8;
     process->disable_boost   = 0;
     process->handle_checking_mode = 0;
+    process->subsystem_process = 0;
     process->critical        = 0;
     process->protection      = 0;
     process->suspend         = 0;
@@ -1798,7 +1799,15 @@ DECL_HANDLER(set_process_info)
             release_object( process );
             return;
         }
+        if ((req->mask & SET_PROCESS_INFO_SUBSYSTEM) &&
+            !thread_single_check_privilege( current, SeTcbPrivilege ))
+        {
+            set_error( STATUS_PRIVILEGE_NOT_HELD );
+            release_object( process );
+            return;
+        }
         if (req->mask & SET_PROCESS_INFO_CRITICAL) process->critical = !!req->critical;
+        if (req->mask & SET_PROCESS_INFO_SUBSYSTEM) process->subsystem_process = 1;
         if (req->mask & SET_PROCESS_INFO_PRIORITY) set_process_priority( process, req->priority );
         if (req->mask & SET_PROCESS_INFO_BASE_PRIORITY) set_process_base_priority( process, req->base_priority );
         if (req->mask & SET_PROCESS_INFO_DISABLE_BOOST) set_process_disable_boost( process, req->disable_boost );

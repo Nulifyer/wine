@@ -67,6 +67,7 @@ struct process
     int                  critical;        /* break-on-termination policy */
     int                  disable_boost;   /* disable priority boost */
     unsigned int         handle_checking_mode; /* process handle checking policy */
+    unsigned int         subsystem_process:1; /* registered native subsystem owner */
     int                  suspend;         /* global process suspend count */
     unsigned int         is_system:1;     /* is it a system process? */
     unsigned int         debug_children:1;/* also debug all child processes */
