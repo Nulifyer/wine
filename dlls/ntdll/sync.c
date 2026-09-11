@@ -1321,6 +1321,59 @@ BYTE WINAPI RtlAcquireResourceShared(LPRTL_RWLOCK rwl, BYTE fWait)
     return retVal;
 }
 
+/***********************************************************************
+ *           RtlConvertExclusiveToShared  (NTDLL.@)
+ */
+void WINAPI RtlConvertExclusiveToShared(LPRTL_RWLOCK rwl)
+{
+    UINT count;
+
+    if (!rwl) return;
+
+    RtlEnterCriticalSection( &rwl->rtlCS );
+    rwl->hOwningThreadId = 0;
+    if ((count = rwl->uSharedWaiters))
+    {
+        /* Waiting readers have already been counted by the acquisition
+         * path; include them and the converting owner in the active count. */
+        rwl->iNumberActive = count + 1;
+        rwl->uSharedWaiters = 0;
+        NtReleaseSemaphore( rwl->hSharedReleaseSemaphore, count, NULL );
+    }
+    else
+    {
+        rwl->iNumberActive = 1;
+    }
+    RtlLeaveCriticalSection( &rwl->rtlCS );
+}
+
+/***********************************************************************
+ *           RtlConvertSharedToExclusive  (NTDLL.@)
+ */
+void WINAPI RtlConvertSharedToExclusive(LPRTL_RWLOCK rwl)
+{
+    LONG active;
+
+    if (!rwl) return;
+
+    active = rwl->iNumberActive;
+    while (active >= 0)
+    {
+        if (active != 1)
+        {
+            RtlReleaseResource( rwl );
+            RtlAcquireResourceExclusive( rwl, TRUE );
+            return;
+        }
+        active = InterlockedCompareExchange( (LONG volatile *)&rwl->iNumberActive, -1, 1 );
+        if (active == 1)
+        {
+            rwl->hOwningThreadId = ULongToHandle(GetCurrentThreadId());
+            return;
+        }
+    }
+}
+
 
 /***********************************************************************
  *           RtlReleaseResource  (NTDLL.@)

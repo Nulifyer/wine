@@ -5125,6 +5125,8 @@ NTSYSAPI NTSTATUS  WINAPI RtlAbsoluteToSelfRelativeSD(PSECURITY_DESCRIPTOR,PSECU
 NTSYSAPI void      WINAPI RtlAcquirePebLock(void);
 NTSYSAPI BYTE      WINAPI RtlAcquireResourceExclusive(LPRTL_RWLOCK,BYTE);
 NTSYSAPI BYTE      WINAPI RtlAcquireResourceShared(LPRTL_RWLOCK,BYTE);
+NTSYSAPI void      WINAPI RtlConvertExclusiveToShared(LPRTL_RWLOCK);
+NTSYSAPI void      WINAPI RtlConvertSharedToExclusive(LPRTL_RWLOCK);
 NTSYSAPI void      WINAPI RtlAcquireSRWLockExclusive(RTL_SRWLOCK*);
 NTSYSAPI void      WINAPI RtlAcquireSRWLockShared(RTL_SRWLOCK*);
 NTSYSAPI NTSTATUS  WINAPI RtlActivateActivationContext(DWORD,struct _ACTIVATION_CONTEXT *,ULONG_PTR*);

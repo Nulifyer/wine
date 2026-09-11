@@ -52,6 +52,8 @@ static NTSTATUS (WINAPI *pNtWaitForAlertByThreadId)( void *, const LARGE_INTEGER
 static NTSTATUS (WINAPI *pNtWaitForKeyedEvent)( HANDLE, const void *, BOOLEAN, const LARGE_INTEGER * );
 static BOOLEAN  (WINAPI *pRtlAcquireResourceExclusive)( RTL_RWLOCK *, BOOLEAN );
 static BOOLEAN  (WINAPI *pRtlAcquireResourceShared)( RTL_RWLOCK *, BOOLEAN );
+static void     (WINAPI *pRtlConvertExclusiveToShared)( RTL_RWLOCK * );
+static void     (WINAPI *pRtlConvertSharedToExclusive)( RTL_RWLOCK * );
 static void     (WINAPI *pRtlDeleteResource)( RTL_RWLOCK * );
 static void     (WINAPI *pRtlInitializeResource)( RTL_RWLOCK * );
 static void     (WINAPI *pRtlInitUnicodeString)( UNICODE_STRING *, const WCHAR * );
@@ -645,6 +647,19 @@ static DWORD WINAPI resource_exclusive_thread(void *arg)
     return 0;
 }
 
+static DWORD WINAPI resource_shared_timed_thread(void *arg)
+{
+    RTL_RWLOCK *resource = arg;
+    BOOLEAN ret;
+
+    ret = pRtlAcquireResourceShared(resource, TRUE);
+    ok(ret == TRUE, "got %u\n", ret);
+    SetEvent(thread_ready);
+    Sleep(100);
+    pRtlReleaseResource(resource);
+    return 0;
+}
+
 static void test_resource(void)
 {
     HANDLE thread, thread2;
@@ -761,6 +776,43 @@ static void test_resource(void)
     pRtlReleaseResource(&resource);
     ret = pRtlAcquireResourceShared(&resource, FALSE);
     ok(ret == TRUE, "got %u\n", ret);
+    pRtlReleaseResource(&resource);
+
+    /* Upgrade the sole reader in place. */
+    ret = pRtlAcquireResourceShared(&resource, FALSE);
+    ok(ret == TRUE, "got %u\n", ret);
+    pRtlConvertSharedToExclusive(&resource);
+    ok(resource.iNumberActive == -1, "got active count %d\n", resource.iNumberActive);
+    ok(resource.hOwningThreadId == ULongToHandle(GetCurrentThreadId()), "got owner %p\n",
+       resource.hOwningThreadId);
+    pRtlReleaseResource(&resource);
+
+    /* A contended upgrade releases this reader before waiting for exclusive
+     * ownership, allowing the other reader to drain. */
+    ret = pRtlAcquireResourceShared(&resource, FALSE);
+    ok(ret == TRUE, "got %u\n", ret);
+    thread = CreateThread(NULL, 0, resource_shared_timed_thread, &resource, 0, NULL);
+    ok(!WaitForSingleObject(thread_ready, 1000), "wait failed\n");
+    pRtlConvertSharedToExclusive(&resource);
+    ok(resource.iNumberActive == -1, "got active count %d\n", resource.iNumberActive);
+    ok(resource.hOwningThreadId == ULongToHandle(GetCurrentThreadId()), "got owner %p\n",
+       resource.hOwningThreadId);
+    ok(!WaitForSingleObject(thread, 1000), "wait failed\n");
+    CloseHandle(thread);
+    pRtlReleaseResource(&resource);
+
+    /* Downgrading an exclusive owner wakes queued readers while retaining one
+     * shared acquisition for the converting thread. */
+    ret = pRtlAcquireResourceExclusive(&resource, FALSE);
+    ok(ret == TRUE, "got %u\n", ret);
+    thread = CreateThread(NULL, 0, resource_shared_thread, &resource, 0, NULL);
+    ok(WaitForSingleObject(thread_ready, 100) == WAIT_TIMEOUT, "expected timeout\n");
+    pRtlConvertExclusiveToShared(&resource);
+    ok(!WaitForSingleObject(thread_ready, 1000), "wait failed\n");
+    ok(resource.iNumberActive == 2, "got active count %d\n", resource.iNumberActive);
+    SetEvent(thread_done);
+    ok(!WaitForSingleObject(thread, 1000), "wait failed\n");
+    CloseHandle(thread);
     pRtlReleaseResource(&resource);
 
     CloseHandle(thread_ready);
@@ -1462,6 +1514,8 @@ START_TEST(sync)
     pNtWaitForKeyedEvent            = (void *)GetProcAddress(module, "NtWaitForKeyedEvent");
     pRtlAcquireResourceExclusive    = (void *)GetProcAddress(module, "RtlAcquireResourceExclusive");
     pRtlAcquireResourceShared       = (void *)GetProcAddress(module, "RtlAcquireResourceShared");
+    pRtlConvertExclusiveToShared    = (void *)GetProcAddress(module, "RtlConvertExclusiveToShared");
+    pRtlConvertSharedToExclusive    = (void *)GetProcAddress(module, "RtlConvertSharedToExclusive");
     pRtlDeleteResource              = (void *)GetProcAddress(module, "RtlDeleteResource");
     pRtlInitializeResource          = (void *)GetProcAddress(module, "RtlInitializeResource");
     pRtlInitUnicodeString           = (void *)GetProcAddress(module, "RtlInitUnicodeString");

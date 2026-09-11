@@ -570,10 +570,10 @@
 @ stdcall RtlConnectToSm(ptr long long ptr)
 @ stub RtlConsoleMultiByteToUnicodeN
 @ stdcall RtlConvertDeviceFamilyInfoToString(ptr ptr ptr ptr)
-@ stub RtlConvertExclusiveToShared
+@ stdcall RtlConvertExclusiveToShared(ptr)
 @ stdcall -arch=win32 -ret64 RtlConvertLongToLargeInteger(long)
 # @ stub RtlConvertPropertyToVariant
-@ stub RtlConvertSharedToExclusive
+@ stdcall RtlConvertSharedToExclusive(ptr)
 @ stdcall RtlConvertSidToUnicodeString(ptr ptr long)
 @ stdcall RtlConvertToAutoInheritSecurityObject(ptr ptr ptr ptr long ptr)
 @ stub RtlConvertUiListToApiList
