@@ -67,6 +67,7 @@
 @ stdcall I_RpcSend(ptr)
 @ stdcall I_RpcSendReceive(ptr)
 @ stub I_RpcServerAllocateIpPort
+@ stdcall I_RpcServerDisableExceptionFilter()
 @ stub I_RpcServerInqAddressChangeFn
 @ stub I_RpcServerInqLocalConnAddress
 @ stub I_RpcServerInqTransportType

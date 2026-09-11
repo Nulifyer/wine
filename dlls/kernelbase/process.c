@@ -1165,6 +1165,15 @@ BOOL WINAPI DECLSPEC_HOTPATCH ProcessIdToSessionId( DWORD pid, DWORD *id )
 
 
 /***********************************************************************
+ *           WTSGetServiceSessionId   (kernelbase.@)
+ */
+DWORD WINAPI WTSGetServiceSessionId(void)
+{
+    return RtlGetCurrentServiceSessionId();
+}
+
+
+/***********************************************************************
  *           QueryProcessCycleTime   (kernelbase.@)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH QueryProcessCycleTime( HANDLE process, ULONG64 *cycle )

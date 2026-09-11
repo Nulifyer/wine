@@ -103,6 +103,8 @@ static BOOL std_listen;
 static LONG listen_count;
 /* event set once all manual listening is finished */
 static HANDLE listen_done_event;
+/* Whether server dispatch exceptions should escape the RPC runtime. */
+static LONG server_exception_filter_disabled;
 
 static UUID uuid_nil;
 
@@ -432,18 +434,25 @@ static RPC_STATUS process_request_packet(RpcConnection *conn, RpcPktRequestHdr *
 
   /* dispatch */
   RPCRT4_SetThreadCurrentCallHandle(msg->Handle);
-  __TRY {
+  if (InterlockedCompareExchange(&server_exception_filter_disabled, 0, 0))
+  {
     if (func) func(msg);
-  } __EXCEPT_ALL {
-    WARN("exception caught with code 0x%08lx = %ld\n", GetExceptionCode(), GetExceptionCode());
-    exception = TRUE;
-    if (GetExceptionCode() == STATUS_ACCESS_VIOLATION)
-      status = ERROR_NOACCESS;
-    else
-      status = GetExceptionCode();
-    response = RPCRT4_BuildFaultHeader(msg->DataRepresentation,
-                                       RPC2NCA_STATUS(status));
-  } __ENDTRY
+  }
+  else
+  {
+    __TRY {
+      if (func) func(msg);
+    } __EXCEPT_ALL {
+      WARN("exception caught with code 0x%08lx = %ld\n", GetExceptionCode(), GetExceptionCode());
+      exception = TRUE;
+      if (GetExceptionCode() == STATUS_ACCESS_VIOLATION)
+        status = ERROR_NOACCESS;
+      else
+        status = GetExceptionCode();
+      response = RPCRT4_BuildFaultHeader(msg->DataRepresentation,
+                                         RPC2NCA_STATUS(status));
+    } __ENDTRY
+  }
     RPCRT4_SetThreadCurrentCallHandle(NULL);
 
   /* release any unmarshalled context handles */
@@ -1632,6 +1641,14 @@ RPC_STATUS WINAPI I_RpcServerStopListening( void )
   FIXME( "(): stub\n" );
 
   return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             I_RpcServerDisableExceptionFilter (RPCRT4.@)
+ */
+void WINAPI I_RpcServerDisableExceptionFilter(void)
+{
+    InterlockedExchange(&server_exception_filter_disabled, TRUE);
 }
 
 /***********************************************************************

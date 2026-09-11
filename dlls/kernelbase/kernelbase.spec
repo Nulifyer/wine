@@ -1741,7 +1741,7 @@
 @ stdcall VirtualQuery(ptr ptr long)
 @ stdcall VirtualQueryEx(long ptr ptr long)
 @ stdcall VirtualUnlock(ptr long)
-# @ stub WTSGetServiceSessionId
+@ stdcall WTSGetServiceSessionId()
 # @ stub WTSIsServerContainer
 @ stdcall WaitCommEvent(long ptr ptr)
 @ stdcall WaitForDebugEvent(ptr long)
