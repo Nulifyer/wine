@@ -1,7 +1,7 @@
 101 stub -noname @
 102 stub -noname @
 103 stub -noname @
-104 stub -noname @
+104 stdcall -noname profapi_get_directory(long wstr ptr long)
 105 stub -noname @
 106 stub -noname @
 107 stub -noname @
