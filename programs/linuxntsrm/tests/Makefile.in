@@ -1,0 +1,5 @@
+TESTDLL = linuxntsrm.exe
+IMPORTS = ntdll
+
+SOURCES = \
+	srm.c

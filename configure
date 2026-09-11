@@ -1750,6 +1750,8 @@ enable_icinfo
 enable_iexplore
 enable_ipconfig
 enable_klist
+enable_linuxntsrm_server
+enable_linuxntsrm
 enable_lodctr
 enable_lsass
 enable_makecab
@@ -23171,6 +23173,9 @@ wine_fn_config_makefile programs/icinfo enable_icinfo
 wine_fn_config_makefile programs/iexplore enable_iexplore
 wine_fn_config_makefile programs/ipconfig enable_ipconfig
 wine_fn_config_makefile programs/klist enable_klist
+wine_fn_config_makefile programs/linuxntsrm-server enable_linuxntsrm_server
+wine_fn_config_makefile programs/linuxntsrm enable_linuxntsrm
+wine_fn_config_makefile programs/linuxntsrm/tests enable_tests
 wine_fn_config_makefile programs/lodctr enable_lodctr
 wine_fn_config_makefile programs/lsass enable_lsass
 wine_fn_config_makefile programs/makecab enable_makecab
