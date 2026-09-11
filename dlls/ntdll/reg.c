@@ -175,6 +175,411 @@ NTSTATUS WINAPI RtlpNtSetValueKey( HANDLE hkey, ULONG type, const void *data,
     return NtSetValueKey( hkey, &name, 0, type, data, count );
 }
 
+/*
+ * The RXACT implementation is based on the ReactOS sdk/lib/rtl/rxact.c
+ * implementation and was also compared with Windows 11 ntdll.
+ *
+ * Copyright 2014 Timo Kreuzer <timo.kreuzer@reactos.org>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#define RXACT_DEFAULT_BUFFER_SIZE (4 * 4096)
+
+struct rxact_info
+{
+    ULONG revision;
+    ULONG unknown1;
+    ULONG unknown2;
+};
+
+struct rxact_data
+{
+    ULONG action_count;
+    ULONG buffer_size;
+    ULONG current_size;
+};
+
+struct rxact_context
+{
+    HANDLE root;
+    HANDLE key;
+    BOOLEAN can_use_handles;
+    struct rxact_data *data;
+};
+
+struct rxact_action
+{
+    ULONG size;
+    ULONG type;
+    UNICODE_STRING key_name;
+    UNICODE_STRING value_name;
+    HANDLE key;
+    ULONG value_type;
+    ULONG value_data_size;
+    void *value_data;
+};
+
+enum rxact_action_type
+{
+    RXACT_DELETE_KEY = 1,
+    RXACT_SET_VALUE = 2,
+};
+
+static ULONG rxact_align( ULONG size, ULONG alignment )
+{
+    return (size + alignment - 1) & ~(alignment - 1);
+}
+
+static void rxact_init_context( struct rxact_context *context, HANDLE root, HANDLE key )
+{
+    context->root = root;
+    context->key = key;
+    context->can_use_handles = TRUE;
+    context->data = NULL;
+}
+
+static NTSTATUS rxact_open_target_key( HANDLE root, ULONG action_type,
+                                       const UNICODE_STRING *name, HANDLE *key )
+{
+    OBJECT_ATTRIBUTES attr;
+
+    if (action_type == RXACT_DELETE_KEY)
+    {
+        InitializeObjectAttributes( &attr, (UNICODE_STRING *)name, OBJ_CASE_INSENSITIVE, root, NULL );
+        return NtOpenKey( key, DELETE, &attr );
+    }
+    if (action_type == RXACT_SET_VALUE)
+    {
+        InitializeObjectAttributes( &attr, (UNICODE_STRING *)name,
+                                    OBJ_CASE_INSENSITIVE | OBJ_OPENIF, root, NULL );
+        return NtCreateKey( key, KEY_WRITE, &attr, 0, NULL, 0, NULL );
+    }
+    return STATUS_INVALID_PARAMETER;
+}
+
+static NTSTATUS rxact_commit( struct rxact_context *context )
+{
+    struct rxact_data *data = context->data;
+    struct rxact_action *action;
+    NTSTATUS status;
+    HANDLE key;
+    ULONG i;
+
+    action = (struct rxact_action *)((BYTE *)data + rxact_align( sizeof(*data), sizeof(void *) ));
+    for (i = 0; i < data->action_count; ++i)
+    {
+        action->key_name.Buffer = (WCHAR *)((BYTE *)data + (ULONG_PTR)action->key_name.Buffer);
+        action->value_name.Buffer = (WCHAR *)((BYTE *)data + (ULONG_PTR)action->value_name.Buffer);
+        action->value_data = (BYTE *)data + (ULONG_PTR)action->value_data;
+
+        if (action->type == RXACT_DELETE_KEY)
+        {
+            if (action->key != INVALID_HANDLE_VALUE && context->can_use_handles)
+                status = NtDeleteKey( action->key );
+            else
+            {
+                status = rxact_open_target_key( context->root, RXACT_DELETE_KEY,
+                                                &action->key_name, &key );
+                if (!status)
+                {
+                    status = NtDeleteKey( key );
+                    NtClose( key );
+                }
+                else if (status == STATUS_OBJECT_NAME_NOT_FOUND)
+                    status = STATUS_SUCCESS;
+            }
+        }
+        else if (action->type == RXACT_SET_VALUE)
+        {
+            if (action->key != INVALID_HANDLE_VALUE && context->can_use_handles)
+                status = NtSetValueKey( action->key, &action->value_name, 0, action->value_type,
+                                        action->value_data, action->value_data_size );
+            else
+            {
+                status = rxact_open_target_key( context->root, RXACT_SET_VALUE,
+                                                &action->key_name, &key );
+                if (!status)
+                {
+                    status = NtSetValueKey( key, &action->value_name, 0, action->value_type,
+                                            action->value_data, action->value_data_size );
+                    NtClose( key );
+                }
+            }
+        }
+        else
+            return STATUS_INVALID_PARAMETER;
+
+        if (status) return status;
+        action = (struct rxact_action *)((BYTE *)action + action->size);
+    }
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ * RtlStartRXact [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlStartRXact( struct rxact_context *context )
+{
+    struct rxact_data *data;
+
+    if (context->data) return STATUS_RXACT_INVALID_STATE;
+    if (!(data = RtlAllocateHeap( GetProcessHeap(), 0, RXACT_DEFAULT_BUFFER_SIZE )))
+        return STATUS_NO_MEMORY;
+
+    data->action_count = 0;
+    data->buffer_size = RXACT_DEFAULT_BUFFER_SIZE;
+    data->current_size = rxact_align( sizeof(*data), sizeof(void *) );
+    context->data = data;
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ * RtlAbortRXact [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlAbortRXact( struct rxact_context *context )
+{
+    if (!context->data) return STATUS_RXACT_INVALID_STATE;
+    RtlFreeHeap( GetProcessHeap(), 0, context->data );
+    context->data = NULL;
+    context->can_use_handles = TRUE;
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ * RtlInitializeRXact [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlInitializeRXact( HANDLE root, BOOLEAN commit,
+                                    struct rxact_context **out_context )
+{
+    KEY_VALUE_FULL_INFORMATION *value_info;
+    BYTE basic_info[128];
+    struct rxact_context *context;
+    struct rxact_info info;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING name;
+    ULONG disposition, type, data_size, size;
+    HANDLE key;
+    NTSTATUS status;
+
+    RtlInitUnicodeString( &name, L"RXACT" );
+    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE | OBJ_OPENIF, root, NULL );
+    status = NtCreateKey( &key, KEY_READ | KEY_WRITE | DELETE, &attr, 0, NULL, 0, &disposition );
+    if (status) return status;
+
+    if (!(context = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*context) )))
+    {
+        NtDeleteKey( key );
+        NtClose( key );
+        return STATUS_NO_MEMORY;
+    }
+    *out_context = context;
+    rxact_init_context( context, root, key );
+
+    if (disposition == REG_CREATED_NEW_KEY)
+    {
+        memset( &info, 0, sizeof(info) );
+        info.revision = 1;
+        RtlInitUnicodeString( &name, NULL );
+        status = NtSetValueKey( key, &name, 0, REG_NONE, &info, sizeof(info) );
+        if (!status) return STATUS_RXACT_STATE_CREATED;
+
+        NtDeleteKey( key );
+        NtClose( key );
+        RtlFreeHeap( GetProcessHeap(), 0, context );
+        return status;
+    }
+
+    data_size = sizeof(info);
+    status = RtlpNtQueryValueKey( key, &type, (BYTE *)&info, &data_size, NULL );
+    if (status)
+    {
+        NtClose( key );
+        RtlFreeHeap( GetProcessHeap(), 0, context );
+        return status;
+    }
+    if (data_size != sizeof(info) || info.revision != 1)
+    {
+        NtClose( key );
+        RtlFreeHeap( GetProcessHeap(), 0, context );
+        return STATUS_UNKNOWN_REVISION;
+    }
+
+    RtlInitUnicodeString( &name, L"Log" );
+    status = NtQueryValueKey( key, &name, KeyValueBasicInformation,
+                              &basic_info, sizeof(basic_info), &size );
+    if (status) return STATUS_SUCCESS;
+    if (!commit) return STATUS_RXACT_COMMIT_NECESSARY;
+
+    status = NtQueryValueKey( key, &name, KeyValueFullInformation, NULL, 0, &size );
+    if (status != STATUS_BUFFER_TOO_SMALL) return status;
+    if (!(value_info = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
+
+    status = NtQueryValueKey( key, &name, KeyValueFullInformation, value_info, size, &size );
+    if (status)
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, value_info );
+        NtClose( key );
+        RtlFreeHeap( GetProcessHeap(), 0, context );
+        return status;
+    }
+
+    context->data = (struct rxact_data *)((BYTE *)value_info + value_info->DataOffset);
+    context->can_use_handles = FALSE;
+    status = rxact_commit( context );
+    if (status)
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, value_info );
+        NtClose( key );
+        RtlFreeHeap( GetProcessHeap(), 0, context );
+        return status;
+    }
+
+    NtDeleteValueKey( key, &name );
+    context->data = (struct rxact_data *)value_info;
+    RtlAbortRXact( context );
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ * RtlAddAttributeActionToRXact [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlAddAttributeActionToRXact( struct rxact_context *context, ULONG type,
+                                              const UNICODE_STRING *key_name, HANDLE key,
+                                              const UNICODE_STRING *value_name, ULONG value_type,
+                                              const void *value_data, ULONG value_data_size )
+{
+    struct rxact_action *action;
+    struct rxact_data *new_data;
+    ULONG action_size, required_size, buffer_size, offset;
+
+    if (type != RXACT_DELETE_KEY && type != RXACT_SET_VALUE) return STATUS_INVALID_PARAMETER;
+
+    action_size = rxact_align( sizeof(*action) + rxact_align( key_name->Length, sizeof(ULONG) ) +
+                               rxact_align( value_name->Length, sizeof(ULONG) ) +
+                               rxact_align( value_data_size, sizeof(ULONG) ), sizeof(void *) );
+    required_size = context->data->current_size + action_size;
+    if (required_size < action_size) return STATUS_NO_MEMORY;
+
+    buffer_size = context->data->buffer_size;
+    if (required_size > buffer_size)
+    {
+        while (buffer_size < required_size) buffer_size *= 2;
+        if (!(new_data = RtlAllocateHeap( GetProcessHeap(), 0, buffer_size )))
+            return STATUS_NO_MEMORY;
+        memcpy( new_data, context->data, context->data->current_size );
+        RtlFreeHeap( GetProcessHeap(), 0, context->data );
+        context->data = new_data;
+        new_data->buffer_size = buffer_size;
+    }
+
+    action = (struct rxact_action *)((BYTE *)context->data + context->data->current_size);
+    action->size = action_size;
+    action->type = type;
+    action->key_name = *key_name;
+    action->value_name = *value_name;
+    action->key = key;
+    action->value_type = value_type;
+    action->value_data_size = value_data_size;
+    action->value_data = NULL;
+
+    offset = context->data->current_size + sizeof(*action);
+    action->key_name.Buffer = (WCHAR *)(ULONG_PTR)offset;
+    if (key_name->Length)
+        memcpy( (BYTE *)context->data + offset, key_name->Buffer, key_name->Length );
+    offset += rxact_align( key_name->Length, sizeof(ULONG) );
+
+    action->value_name.Buffer = (WCHAR *)(ULONG_PTR)offset;
+    if (value_name->Length)
+        memcpy( (BYTE *)context->data + offset, value_name->Buffer, value_name->Length );
+    offset += rxact_align( value_name->Length, sizeof(ULONG) );
+
+    if (type == RXACT_SET_VALUE)
+    {
+        action->value_data = (void *)(ULONG_PTR)offset;
+        if (value_data_size)
+            memcpy( (BYTE *)context->data + offset, value_data, value_data_size );
+        offset += rxact_align( value_data_size, sizeof(ULONG) );
+    }
+
+    context->data->current_size = rxact_align( offset, sizeof(void *) );
+    context->data->action_count++;
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ * RtlAddActionToRXact [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlAddActionToRXact( struct rxact_context *context, ULONG type,
+                                     const UNICODE_STRING *key_name, ULONG value_type,
+                                     const void *value_data, ULONG value_data_size )
+{
+    UNICODE_STRING value_name;
+
+    RtlInitUnicodeString( &value_name, NULL );
+    return RtlAddAttributeActionToRXact( context, type, key_name, INVALID_HANDLE_VALUE,
+                                        &value_name, value_type, value_data, value_data_size );
+}
+
+/******************************************************************************
+ * RtlApplyRXactNoFlush [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlApplyRXactNoFlush( struct rxact_context *context )
+{
+    NTSTATUS status;
+
+    if (!(status = rxact_commit( context ))) status = RtlAbortRXact( context );
+    return status;
+}
+
+/******************************************************************************
+ * RtlApplyRXact [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlApplyRXact( struct rxact_context *context )
+{
+    UNICODE_STRING name;
+    NTSTATUS status;
+
+    RtlInitUnicodeString( &name, L"Log" );
+    status = NtSetValueKey( context->key, &name, 0, REG_BINARY,
+                            context->data, context->data->current_size );
+    if (status) return status;
+
+    status = NtFlushKey( context->key );
+    if (status)
+    {
+        NtDeleteValueKey( context->key, &name );
+        return status;
+    }
+
+    status = rxact_commit( context );
+    if (status)
+    {
+        NtDeleteValueKey( context->key, &name );
+        return status;
+    }
+
+    NtDeleteValueKey( context->key, &name );
+    RtlAbortRXact( context );
+    return STATUS_SUCCESS;
+}
+
 /******************************************************************************
  *  RtlFormatCurrentUserKeyPath		[NTDLL.@]
  *

@@ -155,6 +155,14 @@ static LPVOID   (WINAPI * pRtlAllocateHeap)(PVOID,ULONG,ULONG);
 static NTSTATUS (WINAPI * pRtlZeroMemory)(PVOID, ULONG);
 static NTSTATUS (WINAPI * pRtlCreateRegistryKey)(ULONG, PWSTR);
 static NTSTATUS (WINAPI * pRtlpNtQueryValueKey)(HANDLE,ULONG*,PBYTE,DWORD*,void *);
+static NTSTATUS (WINAPI * pRtlInitializeRXact)(HANDLE,BOOLEAN,void **);
+static NTSTATUS (WINAPI * pRtlStartRXact)(void *);
+static NTSTATUS (WINAPI * pRtlAbortRXact)(void *);
+static NTSTATUS (WINAPI * pRtlAddActionToRXact)(void *,ULONG,const UNICODE_STRING *,ULONG,const void *,ULONG);
+static NTSTATUS (WINAPI * pRtlAddAttributeActionToRXact)(void *,ULONG,const UNICODE_STRING *,HANDLE,
+                                                         const UNICODE_STRING *,ULONG,const void *,ULONG);
+static NTSTATUS (WINAPI * pRtlApplyRXact)(void *);
+static NTSTATUS (WINAPI * pRtlApplyRXactNoFlush)(void *);
 static NTSTATUS (WINAPI * pNtNotifyChangeKey)(HANDLE,HANDLE,PIO_APC_ROUTINE,PVOID,PIO_STATUS_BLOCK,ULONG,BOOLEAN,PVOID,ULONG,BOOLEAN);
 static NTSTATUS (WINAPI * pNtNotifyChangeMultipleKeys)(HANDLE,ULONG,OBJECT_ATTRIBUTES*,HANDLE,PIO_APC_ROUTINE,
                                                        void*,IO_STATUS_BLOCK*,ULONG,BOOLEAN,void*,ULONG,BOOLEAN);
@@ -209,6 +217,13 @@ static BOOL InitFunctionPtrs(void)
     NTDLL_GET_PROC(RtlZeroMemory)
     NTDLL_GET_PROC(RtlCreateRegistryKey)
     NTDLL_GET_PROC(RtlpNtQueryValueKey)
+    NTDLL_GET_PROC(RtlInitializeRXact)
+    NTDLL_GET_PROC(RtlStartRXact)
+    NTDLL_GET_PROC(RtlAbortRXact)
+    NTDLL_GET_PROC(RtlAddActionToRXact)
+    NTDLL_GET_PROC(RtlAddAttributeActionToRXact)
+    NTDLL_GET_PROC(RtlApplyRXact)
+    NTDLL_GET_PROC(RtlApplyRXactNoFlush)
     NTDLL_GET_PROC(RtlOpenCurrentUser)
     NTDLL_GET_PROC(NtWaitForSingleObject)
     NTDLL_GET_PROC(NtLoadKeyEx);
@@ -3153,6 +3168,159 @@ static void test_RtlQueryRegistryValues(void)
     ok(status == ERROR_FILE_NOT_FOUND, "Registry value WindowsDrive should have been deleted already\n");
 }
 
+struct rxact_context_layout
+{
+    HANDLE root;
+    HANDLE key;
+    BOOLEAN can_use_handles;
+    void *data;
+};
+
+struct rxact_data_layout
+{
+    ULONG action_count;
+    ULONG buffer_size;
+    ULONG current_size;
+};
+
+static void free_rxact_context(void *opaque)
+{
+    struct rxact_context_layout *context = opaque;
+
+    if (!context) return;
+    if (context->data) pRtlAbortRXact(context);
+    pNtClose(context->key);
+    pRtlFreeHeap(GetProcessHeap(), 0, context);
+}
+
+static void test_RXact(void)
+{
+    static const WCHAR root_name[] = L"WineTest\\RXactTest";
+    struct rxact_context_layout *context = NULL;
+    struct rxact_data_layout *data;
+    UNICODE_STRING key_name, value_name, log_name;
+    DWORD value, type, size;
+    HKEY root, target;
+    LSTATUS error;
+    NTSTATUS status;
+
+    RegDeleteTreeW(HKEY_CURRENT_USER, root_name);
+    error = RegCreateKeyExW(HKEY_CURRENT_USER, root_name, 0, NULL, 0, KEY_ALL_ACCESS,
+                            NULL, &root, NULL);
+    ok(error == ERROR_SUCCESS, "RegCreateKeyExW failed: %lu\n", error);
+    if (error) return;
+
+    status = pRtlInitializeRXact(root, FALSE, (void **)&context);
+    ok(status == STATUS_RXACT_STATE_CREATED, "RtlInitializeRXact returned %#lx\n", status);
+    if (status != STATUS_RXACT_STATE_CREATED) goto done;
+
+    error = RegOpenKeyExW(root, L"RXACT", 0, KEY_READ, &target);
+    ok(error == ERROR_SUCCESS, "RegOpenKeyExW(RXACT) failed: %lu\n", error);
+    if (!error)
+    {
+        struct rxact_info
+        {
+            ULONG revision;
+            ULONG unknown1;
+            ULONG unknown2;
+        } info = {0};
+
+        size = sizeof(info);
+        error = RegQueryValueExW(target, NULL, NULL, &type, (BYTE *)&info, &size);
+        ok(error == ERROR_SUCCESS, "RegQueryValueExW(default) failed: %lu\n", error);
+        ok(type == REG_NONE, "expected REG_NONE, got %lu\n", type);
+        ok(size == sizeof(info), "expected size %Iu, got %lu\n", sizeof(info), size);
+        ok(info.revision == 1 && !info.unknown1 && !info.unknown2,
+           "unexpected RXACT info %lu, %lu, %lu\n", info.revision, info.unknown1, info.unknown2);
+        RegCloseKey(target);
+    }
+
+    status = pRtlStartRXact(context);
+    ok(status == STATUS_SUCCESS, "RtlStartRXact returned %#lx\n", status);
+    status = pRtlStartRXact(context);
+    ok(status == STATUS_RXACT_INVALID_STATE, "second RtlStartRXact returned %#lx\n", status);
+
+    pRtlInitUnicodeString(&key_name, L"Created");
+    value = 0x12345678;
+    status = pRtlAddActionToRXact(context, 0, &key_name, REG_DWORD, &value, sizeof(value));
+    ok(status == STATUS_INVALID_PARAMETER, "invalid RtlAddActionToRXact returned %#lx\n", status);
+    status = pRtlAddActionToRXact(context, 2, &key_name, REG_DWORD, &value, sizeof(value));
+    ok(status == STATUS_SUCCESS, "RtlAddActionToRXact returned %#lx\n", status);
+
+    pRtlInitUnicodeString(&value_name, L"Named");
+    value = 0x87654321;
+    status = pRtlAddAttributeActionToRXact(context, 2, &key_name, INVALID_HANDLE_VALUE,
+                                           &value_name, REG_DWORD, &value, sizeof(value));
+    ok(status == STATUS_SUCCESS, "RtlAddAttributeActionToRXact returned %#lx\n", status);
+    status = pRtlApplyRXactNoFlush(context);
+    ok(status == STATUS_SUCCESS, "RtlApplyRXactNoFlush returned %#lx\n", status);
+
+    error = RegOpenKeyExW(root, L"Created", 0, KEY_READ, &target);
+    ok(error == ERROR_SUCCESS, "RegOpenKeyExW(Created) failed: %lu\n", error);
+    if (!error)
+    {
+        size = sizeof(value);
+        error = RegQueryValueExW(target, L"Named", NULL, &type, (BYTE *)&value, &size);
+        ok(error == ERROR_SUCCESS, "RegQueryValueExW(Named) failed: %lu\n", error);
+        ok(type == REG_DWORD && size == sizeof(value) && value == 0x87654321,
+           "unexpected named value type %lu, size %lu, data %#lx\n", type, size, value);
+        RegCloseKey(target);
+    }
+    status = pRtlAbortRXact(context);
+    ok(status == STATUS_RXACT_INVALID_STATE, "RtlAbortRXact after apply returned %#lx\n", status);
+
+    status = pRtlStartRXact(context);
+    ok(status == STATUS_SUCCESS, "recovery RtlStartRXact returned %#lx\n", status);
+    pRtlInitUnicodeString(&key_name, L"Recovered");
+    value = 0xabcdef01;
+    status = pRtlAddActionToRXact(context, 2, &key_name, REG_DWORD, &value, sizeof(value));
+    ok(status == STATUS_SUCCESS, "recovery RtlAddActionToRXact returned %#lx\n", status);
+
+    data = context->data;
+    pRtlInitUnicodeString(&log_name, L"Log");
+    status = pNtSetValueKey(context->key, &log_name, 0, REG_BINARY, data, data->current_size);
+    ok(status == STATUS_SUCCESS, "NtSetValueKey(Log) returned %#lx\n", status);
+    status = pRtlAbortRXact(context);
+    ok(status == STATUS_SUCCESS, "recovery RtlAbortRXact returned %#lx\n", status);
+    free_rxact_context(context);
+    context = NULL;
+
+    status = pRtlInitializeRXact(root, FALSE, (void **)&context);
+    ok(status == STATUS_RXACT_COMMIT_NECESSARY, "RtlInitializeRXact(no commit) returned %#lx\n", status);
+    free_rxact_context(context);
+    context = NULL;
+
+    status = pRtlInitializeRXact(root, TRUE, (void **)&context);
+    ok(status == STATUS_SUCCESS, "RtlInitializeRXact(commit) returned %#lx\n", status);
+    error = RegOpenKeyExW(root, L"Recovered", 0, KEY_READ, &target);
+    ok(error == ERROR_SUCCESS, "RegOpenKeyExW(Recovered) failed: %lu\n", error);
+    if (!error)
+    {
+        size = sizeof(value);
+        error = RegQueryValueExW(target, NULL, NULL, &type, (BYTE *)&value, &size);
+        ok(error == ERROR_SUCCESS, "RegQueryValueExW(recovered default) failed: %lu\n", error);
+        ok(type == REG_DWORD && size == sizeof(value) && value == 0xabcdef01,
+           "unexpected recovered value type %lu, size %lu, data %#lx\n", type, size, value);
+        RegCloseKey(target);
+    }
+
+    status = pRtlStartRXact(context);
+    ok(status == STATUS_SUCCESS, "delete RtlStartRXact returned %#lx\n", status);
+    pRtlInitUnicodeString(&key_name, L"Created");
+    status = pRtlAddActionToRXact(context, 1, &key_name, REG_NONE, NULL, 0);
+    ok(status == STATUS_SUCCESS, "delete RtlAddActionToRXact returned %#lx\n", status);
+    status = pRtlApplyRXact(context);
+    ok(status == STATUS_SUCCESS, "RtlApplyRXact returned %#lx\n", status);
+    error = RegOpenKeyExW(root, L"Created", 0, KEY_READ, &target);
+    ok(error == ERROR_FILE_NOT_FOUND, "deleted key open returned %lu\n", error);
+
+done:
+    free_rxact_context(context);
+    RegCloseKey(root);
+    error = RegDeleteTreeW(HKEY_CURRENT_USER, root_name);
+    ok(error == ERROR_SUCCESS, "RegDeleteTreeW failed: %lu\n", error);
+}
+
 START_TEST(reg)
 {
     LSTATUS status;
@@ -3185,6 +3353,7 @@ START_TEST(reg)
     test_NtRenameKey();
     test_NtRegLoadKeyEx();
     test_RtlQueryRegistryValues();
+    test_RXact();
 
     status = RegDeleteTreeW(HKEY_CURRENT_USER, L"WineTest");
     ok(status == ERROR_SUCCESS, "Failed to delete the WineTest registry key: %lu\n", status);

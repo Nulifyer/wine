@@ -487,7 +487,7 @@
 @ stub PfxRemovePrefix
 @ stdcall -arch=arm64ec ProcessPendingCrossProcessEmulatorWork()
 # @ stub PropertyLengthAsVariant
-@ stub RtlAbortRXact
+@ stdcall RtlAbortRXact(ptr)
 @ stdcall RtlAbsoluteToSelfRelativeSD(ptr ptr ptr)
 @ stdcall RtlAcquirePebLock()
 @ stdcall RtlAcquireResourceExclusive(ptr long)
@@ -504,9 +504,9 @@
 @ stdcall RtlAddAccessDeniedAceEx(ptr long long long ptr)
 @ stdcall RtlAddAccessDeniedObjectAce(ptr long long long ptr ptr ptr)
 @ stdcall RtlAddAce(ptr long long ptr long)
-@ stub RtlAddActionToRXact
+@ stdcall RtlAddActionToRXact(ptr long ptr long ptr long)
 @ stdcall RtlAddAtomToAtomTable(ptr wstr ptr)
-@ stub RtlAddAttributeActionToRXact
+@ stdcall RtlAddAttributeActionToRXact(ptr long ptr long ptr long ptr long)
 @ stdcall RtlAddAuditAccessAce(ptr long long ptr long long)
 @ stdcall RtlAddAuditAccessAceEx(ptr long long long ptr long long)
 @ stdcall RtlAddAuditAccessObjectAce(ptr long long long ptr ptr ptr long long)
@@ -535,8 +535,8 @@
 @ stdcall RtlAppendUnicodeStringToString(ptr ptr)
 @ stdcall RtlAppendUnicodeToString(ptr wstr)
 # @ stub RtlApplicationVerifierStop
-@ stub RtlApplyRXact
-@ stub RtlApplyRXactNoFlush
+@ stdcall RtlApplyRXact(ptr)
+@ stdcall RtlApplyRXactNoFlush(ptr)
 @ stdcall RtlAreAllAccessesGranted(long long)
 @ stdcall RtlAreAnyAccessesGranted(long long)
 @ stdcall RtlAreBitsClear(ptr long long)
@@ -848,7 +848,7 @@
 @ stdcall RtlInitializeGenericTableAvl(ptr ptr ptr ptr ptr)
 @ stdcall RtlInitializeHandleTable(long long ptr)
 @ stdcall RtlInitializeNtUserPfn(ptr long ptr long ptr long)
-@ stub RtlInitializeRXact
+@ stdcall RtlInitializeRXact(long long ptr)
 # @ stub RtlInitializeRangeList
 @ stdcall RtlInitializeResource(ptr)
 @ stdcall RtlInitializeSListHead(ptr)
@@ -1099,7 +1099,7 @@
 @ stdcall RtlSleepConditionVariableCS(ptr ptr ptr)
 @ stdcall RtlSleepConditionVariableSRW(ptr ptr ptr long)
 @ stdcall RtlSplay(ptr)
-@ stub RtlStartRXact
+@ stdcall RtlStartRXact(ptr)
 # @ stub RtlStatMemoryStream
 @ stdcall RtlStringFromGUID(ptr ptr)
 @ stdcall RtlSubAuthorityCountSid(ptr)
