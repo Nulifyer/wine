@@ -21,6 +21,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winreg.h"
 
 #include "wldp.h"
 
@@ -60,4 +61,23 @@ HRESULT WINAPI WldpQueryWindowsLockdownMode(WLDP_WINDOWS_LOCKDOWN_MODE *lockdown
 
     *lockdown_mode = WLDP_WINDOWS_LOCKDOWN_MODE_UNLOCKED;
     return S_OK;
+}
+
+/***********************************************************************
+ *      WldpQueryWindowsLockdownRestriction (wldp.@)
+ */
+HRESULT WINAPI WldpQueryWindowsLockdownRestriction(DWORD *restriction)
+{
+    DWORD size = sizeof(*restriction);
+    LSTATUS status;
+
+    TRACE("%p\n", restriction);
+
+    if (!restriction) return E_INVALIDARG;
+
+    *restriction = 0;
+    status = RegGetValueW(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\CI\\Policy",
+                          L"LockDownRestriction", RRF_RT_DWORD, NULL, restriction, &size);
+    if (status == ERROR_FILE_NOT_FOUND || status == ERROR_NOT_FOUND) return S_OK;
+    return HRESULT_FROM_WIN32(status);
 }

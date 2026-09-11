@@ -20,12 +20,14 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winreg.h"
 #include "wldp.h"
 
 #include "wine/test.h"
 
 static HRESULT (WINAPI *pWldpGetLockdownPolicy)(WLDP_HOST_INFORMATION *, DWORD *, DWORD);
 static HRESULT (WINAPI *pWldpQueryWindowsLockdownMode)(WLDP_WINDOWS_LOCKDOWN_MODE *);
+static HRESULT (WINAPI *pWldpQueryWindowsLockdownRestriction)(DWORD *);
 
 static void test_WldpGetLockdownPolicy(void)
 {
@@ -70,13 +72,46 @@ static void test_WldpQueryWindowsLockdownMode(void)
     ok( mode == WLDP_WINDOWS_LOCKDOWN_MODE_UNLOCKED, "got %u\n", mode );
 }
 
+static void test_WldpQueryWindowsLockdownRestriction(void)
+{
+    DWORD expected = 0, restriction = 0xdeadbeef, size = sizeof(expected);
+    LSTATUS status;
+    HRESULT hr;
+
+    if (!pWldpQueryWindowsLockdownRestriction)
+    {
+        win_skip( "WldpQueryWindowsLockdownRestriction not available\n" );
+        return;
+    }
+
+    hr = pWldpQueryWindowsLockdownRestriction( NULL );
+    ok( hr == E_INVALIDARG, "got %#lx\n", hr );
+
+    status = RegGetValueW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\CI\\Policy",
+                           L"LockDownRestriction", RRF_RT_DWORD, NULL, &expected, &size );
+    hr = pWldpQueryWindowsLockdownRestriction( &restriction );
+    if (status == ERROR_FILE_NOT_FOUND || status == ERROR_NOT_FOUND)
+    {
+        ok( hr == S_OK, "got %#lx\n", hr );
+        ok( !restriction, "got %#lx\n", restriction );
+    }
+    else
+    {
+        ok( hr == HRESULT_FROM_WIN32(status), "got %#lx, expected %#lx for status %ld\n",
+            hr, HRESULT_FROM_WIN32(status), status );
+        ok( restriction == expected, "got %#lx, expected %#lx\n", restriction, expected );
+    }
+}
+
 START_TEST(wldp)
 {
     HMODULE hwldp = LoadLibraryW( L"wldp" );
 
     pWldpGetLockdownPolicy = (void *)GetProcAddress( hwldp, "WldpGetLockdownPolicy" );
     pWldpQueryWindowsLockdownMode = (void *)GetProcAddress( hwldp, "WldpQueryWindowsLockdownMode" );
+    pWldpQueryWindowsLockdownRestriction = (void *)GetProcAddress( hwldp, "WldpQueryWindowsLockdownRestriction" );
 
     test_WldpGetLockdownPolicy();
     test_WldpQueryWindowsLockdownMode();
+    test_WldpQueryWindowsLockdownRestriction();
 }

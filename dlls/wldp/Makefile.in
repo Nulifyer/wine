@@ -1,4 +1,5 @@
 MODULE    = wldp.dll
+IMPORTS   = advapi32
 
 SOURCES = \
 	wldp.c
