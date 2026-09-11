@@ -1132,6 +1132,7 @@ typedef volatile struct
     int          socket_fd;      /* file descriptor for process socket */
     unsigned int access;         /* access rights for process object */
     unsigned short machine;      /* architecture that the new process will use */
+    int          native_session; /* per-session native child of the reserved bootstrap */
     data_size_t  info_size;      /* size of startup info */
     data_size_t  handles_size;   /* length of explicit handles list */
     data_size_t  jobs_size;      /* length of jobs list */

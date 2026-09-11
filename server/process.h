@@ -111,7 +111,7 @@ extern int validate_native_bootstrap_image( struct process *process, int fd );
 extern struct process *create_process( int fd, struct process *parent, unsigned int flags,
                                        const struct startup_info_data *info,
                                        const struct security_descriptor *sd, const obj_handle_t *handles,
-                                       unsigned int handle_count, struct token *token );
+                                       unsigned int handle_count, struct token *token, int session_id );
 extern data_size_t get_process_startup_info_size( struct process *process );
 extern struct thread *get_process_first_thread( struct process *process );
 extern struct process *get_process_from_id( process_id_t id );

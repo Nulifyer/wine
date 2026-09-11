@@ -1119,6 +1119,7 @@ struct new_process_request
     unsigned int access;
     unsigned short machine;
     char __pad_38[2];
+    int          native_session;
     data_size_t  info_size;
     data_size_t  handles_size;
     data_size_t  jobs_size;
@@ -1127,7 +1128,6 @@ struct new_process_request
     /* VARARG(jobs,uints,jobs_size); */
     /* VARARG(info,startup_info,info_size); */
     /* VARARG(env,unicode_str); */
-    char __pad_52[4];
 };
 struct new_process_reply
 {
@@ -7532,6 +7532,6 @@ union generic_reply
     struct get_process_protection_reply get_process_protection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 981
+#define SERVER_PROTOCOL_VERSION 982
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

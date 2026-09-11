@@ -1280,6 +1280,11 @@ unsigned int token_get_session_id( struct token *token )
     return token->session_id;
 }
 
+void token_set_session_id( struct token *token, unsigned int session_id )
+{
+    token->session_id = session_id;
+}
+
 static unsigned int token_trust_access_mask( struct token *token, const struct security_descriptor *sd )
 {
     const struct acl *sacl;

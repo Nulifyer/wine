@@ -69,6 +69,7 @@
 
 static struct list process_list = LIST_INIT(process_list);
 static int running_processes, user_processes;
+static unsigned int next_native_session_id;
 static struct event *shutdown_event;           /* signaled when shutdown starts */
 static struct timeout_user *shutdown_timeout;  /* timeout for server shutdown */
 static int shutdown_stage;  /* current stage in the shutdown process */
@@ -596,7 +597,7 @@ static void start_sigkill_timer( struct process *process )
 struct process *create_process( int fd, struct process *parent, unsigned int flags,
                                 const struct startup_info_data *info,
                                 const struct security_descriptor *sd, const obj_handle_t *handles,
-                                unsigned int handle_count, struct token *token )
+                                unsigned int handle_count, struct token *token, int session_id )
 {
     struct process *process;
 
@@ -709,6 +710,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
         process->affinity = parent->affinity;
     }
     if (!process->handles || !process->token) goto error;
+    if (session_id >= 0) token_set_session_id( process->token, session_id );
     process->session_id = token_get_session_id( process->token );
 
     set_fd_events( process->msg_fd, POLLIN );  /* start listening to events */
@@ -734,7 +736,7 @@ int init_native_bootstrap( int socket, int image, int pid )
     struct process *process;
     struct thread *thread;
 
-    if (!(process = create_process( socket, NULL, 0, NULL, NULL, NULL, 0, NULL )))
+    if (!(process = create_process( socket, NULL, 0, NULL, NULL, NULL, 0, NULL, -1 )))
     {
         close( image );
         return 0;
@@ -1200,6 +1202,7 @@ DECL_HANDLER(new_process)
     const obj_handle_t *handles = NULL;
     const obj_handle_t *job_handles = NULL;
     unsigned int i, job_handle_count;
+    int native_session_id = -1;
     struct job *job;
 
     if (socket_fd == -1)
@@ -1238,6 +1241,18 @@ DECL_HANDLER(new_process)
         parent_thread = NULL;
     }
     else parent = (struct process *)grab_object( current->process );
+
+    if (req->native_session)
+    {
+        if (parent != current->process || !parent->native_bootstrap_pid)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            close( socket_fd );
+            release_object( parent );
+            return;
+        }
+        native_session_id = next_native_session_id;
+    }
 
     /* If a job further in the job chain does not permit breakaway process creation
      * succeeds and the process which is trying to breakaway is assigned to that job. */
@@ -1360,8 +1375,10 @@ DECL_HANDLER(new_process)
     }
 
     if (!(process = create_process( socket_fd, parent, req->flags, info->data, params.sd,
-                                    handles, req->handles_size / sizeof(*handles), token )))
+                                    handles, req->handles_size / sizeof(*handles), token,
+                                    native_session_id )))
         goto done;
+    if (native_session_id >= 0) next_native_session_id++;
 
     process->machine = req->machine;
     process->startup_info = (struct startup_info *)grab_object( info );

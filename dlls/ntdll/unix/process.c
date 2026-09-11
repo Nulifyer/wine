@@ -825,6 +825,8 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         req->socket_fd      = socketfd[1];
         req->access         = process_access;
         req->machine        = machine;
+        req->native_session = is_native_machine && pe_info.subsystem == IMAGE_SUBSYSTEM_NATIVE &&
+                              (process_flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES);
         req->info_size      = startup_info_size;
         req->handles_size   = handles_size;
         req->jobs_size      = jobs_size;

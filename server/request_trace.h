@@ -70,6 +70,7 @@ static void dump_new_process_request( const struct new_process_request *req )
     fprintf( stderr, ", socket_fd=%d", req->socket_fd );
     fprintf( stderr, ", access=%08x", req->access );
     fprintf( stderr, ", machine=%04x", req->machine );
+    fprintf( stderr, ", native_session=%d", req->native_session );
     fprintf( stderr, ", info_size=%u", req->info_size );
     fprintf( stderr, ", handles_size=%u", req->handles_size );
     fprintf( stderr, ", jobs_size=%u", req->jobs_size );
