@@ -544,6 +544,68 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
                                 &create_info, attr );
 }
 
+/**********************************************************************
+ *           RtlCreateUserProcessEx  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlCreateUserProcessEx( UNICODE_STRING *path, RTL_USER_PROCESS_PARAMETERS *params,
+                                        BOOLEAN inherit, RTL_USER_PROCESS_EXTENDED_PARAMETERS *extended,
+                                        RTL_USER_PROCESS_INFORMATION *info )
+{
+    RTL_USER_PROCESS_INFORMATION local = { sizeof(local) };
+    UNICODE_STRING nt_path;
+    WCHAR *path_buffer;
+    SIZE_T path_chars, path_offset = 0;
+    BOOL free_nt_path = FALSE;
+    NTSTATUS status;
+
+    if (!path || !path->Buffer || !path->Length || path->Length & 1 ||
+        !params || !extended || !info || extended->Version != 1 ||
+        info->Length != sizeof(*info)) return STATUS_INVALID_PARAMETER;
+
+    /* A single optional job is part of the private version-1 layout, but the
+     * current native SMSS transaction leaves it empty. Do not create a child
+     * outside that verified partition and then fail to attach its job. */
+    if (extended->JobHandle) return STATUS_NOT_IMPLEMENTED;
+
+    path_chars = path->Length / sizeof(WCHAR);
+    if (path_chars >= 2 && path->Buffer[0] == '"' && path->Buffer[path_chars - 1] == '"')
+    {
+        path_offset = 1;
+        path_chars -= 2;
+    }
+    if (!(path_buffer = RtlAllocateHeap( GetProcessHeap(), 0, (path_chars + 1) * sizeof(WCHAR) )))
+        return STATUS_NO_MEMORY;
+    memcpy( path_buffer, path->Buffer + path_offset, path_chars * sizeof(WCHAR) );
+    path_buffer[path_chars] = 0;
+
+    if (path_buffer[0] == '\\') RtlInitUnicodeString( &nt_path, path_buffer );
+    else
+    {
+        status = RtlDosPathNameToNtPathName_U_WithStatus( path_buffer, &nt_path, NULL, NULL );
+        if (status)
+        {
+            RtlFreeHeap( GetProcessHeap(), 0, path_buffer );
+            return status;
+        }
+        free_nt_path = TRUE;
+    }
+
+    status = RtlCreateUserProcess( &nt_path, 0, params, extended->ProcessSecurityDescriptor,
+                                   extended->ThreadSecurityDescriptor, extended->ParentProcess,
+                                   inherit, extended->DebugPort, extended->TokenHandle, &local );
+    if (free_nt_path) RtlFreeUnicodeString( &nt_path );
+    RtlFreeHeap( GetProcessHeap(), 0, path_buffer );
+    if (status)
+    {
+        if (local.Thread) NtClose( local.Thread );
+        if (local.Process) NtClose( local.Process );
+        return status;
+    }
+
+    *info = local;
+    return STATUS_SUCCESS;
+}
+
 /***********************************************************************
  *      DbgUiGetThreadDebugObject (NTDLL.@)
  */

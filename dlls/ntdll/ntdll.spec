@@ -610,6 +610,7 @@
 @ stdcall RtlCreateUnicodeString(ptr wstr)
 @ stdcall RtlCreateUnicodeStringFromAsciiz(ptr str)
 @ stdcall RtlCreateUserProcess(ptr long ptr ptr ptr long long long long ptr)
+@ stdcall RtlCreateUserProcessEx(ptr ptr long ptr ptr)
 @ stub RtlCreateUserSecurityObject
 @ stdcall RtlCreateUserStack(long long long long long ptr)
 @ stdcall RtlCreateUserThread(long ptr long long long long ptr ptr ptr ptr)
