@@ -1236,6 +1236,32 @@ done:
     release_object( listener );
 }
 
+DECL_HANDLER(alpc_open_sender_process)
+{
+    struct alpc_port *listener, *client, *sender = NULL;
+
+    reply->handle = 0;
+    if (!(listener = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                        ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
+    if (listener->thread->process != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto done;
+    }
+    LIST_FOR_EACH_ENTRY( client, &listener->pending_connections, struct alpc_port, pending_entry )
+        if (client->connection_id == req->message_id && client->request_delivered &&
+            client->thread->process->id == req->sender_pid && client->thread->id == req->sender_tid)
+        {
+            sender = client;
+            break;
+        }
+    if (!sender) set_error( STATUS_INVALID_MESSAGE );
+    else reply->handle = alloc_handle( current->process, sender->thread->process,
+                                      req->access, req->attributes );
+done:
+    release_object( listener );
+}
+
 DECL_HANDLER(alpc_disconnect_port)
 {
     struct alpc_port *port;

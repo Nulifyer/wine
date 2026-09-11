@@ -162,6 +162,7 @@
 @ stdcall -syscall NtAlpcDisconnectPort(ptr long)
 @ stdcall -syscall NtAlpcSetInformation(ptr long ptr long)
 @ stdcall -syscall NtAlpcImpersonateClientOfPort(ptr ptr ptr)
+@ stdcall -syscall NtAlpcOpenSenderProcess(ptr long ptr long long ptr)
 @ stdcall -syscall NtAlpcSendWaitReceivePort(ptr long ptr ptr ptr ptr ptr ptr)
 @ stub -syscall=0x004c NtApphelpCacheControl
 @ stdcall -syscall NtAreMappedFilesTheSame(ptr ptr)
@@ -564,6 +565,7 @@
 @ stdcall RtlComputeCrc32(long ptr long)
 # @ stub RtlComputeImportTableHash
 # @ stub RtlComputePrivatizedDllName_U
+@ stdcall RtlConnectToSm(ptr long long ptr)
 @ stub RtlConsoleMultiByteToUnicodeN
 @ stdcall RtlConvertDeviceFamilyInfoToString(ptr ptr ptr ptr)
 @ stub RtlConvertExclusiveToShared

@@ -26,6 +26,33 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(alpc);
 
+/***********************************************************************
+ *           RtlConnectToSm    (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlConnectToSm( UNICODE_STRING *api_port_name, HANDLE api_port_handle,
+                                ULONG process_image_type, HANDLE *connection_handle )
+{
+    static const WCHAR default_name_buffer[] = L"\\SmApiPort";
+    UNICODE_STRING default_name = RTL_CONSTANT_STRING(default_name_buffer);
+    ALPC_PORT_ATTRIBUTES attributes = {0};
+
+    TRACE( "%s %p %#lx %p\n", api_port_name ?
+           wine_dbgstr_wn(api_port_name->Buffer, api_port_name->Length / sizeof(WCHAR)) : "(null)", api_port_handle,
+           process_image_type, connection_handle );
+
+    if (!connection_handle) return STATUS_ACCESS_VIOLATION;
+    if (api_port_name) return STATUS_INVALID_PORT_ATTRIBUTES;
+
+    /* The default client form does not admit a subsystem, so Windows ignores
+     * the supplied server handle and image type. The named form carries that
+     * admission data and remains a separate contract. */
+    attributes.Flags = 0x20000;
+    attributes.MaxMessageLength = 0x148;
+    attributes.MaxPoolUsage = 1000000;
+    return NtAlpcConnectPort( connection_handle, &default_name, NULL, &attributes, 0,
+                              NULL, NULL, NULL, NULL, NULL, NULL );
+}
+
 SIZE_T WINAPI AlpcGetHeaderSize(ULONG attribute_flags)
 {
     static const struct

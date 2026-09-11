@@ -188,6 +188,33 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
     return status;
 }
 
+NTSTATUS WINAPI NtAlpcOpenSenderProcess( HANDLE *process_handle, HANDLE port_handle,
+                                         ALPC_PORT_MESSAGE *message, ULONG flags,
+                                         ACCESS_MASK access, OBJECT_ATTRIBUTES *attributes )
+{
+    NTSTATUS status;
+
+    if (!process_handle || !message) return STATUS_ACCESS_VIOLATION;
+    if (flags) return STATUS_INVALID_PARAMETER;
+    if (attributes && (attributes->Length != sizeof(*attributes) || attributes->ObjectName ||
+                       attributes->RootDirectory || attributes->SecurityDescriptor))
+        return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( alpc_open_sender_process )
+    {
+        req->handle = wine_server_obj_handle( port_handle );
+        req->message_id = message->MessageId;
+        req->sender_pid = HandleToULong( message->ClientId.UniqueProcess );
+        req->sender_tid = HandleToULong( message->ClientId.UniqueThread );
+        req->access = access;
+        req->attributes = attributes ? attributes->Attributes : 0;
+        status = wine_server_call( req );
+        if (!status) *process_handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 NTSTATUS WINAPI NtAlpcCreatePort( HANDLE *port_handle, OBJECT_ATTRIBUTES *attr, ALPC_PORT_ATTRIBUTES *port_attr )
 {
     struct object_attributes *objattr = NULL;

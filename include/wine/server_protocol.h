@@ -6464,6 +6464,24 @@ struct alpc_accept_connect_port_reply
     char __pad_12[4];
 };
 
+struct alpc_open_sender_process_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int message_id;
+    process_id_t sender_pid;
+    thread_id_t  sender_tid;
+    unsigned int access;
+    unsigned int attributes;
+    char __pad_36[4];
+};
+struct alpc_open_sender_process_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
 struct alpc_disconnect_port_request
 {
     struct request_header __header;
@@ -6821,6 +6839,7 @@ enum request
     REQ_alpc_connect_port,
     REQ_alpc_get_connect_result,
     REQ_alpc_accept_connect_port,
+    REQ_alpc_open_sender_process,
     REQ_alpc_disconnect_port,
     REQ_get_process_critical_state,
     REQ_get_process_protection,
@@ -7149,6 +7168,7 @@ union generic_request
     struct alpc_connect_port_request alpc_connect_port_request;
     struct alpc_get_connect_result_request alpc_get_connect_result_request;
     struct alpc_accept_connect_port_request alpc_accept_connect_port_request;
+    struct alpc_open_sender_process_request alpc_open_sender_process_request;
     struct alpc_disconnect_port_request alpc_disconnect_port_request;
     struct get_process_critical_state_request get_process_critical_state_request;
     struct get_process_protection_request get_process_protection_request;
@@ -7475,11 +7495,12 @@ union generic_reply
     struct alpc_connect_port_reply alpc_connect_port_reply;
     struct alpc_get_connect_result_reply alpc_get_connect_result_reply;
     struct alpc_accept_connect_port_reply alpc_accept_connect_port_reply;
+    struct alpc_open_sender_process_reply alpc_open_sender_process_reply;
     struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
     struct get_process_critical_state_reply get_process_critical_state_reply;
     struct get_process_protection_reply get_process_protection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 977
+#define SERVER_PROTOCOL_VERSION 978
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
