@@ -1689,6 +1689,22 @@ static void test_query_battery(void)
        "expected %lu minutes remaining got %lu minutes\n", time_left, bs.EstimatedTime);
 }
 
+static void test_power_black_box_update(void)
+{
+    BYTE input[32];
+    NTSTATUS status;
+
+    memset(input, 0, sizeof(input));
+    status = pNtPowerInformation(UpdateBlackBoxRecorder, input, sizeof(input), NULL, 0);
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+
+    status = pNtPowerInformation(UpdateBlackBoxRecorder, input, sizeof(input) - 1, NULL, 0);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Expected STATUS_BUFFER_TOO_SMALL, got %08lx\n", status);
+
+    status = pNtPowerInformation(UpdateBlackBoxRecorder, NULL, sizeof(input), NULL, 0);
+    ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got %08lx\n", status);
+}
+
 static void test_query_processor_power_info(void)
 {
     NTSTATUS status;
@@ -4767,6 +4783,7 @@ START_TEST(info)
 
     /* NtPowerInformation */
     test_query_battery();
+    test_power_black_box_update();
     test_query_processor_power_info();
 
     /* NtQueryInformationProcess */

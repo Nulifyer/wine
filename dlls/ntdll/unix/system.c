@@ -4801,6 +4801,12 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
         return STATUS_SUCCESS;
     }
 
+    case UpdateBlackBoxRecorder:
+        if (!input || output || out_size) return STATUS_INVALID_PARAMETER;
+        if (in_size < 32) return STATUS_BUFFER_TOO_SMALL;
+        if (in_size != 32) return STATUS_INVALID_PARAMETER;
+        return STATUS_SUCCESS;
+
     default:
         /* FIXME: Needed by .NET Framework */
         WARN( "Unimplemented NtPowerInformation action: %d\n", level );

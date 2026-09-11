@@ -5792,7 +5792,8 @@ typedef enum _POWER_INFORMATION_LEVEL {
         ProcessorPowerPolicyDc,
         VerifyProcessorPowerPolicyAc,
         VerifyProcessorPowerPolicyDc,
-        ProcessorPowerPolicyCurrent
+        ProcessorPowerPolicyCurrent,
+        UpdateBlackBoxRecorder = 94
 } POWER_INFORMATION_LEVEL;
 
 typedef struct _ADMINISTRATOR_POWER_POLICY {
