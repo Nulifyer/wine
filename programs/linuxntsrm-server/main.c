@@ -19,6 +19,7 @@
 #define SRM_PAYLOAD_LIMIT 0x1d4
 #define LSA_CONNECT_RETRY_COUNT 2400
 #define LSA_CONNECT_RETRY_100NS 500000
+#define POLICY_INIT_TIMEOUT_SECONDS 120
 
 struct srm_message
 {
@@ -164,6 +165,94 @@ static NTSTATUS connect_to_lsa( HANDLE *port, UNICODE_STRING *name,
     return STATUS_TIMEOUT;
 }
 
+static NTSTATUS ensure_default_audit_policy(void)
+{
+    static const WCHAR security_name_buffer[] = L"\\Registry\\Machine\\Security";
+    static const WCHAR revision_name_buffer[] = L"Policy\\PolRevision";
+    static const WCHAR audit_name_buffer[] = L"Policy\\PolAdtEv";
+    static const ULONG default_audit_policy[] = {FALSE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9};
+    UNICODE_STRING security_name = RTL_CONSTANT_STRING(security_name_buffer);
+    UNICODE_STRING revision_name = RTL_CONSTANT_STRING(revision_name_buffer);
+    UNICODE_STRING audit_name = RTL_CONSTANT_STRING(audit_name_buffer);
+    UNICODE_STRING default_name = {0, 0, NULL};
+    OBJECT_ATTRIBUTES attributes;
+    IO_STATUS_BLOCK io;
+    LARGE_INTEGER timeout;
+    HANDLE security = NULL, security_notify = NULL, event = NULL, key = NULL;
+    BOOL notification_pending = FALSE;
+    ULONG disposition;
+    NTSTATUS status;
+
+    /* The source SECURITY hive is an empty root.  Materialize only that root;
+     * genuine LSASS must remain responsible for creating the policy database
+     * and its protected state through RXACT. */
+    InitializeObjectAttributes( &attributes, &security_name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+    status = NtCreateKey( &security, KEY_CREATE_SUB_KEY, &attributes, 0, NULL,
+                          REG_OPTION_NON_VOLATILE, &disposition );
+    if (status) return status;
+
+    InitializeObjectAttributes( &attributes, &security_name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+    status = NtOpenKey( &security_notify, KEY_NOTIFY, &attributes );
+    if (status) goto done;
+
+    status = NtCreateEvent( &event, EVENT_ALL_ACCESS, NULL, NotificationEvent, FALSE );
+    if (status) goto done;
+
+    status = NtQuerySystemTime( &timeout );
+    if (status) goto done;
+    timeout.QuadPart += (LONGLONG)POLICY_INIT_TIMEOUT_SECONDS * 10000000;
+
+    for (;;)
+    {
+        status = NtNotifyChangeKey( security_notify, event, NULL, NULL, &io,
+                                    REG_NOTIFY_CHANGE_NAME, TRUE, NULL, 0, TRUE );
+        if (status != STATUS_PENDING) goto done;
+        notification_pending = TRUE;
+
+        InitializeObjectAttributes( &attributes, &revision_name, OBJ_CASE_INSENSITIVE,
+                                    security, NULL );
+        status = NtOpenKey( &key, KEY_READ, &attributes );
+        if (!status)
+        {
+            NtClose( key );
+            key = NULL;
+            break;
+        }
+        if (status != STATUS_OBJECT_NAME_NOT_FOUND && status != STATUS_OBJECT_PATH_NOT_FOUND)
+            goto done;
+
+        status = NtWaitForSingleObject( event, FALSE, &timeout );
+        if (status) goto done;
+        notification_pending = FALSE;
+        NtResetEvent( event, NULL );
+    }
+
+    NtClose( security_notify );
+    security_notify = NULL;
+    status = NtWaitForSingleObject( event, FALSE, NULL );
+    notification_pending = FALSE;
+    if (status) goto done;
+
+    InitializeObjectAttributes( &attributes, &audit_name, OBJ_CASE_INSENSITIVE, security, NULL );
+    status = NtOpenKey( &key, KEY_READ, &attributes );
+    if (!status) goto done;
+    if (status != STATUS_OBJECT_NAME_NOT_FOUND && status != STATUS_OBJECT_PATH_NOT_FOUND) goto done;
+
+    status = NtCreateKey( &key, KEY_SET_VALUE, &attributes, 0, NULL, REG_OPTION_NON_VOLATILE,
+                          &disposition );
+    if (status || disposition != REG_CREATED_NEW_KEY) goto done;
+    status = NtSetValueKey( key, &default_name, 0, REG_NONE, default_audit_policy,
+                            sizeof(default_audit_policy) );
+
+done:
+    if (key) NtClose( key );
+    if (security_notify) NtClose( security_notify );
+    if (notification_pending) NtWaitForSingleObject( event, FALSE, NULL );
+    if (event) NtClose( event );
+    if (security) NtClose( security );
+    return status;
+}
+
 static NTSTATUS run_server( HANDLE ready_event )
 {
     static const WCHAR rm_name_buffer[] = L"\\SeRmCommandPort";
@@ -208,6 +297,9 @@ static NTSTATUS run_server( HANDLE ready_event )
     if (status) goto done;
 
     status = connect_to_lsa( &lsa_command_port, &lsa_name, &attributes );
+    if (status) goto done;
+
+    status = ensure_default_audit_policy();
     if (status) goto done;
 
     status = serve_lsa_commands( command_port );

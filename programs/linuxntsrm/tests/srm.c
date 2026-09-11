@@ -56,6 +56,85 @@ static DWORD WINAPI connect_to_rm( void *arg )
     return context->status;
 }
 
+static BOOL create_policy_revision(void)
+{
+    static const WCHAR security_name_buffer[] = L"\\Registry\\Machine\\Security";
+    static const WCHAR policy_name_buffer[] = L"Policy";
+    static const WCHAR revision_name_buffer[] = L"PolRevision";
+    UNICODE_STRING security_name = RTL_CONSTANT_STRING(security_name_buffer);
+    UNICODE_STRING policy_name = RTL_CONSTANT_STRING(policy_name_buffer);
+    UNICODE_STRING revision_name = RTL_CONSTANT_STRING(revision_name_buffer);
+    OBJECT_ATTRIBUTES attributes;
+    HANDLE security = NULL, policy = NULL, revision = NULL;
+    ULONG attempt;
+    ULONG disposition;
+    NTSTATUS status;
+
+    InitializeObjectAttributes( &attributes, &security_name, OBJ_CASE_INSENSITIVE,
+                                NULL, NULL );
+    for (attempt = 0; attempt < 3000; attempt++)
+    {
+        status = NtOpenKey( &security, KEY_CREATE_SUB_KEY, &attributes );
+        if (!status) break;
+        if (status != STATUS_OBJECT_NAME_NOT_FOUND && status != STATUS_OBJECT_PATH_NOT_FOUND)
+            break;
+        Sleep( 10 );
+    }
+    ok( !status, "server did not create the Security root, status %#lx\n", status );
+    if (status) goto done;
+
+    InitializeObjectAttributes( &attributes, &policy_name, OBJ_CASE_INSENSITIVE,
+                                security, NULL );
+    status = NtCreateKey( &policy, KEY_CREATE_SUB_KEY, &attributes, 0, NULL,
+                          REG_OPTION_NON_VOLATILE, &disposition );
+    ok( !status, "NtCreateKey Policy returned %#lx\n", status );
+    if (status) goto done;
+
+    InitializeObjectAttributes( &attributes, &revision_name, OBJ_CASE_INSENSITIVE,
+                                policy, NULL );
+    status = NtCreateKey( &revision, KEY_READ, &attributes, 0, NULL,
+                          REG_OPTION_NON_VOLATILE, &disposition );
+    ok( !status, "NtCreateKey PolRevision returned %#lx\n", status );
+
+done:
+    if (revision) NtClose( revision );
+    if (policy) NtClose( policy );
+    if (security) NtClose( security );
+    return !status;
+}
+
+static void check_default_audit_policy(void)
+{
+    static const WCHAR audit_name_buffer[] = L"\\Registry\\Machine\\Security\\Policy\\PolAdtEv";
+    static const ULONG expected[] = {FALSE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9};
+    UNICODE_STRING audit_name = RTL_CONSTANT_STRING(audit_name_buffer);
+    UNICODE_STRING default_name = {0, 0, NULL};
+    OBJECT_ATTRIBUTES attributes;
+    ULONG buffer[32], result_length;
+    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+    HANDLE audit;
+    NTSTATUS status;
+
+    InitializeObjectAttributes( &attributes, &audit_name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+    status = NtOpenKey( &audit, KEY_QUERY_VALUE, &attributes );
+    ok( !status, "NtOpenKey PolAdtEv returned %#lx\n", status );
+    if (status) return;
+
+    status = NtQueryValueKey( audit, &default_name, KeyValuePartialInformation,
+                              info, sizeof(buffer), &result_length );
+    ok( !status, "NtQueryValueKey PolAdtEv returned %#lx\n", status );
+    if (!status)
+    {
+        ok( info->Type == REG_NONE, "PolAdtEv type is %lu\n", info->Type );
+        ok( info->DataLength == sizeof(expected), "PolAdtEv has %lu data bytes\n",
+            info->DataLength );
+        if (info->DataLength == sizeof(expected))
+            ok( !memcmp( info->Data, expected, sizeof(expected) ),
+                "PolAdtEv does not contain the disabled legacy policy\n" );
+    }
+    NtClose( audit );
+}
+
 static BOOL start_server(void)
 {
     SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
@@ -160,6 +239,14 @@ static void test_lsa_handshake(void)
         return;
     }
 
+    if (!create_policy_revision())
+    {
+        NtClose( context.port );
+        NtClose( reverse_port );
+        NtClose( lsa_port );
+        return;
+    }
+
     memset( &message, 0, sizeof(message) );
     message.header.DataLength = sizeof(command);
     message.header.TotalLength = sizeof(message.header) + message.header.DataLength;
@@ -172,6 +259,7 @@ static void test_lsa_handshake(void)
         message.header.DataLength );
     memcpy( &command_status, message.data, sizeof(command_status) );
     ok( command_status == STATUS_NOT_IMPLEMENTED, "command status is %#lx\n", command_status );
+    check_default_audit_policy();
 
     NtClose( context.port );
     NtClose( reverse_port );
