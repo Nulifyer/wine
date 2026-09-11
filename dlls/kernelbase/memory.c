@@ -106,6 +106,44 @@ static const SIZE_T page_mask = 0xfff;
 #define ROUND_SIZE(addr,size) (((SIZE_T)(size) + ((UINT_PTR)(addr) & page_mask) + page_mask) & ~page_mask)
 
 /***********************************************************************
+ *             GetOsManufacturingMode   (kernelbase.@)
+ */
+BOOL WINAPI GetOsManufacturingMode( BOOL *mode )
+{
+    ULONG size = 0;
+    NTSTATUS status;
+    void *info;
+
+    if (!mode)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    status = NtQuerySystemInformation( SystemManufacturingInformation, NULL, 0, &size );
+    if (status != STATUS_INFO_LENGTH_MISMATCH)
+    {
+        SetLastError( status ? RtlNtStatusToDosError( status ) : ERROR_INVALID_DATA );
+        return FALSE;
+    }
+    if (!(info = HeapAlloc( GetProcessHeap(), 0, size )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return FALSE;
+    }
+
+    status = NtQuerySystemInformation( SystemManufacturingInformation, info, size, &size );
+    if (!status) *mode = *(DWORD *)info & 1;
+    HeapFree( GetProcessHeap(), 0, info );
+    if (status)
+    {
+        SetLastError( RtlNtStatusToDosError( status ) );
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/***********************************************************************
  *             DiscardVirtualMemory   (kernelbase.@)
  */
 DWORD WINAPI DECLSPEC_HOTPATCH DiscardVirtualMemory( void *addr, SIZE_T size )

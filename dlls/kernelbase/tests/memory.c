@@ -28,6 +28,7 @@
 #include "wine/test.h"
 
 static UINT WINAPI (WINAPI *pEnumSystemFirmwareTables)(DWORD provider, void *buffer, DWORD size);
+static BOOL WINAPI (*pGetOsManufacturingMode)(BOOL *mode);
 
 static void test_enum_system_firmware_tables(void)
 {
@@ -50,12 +51,39 @@ static void test_enum_system_firmware_tables(void)
     ok(err == ERROR_INVALID_FUNCTION, "Unexpected error for invalid provider: %ld\n", err);
 }
 
+static void test_os_manufacturing_mode(void)
+{
+    BOOL mode;
+    BOOL ret;
+
+    if (!pGetOsManufacturingMode)
+    {
+        win_skip("GetOsManufacturingMode is not available.\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = pGetOsManufacturingMode(NULL);
+    ok(!ret, "Expected failure for a null output pointer.\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %lu.\n",
+       GetLastError());
+
+    mode = TRUE;
+    SetLastError(0xdeadbeef);
+    ret = pGetOsManufacturingMode(&mode);
+    ok(ret, "GetOsManufacturingMode failed, error %lu.\n", GetLastError());
+    ok(!mode, "Expected manufacturing mode to be disabled.\n");
+    ok(GetLastError() == 0xdeadbeef, "Expected last error to be preserved, got %lu.\n", GetLastError());
+}
+
 START_TEST(memory)
 {
     HMODULE hmod;
 
     hmod = LoadLibraryA("kernelbase.dll");
     pEnumSystemFirmwareTables = (void *)GetProcAddress(hmod, "EnumSystemFirmwareTables");
+    pGetOsManufacturingMode = (void *)GetProcAddress(hmod, "GetOsManufacturingMode");
 
     test_enum_system_firmware_tables();
+    test_os_manufacturing_mode();
 }

@@ -624,7 +624,7 @@
 @ stdcall GetNumberOfConsoleInputEvents(long ptr)
 @ stdcall GetNumberOfConsoleMouseButtons(ptr)
 @ stdcall GetOEMCP()
-# @ stub GetOsManufacturingMode
+@ stdcall GetOsManufacturingMode(ptr)
 # @ stub GetOsSafeBootMode
 @ stdcall GetOverlappedResult(long ptr ptr long)
 @ stdcall GetOverlappedResultEx(long ptr ptr long long)
