@@ -26,6 +26,7 @@ SOURCES = \
 	rtlstr.c \
 	service_session.c \
 	string.c \
+	system_root.c \
 	sync.c \
 	testdll.c \
 	testdll.spec \

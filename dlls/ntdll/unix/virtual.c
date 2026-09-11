@@ -4473,6 +4473,7 @@ void virtual_map_user_shared_data(void)
  */
 void virtual_init_user_shared_data(void)
 {
+    static const WCHAR system_rootW[] = {'C',':','\\','W','I','N','D','O','W','S',0};
     UNICODE_STRING name_str = RTL_CONSTANT_STRING( shared_data_nameW );
     OBJECT_ATTRIBUTES attr = { sizeof(attr), 0, &name_str };
     SYSTEM_BASIC_INFORMATION info;
@@ -4504,6 +4505,7 @@ void virtual_init_user_shared_data(void)
     data->NXSupportPolicy       = NX_SUPPORT_POLICY_OPTIN;
     data->ActiveProcessorCount  = peb->NumberOfProcessors;
     data->ActiveGroupCount      = 1;
+    memcpy(data->NtSystemRoot, system_rootW, sizeof(system_rootW));
 
     switch (native_machine)
     {

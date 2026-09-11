@@ -635,6 +635,14 @@ ULONG WINAPI RtlGetCurrentServiceSessionId(void)
     return 0;
 }
 
+/******************************************************************************
+ *  RtlGetNtSystemRoot   (NTDLL.@)
+ */
+WCHAR * WINAPI RtlGetNtSystemRoot(void)
+{
+    return user_shared_data->NtSystemRoot;
+}
+
 static inline UCHAR version_update_condition(UCHAR *last_condition, UCHAR condition)
 {
     switch (*last_condition)

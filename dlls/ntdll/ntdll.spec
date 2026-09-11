@@ -777,6 +777,7 @@
 # @ stub RtlGetNextRange
 @ stdcall RtlGetNtGlobalFlags()
 @ stdcall RtlGetNtProductType(ptr)
+@ stdcall RtlGetNtSystemRoot()
 @ stdcall RtlGetNtVersionNumbers(ptr ptr ptr)
 @ stdcall RtlGetOwnerSecurityDescriptor(ptr ptr ptr)
 @ stdcall RtlGetProductInfo(long long long long ptr)
