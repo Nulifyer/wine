@@ -43,6 +43,7 @@
 #include "rpcndr.h"
 
 #include "wine/debug.h"
+#include "wine/rpc_transport.h"
 
 #include "rpc_binding.h"
 #include "rpc_assoc.h"
@@ -894,6 +895,60 @@ static RPC_STATUS rpcrt4_ncalrpc_inquire_client_pid(RpcConnection *conn, ULONG *
     RpcConnection_np *connection = (RpcConnection_np *)conn;
 
     return GetNamedPipeClientProcessId(connection->pipe, pid) ? RPC_S_OK : RPC_S_INVALID_BINDING;
+}
+
+static RPC_STATUS rpcrt4_ncalrpc_send_system_handle(RpcConnection *conn, HANDLE source,
+                                                     ACCESS_MASK access, BOOL close_source,
+                                                     ULONGLONG *transfer_id)
+{
+    RpcConnection_np *connection = (RpcConnection_np *)conn;
+    struct wine_rpc_system_handle_request params;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+
+    params.value = (ULONG_PTR)source;
+    params.access = access;
+    params.attributes = 0;
+    params.options = (access ? 0 : DUPLICATE_SAME_ACCESS) |
+                     (close_source ? DUPLICATE_CLOSE_SOURCE : 0);
+    params.operation = WINE_RPC_SYSTEM_HANDLE_SEND;
+    status = NtFsControlFile(connection->pipe, NULL, NULL, NULL, &io,
+                             FSCTL_PIPE_WINE_RPC_SYSTEM_HANDLE, &params, sizeof(params),
+                             transfer_id, sizeof(*transfer_id));
+    return status ? RtlNtStatusToDosError(status) : RPC_S_OK;
+}
+
+static RPC_STATUS rpcrt4_ncalrpc_receive_system_handle(RpcConnection *conn,
+                                                        ULONGLONG transfer_id, HANDLE *handle)
+{
+    RpcConnection_np *connection = (RpcConnection_np *)conn;
+    struct wine_rpc_system_handle_request params = {0};
+    IO_STATUS_BLOCK io;
+    ULONGLONG value;
+    NTSTATUS status;
+
+    params.value = transfer_id;
+    params.operation = WINE_RPC_SYSTEM_HANDLE_RECEIVE;
+    status = NtFsControlFile(connection->pipe, NULL, NULL, NULL, &io,
+                             FSCTL_PIPE_WINE_RPC_SYSTEM_HANDLE, &params, sizeof(params),
+                             &value, sizeof(value));
+    if (!status) *handle = (HANDLE)(ULONG_PTR)value;
+    return status ? RtlNtStatusToDosError(status) : RPC_S_OK;
+}
+
+RPC_STATUS RPCRT4_InquireLocalClientThreadId(RpcConnection *conn, ULONG *tid)
+{
+    RpcConnection_np *connection = (RpcConnection_np *)conn;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+
+    if (!conn || strcmp(conn->ops->name, "ncalrpc"))
+        return RPC_S_INVALID_BINDING;
+
+    status = NtFsControlFile(connection->pipe, NULL, NULL, NULL, &io,
+                             FSCTL_PIPE_GET_CONNECTION_ATTRIBUTE, (void *)"ClientThreadId",
+                             sizeof("ClientThreadId"), tid, sizeof(*tid));
+    return status ? RtlNtStatusToDosError(status) : RPC_S_OK;
 }
 
 /**** ncacn_ip_tcp support ****/
@@ -3137,6 +3192,8 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_np_impersonate_client,
     rpcrt4_conn_np_revert_to_self,
     RPCRT4_default_inquire_auth_client,
+    NULL,
+    NULL,
     NULL
   },
   { "ncalrpc",
@@ -3160,7 +3217,9 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_np_impersonate_client,
     rpcrt4_conn_np_revert_to_self,
     rpcrt4_ncalrpc_inquire_auth_client,
-    rpcrt4_ncalrpc_inquire_client_pid
+    rpcrt4_ncalrpc_inquire_client_pid,
+    rpcrt4_ncalrpc_send_system_handle,
+    rpcrt4_ncalrpc_receive_system_handle
   },
   { "ncacn_ip_tcp",
     { EPM_PROTOCOL_NCACN, EPM_PROTOCOL_TCP },
@@ -3183,6 +3242,8 @@ static const struct connection_ops conn_protseq_list[] = {
     RPCRT4_default_impersonate_client,
     RPCRT4_default_revert_to_self,
     RPCRT4_default_inquire_auth_client,
+    NULL,
+    NULL,
     NULL
   },
   { "ncacn_http",
@@ -3206,6 +3267,8 @@ static const struct connection_ops conn_protseq_list[] = {
     RPCRT4_default_impersonate_client,
     RPCRT4_default_revert_to_self,
     RPCRT4_default_inquire_auth_client,
+    NULL,
+    NULL,
     NULL
   },
 };

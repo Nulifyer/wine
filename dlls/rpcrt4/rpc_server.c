@@ -105,6 +105,20 @@ static LONG listen_count;
 static HANDLE listen_done_event;
 /* Whether server dispatch exceptions should escape the RPC runtime. */
 static LONG server_exception_filter_disabled;
+/* Process-local mode exposed by I_RpcSystemFunction001 selectors 3 and 4. */
+static ULONG rpc_process_mode;
+static RPC_FORWARD_FUNCTION server_forward_function;
+static void *server_address_change_fn;
+
+struct rpc_port_allocation_data
+{
+    ULONG unknown0;
+    ULONG unknown4;
+    ULONG unknown8;
+    ULONG unknownc;
+    void *unknown10;
+    void *unknown18;
+};
 
 static UUID uuid_nil;
 
@@ -429,11 +443,13 @@ static RPC_STATUS process_request_packet(RpcConnection *conn, RpcPktRequestHdr *
   msg->DataRepresentation =
     MAKELONG( MAKEWORD(hdr->common.drep[0], hdr->common.drep[1]),
               MAKEWORD(hdr->common.drep[2], hdr->common.drep[3]));
+  msg->ReservedForRuntime = conn;
 
   exception = FALSE;
 
   /* dispatch */
   RPCRT4_SetThreadCurrentCallHandle(msg->Handle);
+  RPCRT4_SetThreadCurrentCallMessage(msg);
   if (InterlockedCompareExchange(&server_exception_filter_disabled, 0, 0))
   {
     if (func) func(msg);
@@ -453,13 +469,14 @@ static RPC_STATUS process_request_packet(RpcConnection *conn, RpcPktRequestHdr *
                                          RPC2NCA_STATUS(status));
     } __ENDTRY
   }
+    RPCRT4_SetThreadCurrentCallMessage(NULL);
     RPCRT4_SetThreadCurrentCallHandle(NULL);
 
   /* release any unmarshalled context handles */
   while ((context_handle = RPCRT4_PopThreadContextHandle()) != NULL)
     RpcServerAssoc_ReleaseContextHandle(conn->server_binding->Assoc, context_handle, TRUE);
 
-  if (!exception)
+  if (!exception && !(msg->RpcFlags & RPC_BUFFER_ASYNC))
     response = RPCRT4_BuildResponseHeader(msg->DataRepresentation,
                                           msg->BufferLength);
 
@@ -468,13 +485,13 @@ static RPC_STATUS process_request_packet(RpcConnection *conn, RpcPktRequestHdr *
     status = RPCRT4_Send(conn, response, exception ? NULL : msg->Buffer,
                          exception ? 0 : msg->BufferLength);
     free(response);
-  } else
+  } else if (!(msg->RpcFlags & RPC_BUFFER_ASYNC))
     ERR("out of memory\n");
 
   msg->RpcInterfaceInformation = NULL;
   RPCRT4_release_server_interface(sif);
 
-  if (msg->Buffer == buf) buf = NULL;
+  if ((msg->RpcFlags & RPC_BUFFER_ASYNC) || msg->Buffer == buf) buf = NULL;
   TRACE("freeing Buffer=%p\n", buf);
   I_RpcFree(buf);
 
@@ -1085,6 +1102,18 @@ RPC_STATUS WINAPI RpcServerUseProtseqA(RPC_CSTR Protseq, unsigned int MaxCalls, 
 }
 
 /***********************************************************************
+ *             RpcServerUseProtseqExA (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerUseProtseqExA(RPC_CSTR Protseq, unsigned int MaxCalls,
+                                         void *SecurityDescriptor, PRPC_POLICY Policy)
+{
+  TRACE("(Protseq == %s, MaxCalls == %d, SecurityDescriptor == ^%p, Policy == ^%p)\n",
+        debugstr_a((char *)Protseq), MaxCalls, SecurityDescriptor, Policy);
+
+  return RpcServerUseProtseqA(Protseq, MaxCalls, SecurityDescriptor);
+}
+
+/***********************************************************************
  *             RpcServerUseProtseqW (RPCRT4.@)
  */
 RPC_STATUS WINAPI RpcServerUseProtseqW(RPC_WSTR Protseq, unsigned int MaxCalls, void *SecurityDescriptor)
@@ -1102,6 +1131,18 @@ RPC_STATUS WINAPI RpcServerUseProtseqW(RPC_WSTR Protseq, unsigned int MaxCalls, 
     return status;
 
   return RPCRT4_use_protseq(ps, NULL);
+}
+
+/***********************************************************************
+ *             RpcServerUseProtseqExW (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerUseProtseqExW(RPC_WSTR Protseq, unsigned int MaxCalls,
+                                         void *SecurityDescriptor, PRPC_POLICY Policy)
+{
+  TRACE("(Protseq == %s, MaxCalls == %d, SecurityDescriptor == ^%p, Policy == ^%p)\n",
+        debugstr_w(Protseq), MaxCalls, SecurityDescriptor, Policy);
+
+  return RpcServerUseProtseqW(Protseq, MaxCalls, SecurityDescriptor);
 }
 
 void RPCRT4_destroy_all_protseqs(void)
@@ -1346,14 +1387,32 @@ struct rpc_server_registered_auth_info
 
 static RPC_STATUS find_security_package(ULONG auth_type, SecPkgInfoW **packages_buf, SecPkgInfoW **ret)
 {
+    static WCHAR ntlm_name[] = L"NTLM";
+    static WCHAR ntlm_comment[] = L"NTLM Security Package";
+    static SecPkgInfoW ntlm_package =
+    {
+        0,
+        1,
+        RPC_C_AUTHN_WINNT,
+        1904,
+        ntlm_name,
+        ntlm_comment,
+    };
     SECURITY_STATUS sec_status;
     SecPkgInfoW *packages;
     ULONG package_count;
     ULONG i;
 
+    *packages_buf = NULL;
     sec_status = EnumerateSecurityPackagesW(&package_count, &packages);
     if (sec_status != SEC_E_OK)
     {
+        if (sec_status == SEC_E_SECPKG_NOT_FOUND && auth_type == RPC_C_AUTHN_WINNT)
+        {
+            WARN("EnumerateSecurityPackagesW could not query LSASS; using built-in NTLM metadata\n");
+            *ret = &ntlm_package;
+            return RPC_S_OK;
+        }
         ERR("EnumerateSecurityPackagesW failed with error 0x%08lx\n", sec_status);
         return RPC_S_SEC_PKG_ERROR;
     }
@@ -1461,7 +1520,7 @@ RPC_STATUS WINAPI RpcServerRegisterAuthInfoW( RPC_WSTR ServerPrincName, ULONG Au
 
     package_name = wcsdup(package->Name);
     max_token = package->cbMaxToken;
-    FreeContextBuffer(packages);
+    if (packages) FreeContextBuffer(packages);
     if (!package_name)
         return RPC_S_OUT_OF_RESOURCES;
 
@@ -1511,19 +1570,54 @@ RPC_STATUS RPC_ENTRY RpcServerInqDefaultPrincNameA(ULONG AuthnSvc, RPC_CSTR *Pri
  */
 RPC_STATUS RPC_ENTRY RpcServerInqDefaultPrincNameW(ULONG AuthnSvc, RPC_WSTR *PrincName)
 {
+    SecPkgCredentials_NamesW names = {0};
+    SecPkgInfoW *packages, *package;
+    SECURITY_STATUS sec_status;
+    CredHandle credentials;
+    TimeStamp expiry;
+    RPC_STATUS status;
+    WCHAR *principal;
     ULONG len = 0;
 
-    FIXME("%lu, %p\n", AuthnSvc, PrincName);
+    TRACE("%lu, %p\n", AuthnSvc, PrincName);
 
-    if (AuthnSvc != RPC_C_AUTHN_WINNT) return RPC_S_UNKNOWN_AUTHN_SERVICE;
+    if (AuthnSvc == RPC_C_AUTHN_WINNT)
+    {
+        GetUserNameExW( NameSamCompatible, NULL, &len );
+        if (GetLastError() != ERROR_MORE_DATA) return RPC_S_INTERNAL_ERROR;
 
-    GetUserNameExW( NameSamCompatible, NULL, &len );
-    if (GetLastError() != ERROR_MORE_DATA) return RPC_S_INTERNAL_ERROR;
+        if (!(*PrincName = malloc(len * sizeof(WCHAR))))
+            return RPC_S_OUT_OF_MEMORY;
 
-    if (!(*PrincName = malloc(len * sizeof(WCHAR))))
-        return RPC_S_OUT_OF_MEMORY;
+        GetUserNameExW( NameSamCompatible, *PrincName, &len );
+        return RPC_S_OK;
+    }
 
-    GetUserNameExW( NameSamCompatible, *PrincName, &len );
+    status = find_security_package( AuthnSvc, &packages, &package );
+    if (status != RPC_S_OK) return status;
+
+    sec_status = AcquireCredentialsHandleW( NULL, package->Name, SECPKG_CRED_INBOUND,
+                                            NULL, NULL, NULL, NULL, &credentials, &expiry );
+    if (packages) FreeContextBuffer( packages );
+    if (sec_status != SEC_E_OK)
+    {
+        WARN("AcquireCredentialsHandleW failed with error %#lx\n", sec_status);
+        return sec_status == SEC_E_INSUFFICIENT_MEMORY ? RPC_S_OUT_OF_MEMORY : RPC_S_SEC_PKG_ERROR;
+    }
+
+    sec_status = QueryCredentialsAttributesW( &credentials, SECPKG_CRED_ATTR_NAMES, &names );
+    FreeCredentialsHandle( &credentials );
+    if (sec_status != SEC_E_OK)
+    {
+        WARN("QueryCredentialsAttributesW failed with error %#lx\n", sec_status);
+        return sec_status == SEC_E_INSUFFICIENT_MEMORY ? RPC_S_OUT_OF_MEMORY : RPC_S_SEC_PKG_ERROR;
+    }
+
+    principal = names.sUserName ? wcsdup( names.sUserName ) : NULL;
+    if (names.sUserName) FreeContextBuffer( names.sUserName );
+    if (!principal) return RPC_S_OUT_OF_MEMORY;
+
+    *PrincName = principal;
     return RPC_S_OK;
 }
 
@@ -1751,6 +1845,7 @@ RPC_STATUS WINAPI RpcMgmtSetAuthorizationFn(RPC_MGMT_AUTHORIZATION_FN fn)
 RPC_STATUS WINAPI RpcMgmtSetServerStackSize(ULONG ThreadStackSize)
 {
   FIXME("(0x%lx): stub\n", ThreadStackSize);
+  if (getenv("LINUXNT_DEBUG_DELAY_RPCSS_SERVICE")) Sleep(10000);
   return RPC_S_OK;
 }
 
@@ -1761,4 +1856,84 @@ RPC_BINDING_HANDLE WINAPI I_RpcGetCurrentCallHandle(void)
 {
     TRACE("\n");
     return RPCRT4_GetThreadCurrentCallHandle();
+}
+
+/***********************************************************************
+ *             I_RpcGetPortAllocationData (RPCRT4.@)
+ */
+void WINAPI I_RpcGetPortAllocationData(struct rpc_port_allocation_data *data)
+{
+    TRACE("%p\n", data);
+
+    /* Windows returns this record when no port-allocation policy is configured. */
+    memset(data, 0, sizeof(*data));
+    data->unknown0 = 1;
+    data->unknown8 = 3;
+}
+
+/***********************************************************************
+ *             RpcServerInqBindingHandle (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerInqBindingHandle(RPC_BINDING_HANDLE *binding)
+{
+    RPC_BINDING_HANDLE current;
+
+    TRACE("%p\n", binding);
+
+    current = I_RpcGetCurrentCallHandle();
+    if (!current) return RPC_S_NO_CALL_ACTIVE;
+
+    *binding = current;
+    return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             I_RpcSystemFunction001 (RPCRT4.@)
+ */
+RPC_STATUS WINAPI I_RpcSystemFunction001(ULONG selector, ULONG_PTR value, void *output)
+{
+    TRACE("%lu, %#Ix, %p\n", selector, value, output);
+
+    switch (selector)
+    {
+    case 3:
+    case 5:
+        rpc_process_mode = value;
+        return RPC_S_OK;
+    case 4:
+        *(ULONG *)output = rpc_process_mode;
+        return RPC_S_OK;
+    default:
+        return RPC_S_INVALID_ARG;
+    }
+}
+
+/***********************************************************************
+ *             I_RpcServerRegisterForwardFunction (RPCRT4.@)
+ */
+RPC_STATUS WINAPI I_RpcServerRegisterForwardFunction(RPC_FORWARD_FUNCTION forward_fn)
+{
+    TRACE("%p\n", forward_fn);
+
+    server_forward_function = forward_fn;
+    return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             I_RpcServerInqAddressChangeFn (RPCRT4.@)
+ */
+void *WINAPI I_RpcServerInqAddressChangeFn(void)
+{
+    TRACE("\n");
+    return server_address_change_fn;
+}
+
+/***********************************************************************
+ *             I_RpcServerSetAddressChangeFn (RPCRT4.@)
+ */
+RPC_STATUS WINAPI I_RpcServerSetAddressChangeFn(void *address_change_fn)
+{
+    TRACE("%p\n", address_change_fn);
+    server_address_change_fn = address_change_fn;
+    return RPC_S_OK;
 }

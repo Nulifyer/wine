@@ -91,6 +91,7 @@ struct threaddata
     DWORD thread_id;
     RpcConnection *connection;
     RpcBinding *server_binding;
+    RPC_MESSAGE *server_message;
     struct context_handle_list *context_handle_list;
 };
 
@@ -987,6 +988,22 @@ RpcBinding *RPCRT4_GetThreadCurrentCallHandle(void)
     if (!tdata) return NULL;
 
     return tdata->server_binding;
+}
+
+void RPCRT4_SetThreadCurrentCallMessage(RPC_MESSAGE *message)
+{
+    struct threaddata *tdata = get_or_create_threaddata();
+    if (!tdata) return;
+
+    tdata->server_message = message;
+}
+
+RPC_MESSAGE *RPCRT4_GetThreadCurrentCallMessage(void)
+{
+    struct threaddata *tdata = get_or_create_threaddata();
+    if (!tdata) return NULL;
+
+    return tdata->server_message;
 }
 
 void RPCRT4_PushThreadContextHandle(NDR_SCONTEXT SContext)

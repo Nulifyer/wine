@@ -62,7 +62,7 @@ static struct context_handle_entry *get_context_entry(NDR_CCONTEXT CContext)
 {
     struct context_handle_entry *che = CContext;
 
-    if (che->magic != NDR_CONTEXT_HANDLE_MAGIC)
+    if (!che || che->magic != NDR_CONTEXT_HANDLE_MAGIC)
         return NULL;
     return che;
 }
@@ -95,6 +95,28 @@ RPC_BINDING_HANDLE WINAPI NDRCContextBinding(NDR_CCONTEXT CContext)
         RpcRaiseException(RPC_X_SS_CONTEXT_MISMATCH);
     }
     return handle;
+}
+
+/***********************************************************************
+ *             RpcSsGetContextBinding (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcSsGetContextBinding(NDR_CCONTEXT context, RPC_BINDING_HANDLE *binding)
+{
+    struct context_handle_entry *entry;
+    RPC_STATUS status = ERROR_INVALID_PARAMETER;
+
+    TRACE("%p %p\n", context, binding);
+
+    EnterCriticalSection(&ndr_context_cs);
+    entry = get_context_entry(context);
+    if (entry && binding)
+    {
+        *binding = entry->handle;
+        status = RPC_S_OK;
+    }
+    LeaveCriticalSection(&ndr_context_cs);
+
+    return status;
 }
 
 void WINAPI NDRCContextMarshall(NDR_CCONTEXT CContext, void *pBuff)

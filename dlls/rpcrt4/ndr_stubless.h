@@ -227,6 +227,7 @@ typedef struct _NDR_EHD_CONTEXT
 struct async_call_data
 {
     MIDL_STUB_MESSAGE *pStubMsg;
+    void *request_buffer;
     const NDR_PROC_HEADER *pProcHeader;
     PFORMAT_STRING pHandleFormat;
     PFORMAT_STRING pParamFormat;
@@ -237,6 +238,7 @@ struct async_call_data
     unsigned int number_of_params;
     /* location to put retval into */
     LONG_PTR *retval_ptr;
+    size_t retval_size;
     /* correlation cache */
     ULONG_PTR NdrCorrCache[256];
 };

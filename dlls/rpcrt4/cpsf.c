@@ -51,7 +51,21 @@ static void format_clsid( WCHAR *buffer, const CLSID *clsid )
 static BOOL FindProxyInfo(const ProxyFileInfo **pProxyFileList, REFIID riid, const ProxyFileInfo **pProxyInfo, int *pIndex)
 {
   while (*pProxyFileList) {
-    if ((*pProxyFileList)->pIIDLookupRtn(riid, pIndex)) {
+    const ProxyFileInfo *info = *pProxyFileList;
+    BOOL found = FALSE;
+    if (info->pIIDLookupRtn == (PIIDLookup)~(ULONG_PTR)0)
+    {
+      unsigned int i;
+      for (i = 0; i < info->TableSize; i++)
+        if (IsEqualIID(info->pStubVtblList[i]->header.piid, riid))
+        {
+          *pIndex = i;
+          found = TRUE;
+          break;
+        }
+    }
+    else found = info->pIIDLookupRtn(riid, pIndex);
+    if (found) {
       *pProxyInfo = *pProxyFileList;
       TRACE("found: ProxyInfo %p Index %d\n", *pProxyInfo, *pIndex);
       return TRUE;
@@ -114,19 +128,26 @@ static HRESULT WINAPI CStdPSFactory_CreateStub(LPPSFACTORYBUFFER iface,
 {
   CStdPSFactoryBuffer *This = (CStdPSFactoryBuffer *)iface;
   const ProxyFileInfo *ProxyInfo;
+  PCInterfaceName name;
   int Index;
   TRACE("(%p)->CreateStub(%s,%p,%p)\n",iface,debugstr_guid(riid),
        pUnkServer,ppStub);
   if (!FindProxyInfo(This->pProxyFileList,riid,&ProxyInfo,&Index))
     return E_NOINTERFACE;
 
+  name = ProxyInfo->pNamesArray ? ProxyInfo->pNamesArray[Index] : NULL;
+  if (is_compact_proxy_file(ProxyInfo) && ProxyInfo->pDelegatedIIDs && ProxyInfo->pDelegatedIIDs[Index])
+  {
+    FIXME("compact delegated stub %s is not supported\n", debugstr_guid(riid));
+    return E_NOTIMPL;
+  }
   if(ProxyInfo->pDelegatedIIDs && ProxyInfo->pDelegatedIIDs[Index])
-    return  CStdStubBuffer_Delegating_Construct(riid, pUnkServer, ProxyInfo->pNamesArray[Index],
+    return  CStdStubBuffer_Delegating_Construct(riid, pUnkServer, name,
                                                 ProxyInfo->pStubVtblList[Index], ProxyInfo->pDelegatedIIDs[Index],
                                                 iface, ppStub);
 
-  return CStdStubBuffer_Construct(riid, pUnkServer, ProxyInfo->pNamesArray[Index],
-                                  ProxyInfo->pStubVtblList[Index], iface, ppStub);
+  return CStdStubBuffer_Construct(riid, pUnkServer, name,
+                                  ProxyInfo->pStubVtblList[Index], is_compact_proxy_file(ProxyInfo), iface, ppStub);
 }
 
 static const IPSFactoryBufferVtbl CStdPSFactory_Vtbl =
@@ -151,6 +172,9 @@ static void init_psfactory( CStdPSFactoryBuffer *psfac, const ProxyFileInfo **fi
         const PCInterfaceProxyVtblList *proxies = file_list[i]->pProxyVtblList;
         const PCInterfaceStubVtblList *stubs = file_list[i]->pStubVtblList;
 
+        /* Compact descriptors end with one sentinel, not a writable vtable. */
+        if (is_compact_proxy_file(file_list[i])) continue;
+
         for (j = 0; j < file_list[i]->TableSize; j++)
         {
             /* FIXME: i think that different vtables should be copied for
@@ -160,9 +184,16 @@ static void init_psfactory( CStdPSFactoryBuffer *psfac, const ProxyFileInfo **fi
 
             if (file_list[i]->pDelegatedIIDs && file_list[i]->pDelegatedIIDs[j])
             {
+                const MIDL_SERVER_INFO *server_info = stubs[j]->header.pServerInfo;
                 void **vtbl = proxies[j]->Vtbl;
                 if (file_list[i]->TableVersion > 1) vtbl++;
-                fill_delegated_proxy_table( (IUnknownVtbl *)vtbl, stubs[j]->header.DispatchTableCount );
+                /* Newer NDR metadata supplies the first 32 proxy methods as
+                 * prebuilt thunks, including delegation. These tables can
+                 * live in read-only image sections. Older tables still need
+                 * their IUnknown and missing delegated entries initialized. */
+                if (!server_info || server_info->pStubDesc->Version < 0x60002 ||
+                    stubs[j]->header.DispatchTableCount > 32)
+                    fill_delegated_proxy_table( (IUnknownVtbl *)vtbl, stubs[j]->header.DispatchTableCount );
                 pSrcRpcStubVtbl = (void * const *)&CStdStubBuffer_Delegating_Vtbl;
             }
 

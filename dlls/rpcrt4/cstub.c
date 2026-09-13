@@ -39,6 +39,14 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
+struct compact_stub_buffer
+{
+    CStdStubBuffer stub;
+    const CInterfaceStubHeader *header;
+};
+
+static const IRpcStubBufferVtbl compact_stub_vtbl;
+
 static LONG WINAPI stub_filter(EXCEPTION_POINTERS *eptr)
 {
     if (eptr->ExceptionRecord->ExceptionFlags & EXCEPTION_NONCONTINUABLE)
@@ -58,7 +66,10 @@ static inline cstdstubbuffer_delegating_t *impl_from_delegating( IRpcStubBuffer 
 
 static const CInterfaceStubHeader *get_stub_header(const CStdStubBuffer *stub)
 {
-    const CInterfaceStubVtbl *vtbl = CONTAINING_RECORD(stub->lpVtbl, CInterfaceStubVtbl, Vtbl);
+    const CInterfaceStubVtbl *vtbl;
+    if (stub->lpVtbl == &compact_stub_vtbl)
+        return CONTAINING_RECORD(stub, struct compact_stub_buffer, stub)->header;
+    vtbl = CONTAINING_RECORD(stub->lpVtbl, CInterfaceStubVtbl, Vtbl);
 
     return &vtbl->header;
 }
@@ -67,6 +78,7 @@ HRESULT CStdStubBuffer_Construct(REFIID riid,
                                  LPUNKNOWN pUnkServer,
                                  PCInterfaceName name,
                                  CInterfaceStubVtbl *vtbl,
+                                 BOOL compact,
                                  LPPSFACTORYBUFFER pPSFactory,
                                  LPRPCSTUBBUFFER *ppStub)
 {
@@ -86,13 +98,19 @@ HRESULT CStdStubBuffer_Construct(REFIID riid,
   if(FAILED(r))
     return r;
 
-  This = calloc(1, sizeof(CStdStubBuffer));
+  This = calloc(1, compact ? sizeof(struct compact_stub_buffer) : sizeof(*This));
   if (!This) {
     IUnknown_Release(pvServer);
     return E_OUTOFMEMORY;
   }
 
-  This->lpVtbl = &vtbl->Vtbl;
+  if (compact)
+  {
+    struct compact_stub_buffer *buffer = CONTAINING_RECORD(This, struct compact_stub_buffer, stub);
+    buffer->header = &vtbl->header;
+    This->lpVtbl = &compact_stub_vtbl;
+  }
+  else This->lpVtbl = &vtbl->Vtbl;
   This->RefCount = 1;
   This->pvServerObject = pvServer;
   This->pPSFactory = pPSFactory;
@@ -344,6 +362,47 @@ void WINAPI CStdStubBuffer_DebugServerRelease(LPRPCSTUBBUFFER iface,
   CStdStubBuffer *This = impl_from_IRpcStubBuffer(iface);
   TRACE("(%p)->DebugServerRelease(%p)\n",This,pv);
 }
+
+/* Compact stubs use runtime-owned methods. CountRefs counts connected servers,
+ * independently of the COM references retained by QueryInterface and support. */
+static IRpcStubBuffer *WINAPI compact_stub_support(IRpcStubBuffer *iface, REFIID iid)
+{
+    IRpcStubBuffer *supported = CStdStubBuffer_IsIIDSupported(iface, iid);
+    if (supported) IRpcStubBuffer_AddRef(supported);
+    return supported;
+}
+
+static ULONG WINAPI compact_stub_count_refs(IRpcStubBuffer *iface)
+{
+    return impl_from_IRpcStubBuffer(iface)->pvServerObject != NULL;
+}
+
+static ULONG WINAPI compact_stub_release(IRpcStubBuffer *iface)
+{
+    CStdStubBuffer *stub = impl_from_IRpcStubBuffer(iface);
+    ULONG refs = InterlockedDecrement(&stub->RefCount);
+    if (!refs)
+    {
+        /* The channel must disconnect its server before releasing the stub. */
+        IPSFactoryBuffer_Release(stub->pPSFactory);
+        free(stub);
+    }
+    return refs;
+}
+
+static const IRpcStubBufferVtbl compact_stub_vtbl =
+{
+    CStdStubBuffer_QueryInterface,
+    CStdStubBuffer_AddRef,
+    compact_stub_release,
+    CStdStubBuffer_Connect,
+    CStdStubBuffer_Disconnect,
+    CStdStubBuffer_Invoke,
+    compact_stub_support,
+    compact_stub_count_refs,
+    CStdStubBuffer_DebugServerQueryInterface,
+    CStdStubBuffer_DebugServerRelease
+};
 
 const IRpcStubBufferVtbl CStdStubBuffer_Vtbl =
 {

@@ -1,0 +1,58 @@
+/*
+ * Windows local endpoint mapper extensions.
+ *
+ * The classic endpoint mapper interface leaves registration to the DCE
+ * ept_insert call.  Current Windows uses this companion interface so that
+ * registrations are tied to a context handle and removed when its client
+ * goes away.
+ */
+
+#pragma makedep client
+
+#include "wine/dcetypes.idl"
+
+[
+    uuid(0b0a6584-9e0f-11cf-a3cf-00805f68cb1b),
+    version(1.1),
+    pointer_default(ref)
+]
+interface epm_ext
+{
+    const long ept_ext_max_annotation_size = 64;
+
+    typedef struct
+    {
+                    GUID        object;
+        [ptr]       twr_t      *tower;
+        [string]    char        annotation[ept_ext_max_annotation_size];
+    } ept_ext_entry_t;
+
+    typedef [context_handle] void *ept_cleanup_handle_t;
+
+    unsigned32 epm_ext_open(
+        [in]    handle_t                h,
+        [out]   ept_cleanup_handle_t   *cleanup_handle
+    );
+
+    unsigned32 epm_ext_allocate_port(
+        [in]    handle_t                h,
+        [in]    ept_cleanup_handle_t    cleanup_handle,
+        [in]    unsigned32              protocol,
+        [out]   unsigned32             *port,
+        [out]   unsigned16             *allocation_id
+    );
+
+    void ept_insert_ex(
+        [in]        handle_t                h,
+        [in, out]   ept_cleanup_handle_t   *cleanup_handle,
+        [in, range(0, 500)]
+                    unsigned32              num_ents,
+        [in, size_is(num_ents)]
+                    ept_ext_entry_t         entries[],
+        [in]        boolean32               replace,
+        [in]        boolean32               local_only,
+        [in]        hyper                   registration_cookie,
+        [in]        unsigned32              max_lifetime,
+        [out]       error_status_t          *status
+    );
+}

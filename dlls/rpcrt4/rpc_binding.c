@@ -27,6 +27,7 @@
 #include <string.h>
 #include <assert.h>
 
+#include "ntstatus.h"
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -35,6 +36,8 @@
 
 #include "rpc.h"
 #include "rpcndr.h"
+#include "rpcasync.h"
+#include "rpcdcep.h"
 
 #include "wine/debug.h"
 
@@ -773,6 +776,191 @@ RPC_STATUS WINAPI RpcBindingFree( RPC_BINDING_HANDLE* Binding )
   if (status == RPC_S_OK) *Binding = NULL;
   return status;
 }
+
+static RPC_STATUS complete_fast_binding(RpcBinding *binding, const UUID *object,
+                                        ULONG template_flags, ULONG option_flags,
+                                        ULONG com_timeout, ULONG call_timeout)
+{
+  RPC_STATUS status;
+
+  if (template_flags & RPC_BHT_OBJECT_UUID_VALID)
+    status = RPCRT4_SetBindingObject(binding, object);
+  else
+    status = RPCRT4_SetBindingObject(binding, NULL);
+
+  if (status == RPC_S_OK)
+  {
+    binding->FastBinding = TRUE;
+    binding->FastDynamicEndpoint = !binding->Endpoint || !binding->Endpoint[0];
+    binding->FastFlags = option_flags;
+    binding->ComTimeout = com_timeout;
+    binding->CallTimeout = call_timeout;
+  }
+  return status;
+}
+
+/***********************************************************************
+ *             RpcBindingCreateA (RPCRT4.@)
+ */
+RPC_STATUS RPC_ENTRY RpcBindingCreateA(RPC_BINDING_HANDLE_TEMPLATE_V1_A *Template,
+                                       RPC_BINDING_HANDLE_SECURITY_V1_A *Security,
+                                       RPC_BINDING_HANDLE_OPTIONS_V1 *Options,
+                                       RPC_BINDING_HANDLE *Binding)
+{
+  RpcBinding *binding = NULL;
+  RPC_STATUS status;
+
+  TRACE("(%p,%p,%p,%p)\n", Template, Security, Options, Binding);
+
+  if (!Template || !Binding) return RPC_S_INVALID_ARG;
+  if (Template->Version != 1 || (Security && Security->Version != 1) ||
+      (Options && Options->Version != 1))
+    return RPC_S_CANNOT_SUPPORT;
+  if (Template->ProtocolSequence != RPC_PROTSEQ_LRPC)
+    return RPC_S_CANNOT_SUPPORT;
+  if ((Template->Flags & ~RPC_BHT_OBJECT_UUID_VALID) || Template->u1.Reserved ||
+      (Options && (Options->Flags & ~(RPC_BHO_NONCAUSAL | RPC_BHO_DONTLINGER))))
+    return RPC_S_INVALID_ARG;
+
+  status = RPCRT4_CreateBindingA(&binding, FALSE, "ncalrpc");
+  if (status == RPC_S_OK)
+    status = RPCRT4_CompleteBindingA(binding,
+                                     Template->NetworkAddress ? (const char *)Template->NetworkAddress : "",
+                                     Template->StringEndpoint ? (const char *)Template->StringEndpoint : "", "");
+  if (status == RPC_S_OK)
+    status = complete_fast_binding(binding, &Template->ObjectUuid, Template->Flags,
+                                   Options ? Options->Flags : 0,
+                                   Options ? Options->ComTimeout : RPC_C_BINDING_DEFAULT_TIMEOUT,
+                                   Options ? Options->CallTimeout : 0);
+  if (status == RPC_S_OK && Security)
+    status = RpcBindingSetAuthInfoExA(binding, Security->ServerPrincName,
+                                     Security->AuthnLevel, Security->AuthnSvc,
+                                     Security->AuthIdentity, RPC_C_AUTHZ_NONE,
+                                     Security->SecurityQos);
+
+  if (status == RPC_S_OK)
+    *Binding = binding;
+  else if (binding)
+    RPCRT4_ReleaseBinding(binding);
+  return status;
+}
+
+/***********************************************************************
+ *             RpcBindingCreateW (RPCRT4.@)
+ */
+RPC_STATUS RPC_ENTRY RpcBindingCreateW(RPC_BINDING_HANDLE_TEMPLATE_V1_W *Template,
+                                       RPC_BINDING_HANDLE_SECURITY_V1_W *Security,
+                                       RPC_BINDING_HANDLE_OPTIONS_V1 *Options,
+                                       RPC_BINDING_HANDLE *Binding)
+{
+  static const WCHAR ncalrpcW[] = L"ncalrpc";
+  static const WCHAR emptyW[] = L"";
+  RpcBinding *binding = NULL;
+  RPC_STATUS status;
+
+  TRACE("(%p,%p,%p,%p)\n", Template, Security, Options, Binding);
+
+  if (!Template || !Binding) return RPC_S_INVALID_ARG;
+  if (Template->Version != 1 || (Security && Security->Version != 1) ||
+      (Options && Options->Version != 1))
+    return RPC_S_CANNOT_SUPPORT;
+  if (Template->ProtocolSequence != RPC_PROTSEQ_LRPC)
+    return RPC_S_CANNOT_SUPPORT;
+  if ((Template->Flags & ~RPC_BHT_OBJECT_UUID_VALID) || Template->u1.Reserved ||
+      (Options && (Options->Flags & ~(RPC_BHO_NONCAUSAL | RPC_BHO_DONTLINGER))))
+    return RPC_S_INVALID_ARG;
+
+  status = RPCRT4_CreateBindingW(&binding, FALSE, ncalrpcW);
+  if (status == RPC_S_OK)
+    status = RPCRT4_CompleteBindingW(binding,
+                                     Template->NetworkAddress ? (LPCWSTR)Template->NetworkAddress : emptyW,
+                                     Template->StringEndpoint ? (LPCWSTR)Template->StringEndpoint : emptyW,
+                                     emptyW);
+  if (status == RPC_S_OK)
+    status = complete_fast_binding(binding, &Template->ObjectUuid, Template->Flags,
+                                   Options ? Options->Flags : 0,
+                                   Options ? Options->ComTimeout : RPC_C_BINDING_DEFAULT_TIMEOUT,
+                                   Options ? Options->CallTimeout : 0);
+  if (status == RPC_S_OK && Security)
+    status = RpcBindingSetAuthInfoExW(binding, Security->ServerPrincName,
+                                     Security->AuthnLevel, Security->AuthnSvc,
+                                     Security->AuthIdentity, RPC_C_AUTHZ_NONE,
+                                     Security->SecurityQos);
+
+  if (status == RPC_S_OK)
+    *Binding = binding;
+  else if (binding)
+    RPCRT4_ReleaseBinding(binding);
+  return status;
+}
+
+/***********************************************************************
+ *             RpcBindingBind (RPCRT4.@)
+ */
+RPC_STATUS RPC_ENTRY RpcBindingBind(PRPC_ASYNC_STATE Async, RPC_BINDING_HANDLE Binding,
+                                    RPC_IF_HANDLE IfSpec)
+{
+  const RPC_CLIENT_INTERFACE *client_if = IfSpec;
+  RpcBinding *binding = Binding;
+  RpcConnection *connection;
+  RPC_STATUS status;
+
+  TRACE("(%p,%p,%p)\n", Async, Binding, IfSpec);
+
+  if (!binding || !client_if) return RPC_S_INVALID_ARG;
+  if (!binding->FastBinding || binding->server || strcmp(binding->Protseq, "ncalrpc"))
+    return RPC_S_INVALID_BINDING;
+  if (Async) return RPC_S_CANNOT_SUPPORT;
+  if (binding->FastBound) return RPC_S_OK;
+
+  if (!binding->Endpoint || !binding->Endpoint[0])
+  {
+    status = RpcEpResolveBinding(binding, IfSpec);
+    if (status != RPC_S_OK) return status;
+  }
+  else if (!binding->Assoc)
+  {
+    status = RPCRT4_GetAssociation(binding->Protseq, binding->NetworkAddr,
+                                   binding->Endpoint, binding->NetworkOptions,
+                                   &binding->Assoc);
+    if (status != RPC_S_OK) return status;
+  }
+
+  status = RPCRT4_OpenBinding(binding, &connection, &client_if->TransferSyntax,
+                              &client_if->InterfaceId, NULL);
+  if (status != RPC_S_OK) return status;
+
+  RPCRT4_CloseBinding(binding, connection);
+  binding->FastInterface = client_if->InterfaceId;
+  binding->FastTransferSyntax = client_if->TransferSyntax;
+  binding->FastBound = TRUE;
+  return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             RpcBindingUnbind (RPCRT4.@)
+ */
+RPC_STATUS RPC_ENTRY RpcBindingUnbind(RPC_BINDING_HANDLE Binding)
+{
+  RpcBinding *binding = Binding;
+
+  TRACE("(%p)\n", Binding);
+
+  if (!binding || !binding->FastBinding || !binding->FastBound)
+    return RPC_S_INVALID_BINDING;
+
+  if (binding->Assoc) RpcAssoc_Release(binding->Assoc);
+  binding->Assoc = NULL;
+  if (binding->FastDynamicEndpoint)
+  {
+    free(binding->Endpoint);
+    binding->Endpoint = NULL;
+  }
+  memset(&binding->FastInterface, 0, sizeof(binding->FastInterface));
+  memset(&binding->FastTransferSyntax, 0, sizeof(binding->FastTransferSyntax));
+  binding->FastBound = FALSE;
+  return RPC_S_OK;
+}
   
 /***********************************************************************
  *             RpcBindingVectorFree (RPCRT4.@)
@@ -1103,6 +1291,7 @@ RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc,
         return RPC_S_OUT_OF_MEMORY;
 
     AuthInfo->refs = 1;
+    AuthInfo->transport_only = FALSE;
     AuthInfo->AuthnLevel = AuthnLevel;
     AuthInfo->AuthnSvc = AuthnSvc;
     AuthInfo->cred = cred;
@@ -1169,7 +1358,8 @@ ULONG RpcAuthInfo_Release(RpcAuthInfo *AuthInfo)
 
     if (!refs)
     {
-        FreeCredentialsHandle(&AuthInfo->cred);
+        if (!AuthInfo->transport_only)
+            FreeCredentialsHandle(&AuthInfo->cred);
         if (AuthInfo->nt_identity)
         {
             free(AuthInfo->nt_identity->User);
@@ -1628,6 +1818,8 @@ RpcBindingServerFromClient(RPC_BINDING_HANDLE ClientBinding, RPC_BINDING_HANDLE*
 
     if (!bind)
         bind = I_RpcGetCurrentCallHandle();
+    if (!bind)
+        return RPC_S_INVALID_BINDING;
 
     if (!bind->server)
         return RPC_S_INVALID_BINDING;
@@ -1638,6 +1830,34 @@ RpcBindingServerFromClient(RPC_BINDING_HANDLE ClientBinding, RPC_BINDING_HANDLE*
 
     *ServerBinding = NewBinding;
 
+    return RPC_S_OK;
+}
+
+static RPC_STATUS set_ncalrpc_auth_info(RpcBinding *binding, const WCHAR *server_principal_name,
+                                        ULONG authn_level, ULONG authn_svc,
+                                        RPC_AUTH_IDENTITY_HANDLE identity)
+{
+    RpcAuthInfo *auth_info;
+    CredHandle cred;
+    TimeStamp exp = {0};
+    RPC_STATUS status;
+
+    SecInvalidateHandle(&cred);
+    status = RpcAuthInfo_Create(authn_level, authn_svc, cred, exp, 0, identity, &auth_info);
+    if (status != RPC_S_OK)
+        return status;
+
+    auth_info->transport_only = TRUE;
+    auth_info->server_principal_name = server_principal_name ? wcsdup(server_principal_name) : NULL;
+    if (server_principal_name && !auth_info->server_principal_name)
+    {
+        RpcAuthInfo_Release(auth_info);
+        return RPC_S_OUT_OF_MEMORY;
+    }
+
+    if (binding->AuthInfo)
+        RpcAuthInfo_Release(binding->AuthInfo);
+    binding->AuthInfo = auth_info;
     return RPC_S_OK;
 }
 
@@ -1718,6 +1938,18 @@ RpcBindingSetAuthInfoExA( RPC_BINDING_HANDLE Binding, RPC_CSTR ServerPrincName,
   {
     FIXME("unsupported AuthzSvr %lu\n", AuthzSvr);
     return RPC_S_UNKNOWN_AUTHZ_SERVICE;
+  }
+
+  if (!strcmp(bind->Protseq, "ncalrpc") && AuthnSvc == RPC_C_AUTHN_WINNT)
+  {
+    WCHAR *server_principal_name = RPCRT4_strdupAtoW((const char *)ServerPrincName);
+
+    if (ServerPrincName && !server_principal_name)
+      return RPC_S_OUT_OF_MEMORY;
+    r = set_ncalrpc_auth_info(bind, server_principal_name, AuthnLevel,
+                             AuthnSvc, AuthIdentity);
+    free(server_principal_name);
+    return r;
   }
 
   r = EnumerateSecurityPackagesA(&package_count, &packages);
@@ -1851,6 +2083,10 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
     return RPC_S_UNKNOWN_AUTHZ_SERVICE;
   }
 
+  if (!strcmp(bind->Protseq, "ncalrpc") && AuthnSvc == RPC_C_AUTHN_WINNT)
+    return set_ncalrpc_auth_info(bind, ServerPrincName, AuthnLevel,
+                                AuthnSvc, AuthIdentity);
+
   r = EnumerateSecurityPackagesW(&package_count, &packages);
   if (r != SEC_E_OK)
   {
@@ -1978,4 +2214,212 @@ RPC_STATUS WINAPI I_RpcBindingInqLocalClientPID(RPC_BINDING_HANDLE ClientBinding
         return RPC_S_INVALID_BINDING;
 
     return connection->ops->inquire_client_pid(connection, ClientPID);
+}
+
+/***********************************************************************
+ *             I_RpcOpenClientProcess (RPCRT4.@)
+ */
+LONG WINAPI I_RpcOpenClientProcess(RPC_BINDING_HANDLE ClientBinding, ACCESS_MASK access,
+                                    HANDLE *process_handle)
+{
+    RpcConnection *connection;
+    RpcBinding *binding;
+    CLIENT_ID client_id;
+    RPC_STATUS status;
+    ULONG pid;
+
+    TRACE("%p %#lx %p\n", ClientBinding, access, process_handle);
+
+    if (!process_handle) return STATUS_INVALID_PARAMETER;
+    *process_handle = NULL;
+
+    binding = ClientBinding ? ClientBinding : RPCRT4_GetThreadCurrentCallHandle();
+    if (!binding) return RPC_NT_NO_CALL_ACTIVE;
+    if (!(connection = binding->FromConn) || !connection->ops->inquire_client_pid)
+        return RPC_NT_INVALID_BINDING;
+
+    status = connection->ops->inquire_client_pid(connection, &pid);
+    if (status != RPC_S_OK) return I_RpcMapWin32Status(status);
+
+    client_id.UniqueProcess = ULongToHandle(pid);
+    client_id.UniqueThread = 0;
+    return NtOpenProcess(process_handle, access, NULL, &client_id);
+}
+
+/***********************************************************************
+ *             I_RpcOpenClientThread (RPCRT4.@)
+ */
+LONG WINAPI I_RpcOpenClientThread(RPC_BINDING_HANDLE ClientBinding, ACCESS_MASK access,
+                                   HANDLE *thread_handle)
+{
+    RpcBinding *binding;
+    CLIENT_ID client_id;
+    RPC_STATUS status;
+    ULONG tid;
+
+    TRACE("%p %#lx %p\n", ClientBinding, access, thread_handle);
+
+    if (!thread_handle) return STATUS_INVALID_PARAMETER;
+    *thread_handle = NULL;
+
+    binding = ClientBinding ? ClientBinding : RPCRT4_GetThreadCurrentCallHandle();
+    if (!binding) return RPC_NT_NO_CALL_ACTIVE;
+    if (!binding->FromConn) return RPC_NT_INVALID_BINDING;
+
+    status = RPCRT4_InquireLocalClientThreadId(binding->FromConn, &tid);
+    if (status != RPC_S_OK) return I_RpcMapWin32Status(status);
+
+    client_id.UniqueProcess = 0;
+    client_id.UniqueThread = ULongToHandle(tid);
+    return NtOpenThread(thread_handle, access, NULL, &client_id);
+}
+
+static ULONG get_call_protocol_sequence(const RpcBinding *binding)
+{
+    if (!binding->Protseq) return 0;
+    if (!strcmp(binding->Protseq, "ncalrpc")) return RPC_PROTSEQ_LRPC;
+    if (!strcmp(binding->Protseq, "ncacn_np")) return RPC_PROTSEQ_NMP;
+    if (!strcmp(binding->Protseq, "ncacn_ip_tcp")) return RPC_PROTSEQ_TCP;
+    if (!strcmp(binding->Protseq, "ncacn_http")) return RPC_PROTSEQ_HTTP;
+    return 0;
+}
+
+/***********************************************************************
+ *             I_RpcBindingIsClientLocal (RPCRT4.@)
+ */
+RPC_STATUS WINAPI I_RpcBindingIsClientLocal(RPC_BINDING_HANDLE ClientBinding,
+                                             unsigned int *IsClientLocal)
+{
+    RpcBinding *binding;
+
+    TRACE("%p %p\n", ClientBinding, IsClientLocal);
+
+    if (!IsClientLocal) return RPC_S_INVALID_ARG;
+    binding = ClientBinding ? ClientBinding : RPCRT4_GetThreadCurrentCallHandle();
+    if (!binding) return RPC_S_NO_CALL_ACTIVE;
+    if (!binding->FromConn) return RPC_S_INVALID_BINDING;
+
+    *IsClientLocal = get_call_protocol_sequence(binding) == RPC_PROTSEQ_LRPC;
+    return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             RpcServerInqCallAttributesW (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerInqCallAttributesW(RPC_BINDING_HANDLE ClientBinding,
+                                               void *call_attributes)
+{
+    const ULONG unsupported_flags = RPC_QUERY_SERVER_PRINCIPAL_NAME |
+                                    RPC_QUERY_CLIENT_PRINCIPAL_NAME |
+                                    RPC_QUERY_CALL_LOCAL_ADDRESS |
+                                    RPC_QUERY_CLIENT_ID;
+    RPC_CALL_ATTRIBUTES_V1_W *attributes = call_attributes;
+    RPC_CALL_ATTRIBUTES_V2_W *attributes_v2 = call_attributes;
+    RPC_MESSAGE *message = RPCRT4_GetThreadCurrentCallMessage();
+    RpcBinding *binding;
+    RpcConnection *connection;
+    RPC_STATUS status;
+    ULONG pid = 0;
+
+    TRACE("%p %p\n", ClientBinding, call_attributes);
+
+    if (!attributes || attributes->Version < 1 || attributes->Version > 3)
+        return RPC_S_INVALID_ARG;
+    if (attributes->Flags & unsupported_flags) return RPC_S_CANNOT_SUPPORT;
+
+    binding = ClientBinding ? ClientBinding : RPCRT4_GetThreadCurrentCallHandle();
+    if (!binding) return RPC_S_NO_CALL_ACTIVE;
+    if (!(connection = binding->FromConn)) return RPC_S_INVALID_BINDING;
+
+    status = rpcrt4_conn_inquire_auth_client(connection, NULL, NULL,
+                                              &attributes->AuthenticationLevel,
+                                              &attributes->AuthenticationService,
+                                              NULL, 0);
+    if (status != RPC_S_OK && !(attributes->Flags & RPC_QUERY_NO_AUTH_REQUIRED))
+        return status;
+    if (status != RPC_S_OK)
+    {
+        attributes->AuthenticationLevel = RPC_C_AUTHN_LEVEL_NONE;
+        attributes->AuthenticationService = RPC_C_AUTHN_NONE;
+    }
+    attributes->NullSession = FALSE;
+
+    if (attributes->Version == 1) return RPC_S_OK;
+
+    attributes_v2->KernelModeCaller = FALSE;
+    attributes_v2->ProtocolSequence = get_call_protocol_sequence(binding);
+    attributes_v2->IsClientLocal = attributes_v2->ProtocolSequence == RPC_PROTSEQ_LRPC ?
+                                   rcclLocal : rcclClientUnknownLocality;
+    attributes_v2->CallStatus = 0;
+    attributes_v2->CallType = rctNormal;
+
+    if (attributes->Flags & RPC_QUERY_CLIENT_PID)
+    {
+        if (!connection->ops->inquire_client_pid) return RPC_S_INVALID_BINDING;
+        status = connection->ops->inquire_client_pid(connection, &pid);
+        if (status != RPC_S_OK) return status;
+        attributes_v2->ClientPID = ULongToHandle(pid);
+    }
+
+    if (message)
+    {
+        const RPC_SERVER_INTERFACE *server_if = message->RpcInterfaceInformation;
+
+        attributes_v2->OpNum = message->ProcNum;
+        if (server_if) attributes_v2->InterfaceUuid = server_if->InterfaceId.SyntaxGUID;
+    }
+    return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             I_RpcBindingInqClientTokenAttributes (RPCRT4.@)
+ */
+RPC_STATUS WINAPI I_RpcBindingInqClientTokenAttributes(RPC_BINDING_HANDLE ClientBinding,
+                                                        LUID *TokenId,
+                                                        LUID *AuthenticationId,
+                                                        LUID *ModifiedId)
+{
+    TOKEN_STATISTICS statistics;
+    RpcBinding *binding;
+    RPC_STATUS status;
+    DWORD size, error;
+    HANDLE token;
+
+    TRACE("%p %p %p %p\n", ClientBinding, TokenId, AuthenticationId, ModifiedId);
+
+    binding = ClientBinding ? ClientBinding : RPCRT4_GetThreadCurrentCallHandle();
+    if (!binding)
+        return RPC_S_NO_CALL_ACTIVE;
+    if (!binding->FromConn)
+        return RPC_S_INVALID_BINDING;
+
+    status = rpcrt4_conn_impersonate_client(binding->FromConn);
+    if (status != RPC_S_OK)
+        return ERROR_ACCESS_DENIED;
+
+    if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token))
+    {
+        error = GetLastError();
+    }
+    else
+    {
+        if (GetTokenInformation(token, TokenStatistics, &statistics, sizeof(statistics), &size))
+        {
+            if (TokenId) *TokenId = statistics.TokenId;
+            if (AuthenticationId) *AuthenticationId = statistics.AuthenticationId;
+            if (ModifiedId) *ModifiedId = statistics.ModifiedId;
+            error = ERROR_SUCCESS;
+        }
+        else
+        {
+            error = GetLastError();
+        }
+        CloseHandle(token);
+    }
+
+    status = rpcrt4_conn_revert_to_self(binding->FromConn);
+    if (error == ERROR_SUCCESS && status != RPC_S_OK)
+        error = ERROR_ACCESS_DENIED;
+
+    return error;
 }

@@ -165,6 +165,107 @@ typedef struct _RPC_ASYNC_STATE
 
 #define RpcAsyncGetCallHandle(async) (((PRPC_ASYNC_STATE)async)->RuntimeInfo)
 
+#define RPC_QUERY_SERVER_PRINCIPAL_NAME  0x02
+#define RPC_QUERY_CLIENT_PRINCIPAL_NAME  0x04
+#define RPC_QUERY_CALL_LOCAL_ADDRESS     0x08
+#define RPC_QUERY_CLIENT_PID             0x10
+#define RPC_QUERY_IS_CLIENT_LOCAL        0x20
+#define RPC_QUERY_NO_AUTH_REQUIRED       0x40
+#define RPC_QUERY_CLIENT_ID              0x80
+
+#define RPC_CALL_STATUS_CANCELLED        0x01
+#define RPC_CALL_STATUS_DISCONNECTED     0x02
+
+typedef enum _RpcCallType
+{
+    rctInvalid,
+    rctNormal,
+    rctTraining,
+    rctGuaranteed
+} RpcCallType;
+
+typedef enum _RpcLocalAddressFormat
+{
+    rlafInvalid,
+    rlafIPv4,
+    rlafIPv6
+} RpcLocalAddressFormat;
+
+typedef enum _RpcCallClientLocality
+{
+    rcclInvalid,
+    rcclLocal,
+    rcclRemote,
+    rcclClientUnknownLocality
+} RpcCallClientLocality;
+
+typedef struct _RPC_CALL_LOCAL_ADDRESS_V1
+{
+    unsigned int Version;
+    void *Buffer;
+    ULONG BufferSize;
+    RpcLocalAddressFormat AddressFormat;
+} RPC_CALL_LOCAL_ADDRESS_V1, *PRPC_CALL_LOCAL_ADDRESS_V1;
+
+typedef struct tagRPC_CALL_ATTRIBUTES_V1_W
+{
+    unsigned int Version;
+    ULONG Flags;
+    ULONG ServerPrincipalNameBufferLength;
+    unsigned short *ServerPrincipalName;
+    ULONG ClientPrincipalNameBufferLength;
+    unsigned short *ClientPrincipalName;
+    ULONG AuthenticationLevel;
+    ULONG AuthenticationService;
+    BOOL NullSession;
+} RPC_CALL_ATTRIBUTES_V1_W;
+
+typedef struct tagRPC_CALL_ATTRIBUTES_V2_W
+{
+    unsigned int Version;
+    ULONG Flags;
+    ULONG ServerPrincipalNameBufferLength;
+    unsigned short *ServerPrincipalName;
+    ULONG ClientPrincipalNameBufferLength;
+    unsigned short *ClientPrincipalName;
+    ULONG AuthenticationLevel;
+    ULONG AuthenticationService;
+    BOOL NullSession;
+    BOOL KernelModeCaller;
+    ULONG ProtocolSequence;
+    RpcCallClientLocality IsClientLocal;
+    HANDLE ClientPID;
+    ULONG CallStatus;
+    RpcCallType CallType;
+    RPC_CALL_LOCAL_ADDRESS_V1 *CallLocalAddress;
+    unsigned short OpNum;
+    UUID InterfaceUuid;
+} RPC_CALL_ATTRIBUTES_V2_W;
+
+typedef struct tagRPC_CALL_ATTRIBUTES_V3_W
+{
+    unsigned int Version;
+    ULONG Flags;
+    ULONG ServerPrincipalNameBufferLength;
+    unsigned short *ServerPrincipalName;
+    ULONG ClientPrincipalNameBufferLength;
+    unsigned short *ClientPrincipalName;
+    ULONG AuthenticationLevel;
+    ULONG AuthenticationService;
+    BOOL NullSession;
+    BOOL KernelModeCaller;
+    ULONG ProtocolSequence;
+    RpcCallClientLocality IsClientLocal;
+    HANDLE ClientPID;
+    ULONG CallStatus;
+    RpcCallType CallType;
+    RPC_CALL_LOCAL_ADDRESS_V1 *CallLocalAddress;
+    unsigned short OpNum;
+    UUID InterfaceUuid;
+    ULONG ClientIdentifierBufferLength;
+    unsigned char *ClientIdentifier;
+} RPC_CALL_ATTRIBUTES_V3_W;
+
 #ifdef __RPC_WIN64__
 # pragma pack(pop)
 #endif
@@ -176,6 +277,9 @@ RPCRTAPI RPC_STATUS RPC_ENTRY RpcAsyncCompleteCall(PRPC_ASYNC_STATE,void *);
 RPCRTAPI RPC_STATUS RPC_ENTRY RpcAsyncAbortCall(PRPC_ASYNC_STATE,ULONG);
 RPCRTAPI RPC_STATUS RPC_ENTRY RpcAsyncCancelCall(PRPC_ASYNC_STATE,BOOL);
 RPCRTAPI RPC_STATUS RPC_ENTRY RpcAsyncCleanupThread(DWORD);
+RPCRTAPI RPC_STATUS RPC_ENTRY RpcBindingBind(PRPC_ASYNC_STATE,RPC_BINDING_HANDLE,RPC_IF_HANDLE);
+RPCRTAPI RPC_STATUS RPC_ENTRY RpcBindingUnbind(RPC_BINDING_HANDLE);
+RPCRTAPI RPC_STATUS RPC_ENTRY RpcServerInqCallAttributesW(RPC_BINDING_HANDLE,void *);
 RPCRTAPI RPC_STATUS RPC_ENTRY RpcErrorStartEnumeration(RPC_ERROR_ENUM_HANDLE*);
 RPCRTAPI RPC_STATUS RPC_ENTRY RpcErrorGetNextRecord(RPC_ERROR_ENUM_HANDLE*,BOOL,RPC_EXTENDED_ERROR_INFO*);
 RPCRTAPI RPC_STATUS RPC_ENTRY RpcErrorEndEnumeration(RPC_ERROR_ENUM_HANDLE*);

@@ -11,6 +11,7 @@ SOURCES = \
 	cpsf.c \
 	cstub.c \
 	epm.idl \
+	epm_ext.idl \
 	ndr_clientserver.c \
 	ndr_contexthandle.c \
 	ndr_es.c \

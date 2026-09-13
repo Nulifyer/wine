@@ -36,6 +36,7 @@ enum secure_packet_direction
 typedef struct _RpcAuthInfo
 {
   LONG refs;
+  BOOL transport_only;
 
   ULONG AuthnLevel;
   ULONG AuthnSvc;
@@ -119,6 +120,9 @@ struct connection_ops {
   RPC_STATUS (*revert_to_self)(RpcConnection *conn);
   RPC_STATUS (*inquire_auth_client)(RpcConnection *, RPC_AUTHZ_HANDLE *, RPC_WSTR *, ULONG *, ULONG *, ULONG *, ULONG);
   RPC_STATUS (*inquire_client_pid)(RpcConnection *conn, ULONG *pid);
+  RPC_STATUS (*send_system_handle)(RpcConnection *conn, HANDLE source, ACCESS_MASK access,
+                                   BOOL close_source, ULONGLONG *transfer_id);
+  RPC_STATUS (*receive_system_handle)(RpcConnection *conn, ULONGLONG transfer_id, HANDLE *handle);
 };
 
 /* don't know what MS's structure looks like */
@@ -141,6 +145,16 @@ typedef struct _RpcBinding
   RpcAuthInfo *AuthInfo;
   RpcQualityOfService *QOS;
   LPWSTR CookieAuth;
+
+  /* State owned by binding handles created through RpcBindingCreate. */
+  BOOL FastBinding;
+  BOOL FastBound;
+  BOOL FastDynamicEndpoint;
+  ULONG FastFlags;
+  ULONG ComTimeout;
+  ULONG CallTimeout;
+  RPC_SYNTAX_IDENTIFIER FastInterface;
+  RPC_SYNTAX_IDENTIFIER FastTransferSyntax;
 } RpcBinding;
 
 LPWSTR RPCRT4_strndupW(LPCWSTR src, INT len);
@@ -260,6 +274,9 @@ RPC_STATUS RpcTransport_ParseTopOfTower(const unsigned char *tower_data, size_t 
 void RPCRT4_SetThreadCurrentConnection(RpcConnection *Connection);
 void RPCRT4_SetThreadCurrentCallHandle(RpcBinding *Binding);
 RpcBinding *RPCRT4_GetThreadCurrentCallHandle(void);
+void RPCRT4_SetThreadCurrentCallMessage(RPC_MESSAGE *message);
+RPC_MESSAGE *RPCRT4_GetThreadCurrentCallMessage(void);
+RPC_STATUS RPCRT4_InquireLocalClientThreadId(RpcConnection *connection, ULONG *tid);
 void RPCRT4_PushThreadContextHandle(NDR_SCONTEXT SContext);
 void RPCRT4_RemoveThreadContextHandle(NDR_SCONTEXT SContext);
 NDR_SCONTEXT RPCRT4_PopThreadContextHandle(void);

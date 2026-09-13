@@ -1113,6 +1113,7 @@ SOURCES = \
 	windowscontracts.idl \
 	windowsx.h \
 	wine/afd.h \
+	wine/alpc.h \
 	wine/asm.h \
 	wine/atsvc.idl \
 	wine/condrv.h \
@@ -1141,6 +1142,7 @@ SOURCES = \
 	wine/orpc.idl \
 	wine/plugplay.idl \
 	wine/rbtree.h \
+	wine/rpc_transport.h \
 	wine/schrpc.idl \
 	wine/server.h \
 	wine/server_protocol.h \

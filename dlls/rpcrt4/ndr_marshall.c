@@ -38,12 +38,65 @@
 #include "winerror.h"
 
 #include "ndr_misc.h"
+#include "rpcdcep.h"
 #include "rpcndr.h"
 #include "ndrtypes.h"
+#include "rpc_binding.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
+
+#ifdef _WIN64
+/*
+ * The private SSPI RPC interface returns an in-process dispatch table from
+ * procedure 16 as an FC_UINT3264. Windows uses NDR64 for this local call, but
+ * Wine's NdrClientCall3 currently falls back to NDR32 and consequently drops
+ * the high half of the pointer. The server and client are threads in the same
+ * process, so retain the value locally until NDR64 is implemented.
+ */
+static const UUID sspi_rpc_interface_uuid =
+    {0x4f32adc8, 0x6052, 0x4a04, {0x87, 0x01, 0x29, 0x3c, 0xcf, 0x20, 0x96, 0xf0}};
+static void *sspi_local_dispatch_table;
+
+static BOOL is_sspi_local_dispatch_call(const MIDL_STUB_MESSAGE *stub_msg)
+{
+    const RPC_CLIENT_INTERFACE *client_if;
+
+    if (!stub_msg->RpcMsg ||
+        (stub_msg->RpcMsg->ProcNum & ~RPC_FLAGS_VALID_BIT) != 16 ||
+        !(client_if = stub_msg->RpcMsg->RpcInterfaceInformation))
+        return FALSE;
+
+    return !memcmp(&client_if->InterfaceId.SyntaxGUID, &sspi_rpc_interface_uuid,
+                   sizeof(sspi_rpc_interface_uuid));
+}
+
+static void preserve_sspi_local_dispatch(const MIDL_STUB_MESSAGE *stub_msg, const void *memory)
+{
+    if (!stub_msg->IsClient && is_sspi_local_dispatch_call(stub_msg))
+    {
+        void *dispatch = *(void * const *)memory;
+
+        InterlockedExchangePointer(&sspi_local_dispatch_table, dispatch);
+        TRACE("preserving local SSPI dispatch table %p\n", dispatch);
+    }
+}
+
+static void restore_sspi_local_dispatch(const MIDL_STUB_MESSAGE *stub_msg, UINT_PTR *value)
+{
+    void *dispatch;
+
+    if (!stub_msg->IsClient || !is_sspi_local_dispatch_call(stub_msg)) return;
+
+    dispatch = InterlockedCompareExchangePointer(&sspi_local_dispatch_table, NULL, NULL);
+    if (dispatch && (UINT_PTR)(UINT)*value == (UINT_PTR)(UINT)(UINT_PTR)dispatch)
+    {
+        TRACE("restoring local SSPI dispatch table %p from %#Ix\n", dispatch, *value);
+        *value = (UINT_PTR)dispatch;
+    }
+}
+#endif
 
 #if defined(__i386__)
 # define LITTLE_ENDIAN_UINT32_WRITE(pchar, uint32) \
@@ -145,7 +198,22 @@ static void WINAPI NdrRangeBufferSize(PMIDL_STUB_MESSAGE, unsigned char *, PFORM
 static ULONG WINAPI NdrRangeMemorySize(PMIDL_STUB_MESSAGE, PFORMAT_STRING);
 static void WINAPI NdrRangeFree(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
 
-static ULONG WINAPI NdrByteCountPointerMemorySize(PMIDL_STUB_MESSAGE, PFORMAT_STRING);
+static unsigned char *WINAPI NdrSystemHandleMarshall(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+static unsigned char *WINAPI NdrSystemHandleUnmarshall(PMIDL_STUB_MESSAGE, unsigned char **, PFORMAT_STRING, unsigned char);
+static void WINAPI NdrSystemHandleBufferSize(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+static ULONG WINAPI NdrSystemHandleMemorySize(PMIDL_STUB_MESSAGE, PFORMAT_STRING);
+static void WINAPI NdrSystemHandleFree(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+
+static inline void safe_buffer_increment(MIDL_STUB_MESSAGE *, ULONG);
+static inline void safe_buffer_length_increment(MIDL_STUB_MESSAGE *, ULONG);
+static inline void safe_copy_from_buffer(MIDL_STUB_MESSAGE *, void *, ULONG);
+static inline void copy_to_buffer(MIDL_STUB_MESSAGE *, const void *, ULONG);
+
+static unsigned char *WINAPI NdrSupplementMarshall(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+static unsigned char *WINAPI NdrSupplementUnmarshall(PMIDL_STUB_MESSAGE, unsigned char **, PFORMAT_STRING, unsigned char);
+static void WINAPI NdrSupplementBufferSize(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+static ULONG WINAPI NdrSupplementMemorySize(PMIDL_STUB_MESSAGE, PFORMAT_STRING);
+static void WINAPI NdrSupplementFree(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
 
 static unsigned char * ComplexBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
                                          unsigned char *pMemory,
@@ -204,13 +272,15 @@ const NDR_MARSHALL NdrMarshaller[NDR_TABLE_SIZE] = {
   /* 0x30 */
   NdrContextHandleMarshall,
   /* 0xb1 */
-  0, 0, 0,
+  NdrComplexStructMarshall, 0, 0,
   NdrUserMarshalMarshall,
-  0, 0,
+  0, NdrSupplementMarshall,
   /* 0xb7 */
   NdrRangeMarshall,
   NdrBaseTypeMarshall,
-  NdrBaseTypeMarshall
+  NdrBaseTypeMarshall,
+  /* 0x3a */
+  0, 0, NdrSystemHandleMarshall
 };
 const NDR_UNMARSHALL NdrUnmarshaller[NDR_TABLE_SIZE] = {
   0,
@@ -248,13 +318,15 @@ const NDR_UNMARSHALL NdrUnmarshaller[NDR_TABLE_SIZE] = {
   /* 0x30 */
   NdrContextHandleUnmarshall,
   /* 0xb1 */
-  0, 0, 0,
+  NdrComplexStructUnmarshall, 0, 0,
   NdrUserMarshalUnmarshall,
-  0, 0,
+  0, NdrSupplementUnmarshall,
   /* 0xb7 */
   NdrRangeUnmarshall,
   NdrBaseTypeUnmarshall,
-  NdrBaseTypeUnmarshall
+  NdrBaseTypeUnmarshall,
+  /* 0x3a */
+  0, 0, NdrSystemHandleUnmarshall
 };
 const NDR_BUFFERSIZE NdrBufferSizer[NDR_TABLE_SIZE] = {
   0,
@@ -292,13 +364,15 @@ const NDR_BUFFERSIZE NdrBufferSizer[NDR_TABLE_SIZE] = {
   /* 0x30 */
   NdrContextHandleBufferSize,
   /* 0xb1 */
-  0, 0, 0,
+  NdrComplexStructBufferSize, 0, 0,
   NdrUserMarshalBufferSize,
-  0, 0,
+  0, NdrSupplementBufferSize,
   /* 0xb7 */
   NdrRangeBufferSize,
   NdrBaseTypeBufferSize,
-  NdrBaseTypeBufferSize
+  NdrBaseTypeBufferSize,
+  /* 0x3a */
+  0, 0, NdrSystemHandleBufferSize
 };
 const NDR_MEMORYSIZE NdrMemorySizer[NDR_TABLE_SIZE] = {
   0,
@@ -329,20 +403,22 @@ const NDR_MEMORYSIZE NdrMemorySizer[NDR_TABLE_SIZE] = {
   /* 0x2a */
   NdrEncapsulatedUnionMemorySize,
   NdrNonEncapsulatedUnionMemorySize,
-  NdrByteCountPointerMemorySize,
+  0,
   NdrXmitOrRepAsMemorySize, NdrXmitOrRepAsMemorySize,
   /* 0x2f */
   NdrInterfacePointerMemorySize,
   /* 0x30 */
   0,
   /* 0xb1 */
-  0, 0, 0,
+  NdrComplexStructMemorySize, 0, 0,
   NdrUserMarshalMemorySize,
-  0, 0,
+  0, NdrSupplementMemorySize,
   /* 0xb7 */
   NdrRangeMemorySize,
   NdrBaseTypeMemorySize,
-  NdrBaseTypeMemorySize
+  NdrBaseTypeMemorySize,
+  /* 0x3a */
+  0, 0, NdrSystemHandleMemorySize
 };
 const NDR_FREE NdrFreer[NDR_TABLE_SIZE] = {
   0,
@@ -379,14 +455,181 @@ const NDR_FREE NdrFreer[NDR_TABLE_SIZE] = {
   /* 0x30 */
   0,
   /* 0xb1 */
-  0, 0, 0,
+  NdrComplexStructFree, 0, 0,
   NdrUserMarshalFree,
-  0, 0,
+  0, NdrSupplementFree,
   /* 0xb7 */
   NdrRangeFree,
   NdrBaseTypeFree,
-  NdrBaseTypeFree
+  NdrBaseTypeFree,
+  /* 0x3a */
+  0, 0, NdrSystemHandleFree
 };
+
+static void validate_system_handle_format(PFORMAT_STRING format)
+{
+    if (format[1] > SYSTEM_HANDLE_MAX)
+        RpcRaiseException(RPC_S_SYSTEM_HANDLE_TYPE_MISMATCH);
+}
+
+static RpcConnection *get_system_handle_connection(MIDL_STUB_MESSAGE *stub_msg)
+{
+    RpcConnection *connection;
+
+    if (!stub_msg->RpcMsg || !(connection = stub_msg->RpcMsg->ReservedForRuntime) ||
+        !connection->ops->send_system_handle || !connection->ops->receive_system_handle)
+        RpcRaiseException(RPC_S_INVALID_BINDING);
+    return connection;
+}
+
+static unsigned char *WINAPI NdrSystemHandleMarshall(MIDL_STUB_MESSAGE *stub_msg,
+        unsigned char *memory, PFORMAT_STRING format)
+{
+    HANDLE handle = *(HANDLE *)memory;
+    ULONGLONG wire_handle = 0;
+
+    TRACE("(%p,%p,%p): type %u access %#lx handle %p\n", stub_msg, memory, format,
+          format[1], *(const ULONG *)(format + 2), handle);
+    validate_system_handle_format(format);
+
+    if (handle)
+    {
+        RpcConnection *connection = get_system_handle_connection(stub_msg);
+        RPC_STATUS status = connection->ops->send_system_handle(
+            connection, handle, *(const ULONG *)(format + 2), !stub_msg->IsClient, &wire_handle);
+
+        if (status != RPC_S_OK) RpcRaiseException(status);
+        if (!stub_msg->IsClient) *(HANDLE *)memory = NULL;
+    }
+
+    align_pointer_clear(&stub_msg->Buffer, 4);
+    copy_to_buffer(stub_msg, &wire_handle, sizeof(wire_handle));
+    return NULL;
+}
+
+static unsigned char *WINAPI NdrSystemHandleUnmarshall(MIDL_STUB_MESSAGE *stub_msg,
+        unsigned char **memory, PFORMAT_STRING format, unsigned char must_alloc)
+{
+    ULONGLONG wire_handle;
+    HANDLE handle = NULL;
+
+    TRACE("(%p,%p,%p,%u): type %u access %#lx\n", stub_msg, memory, format,
+          must_alloc, format[1], *(const ULONG *)(format + 2));
+    validate_system_handle_format(format);
+    align_pointer(&stub_msg->Buffer, 4);
+    safe_copy_from_buffer(stub_msg, &wire_handle, sizeof(wire_handle));
+
+    if (wire_handle)
+    {
+        RpcConnection *connection = get_system_handle_connection(stub_msg);
+        RPC_STATUS status = connection->ops->receive_system_handle(connection, wire_handle, &handle);
+
+        if (status != RPC_S_OK) RpcRaiseException(status);
+    }
+
+    if (must_alloc || !*memory)
+        *memory = NdrAllocate(stub_msg, sizeof(handle));
+    *(HANDLE *)*memory = handle;
+    return NULL;
+}
+
+static void WINAPI NdrSystemHandleBufferSize(MIDL_STUB_MESSAGE *stub_msg,
+        unsigned char *memory, PFORMAT_STRING format)
+{
+    TRACE("(%p,%p,%p)\n", stub_msg, memory, format);
+    validate_system_handle_format(format);
+    align_length(&stub_msg->BufferLength, 4);
+    safe_buffer_length_increment(stub_msg, sizeof(ULONGLONG));
+}
+
+static ULONG WINAPI NdrSystemHandleMemorySize(MIDL_STUB_MESSAGE *stub_msg,
+        PFORMAT_STRING format)
+{
+    TRACE("(%p,%p)\n", stub_msg, format);
+    validate_system_handle_format(format);
+    align_pointer(&stub_msg->Buffer, 4);
+    safe_buffer_increment(stub_msg, sizeof(ULONGLONG));
+    align_length(&stub_msg->MemorySize, sizeof(HANDLE));
+    stub_msg->MemorySize += sizeof(HANDLE);
+    return stub_msg->MemorySize;
+}
+
+static void WINAPI NdrSystemHandleFree(MIDL_STUB_MESSAGE *stub_msg,
+        unsigned char *memory, PFORMAT_STRING format)
+{
+    HANDLE handle = *(HANDLE *)memory;
+
+    TRACE("(%p,%p,%p): type %u handle %p\n", stub_msg, memory, format, format[1], handle);
+    validate_system_handle_format(format);
+    if (!stub_msg->IsClient && handle)
+    {
+        CloseHandle(handle);
+        *(HANDLE *)memory = NULL;
+    }
+}
+
+static PFORMAT_STRING supplement_type(PFORMAT_STRING format)
+{
+    format += 2;
+    return format + *(const SHORT *)format;
+}
+
+static unsigned char *WINAPI NdrSupplementMarshall(MIDL_STUB_MESSAGE *stub_msg,
+        unsigned char *memory, PFORMAT_STRING format)
+{
+    PFORMAT_STRING type = supplement_type(format);
+    NDR_MARSHALL marshaller = NdrMarshaller[*type & 0x3f];
+
+    TRACE("(%p,%p,%p): type %#x\n", stub_msg, memory, format, *type);
+    if (marshaller) marshaller(stub_msg, memory, type);
+    else FIXME("no marshaller for supplemented data type=%02x\n", *type);
+    return NULL;
+}
+
+static unsigned char *WINAPI NdrSupplementUnmarshall(MIDL_STUB_MESSAGE *stub_msg,
+        unsigned char **memory, PFORMAT_STRING format, unsigned char must_alloc)
+{
+    PFORMAT_STRING type = supplement_type(format);
+    NDR_UNMARSHALL unmarshaller = NdrUnmarshaller[*type & 0x3f];
+
+    TRACE("(%p,%p,%p,%u): type %#x\n", stub_msg, memory, format, must_alloc, *type);
+    if (unmarshaller) unmarshaller(stub_msg, memory, type, must_alloc);
+    else FIXME("no unmarshaller for supplemented data type=%02x\n", *type);
+    return NULL;
+}
+
+static void WINAPI NdrSupplementBufferSize(MIDL_STUB_MESSAGE *stub_msg,
+        unsigned char *memory, PFORMAT_STRING format)
+{
+    PFORMAT_STRING type = supplement_type(format);
+    NDR_BUFFERSIZE sizer = NdrBufferSizer[*type & 0x3f];
+
+    TRACE("(%p,%p,%p): type %#x\n", stub_msg, memory, format, *type);
+    if (sizer) sizer(stub_msg, memory, type);
+    else FIXME("no buffersizer for supplemented data type=%02x\n", *type);
+}
+
+static ULONG WINAPI NdrSupplementMemorySize(MIDL_STUB_MESSAGE *stub_msg,
+        PFORMAT_STRING format)
+{
+    PFORMAT_STRING type = supplement_type(format);
+    NDR_MEMORYSIZE sizer = NdrMemorySizer[*type & 0x3f];
+
+    TRACE("(%p,%p): type %#x\n", stub_msg, format, *type);
+    if (sizer) sizer(stub_msg, type);
+    else FIXME("no memorysizer for supplemented data type=%02x\n", *type);
+    return stub_msg->MemorySize;
+}
+
+static void WINAPI NdrSupplementFree(MIDL_STUB_MESSAGE *stub_msg,
+        unsigned char *memory, PFORMAT_STRING format)
+{
+    PFORMAT_STRING type = supplement_type(format);
+    NDR_FREE freer = NdrFreer[*type & 0x3f];
+
+    TRACE("(%p,%p,%p): type %#x\n", stub_msg, memory, format, *type);
+    if (freer) freer(stub_msg, memory, type);
+}
 
 typedef struct _NDR_MEMORY_LIST
 {
@@ -397,6 +640,15 @@ typedef struct _NDR_MEMORY_LIST
 } NDR_MEMORY_LIST;
 
 #define MEML_MAGIC  ('M' << 24 | 'E' << 16 | 'M' << 8 | 'L')
+
+struct NDR_ALLOC_ALL_NODES_CONTEXT
+{
+    unsigned char *current;
+    unsigned char *start;
+    unsigned char *end;
+    ULONG raise_bad_stub_data;
+    ULONG reserved;
+};
 
 /***********************************************************************
  *            NdrAllocate [RPCRT4.@]
@@ -421,6 +673,22 @@ void * WINAPI NdrAllocate(MIDL_STUB_MESSAGE *pStubMsg, SIZE_T len)
     SIZE_T adjusted_len;
     void *p;
     NDR_MEMORY_LIST *mem_list;
+
+    if (pStubMsg->pAllocAllNodesContext)
+    {
+        struct NDR_ALLOC_ALL_NODES_CONTEXT *context = pStubMsg->pAllocAllNodesContext;
+        ULONG_PTR current = (ULONG_PTR)context->current;
+        ULONG_PTR aligned = (current + 7) & ~(ULONG_PTR)7;
+        ULONG_PTR end = aligned + len;
+
+        context->current = (unsigned char *)aligned;
+        if (aligned < current || end < aligned || aligned < (ULONG_PTR)context->start ||
+            end > (ULONG_PTR)context->end)
+            RpcRaiseException(context->raise_bad_stub_data ? RPC_X_BAD_STUB_DATA : RPC_S_INTERNAL_ERROR);
+
+        context->current = (unsigned char *)end;
+        return (void *)aligned;
+    }
 
     aligned_len = (len + 7) & ~7;
     adjusted_len = aligned_len + sizeof(NDR_MEMORY_LIST);
@@ -6315,11 +6583,100 @@ void WINAPI NdrNonEncapsulatedUnionFree(PMIDL_STUB_MESSAGE pStubMsg,
 /***********************************************************************
  *           NdrByteCountPointerMarshall [RPCRT4.@]
  */
+static PFORMAT_STRING byte_count_pointer_pointee(MIDL_STUB_MESSAGE *stub_msg,
+                                                  PFORMAT_STRING format)
+{
+    PFORMAT_STRING offset = format + 6 + stub_msg->CorrDespIncrement;
+    return offset + *(const SHORT *)offset;
+}
+
+static ULONG byte_count_pointer_simple_memory_size(unsigned char type)
+{
+    switch (type)
+    {
+    case FC_BYTE:
+    case FC_CHAR:
+    case FC_SMALL:
+    case FC_USMALL:
+        return sizeof(UCHAR);
+    case FC_WCHAR:
+    case FC_SHORT:
+    case FC_USHORT:
+        return sizeof(USHORT);
+    case FC_LONG:
+    case FC_ULONG:
+    case FC_FLOAT:
+    case FC_ERROR_STATUS_T:
+    case FC_ENUM16:
+    case FC_ENUM32:
+        return sizeof(ULONG);
+    case FC_DOUBLE:
+    case FC_HYPER:
+        return sizeof(ULONGLONG);
+    case FC_INT3264:
+    case FC_UINT3264:
+        return sizeof(ULONG_PTR);
+    case FC_IGNORE:
+        return 0;
+    default:
+        RpcRaiseException(RPC_S_INTERNAL_ERROR);
+        return 0;
+    }
+}
+
+static ULONG byte_count_pointer_simple_wire_size(unsigned char type)
+{
+    switch (type)
+    {
+    case FC_BYTE:
+    case FC_CHAR:
+    case FC_SMALL:
+    case FC_USMALL:
+        return sizeof(UCHAR);
+    case FC_WCHAR:
+    case FC_SHORT:
+    case FC_USHORT:
+    case FC_ENUM16:
+        return sizeof(USHORT);
+    case FC_LONG:
+    case FC_ULONG:
+    case FC_FLOAT:
+    case FC_ERROR_STATUS_T:
+    case FC_ENUM32:
+    case FC_INT3264:
+    case FC_UINT3264:
+        return sizeof(ULONG);
+    case FC_DOUBLE:
+    case FC_HYPER:
+        return sizeof(ULONGLONG);
+    case FC_IGNORE:
+        return 0;
+    default:
+        RpcRaiseException(RPC_S_INTERNAL_ERROR);
+        return 0;
+    }
+}
+
 unsigned char *  WINAPI NdrByteCountPointerMarshall(PMIDL_STUB_MESSAGE pStubMsg,
                                 unsigned char *pMemory,
                                 PFORMAT_STRING pFormat)
 {
-    FIXME("stub\n");
+    PFORMAT_STRING pointee;
+    NDR_MARSHALL marshaller;
+
+    TRACE("(%p,%p,%p)\n", pStubMsg, pMemory, pFormat);
+
+    if (pFormat[1] != FC_PAD)
+    {
+        if ((pFormat[1] & 0x3f) >= 0x3c) RpcRaiseException(RPC_S_INTERNAL_ERROR);
+        NdrSimpleTypeMarshall(pStubMsg, pMemory, pFormat[1]);
+        return NULL;
+    }
+
+    pointee = byte_count_pointer_pointee(pStubMsg, pFormat);
+    marshaller = NdrMarshaller[*pointee & NDR_TABLE_MASK];
+    if (!marshaller) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    marshaller(pStubMsg, pMemory, pointee);
     return NULL;
 }
 
@@ -6331,7 +6688,62 @@ unsigned char *  WINAPI NdrByteCountPointerUnmarshall(PMIDL_STUB_MESSAGE pStubMs
                                 PFORMAT_STRING pFormat,
                                 unsigned char fMustAlloc)
 {
-    FIXME("stub\n");
+    struct NDR_ALLOC_ALL_NODES_CONTEXT context;
+    PFORMAT_STRING pointee = NULL;
+    unsigned char *saved_buffer;
+    ULONG_PTR byte_count;
+    ULONG memory_size;
+
+    TRACE("(%p,%p,%p,%u)\n", pStubMsg, ppMemory, pFormat, fMustAlloc);
+
+    ComputeConformanceOrVariance(pStubMsg, NULL, pFormat + 2, 0, &byte_count);
+
+    if (pFormat[1] == FC_PAD)
+    {
+        NDR_MEMORYSIZE sizer;
+
+        pointee = byte_count_pointer_pointee(pStubMsg, pFormat);
+        sizer = NdrMemorySizer[*pointee & NDR_TABLE_MASK];
+        if (!sizer) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+
+        saved_buffer = pStubMsg->Buffer;
+        pStubMsg->MemorySize = 0;
+        memory_size = sizer(pStubMsg, pointee);
+        if (pStubMsg->Buffer > pStubMsg->BufferEnd) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+        pStubMsg->Buffer = saved_buffer;
+    }
+    else
+        memory_size = byte_count_pointer_simple_memory_size(pFormat[1]);
+
+    if (memory_size > byte_count) RpcRaiseException(RPC_X_BYTE_COUNT_TOO_SMALL);
+    if ((ULONG_PTR)*ppMemory + byte_count < (ULONG_PTR)*ppMemory)
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+
+    context.current = context.start = *ppMemory;
+    context.end = (unsigned char *)((ULONG_PTR)*ppMemory + byte_count);
+    context.raise_bad_stub_data = 1;
+    context.reserved = 0;
+    pStubMsg->pAllocAllNodesContext = &context;
+
+    if (pFormat[1] == FC_PAD)
+    {
+        NDR_UNMARSHALL unmarshaller = NdrUnmarshaller[*pointee & NDR_TABLE_MASK];
+        if (!unmarshaller) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+        unmarshaller(pStubMsg, ppMemory, pointee, TRUE);
+    }
+    else
+    {
+        ULONG wire_size = byte_count_pointer_simple_wire_size(pFormat[1]);
+
+        if (wire_size)
+        {
+            align_pointer(&pStubMsg->Buffer, wire_size);
+            validate_size(pStubMsg, pStubMsg->BufferEnd, wire_size);
+        }
+        NdrSimpleTypeUnmarshall(pStubMsg, *ppMemory, pFormat[1]);
+    }
+
+    pStubMsg->pAllocAllNodesContext = NULL;
     return NULL;
 }
 
@@ -6342,17 +6754,28 @@ void WINAPI NdrByteCountPointerBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
                                 unsigned char *pMemory,
                                 PFORMAT_STRING pFormat)
 {
-    FIXME("stub\n");
-}
+    PFORMAT_STRING pointee;
+    NDR_BUFFERSIZE sizer;
 
-/***********************************************************************
- *           NdrByteCountPointerMemorySize [internal]
- */
-static ULONG WINAPI NdrByteCountPointerMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
-                                                  PFORMAT_STRING pFormat)
-{
-    FIXME("stub\n");
-    return 0;
+    TRACE("(%p,%p,%p)\n", pStubMsg, pMemory, pFormat);
+
+    if (pFormat[1] != FC_PAD)
+    {
+        ULONG length = pStubMsg->BufferLength + 16;
+
+        if (length < pStubMsg->BufferLength)
+        {
+            pStubMsg->BufferLength = ~0u;
+            RpcRaiseException(RPC_S_INVALID_BOUND);
+        }
+        pStubMsg->BufferLength = length;
+        return;
+    }
+
+    pointee = byte_count_pointer_pointee(pStubMsg, pFormat);
+    sizer = NdrBufferSizer[*pointee & NDR_TABLE_MASK];
+    if (!sizer) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    sizer(pStubMsg, pMemory, pointee);
 }
 
 /***********************************************************************
@@ -6362,7 +6785,10 @@ void WINAPI NdrByteCountPointerFree(PMIDL_STUB_MESSAGE pStubMsg,
                                 unsigned char *pMemory,
                                 PFORMAT_STRING pFormat)
 {
-    FIXME("stub\n");
+    TRACE("(%p,%p,%p)\n", pStubMsg, pMemory, pFormat);
+    if (pMemory && ((ULONG_PTR)pMemory < (ULONG_PTR)pStubMsg->BufferStart ||
+                    (ULONG_PTR)pMemory > (ULONG_PTR)pStubMsg->BufferEnd))
+        pStubMsg->pfnFree(pMemory);
 }
 
 /***********************************************************************
@@ -6659,6 +7085,9 @@ static unsigned char *WINAPI NdrBaseTypeMarshall(
     case FC_UINT3264:
     {
         UINT val = *(UINT_PTR *)pMemory;
+#ifdef _WIN64
+        if (*pFormat == FC_UINT3264) preserve_sspi_local_dispatch(pStubMsg, pMemory);
+#endif
         align_pointer_clear(&pStubMsg->Buffer, sizeof(UINT));
         copy_to_buffer(pStubMsg, &val, sizeof(val));
         break;
@@ -6776,6 +7205,9 @@ static unsigned char *WINAPI NdrBaseTypeUnmarshall(
                 *ppMemory = NdrAllocate(pStubMsg, sizeof(UINT_PTR));
             safe_copy_from_buffer(pStubMsg, &val, sizeof(UINT));
             **(UINT_PTR **)ppMemory = val;
+#ifdef _WIN64
+            restore_sspi_local_dispatch(pStubMsg, *(UINT_PTR **)ppMemory);
+#endif
             TRACE("value: 0x%08Ix\n", **(UINT_PTR **)ppMemory);
         }
         break;

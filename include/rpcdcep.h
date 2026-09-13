@@ -161,6 +161,12 @@ RPCRTAPI void* RPC_ENTRY
 RPCRTAPI RPC_BINDING_HANDLE RPC_ENTRY
   I_RpcGetCurrentCallHandle( void );
 
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  I_RpcBindingInqClientTokenAttributes( RPC_BINDING_HANDLE Binding,
+                                        LUID *TokenId,
+                                        LUID *AuthenticationId,
+                                        LUID *ModifiedId );
+
 /*
  * The platform SDK headers don't define these functions at all if WINNT is defined
  * The MSVC6 headers define two different sets of functions :
@@ -223,6 +229,15 @@ RPCRTAPI UINT RPC_ENTRY
 
 RPCRTAPI RPC_STATUS RPC_ENTRY
   I_RpcBindingInqLocalClientPID (RPC_BINDING_HANDLE Binding, ULONG *Pid );
+
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  I_RpcBindingIsClientLocal (RPC_BINDING_HANDLE Binding, unsigned int *IsClientLocal );
+
+RPCRTAPI LONG RPC_ENTRY
+  I_RpcOpenClientProcess (RPC_BINDING_HANDLE Binding, ACCESS_MASK DesiredAccess, HANDLE *Process );
+
+RPCRTAPI LONG RPC_ENTRY
+  I_RpcOpenClientThread (RPC_BINDING_HANDLE Binding, ACCESS_MASK DesiredAccess, HANDLE *Thread );
 
 RPCRTAPI RPC_STATUS RPC_ENTRY
   I_RpcBindingInqTransportType( RPC_BINDING_HANDLE Binding, unsigned int* Type );

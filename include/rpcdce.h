@@ -129,6 +129,11 @@ typedef I_RPC_HANDLE *RPC_EP_INQ_HANDLE;
 #define RPC_PROTSEQ_LRPC    0x3
 #define RPC_PROTSEQ_HTTP    0x4
 
+#define RPC_BHT_OBJECT_UUID_VALID 0x1
+
+#define RPC_BHO_NONCAUSAL  0x1
+#define RPC_BHO_DONTLINGER 0x2
+
 /* RPC_POLICY EndpointFlags */
 #define RPC_C_BIND_TO_ALL_NICS          0x1
 #define RPC_C_USE_INTERNET_PORT         0x1
@@ -269,6 +274,67 @@ typedef struct _RPC_SECURITY_QOS {
     ULONG ImpersonationType;
 } RPC_SECURITY_QOS, *PRPC_SECURITY_QOS;
 
+typedef struct _RPC_BINDING_HANDLE_TEMPLATE_V1_W
+{
+    ULONG Version;
+    ULONG Flags;
+    ULONG ProtocolSequence;
+    RPC_WSTR NetworkAddress;
+    RPC_WSTR StringEndpoint;
+    union
+    {
+        RPC_WSTR Reserved;
+    } u1;
+    UUID ObjectUuid;
+} RPC_BINDING_HANDLE_TEMPLATE_V1_W, *PRPC_BINDING_HANDLE_TEMPLATE_V1_W;
+
+typedef struct _RPC_BINDING_HANDLE_TEMPLATE_V1_A
+{
+    ULONG Version;
+    ULONG Flags;
+    ULONG ProtocolSequence;
+    RPC_CSTR NetworkAddress;
+    RPC_CSTR StringEndpoint;
+    union
+    {
+        RPC_CSTR Reserved;
+    } u1;
+    UUID ObjectUuid;
+} RPC_BINDING_HANDLE_TEMPLATE_V1_A, *PRPC_BINDING_HANDLE_TEMPLATE_V1_A;
+
+typedef struct _RPC_BINDING_HANDLE_SECURITY_V1_W
+{
+    ULONG Version;
+    RPC_WSTR ServerPrincName;
+    ULONG AuthnLevel;
+    ULONG AuthnSvc;
+    SEC_WINNT_AUTH_IDENTITY_W *AuthIdentity;
+    RPC_SECURITY_QOS *SecurityQos;
+} RPC_BINDING_HANDLE_SECURITY_V1_W, *PRPC_BINDING_HANDLE_SECURITY_V1_W;
+
+typedef struct _RPC_BINDING_HANDLE_SECURITY_V1_A
+{
+    ULONG Version;
+    RPC_CSTR ServerPrincName;
+    ULONG AuthnLevel;
+    ULONG AuthnSvc;
+    SEC_WINNT_AUTH_IDENTITY_A *AuthIdentity;
+    RPC_SECURITY_QOS *SecurityQos;
+} RPC_BINDING_HANDLE_SECURITY_V1_A, *PRPC_BINDING_HANDLE_SECURITY_V1_A;
+
+typedef struct _RPC_BINDING_HANDLE_OPTIONS_V1
+{
+    ULONG Version;
+    ULONG Flags;
+    ULONG ComTimeout;
+    ULONG CallTimeout;
+} RPC_BINDING_HANDLE_OPTIONS_V1, *PRPC_BINDING_HANDLE_OPTIONS_V1;
+
+#define RPC_BINDING_HANDLE_TEMPLATE_V1  WINELIB_NAME_AW(RPC_BINDING_HANDLE_TEMPLATE_V1_)
+#define PRPC_BINDING_HANDLE_TEMPLATE_V1 WINELIB_NAME_AW(PRPC_BINDING_HANDLE_TEMPLATE_V1_)
+#define RPC_BINDING_HANDLE_SECURITY_V1  WINELIB_NAME_AW(RPC_BINDING_HANDLE_SECURITY_V1_)
+#define PRPC_BINDING_HANDLE_SECURITY_V1 WINELIB_NAME_AW(PRPC_BINDING_HANDLE_SECURITY_V1_)
+
 typedef struct _RPC_SECURITY_QOS_V2_W
 {
     ULONG Version;
@@ -331,6 +397,18 @@ RPCRTAPI int RPC_ENTRY RpcExceptionFilter(ULONG);
 
 RPCRTAPI RPC_STATUS RPC_ENTRY
   RpcBindingCopy( RPC_BINDING_HANDLE SourceBinding, RPC_BINDING_HANDLE* DestinationBinding );
+
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcBindingCreateA( RPC_BINDING_HANDLE_TEMPLATE_V1_A *Template,
+                     RPC_BINDING_HANDLE_SECURITY_V1_A *Security,
+                     RPC_BINDING_HANDLE_OPTIONS_V1 *Options,
+                     RPC_BINDING_HANDLE *Binding );
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcBindingCreateW( RPC_BINDING_HANDLE_TEMPLATE_V1_W *Template,
+                     RPC_BINDING_HANDLE_SECURITY_V1_W *Security,
+                     RPC_BINDING_HANDLE_OPTIONS_V1 *Options,
+                     RPC_BINDING_HANDLE *Binding );
+#define RpcBindingCreate WINELIB_NAME_AW(RpcBindingCreate)
 
 RPCRTAPI RPC_STATUS RPC_ENTRY
   RpcBindingFree( RPC_BINDING_HANDLE* Binding );
@@ -406,6 +484,8 @@ RPCRTAPI RPC_STATUS RPC_ENTRY
 
 RPCRTAPI RPC_STATUS RPC_ENTRY
   RpcServerInqBindings( RPC_BINDING_VECTOR** BindingVector );
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcServerInqBindingHandle( RPC_BINDING_HANDLE *Binding );
 
 RPCRTAPI RPC_STATUS RPC_ENTRY
   RpcServerListen( unsigned int MinimumCallThreads, unsigned int MaxCalls, unsigned int DontWait );
@@ -475,6 +555,14 @@ RPCRTAPI RPC_STATUS RPC_ENTRY
 RPCRTAPI RPC_STATUS RPC_ENTRY
   RpcServerUseProtseqW(RPC_WSTR Protseq, unsigned int MaxCalls, void *SecurityDescriptor);
 #define RpcServerUseProtseq WINELIB_NAME_AW(RpcServerUseProtseq)
+
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcServerUseProtseqExA(RPC_CSTR Protseq, unsigned int MaxCalls, void *SecurityDescriptor,
+                         PRPC_POLICY Policy);
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcServerUseProtseqExW(RPC_WSTR Protseq, unsigned int MaxCalls, void *SecurityDescriptor,
+                         PRPC_POLICY Policy);
+#define RpcServerUseProtseqEx WINELIB_NAME_AW(RpcServerUseProtseqEx)
 
 RPCRTAPI RPC_STATUS RPC_ENTRY
   RpcServerUseProtseqEpA( RPC_CSTR Protseq, unsigned int MaxCalls, RPC_CSTR Endpoint, void *SecurityDescriptor );

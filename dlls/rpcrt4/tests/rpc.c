@@ -49,6 +49,22 @@ typedef struct twr_t
 
 RPC_STATUS WINAPI TowerExplode(const twr_t *tower, RPC_SYNTAX_IDENTIFIER *object, RPC_SYNTAX_IDENTIFIER *syntax, char **protseq, char **endpoint, char **address);
 RPC_STATUS WINAPI TowerConstruct(const RPC_SYNTAX_IDENTIFIER *object, const RPC_SYNTAX_IDENTIFIER *syntax, const char *protseq, const char *endpoint, const char *address, twr_t **tower);
+RPC_STATUS WINAPI I_RpcSystemFunction001(ULONG selector, ULONG_PTR value, void *output);
+RPC_STATUS WINAPI I_RpcServerRegisterForwardFunction(RPC_FORWARD_FUNCTION forward_fn);
+void *WINAPI I_RpcServerInqAddressChangeFn(void);
+RPC_STATUS WINAPI I_RpcServerSetAddressChangeFn(void *address_change_fn);
+
+struct rpc_port_allocation_data
+{
+    ULONG unknown0;
+    ULONG unknown4;
+    ULONG unknown8;
+    ULONG unknownc;
+    void *unknown10;
+    void *unknown18;
+};
+
+void WINAPI I_RpcGetPortAllocationData(struct rpc_port_allocation_data *data);
 
 static UUID Uuid_Table[10] = {
   { 0x00000000, 0x0000, 0x0000, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00} }, /* 0 (null) */
@@ -107,6 +123,72 @@ static void test_UuidEqual(void)
             ok(UuidEqual(PUuid1, PUuid2, &status) == Uuid_Comparison_Grid[i1][i2], "UUID Equality\n" );
         }
     }
+}
+
+static void test_I_RpcSystemFunction001(void)
+{
+    ULONG original, value;
+    RPC_STATUS status;
+
+    original = 0xdeadbeef;
+    status = I_RpcSystemFunction001( 4, 0, &original );
+    ok( status == RPC_S_OK, "got %lu\n", status );
+
+    status = I_RpcSystemFunction001( 3, original ^ 1, NULL );
+    ok( status == RPC_S_OK, "got %lu\n", status );
+    value = 0xdeadbeef;
+    status = I_RpcSystemFunction001( 4, 0, &value );
+    ok( status == RPC_S_OK, "got %lu\n", status );
+    ok( value == (original ^ 1), "got %#lx\n", value );
+
+    status = I_RpcSystemFunction001( 3, original, NULL );
+    ok( status == RPC_S_OK, "got %lu\n", status );
+    status = I_RpcSystemFunction001( 0xdeadbeef, 0, NULL );
+    ok( status == RPC_S_INVALID_ARG, "got %lu\n", status );
+}
+
+static RPC_STATUS RPC_ENTRY test_forward_function(UUID *interface_id, RPC_VERSION *interface_version,
+                                                   UUID *object_id, unsigned char *rpc_protocol,
+                                                   void **destination_endpoint)
+{
+    return RPC_S_OK;
+}
+
+static void test_I_RpcServerRegisterForwardFunction(void)
+{
+    RPC_STATUS status;
+
+    status = I_RpcServerRegisterForwardFunction( test_forward_function );
+    ok( status == RPC_S_OK, "got %lu\n", status );
+    status = I_RpcServerRegisterForwardFunction( NULL );
+    ok( status == RPC_S_OK, "got %lu\n", status );
+}
+
+static void test_I_RpcGetPortAllocationData(void)
+{
+    struct rpc_port_allocation_data data;
+
+    memset( &data, 0xcc, sizeof(data) );
+    I_RpcGetPortAllocationData( &data );
+    ok( data.unknown0 == 1, "got %#lx\n", data.unknown0 );
+    ok( data.unknown4 == 0, "got %#lx\n", data.unknown4 );
+    ok( data.unknown8 == 3, "got %#lx\n", data.unknown8 );
+    ok( data.unknownc == 0, "got %#lx\n", data.unknownc );
+    ok( !data.unknown10, "got %p\n", data.unknown10 );
+    ok( !data.unknown18, "got %p\n", data.unknown18 );
+}
+
+static void test_I_RpcServerAddressChangeFn(void)
+{
+    void *original, *value = (void *)0xdeadbeef;
+    RPC_STATUS status;
+
+    original = I_RpcServerInqAddressChangeFn();
+    status = I_RpcServerSetAddressChangeFn( &value );
+    ok( status == RPC_S_OK, "got %lu\n", status );
+    ok( I_RpcServerInqAddressChangeFn() == &value, "unexpected callback pointer\n" );
+    status = I_RpcServerSetAddressChangeFn( original );
+    ok( status == RPC_S_OK, "got %lu\n", status );
 }
 
 static void test_UuidFromString(void)
@@ -909,6 +991,7 @@ static void test_RpcServerInqDefaultPrincName(void)
 {
     RPC_STATUS ret;
     RPC_CSTR principal, saved_principal;
+    RPC_WSTR principalW;
     char *username;
     ULONG len = 0;
 
@@ -946,6 +1029,18 @@ static void test_RpcServerInqDefaultPrincName(void)
 
     ret = RpcServerRegisterAuthInfoA( saved_principal, RPC_C_AUTHN_WINNT, NULL, NULL );
     ok( ret == RPC_S_OK, "got %lu\n", ret );
+
+    principalW = (RPC_WSTR)0xdeadbeef;
+    ret = RpcServerInqDefaultPrincNameW( RPC_C_AUTHN_GSS_NEGOTIATE, &principalW );
+    if (ret == RPC_S_OK)
+    {
+        ok( principalW != (RPC_WSTR)0xdeadbeef, "expected valid principal\n" );
+        ok( principalW && *principalW, "expected nonempty principal\n" );
+        RpcStringFreeW( &principalW );
+    }
+    else
+        ok( ret == RPC_S_SEC_PKG_ERROR || ret == RPC_S_UNKNOWN_AUTHN_SERVICE,
+            "got unexpected status %lu\n", ret );
 
     RpcStringFreeA( &saved_principal );
     free( username );
@@ -1243,6 +1338,10 @@ START_TEST( rpc )
     test_UuidCreateSequential();
     test_DceErrorInqTextA();
     test_I_RpcMapWin32Status();
+    test_I_RpcSystemFunction001();
+    test_I_RpcServerRegisterForwardFunction();
+    test_I_RpcGetPortAllocationData();
+    test_I_RpcServerAddressChangeFn();
     test_RpcStringBindingParseA();
     test_RpcExceptionFilter();
 

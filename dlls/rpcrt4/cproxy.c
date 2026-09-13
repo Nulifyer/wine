@@ -70,6 +70,35 @@ BOOL fill_stubless_table( IUnknownVtbl *vtbl, DWORD num )
     return TRUE;
 }
 
+static BOOL create_compact_stubless_table( const void **descriptor, DWORD num,
+                                           CInterfaceProxyVtbl **vtbl, void ***allocation )
+{
+    size_t entry_size = (char *)ObjectStublessClient4 - (char *)ObjectStublessClient3;
+    void **table;
+    DWORD i;
+
+    if (num < 3 || num >= NB_THUNK_ENTRIES)
+    {
+        FIXME( "%lu methods not supported\n", num );
+        return FALSE;
+    }
+    if (!(table = malloc( (num + 2) * sizeof(*table) ))) return FALSE;
+
+    /* Keep the stubless proxy info and IID immediately before the method
+     * table: ndr_stubless_client_call() obtains the former as vtbl[-2]. */
+    table[0] = (void *)descriptor[0];
+    table[1] = (void *)descriptor[1];
+    table[2] = IUnknown_QueryInterface_Proxy;
+    table[3] = IUnknown_AddRef_Proxy;
+    table[4] = IUnknown_Release_Proxy;
+    for (i = 3; i < num; i++)
+        table[i + 2] = (char *)ObjectStublessClient3 + (i - 3) * entry_size;
+
+    *vtbl = (CInterfaceProxyVtbl *)(table + 1);
+    *allocation = table;
+    return TRUE;
+}
+
 HRESULT StdProxy_Construct(REFIID riid,
                            LPUNKNOWN pUnkOuter,
                            const ProxyFileInfo *ProxyInfo,
@@ -79,13 +108,21 @@ HRESULT StdProxy_Construct(REFIID riid,
                            LPVOID *ppvObj)
 {
   StdProxyImpl *This;
-  PCInterfaceName name = ProxyInfo->pNamesArray[Index];
+  PCInterfaceName name = ProxyInfo->pNamesArray ? ProxyInfo->pNamesArray[Index] : NULL;
   CInterfaceProxyVtbl *vtbl = ProxyInfo->pProxyVtblList[Index];
+  void **owned_vtbl = NULL;
 
   TRACE("(%p,%p,%p,%p,%p) %s\n", pUnkOuter, vtbl, pPSFactory, ppProxy, ppvObj, name);
 
   /* TableVersion = 2 means it is the stubless version of CInterfaceProxyVtbl */
-  if (ProxyInfo->TableVersion > 1) {
+  if (is_compact_proxy_file(ProxyInfo))
+  {
+    ULONG count = ProxyInfo->pStubVtblList[Index]->header.DispatchTableCount;
+    if (ProxyInfo->pDelegatedIIDs && ProxyInfo->pDelegatedIIDs[Index]) return E_NOTIMPL;
+    if (!create_compact_stubless_table((const void **)vtbl, count, &vtbl, &owned_vtbl))
+      return E_OUTOFMEMORY;
+  }
+  else if (ProxyInfo->TableVersion > 1) {
     ULONG count = ProxyInfo->pStubVtblList[Index]->header.DispatchTableCount;
     vtbl = (CInterfaceProxyVtbl *)((const void **)vtbl + 1);
     TRACE("stubless vtbl %p: count=%ld\n", vtbl->Vtbl, count );
@@ -94,11 +131,16 @@ HRESULT StdProxy_Construct(REFIID riid,
 
   if (!IsEqualGUID(vtbl->header.piid, riid)) {
     ERR("IID mismatch during proxy creation\n");
+    free(owned_vtbl);
     return RPC_E_UNEXPECTED;
   }
 
   This = calloc(1, sizeof(StdProxyImpl));
-  if (!This) return E_OUTOFMEMORY;
+  if (!This)
+  {
+    free(owned_vtbl);
+    return E_OUTOFMEMORY;
+  }
 
   if (!pUnkOuter) pUnkOuter = (IUnknown *)&This->IRpcProxyBuffer_iface;
   This->IRpcProxyBuffer_iface.lpVtbl = &StdProxy_Vtbl;
@@ -112,6 +154,7 @@ HRESULT StdProxy_Construct(REFIID riid,
   This->name = name;
   This->pPSFactory = pPSFactory;
   This->pChannel = NULL;
+  This->owned_vtbl = owned_vtbl;
 
   if(ProxyInfo->pDelegatedIIDs && ProxyInfo->pDelegatedIIDs[Index])
   {
@@ -119,6 +162,7 @@ HRESULT StdProxy_Construct(REFIID riid,
                                 &This->base_proxy, (void **)&This->base_object );
       if (FAILED(r))
       {
+          free( This->owned_vtbl );
           free( This );
           return r;
       }
@@ -141,7 +185,8 @@ HRESULT WINAPI StdProxy_QueryInterface(IRpcProxyBuffer *iface, REFIID riid, void
 
   if (IsEqualGUID(&IID_IUnknown,riid) ||
       IsEqualGUID(This->piid,riid)) {
-    *obj = &This->PVtbl;
+    *obj = This->owned_vtbl && IsEqualIID(riid, &IID_IUnknown) ?
+        (void *)&This->IRpcProxyBuffer_iface : (void *)&This->PVtbl;
     InterlockedIncrement(&This->RefCount);
     return S_OK;
   }
@@ -179,6 +224,7 @@ static ULONG WINAPI StdProxy_Release(LPRPCPROXYBUFFER iface)
     if (This->base_proxy) IRpcProxyBuffer_Release( This->base_proxy );
 
     IPSFactoryBuffer_Release(This->pPSFactory);
+    free(This->owned_vtbl);
     free(This);
   }
 
@@ -203,7 +249,7 @@ void WINAPI StdProxy_Disconnect(IRpcProxyBuffer *iface)
 
   if (This->base_proxy) IRpcProxyBuffer_Disconnect( This->base_proxy );
 
-  IRpcChannelBuffer_Release(This->pChannel);
+  if (This->pChannel) IRpcChannelBuffer_Release(This->pChannel);
   This->pChannel = NULL;
 }
 

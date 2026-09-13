@@ -205,7 +205,7 @@ typedef enum
 
     FC_UNUSED2, /* 0x3a */
     FC_UNUSED3, /* 0x3b */
-    FC_UNUSED4, /* 0x3c */
+    FC_SYSTEM_HANDLE, /* 0x3c */
 
     FC_STRUCTPAD1, /* 0x3d */
     FC_STRUCTPAD2, /* 0x3e */
@@ -261,13 +261,15 @@ typedef enum
     FC_USER_MARSHAL, /* 0xb4 */
 
     FC_PIPE, /* 0xb5 */
-    FC_BLKHOLE, /* 0xb6 */
+    FC_BLKHOLE, /* 0xb6; called FC_SUPPLEMENT by current rpcrt4 */
 
     FC_RANGE, /* 0xb7 */
 
     FC_INT3264, /* 0xb8 */
     FC_UINT3264, /* 0xb9 */
 } FORMAT_CHARACTER;
+
+#define FC_SUPPLEMENT FC_BLKHOLE
 
 #define FC_ALLOCATE_ALL_NODES   0x01
 #define FC_DONT_FREE            0x02

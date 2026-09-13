@@ -24,6 +24,7 @@
 @ stub I_RpcBCacheAllocate
 @ stub I_RpcBCacheFree
 @ stub I_RpcBindingCopy
+@ stdcall I_RpcBindingInqClientTokenAttributes(ptr ptr ptr ptr)
 @ stub I_RpcBindingInqConnId
 @ stub I_RpcBindingInqDynamicEndPoint
 @ stub I_RpcBindingInqDynamicEndPointA
@@ -32,7 +33,7 @@
 @ stub I_RpcBindingInqSecurityContext
 @ stdcall I_RpcBindingInqTransportType(ptr ptr)
 @ stub I_RpcBindingInqWireIdForSnego
-@ stub I_RpcBindingIsClientLocal
+@ stdcall I_RpcBindingIsClientLocal(ptr ptr)
 # 9x version of I_RpcBindingSetAsync has 3 arguments, not 2
 @ stdcall I_RpcBindingSetAsync(ptr ptr)
 @ stub I_RpcBindingToStaticStringBindingW
@@ -49,6 +50,7 @@
 @ stub I_RpcGetBufferWithObject
 @ stdcall I_RpcGetCurrentCallHandle()
 @ stub I_RpcGetExtendedError
+@ stdcall I_RpcGetPortAllocationData(ptr)
 @ stub I_RpcIfInqTransferSyntaxes
 @ stub I_RpcLogEvent
 @ stdcall I_RpcMapWin32Status(long)
@@ -58,6 +60,8 @@
 @ stub I_RpcNsBindingSetEntryNameW
 @ stub I_RpcNsInterfaceExported
 @ stub I_RpcNsInterfaceUnexported
+@ stdcall I_RpcOpenClientProcess(ptr long ptr)
+@ stdcall I_RpcOpenClientThread(ptr long ptr)
 @ stub I_RpcParseSecurity
 @ stub I_RpcPauseExecution
 @ stub I_RpcProxyNewConnection
@@ -68,11 +72,11 @@
 @ stdcall I_RpcSendReceive(ptr)
 @ stub I_RpcServerAllocateIpPort
 @ stdcall I_RpcServerDisableExceptionFilter()
-@ stub I_RpcServerInqAddressChangeFn
+@ stdcall I_RpcServerInqAddressChangeFn()
 @ stub I_RpcServerInqLocalConnAddress
 @ stub I_RpcServerInqTransportType
-@ stub I_RpcServerRegisterForwardFunction
-@ stub I_RpcServerSetAddressChangeFn
+@ stdcall I_RpcServerRegisterForwardFunction(ptr)
+@ stdcall I_RpcServerSetAddressChangeFn(ptr)
 @ stdcall I_RpcServerStartListening(ptr)
 @ stdcall I_RpcServerStopListening()
 @ stub I_RpcServerUseProtseq2A
@@ -81,7 +85,7 @@
 @ stub I_RpcServerUseProtseqEp2W
 @ stub I_RpcSetAsyncHandle
 @ stub I_RpcSsDontSerializeContext
-@ stub I_RpcSystemFunction001
+@ stdcall I_RpcSystemFunction001(long ptr ptr)
 @ stub I_RpcTransConnectionAllocatePacket
 @ stub I_RpcTransConnectionFreePacket
 @ stub I_RpcTransConnectionReallocPacket
@@ -207,11 +211,11 @@
 @ stub NdrGetSimpleTypeMemorySize
 @ stub NdrGetTypeFlags
 @ stdcall NdrGetUserMarshalInfo(ptr long ptr)
-@ stub NdrHardStructBufferSize #(ptr ptr ptr)
-@ stub NdrHardStructFree #(ptr ptr ptr)
-@ stub NdrHardStructMarshall #(ptr ptr ptr)
-@ stub NdrHardStructMemorySize #(ptr ptr)
-@ stub NdrHardStructUnmarshall #(ptr ptr ptr long)
+@ stdcall NdrHardStructBufferSize(ptr ptr ptr) NdrComplexStructBufferSize
+@ stdcall NdrHardStructFree(ptr ptr ptr) NdrComplexStructFree
+@ stdcall NdrHardStructMarshall(ptr ptr ptr) NdrComplexStructMarshall
+@ stdcall NdrHardStructMemorySize(ptr ptr) NdrComplexStructMemorySize
+@ stdcall NdrHardStructUnmarshall(ptr ptr ptr long) NdrComplexStructUnmarshall
 @ stdcall NdrInterfacePointerBufferSize(ptr ptr ptr)
 @ stdcall NdrInterfacePointerFree(ptr ptr ptr)
 @ stdcall NdrInterfacePointerMarshall(ptr ptr ptr)
@@ -341,7 +345,10 @@
 @ stdcall RpcAsyncGetCallStatus(ptr)
 @ stdcall RpcAsyncInitializeHandle(ptr long)
 @ stub RpcAsyncRegisterInfo
+@ stdcall RpcBindingBind(ptr ptr ptr)
 @ stdcall RpcBindingCopy(ptr ptr)
+@ stdcall RpcBindingCreateA(ptr ptr ptr ptr)
+@ stdcall RpcBindingCreateW(ptr ptr ptr ptr)
 @ stdcall RpcBindingFree(ptr)
 @ stdcall RpcBindingFromStringBindingA(str  ptr)
 @ stdcall RpcBindingFromStringBindingW(wstr ptr)
@@ -365,6 +372,7 @@
 @ stdcall RpcBindingSetOption(ptr long long)
 @ stdcall RpcBindingToStringBindingA(ptr ptr)
 @ stdcall RpcBindingToStringBindingW(ptr ptr)
+@ stdcall RpcBindingUnbind(ptr)
 @ stdcall RpcBindingVectorFree(ptr)
 @ stdcall RpcCancelAsyncCall(ptr long) RpcAsyncCancelCall
 @ stdcall RpcCancelThread(ptr)
@@ -430,8 +438,9 @@
 @ stdcall RpcRevertToSelf()
 @ stdcall RpcRevertToSelfEx(ptr)
 @ stdcall RpcServerInqBindings(ptr)
+@ stdcall RpcServerInqBindingHandle(ptr)
 @ stub RpcServerInqCallAttributesA
-@ stub RpcServerInqCallAttributesW
+@ stdcall RpcServerInqCallAttributesW(ptr ptr)
 @ stdcall RpcServerInqDefaultPrincNameA(long ptr)
 @ stdcall RpcServerInqDefaultPrincNameW(long ptr)
 @ stub RpcServerInqIf
@@ -454,8 +463,8 @@
 @ stdcall RpcServerUseProtseqEpExA(str  long str  ptr ptr)
 @ stdcall RpcServerUseProtseqEpExW(wstr long wstr ptr ptr)
 @ stdcall RpcServerUseProtseqEpW(wstr long wstr ptr)
-@ stub RpcServerUseProtseqExA
-@ stub RpcServerUseProtseqExW
+@ stdcall RpcServerUseProtseqExA(str long ptr ptr)
+@ stdcall RpcServerUseProtseqExW(wstr long ptr ptr)
 @ stub RpcServerUseProtseqIfA
 @ stub RpcServerUseProtseqIfExA
 @ stub RpcServerUseProtseqIfExW
@@ -480,7 +489,7 @@
 @ stdcall RpcSsDontSerializeContext()
 @ stub RpcSsEnableAllocate
 @ stub RpcSsFree
-@ stub RpcSsGetContextBinding
+@ stdcall RpcSsGetContextBinding(ptr ptr)
 @ stub RpcSsGetThreadHandle
 @ stub RpcSsSetClientAllocFree
 @ stub RpcSsSetThreadHandle
@@ -532,3 +541,65 @@
 @ stub tree_into_ndr
 @ stub tree_peek_ndr
 @ stub tree_size_ndr
+
+# Internal targets for COMBASE prebuilt proxy thunks.
+@ extern -private __wine_ObjectStublessClient3 ObjectStublessClient3
+@ extern -private __wine_ObjectStublessClient4 ObjectStublessClient4
+@ extern -private __wine_ObjectStublessClient5 ObjectStublessClient5
+@ extern -private __wine_ObjectStublessClient6 ObjectStublessClient6
+@ extern -private __wine_ObjectStublessClient7 ObjectStublessClient7
+@ extern -private __wine_ObjectStublessClient8 ObjectStublessClient8
+@ extern -private __wine_ObjectStublessClient9 ObjectStublessClient9
+@ extern -private __wine_ObjectStublessClient10 ObjectStublessClient10
+@ extern -private __wine_ObjectStublessClient11 ObjectStublessClient11
+@ extern -private __wine_ObjectStublessClient12 ObjectStublessClient12
+@ extern -private __wine_ObjectStublessClient13 ObjectStublessClient13
+@ extern -private __wine_ObjectStublessClient14 ObjectStublessClient14
+@ extern -private __wine_ObjectStublessClient15 ObjectStublessClient15
+@ extern -private __wine_ObjectStublessClient16 ObjectStublessClient16
+@ extern -private __wine_ObjectStublessClient17 ObjectStublessClient17
+@ extern -private __wine_ObjectStublessClient18 ObjectStublessClient18
+@ extern -private __wine_ObjectStublessClient19 ObjectStublessClient19
+@ extern -private __wine_ObjectStublessClient20 ObjectStublessClient20
+@ extern -private __wine_ObjectStublessClient21 ObjectStublessClient21
+@ extern -private __wine_ObjectStublessClient22 ObjectStublessClient22
+@ extern -private __wine_ObjectStublessClient23 ObjectStublessClient23
+@ extern -private __wine_ObjectStublessClient24 ObjectStublessClient24
+@ extern -private __wine_ObjectStublessClient25 ObjectStublessClient25
+@ extern -private __wine_ObjectStublessClient26 ObjectStublessClient26
+@ extern -private __wine_ObjectStublessClient27 ObjectStublessClient27
+@ extern -private __wine_ObjectStublessClient28 ObjectStublessClient28
+@ extern -private __wine_ObjectStublessClient29 ObjectStublessClient29
+@ extern -private __wine_ObjectStublessClient30 ObjectStublessClient30
+@ extern -private __wine_ObjectStublessClient31 ObjectStublessClient31
+@ extern -private __wine_ObjectStublessClient32 ObjectStublessClient32
+@ extern -private __wine_NdrProxyForwardingFunction3 NdrProxyForwardingFunction3
+@ extern -private __wine_NdrProxyForwardingFunction4 NdrProxyForwardingFunction4
+@ extern -private __wine_NdrProxyForwardingFunction5 NdrProxyForwardingFunction5
+@ extern -private __wine_NdrProxyForwardingFunction6 NdrProxyForwardingFunction6
+@ extern -private __wine_NdrProxyForwardingFunction7 NdrProxyForwardingFunction7
+@ extern -private __wine_NdrProxyForwardingFunction8 NdrProxyForwardingFunction8
+@ extern -private __wine_NdrProxyForwardingFunction9 NdrProxyForwardingFunction9
+@ extern -private __wine_NdrProxyForwardingFunction10 NdrProxyForwardingFunction10
+@ extern -private __wine_NdrProxyForwardingFunction11 NdrProxyForwardingFunction11
+@ extern -private __wine_NdrProxyForwardingFunction12 NdrProxyForwardingFunction12
+@ extern -private __wine_NdrProxyForwardingFunction13 NdrProxyForwardingFunction13
+@ extern -private __wine_NdrProxyForwardingFunction14 NdrProxyForwardingFunction14
+@ extern -private __wine_NdrProxyForwardingFunction15 NdrProxyForwardingFunction15
+@ extern -private __wine_NdrProxyForwardingFunction16 NdrProxyForwardingFunction16
+@ extern -private __wine_NdrProxyForwardingFunction17 NdrProxyForwardingFunction17
+@ extern -private __wine_NdrProxyForwardingFunction18 NdrProxyForwardingFunction18
+@ extern -private __wine_NdrProxyForwardingFunction19 NdrProxyForwardingFunction19
+@ extern -private __wine_NdrProxyForwardingFunction20 NdrProxyForwardingFunction20
+@ extern -private __wine_NdrProxyForwardingFunction21 NdrProxyForwardingFunction21
+@ extern -private __wine_NdrProxyForwardingFunction22 NdrProxyForwardingFunction22
+@ extern -private __wine_NdrProxyForwardingFunction23 NdrProxyForwardingFunction23
+@ extern -private __wine_NdrProxyForwardingFunction24 NdrProxyForwardingFunction24
+@ extern -private __wine_NdrProxyForwardingFunction25 NdrProxyForwardingFunction25
+@ extern -private __wine_NdrProxyForwardingFunction26 NdrProxyForwardingFunction26
+@ extern -private __wine_NdrProxyForwardingFunction27 NdrProxyForwardingFunction27
+@ extern -private __wine_NdrProxyForwardingFunction28 NdrProxyForwardingFunction28
+@ extern -private __wine_NdrProxyForwardingFunction29 NdrProxyForwardingFunction29
+@ extern -private __wine_NdrProxyForwardingFunction30 NdrProxyForwardingFunction30
+@ extern -private __wine_NdrProxyForwardingFunction31 NdrProxyForwardingFunction31
+@ extern -private __wine_NdrProxyForwardingFunction32 NdrProxyForwardingFunction32

@@ -36,6 +36,9 @@
 #include "epm.h"
 #include "epm_towers.h"
 
+void __cdecl ept_insert_ex(handle_t, void **, unsigned32, ept_entry_t *, boolean32,
+                           boolean32, hyper, unsigned32, error_status_t *);
+
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
 /* The "real" RPC portmapper endpoints that I know of are:
@@ -175,7 +178,7 @@ static RPC_STATUS get_epm_handle_client(RPC_BINDING_HANDLE handle, RPC_BINDING_H
 
 static RPC_STATUS get_epm_handle_server(RPC_BINDING_HANDLE *epm_handle)
 {
-    unsigned char string_binding[] = "ncacn_np:.[\\\\pipe\\\\epmapper]";
+    unsigned char string_binding[] = "ncalrpc:[epmapper]";
 
     return RpcBindingFromStringBindingA(string_binding, epm_handle);
 }
@@ -195,6 +198,7 @@ static LONG WINAPI rpc_filter(EXCEPTION_POINTERS *__eptr)
 static RPC_STATUS epm_register( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *BindingVector,
                                 UUID_VECTOR *UuidVector, RPC_CSTR Annotation, BOOL replace )
 {
+  static void *cleanup_handle;
   PRPC_SERVER_INTERFACE If = IfSpec;
   ULONG i;
   RPC_STATUS status = RPC_S_OK;
@@ -263,6 +267,21 @@ static RPC_STATUS epm_register( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bindin
               status2 = GetExceptionCode();
           }
           __ENDTRY
+          if (status2 == EPT_S_CANT_PERFORM_OP && is_epm_destination_local(handle))
+          {
+              __TRY
+              {
+                  ept_insert_ex(handle, &cleanup_handle,
+                                BindingVector->Count * (UuidVector ? UuidVector->Count : 1),
+                                entries, replace,
+                                !!(If->Flags & RPC_IF_ALLOW_LOCAL_ONLY), 0, 0, &status2);
+              }
+              __EXCEPT(rpc_filter)
+              {
+                  status2 = GetExceptionCode();
+              }
+              __ENDTRY
+          }
           if (status2 == RPC_S_SERVER_UNAVAILABLE &&
               is_epm_destination_local(handle))
           {

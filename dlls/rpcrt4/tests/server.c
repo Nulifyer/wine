@@ -24,6 +24,7 @@
 #include <oleauto.h>
 #include <secext.h>
 #include <rpcdce.h>
+#include <rpcasync.h>
 #include <netfw.h>
 #include "wine/test.h"
 #include "server.h"
@@ -53,6 +54,12 @@ static RPC_STATUS (WINAPI *pRpcServerRegisterIfEx)(RPC_IF_HANDLE,UUID*, RPC_MGR_
                    unsigned int,RPC_IF_CALLBACK_FN*);
 static RPC_STATUS (WINAPI *pRpcBindingSetAuthInfoExA)(RPC_BINDING_HANDLE, RPC_CSTR, ULONG, ULONG,
                                                       RPC_AUTH_IDENTITY_HANDLE, ULONG, RPC_SECURITY_QOS *);
+static RPC_STATUS (WINAPI *pI_RpcBindingInqClientTokenAttributes)(RPC_BINDING_HANDLE, LUID *, LUID *, LUID *);
+static LONG (WINAPI *pI_RpcOpenClientProcess)(RPC_BINDING_HANDLE, ACCESS_MASK, HANDLE *);
+static LONG (WINAPI *pI_RpcOpenClientThread)(RPC_BINDING_HANDLE, ACCESS_MASK, HANDLE *);
+static RPC_STATUS (WINAPI *pRpcServerInqCallAttributesW)(RPC_BINDING_HANDLE, void *);
+static RPC_STATUS (WINAPI *pRpcServerInqBindingHandle)(RPC_BINDING_HANDLE *);
+static RPC_STATUS (WINAPI *pRpcSsGetContextBinding)(void *, RPC_BINDING_HANDLE *);
 
 static char *domain_and_user;
 
@@ -298,8 +305,31 @@ static void InitFunctionPointers(void)
     pNDRSContextUnmarshall2 = (void *)GetProcAddress(hrpcrt4, "NDRSContextUnmarshall2");
     pRpcServerRegisterIfEx = (void *)GetProcAddress(hrpcrt4, "RpcServerRegisterIfEx");
     pRpcBindingSetAuthInfoExA = (void *)GetProcAddress(hrpcrt4, "RpcBindingSetAuthInfoExA");
+    pI_RpcBindingInqClientTokenAttributes =
+        (void *)GetProcAddress(hrpcrt4, "I_RpcBindingInqClientTokenAttributes");
+    pI_RpcOpenClientProcess = (void *)GetProcAddress(hrpcrt4, "I_RpcOpenClientProcess");
+    pI_RpcOpenClientThread = (void *)GetProcAddress(hrpcrt4, "I_RpcOpenClientThread");
+    pRpcServerInqCallAttributesW = (void *)GetProcAddress(hrpcrt4, "RpcServerInqCallAttributesW");
+    pRpcServerInqBindingHandle = (void *)GetProcAddress(hrpcrt4, "RpcServerInqBindingHandle");
+    pRpcSsGetContextBinding = (void *)GetProcAddress(hrpcrt4, "RpcSsGetContextBinding");
 
     if (!pNDRSContextMarshall2) old_windows_version = TRUE;
+}
+
+static void test_server_inq_binding_no_call(void)
+{
+    RPC_BINDING_HANDLE binding = (RPC_BINDING_HANDLE)0xdeadbeef;
+    RPC_STATUS status;
+
+    if (!pRpcServerInqBindingHandle)
+    {
+        win_skip("RpcServerInqBindingHandle is unavailable\n");
+        return;
+    }
+
+    status = pRpcServerInqBindingHandle(&binding);
+    ok(status == RPC_S_NO_CALL_ACTIVE, "RpcServerInqBindingHandle returned %ld\n", status);
+    ok(binding == (RPC_BINDING_HANDLE)0xdeadbeef, "failure changed binding to %p\n", binding);
 }
 
 void __RPC_FAR *__RPC_USER
@@ -992,6 +1022,17 @@ void __cdecl s_context_handle_test(void)
     binding = I_RpcGetCurrentCallHandle();
     ok(binding != NULL, "I_RpcGetCurrentCallHandle returned NULL\n");
 
+    if (pRpcServerInqBindingHandle)
+    {
+        RPC_BINDING_HANDLE queried = (RPC_BINDING_HANDLE)0xdeadbeef;
+
+        status = pRpcServerInqBindingHandle(&queried);
+        ok(status == RPC_S_OK, "RpcServerInqBindingHandle returned %ld\n", status);
+        ok(queried == binding, "expected current binding %p, got %p\n", binding, queried);
+    }
+    else
+        win_skip("RpcServerInqBindingHandle is unavailable\n");
+
     if (!pNDRSContextMarshall2 || !pNDRSContextUnmarshall2)
     {
         win_skip("NDRSContextMarshall2 or NDRSContextUnmarshall2 not exported from rpcrt4.dll\n");
@@ -1245,6 +1286,79 @@ void __cdecl s_test_I_RpcBindingInqLocalClientPID(unsigned int protseq, RPC_BIND
     RPC_STATUS status;
     HANDLE thread;
     ULONG pid;
+    unsigned int is_local;
+
+    if (protseq == RPC_PROTSEQ_LRPC && pI_RpcOpenClientProcess)
+    {
+        HANDLE process = NULL;
+        LONG ntstatus;
+
+        ntstatus = pI_RpcOpenClientProcess(NULL, PROCESS_QUERY_LIMITED_INFORMATION, &process);
+        ok(ntstatus == 0, "I_RpcOpenClientProcess returned %#lx.\n", ntstatus);
+        if (!ntstatus)
+        {
+            ok(GetProcessId(process) == client_info.dwProcessId, "Got unexpected process.\n");
+            CloseHandle(process);
+        }
+
+        process = NULL;
+        ntstatus = pI_RpcOpenClientProcess(binding, PROCESS_QUERY_LIMITED_INFORMATION, &process);
+        ok(ntstatus == 0, "I_RpcOpenClientProcess returned %#lx.\n", ntstatus);
+        if (!ntstatus)
+        {
+            ok(GetProcessId(process) == client_info.dwProcessId, "Got unexpected process.\n");
+            CloseHandle(process);
+        }
+    }
+
+    if (protseq == RPC_PROTSEQ_LRPC && pI_RpcOpenClientThread)
+    {
+        HANDLE client_thread = NULL;
+        LONG ntstatus;
+
+        ntstatus = pI_RpcOpenClientThread(NULL, THREAD_QUERY_LIMITED_INFORMATION, &client_thread);
+        ok(ntstatus == 0, "I_RpcOpenClientThread returned %#lx.\n", ntstatus);
+        if (!ntstatus)
+        {
+            ok(GetThreadId(client_thread) == client_info.dwThreadId,
+               "got client tid %lu, expected %lu.\n", GetThreadId(client_thread), client_info.dwThreadId);
+            CloseHandle(client_thread);
+        }
+
+        client_thread = NULL;
+        ntstatus = pI_RpcOpenClientThread(binding, THREAD_QUERY_LIMITED_INFORMATION, &client_thread);
+        ok(ntstatus == 0, "I_RpcOpenClientThread returned %#lx.\n", ntstatus);
+        if (!ntstatus)
+        {
+            ok(GetThreadId(client_thread) == client_info.dwThreadId,
+               "got client tid %lu, expected %lu.\n", GetThreadId(client_thread), client_info.dwThreadId);
+            CloseHandle(client_thread);
+        }
+    }
+
+    if (protseq == RPC_PROTSEQ_LRPC && pRpcServerInqCallAttributesW)
+    {
+        RPC_CALL_ATTRIBUTES_V2_W attributes;
+
+        memset(&attributes, 0xcc, sizeof(attributes));
+        attributes.Version = 2;
+        attributes.Flags = RPC_QUERY_CLIENT_PID | RPC_QUERY_IS_CLIENT_LOCAL |
+                           RPC_QUERY_NO_AUTH_REQUIRED;
+        status = pRpcServerInqCallAttributesW(NULL, &attributes);
+        ok(status == RPC_S_OK, "RpcServerInqCallAttributesW returned %lu.\n", status);
+        if (status == RPC_S_OK)
+        {
+            ok(attributes.ProtocolSequence == RPC_PROTSEQ_LRPC,
+               "got protocol sequence %lu.\n", attributes.ProtocolSequence);
+            ok(attributes.IsClientLocal == rcclLocal,
+               "got client locality %u.\n", attributes.IsClientLocal);
+            ok(HandleToULong(attributes.ClientPID) == client_info.dwProcessId,
+               "got client pid %lu, expected %lu.\n", HandleToULong(attributes.ClientPID),
+               client_info.dwProcessId);
+            ok(!attributes.KernelModeCaller, "unexpected kernel-mode caller.\n");
+            ok(attributes.CallType == rctNormal, "got call type %u.\n", attributes.CallType);
+        }
+    }
 
     winetest_push_context("%s", client_test_name);
 
@@ -1274,6 +1388,16 @@ void __cdecl s_test_I_RpcBindingInqLocalClientPID(unsigned int protseq, RPC_BIND
         status = I_RpcBindingInqLocalClientPID(binding, &pid);
         ok(status == RPC_S_OK, "Got unexpected %ld.\n", status);
         ok(pid == client_info.dwProcessId, "Got unexpected pid.\n");
+
+        is_local = FALSE;
+        status = I_RpcBindingIsClientLocal(NULL, &is_local);
+        ok(status == RPC_S_OK, "I_RpcBindingIsClientLocal returned %ld.\n", status);
+        ok(is_local, "Expected the current ncalrpc client to be local.\n");
+
+        is_local = FALSE;
+        status = I_RpcBindingIsClientLocal(binding, &is_local);
+        ok(status == RPC_S_OK, "I_RpcBindingIsClientLocal returned %ld.\n", status);
+        ok(is_local, "Expected the ncalrpc binding client to be local.\n");
     }
 
     params.protseq = protseq;
@@ -2029,13 +2153,53 @@ array_tests(void)
 void __cdecl s_authinfo_test(unsigned int protseq, int secure)
 {
     RPC_BINDING_HANDLE binding;
+    TOKEN_STATISTICS statistics;
     RPC_STATUS status;
+    LUID token_id, authentication_id, modified_id;
     ULONG level, authnsvc;
     RPC_AUTHZ_HANDLE privs;
     unsigned char *principal;
+    DWORD size;
+    HANDLE token;
+    BOOL ret;
 
     binding = I_RpcGetCurrentCallHandle();
     ok(binding != NULL, "I_RpcGetCurrentCallHandle returned NULL\n");
+
+    if (protseq == RPC_PROTSEQ_LRPC && pI_RpcBindingInqClientTokenAttributes)
+    {
+        memset(&token_id, 0xcc, sizeof(token_id));
+        memset(&authentication_id, 0xcc, sizeof(authentication_id));
+        memset(&modified_id, 0xcc, sizeof(modified_id));
+        status = pI_RpcBindingInqClientTokenAttributes(NULL, &token_id, &authentication_id,
+                                                       &modified_id);
+        ok(status == RPC_S_OK, "I_RpcBindingInqClientTokenAttributes returned %lu\n", status);
+
+        status = RpcImpersonateClient(NULL);
+        ok(status == RPC_S_OK, "RpcImpersonateClient returned %lu\n", status);
+        if (status == RPC_S_OK)
+        {
+            ret = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token);
+            ok(ret, "OpenThreadToken failed: %lu\n", GetLastError());
+            if (ret)
+            {
+                ret = GetTokenInformation(token, TokenStatistics, &statistics, sizeof(statistics), &size);
+                ok(ret, "GetTokenInformation failed: %lu\n", GetLastError());
+                if (ret)
+                {
+                    ok(!memcmp(&token_id, &statistics.TokenId, sizeof(token_id)),
+                       "unexpected token id\n");
+                    ok(!memcmp(&authentication_id, &statistics.AuthenticationId,
+                               sizeof(authentication_id)), "unexpected authentication id\n");
+                    ok(!memcmp(&modified_id, &statistics.ModifiedId, sizeof(modified_id)),
+                       "unexpected modified id\n");
+                }
+                CloseHandle(token);
+            }
+            status = RpcRevertToSelf();
+            ok(status == RPC_S_OK, "RpcRevertToSelf returned %lu\n", status);
+        }
+    }
 
     level = authnsvc = 0xdeadbeef;
     privs = (RPC_AUTHZ_HANDLE)0xdeadbeef;
@@ -2101,9 +2265,27 @@ void __cdecl s_authinfo_test(unsigned int protseq, int secure)
 static void test_handle_return(void)
 {
     ctx_handle_t handle, handle2;
+    RPC_BINDING_HANDLE binding;
+    RPC_STATUS status;
 
     handle = get_handle();
     test_handle(handle);
+    if (pRpcSsGetContextBinding)
+    {
+        binding = NULL;
+        status = pRpcSsGetContextBinding(handle, &binding);
+        ok(status == RPC_S_OK, "RpcSsGetContextBinding returned %ld\n", status);
+        ok(binding == NDRCContextBinding(handle), "expected context binding %p, got %p\n",
+           NDRCContextBinding(handle), binding);
+
+        binding = (RPC_BINDING_HANDLE)0xdeadbeef;
+        status = pRpcSsGetContextBinding(NULL, &binding);
+        ok(status == ERROR_INVALID_PARAMETER, "RpcSsGetContextBinding(NULL) returned %ld\n", status);
+        ok(binding == (RPC_BINDING_HANDLE)0xdeadbeef, "failure changed binding to %p\n", binding);
+    }
+    else
+        win_skip("RpcSsGetContextBinding is unavailable\n");
+
     get_handle_by_ptr(&handle2);
     test_handle(handle2);
 }
@@ -2808,6 +2990,7 @@ START_TEST(server)
   BOOL firewall_enabled = is_firewall_enabled(), firewall_disabled = FALSE;
 
   InitFunctionPointers();
+  test_server_inq_binding_no_call();
   set_mixed_interface();
 
   ok(!GetUserNameExA(NameSamCompatible, NULL, &size), "GetUserNameExA\n");

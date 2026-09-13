@@ -21,6 +21,11 @@
 #ifndef __WINE_CPSF_H
 #define __WINE_CPSF_H
 
+static inline BOOL is_compact_proxy_file(const ProxyFileInfo *info)
+{
+    return info->TableVersion == 16 || info->TableVersion == 20;
+}
+
 typedef struct
 {
     IRpcProxyBuffer IRpcProxyBuffer_iface;
@@ -35,6 +40,7 @@ typedef struct
     PCInterfaceName name;
     IPSFactoryBuffer *pPSFactory;
     IRpcChannelBuffer *pChannel;
+    void **owned_vtbl;
 } StdProxyImpl;
 
 typedef struct
@@ -53,7 +59,7 @@ HRESULT WINAPI StdProxy_Connect(IRpcProxyBuffer *iface, IRpcChannelBuffer *chann
 void WINAPI StdProxy_Disconnect(IRpcProxyBuffer *iface);
 
 HRESULT CStdStubBuffer_Construct(REFIID riid, LPUNKNOWN pUnkServer, PCInterfaceName name,
-                                 CInterfaceStubVtbl *vtbl, LPPSFACTORYBUFFER pPSFactory,
+                                 CInterfaceStubVtbl *vtbl, BOOL compact, LPPSFACTORYBUFFER pPSFactory,
                                  LPRPCSTUBBUFFER *ppStub);
 
 HRESULT CStdStubBuffer_Delegating_Construct(REFIID riid, LPUNKNOWN pUnkServer, PCInterfaceName name,

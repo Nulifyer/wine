@@ -1270,6 +1270,122 @@ static void test_struct_align(void)
     free(memsrc_orig);
 }
 
+static void test_hard_struct(void)
+{
+    static const unsigned char format[] =
+    {
+        FC_UP, 0,
+        NdrFcShort(2),
+        FC_HARD_STRUCT, 3,
+        NdrFcShort(8),
+        NdrFcShort(0),
+        NdrFcShort(0),
+        FC_LONG,
+        FC_LONG,
+        FC_END,
+    };
+    struct
+    {
+        LONG first;
+        LONG second;
+    } value = {0x10203040, 0x50607080}, *copy = NULL;
+    MIDL_STUB_DESC desc = Object_StubDesc;
+    RPC_MESSAGE rpc_msg;
+    MIDL_STUB_MESSAGE msg;
+    unsigned char *ret;
+    ULONG size;
+
+    desc.pFormatTypes = format;
+    NdrClientInitializeNew(&rpc_msg, &msg, &desc, 0);
+
+    msg.BufferLength = 0;
+    NdrPointerBufferSize(&msg, (unsigned char *)&value, format);
+    ok(msg.BufferLength == 12, "got buffer length %lu\n", msg.BufferLength);
+
+    msg.RpcMsg->Buffer = msg.BufferStart = msg.Buffer = NdrOleAllocate(msg.BufferLength);
+    msg.BufferEnd = msg.BufferStart + msg.BufferLength;
+    memset(msg.BufferStart, 0, msg.BufferLength);
+    ret = NdrPointerMarshall(&msg, (unsigned char *)&value, format);
+    ok(ret == NULL, "got return value %p\n", ret);
+    ok(msg.Buffer == msg.BufferStart + 12, "got buffer offset %Id\n", msg.Buffer - msg.BufferStart);
+    ok(*(ULONG *)msg.BufferStart != 0, "got null pointer id\n");
+    ok(!memcmp(msg.BufferStart + 4, &value, sizeof(value)), "hard struct was not marshalled correctly\n");
+
+    msg.Buffer = msg.BufferStart;
+    msg.MemorySize = 0;
+    size = NdrPointerMemorySize(&msg, format);
+    ok(size == msg.MemorySize, "got memory size %lu, message size %lu\n", size, msg.MemorySize);
+    ok(msg.Buffer == msg.BufferStart + 12, "got buffer offset %Id\n", msg.Buffer - msg.BufferStart);
+
+    msg.IsClient = FALSE;
+    msg.Buffer = msg.BufferStart;
+    my_alloc_called = my_free_called = 0;
+    ret = NdrPointerUnmarshall(&msg, (unsigned char **)&copy, format, FALSE);
+    ok(ret == NULL, "got return value %p\n", ret);
+    ok(copy != NULL, "hard struct was not allocated\n");
+    ok(copy && !memcmp(copy, &value, sizeof(value)), "hard struct was not unmarshalled correctly\n");
+    ok(msg.Buffer == msg.BufferStart + 12, "got buffer offset %Id\n", msg.Buffer - msg.BufferStart);
+    ok(my_alloc_called == 1, "allocator called %d times\n", my_alloc_called);
+
+    NdrPointerFree(&msg, (unsigned char *)copy, format);
+    ok(my_free_called == 1, "free called %d times\n", my_free_called);
+    NdrOleFree(msg.BufferStart);
+}
+
+static void test_supplement(void)
+{
+    static const unsigned char format[] =
+    {
+        FC_UP, 0,
+        NdrFcShort(2),
+        FC_SUPPLEMENT, 0,
+        NdrFcShort(2),
+        FC_LONG,
+    };
+    LONG value = 0x10203040, *copy = NULL;
+    MIDL_STUB_DESC desc = Object_StubDesc;
+    RPC_MESSAGE rpc_msg;
+    MIDL_STUB_MESSAGE msg;
+    unsigned char *ret;
+    ULONG size;
+
+    desc.pFormatTypes = format;
+    NdrClientInitializeNew(&rpc_msg, &msg, &desc, 0);
+
+    msg.BufferLength = 0;
+    NdrPointerBufferSize(&msg, (unsigned char *)&value, format);
+    ok(msg.BufferLength == 8, "got buffer length %lu\n", msg.BufferLength);
+
+    msg.RpcMsg->Buffer = msg.BufferStart = msg.Buffer = NdrOleAllocate(msg.BufferLength);
+    msg.BufferEnd = msg.BufferStart + msg.BufferLength;
+    memset(msg.BufferStart, 0, msg.BufferLength);
+    ret = NdrPointerMarshall(&msg, (unsigned char *)&value, format);
+    ok(ret == NULL, "got return value %p\n", ret);
+    ok(msg.Buffer == msg.BufferStart + 8, "got buffer offset %Id\n", msg.Buffer - msg.BufferStart);
+    ok(*(ULONG *)msg.BufferStart != 0, "got null pointer id\n");
+    ok(*(LONG *)(msg.BufferStart + 4) == value, "got value %#lx\n", *(LONG *)(msg.BufferStart + 4));
+
+    msg.Buffer = msg.BufferStart;
+    msg.MemorySize = 0;
+    size = NdrPointerMemorySize(&msg, format);
+    ok(size == sizeof(value), "got memory size %lu\n", size);
+    ok(msg.Buffer == msg.BufferStart + 8, "got buffer offset %Id\n", msg.Buffer - msg.BufferStart);
+
+    msg.IsClient = FALSE;
+    msg.Buffer = msg.BufferStart;
+    my_alloc_called = my_free_called = 0;
+    ret = NdrPointerUnmarshall(&msg, (unsigned char **)&copy, format, FALSE);
+    ok(ret == NULL, "got return value %p\n", ret);
+    ok(copy != NULL, "supplemented value was not allocated\n");
+    ok(copy && *copy == value, "got value %#lx\n", copy ? *copy : 0);
+    ok(msg.Buffer == msg.BufferStart + 8, "got buffer offset %Id\n", msg.Buffer - msg.BufferStart);
+    ok(my_alloc_called == 0, "allocator called %d times\n", my_alloc_called);
+
+    NdrPointerFree(&msg, (unsigned char *)copy, format);
+    ok(my_free_called == 0, "free called %d times\n", my_free_called);
+    NdrOleFree(msg.BufferStart);
+}
+
 struct testiface
 {
     IPersist IPersist_iface;
@@ -1861,6 +1977,20 @@ static void test_ndr_allocate(void)
     MIDL_STUB_MESSAGE StubMsg;
     MIDL_STUB_DESC StubDesc;
     void *p1, *p2;
+    DWORD exception;
+    union
+    {
+        ULONGLONG align;
+        unsigned char bytes[16];
+    } byte_count_memory;
+    struct
+    {
+        unsigned char *current;
+        unsigned char *start;
+        unsigned char *end;
+        ULONG raise_bad_stub_data;
+        ULONG reserved;
+    } alloc_all_nodes;
     struct tag_mem_list_v2_t
     {
         DWORD magic;
@@ -1904,6 +2034,150 @@ static void test_ndr_allocate(void)
     /* NdrFree isn't exported so we can't test free'ing */
     my_free(p1);
     my_free(p2);
+
+    alloc_all_nodes.current = alloc_all_nodes.start = byte_count_memory.bytes;
+    alloc_all_nodes.end = byte_count_memory.bytes + sizeof(byte_count_memory.bytes);
+    alloc_all_nodes.raise_bad_stub_data = 1;
+    alloc_all_nodes.reserved = 0;
+    StubMsg.pAllocAllNodesContext = (void *)&alloc_all_nodes;
+
+    p1 = NdrAllocate(&StubMsg, 3);
+    p2 = NdrAllocate(&StubMsg, 5);
+    ok(p1 == byte_count_memory.bytes, "got allocation %p\n", p1);
+    ok(p2 == byte_count_memory.bytes + 8, "got allocation %p\n", p2);
+    ok(alloc_all_nodes.current == byte_count_memory.bytes + 13,
+       "got allocation cursor %p\n", alloc_all_nodes.current);
+    ok(my_alloc_called == 2, "alloc called %d\n", my_alloc_called);
+
+    exception = 0;
+    RpcTryExcept
+    {
+        NdrAllocate(&StubMsg, 1);
+    }
+    RpcExcept(TRUE)
+    {
+        exception = RpcExceptionCode();
+    }
+    RpcEndExcept
+    ok(exception == RPC_X_BAD_STUB_DATA, "got exception %lu\n", exception);
+}
+
+static void test_byte_count_pointer(void)
+{
+    MIDL_STUB_DESC desc = Object_StubDesc;
+    RPC_MESSAGE rpc_msg;
+    MIDL_STUB_MESSAGE msg;
+    DWORD value, output, exception;
+    unsigned char wire[32];
+    unsigned char *memory;
+    void *allocated;
+    union
+    {
+        ULONGLONG align;
+        unsigned char bytes[8];
+        DWORD values[2];
+    } complex_memory;
+
+    static const unsigned char simple_long[] =
+    {
+        FC_BYTE_COUNT_POINTER, FC_LONG,
+        FC_CONSTANT_CONFORMANCE, 0, NdrFcShort(4),
+    };
+    static const unsigned char short_long[] =
+    {
+        FC_BYTE_COUNT_POINTER, FC_LONG,
+        FC_CONSTANT_CONFORMANCE, 0, NdrFcShort(2),
+    };
+    static const unsigned char complex_struct[] =
+    {
+        FC_BYTE_COUNT_POINTER, FC_PAD,
+        FC_CONSTANT_CONFORMANCE, 0, NdrFcShort(8),
+        NdrFcShort(2),
+        FC_STRUCT, 3, NdrFcShort(8),
+        FC_END,
+    };
+
+    desc.pFormatTypes = simple_long;
+    NdrClientInitializeNew(&rpc_msg, &msg, &desc, 0);
+
+    msg.BufferLength = 5;
+    NdrByteCountPointerBufferSize(&msg, (unsigned char *)&value, simple_long);
+    ok(msg.BufferLength == 21, "got buffer length %lu\n", msg.BufferLength);
+
+    msg.BufferLength = ~0u - 15;
+    exception = 0;
+    RpcTryExcept
+    {
+        NdrByteCountPointerBufferSize(&msg, (unsigned char *)&value, simple_long);
+    }
+    RpcExcept(TRUE)
+    {
+        exception = RpcExceptionCode();
+    }
+    RpcEndExcept
+    ok(exception == RPC_S_INVALID_BOUND, "got exception %lu\n", exception);
+    ok(msg.BufferLength == ~0u, "got buffer length %lu\n", msg.BufferLength);
+
+    value = 0x12345678;
+    memset(wire, 0xcc, sizeof(wire));
+    rpc_msg.Buffer = msg.BufferStart = msg.Buffer = wire;
+    msg.BufferEnd = wire + sizeof(wire);
+    msg.BufferLength = sizeof(wire);
+    NdrByteCountPointerMarshall(&msg, (unsigned char *)&value, simple_long);
+    ok(msg.Buffer == wire + sizeof(value), "got buffer %p\n", msg.Buffer);
+    ok(*(DWORD *)wire == value, "got wire value %#lx\n", *(DWORD *)wire);
+
+    output = 0;
+    memory = (unsigned char *)&output;
+    msg.Buffer = wire;
+    my_alloc_called = 0;
+    NdrByteCountPointerUnmarshall(&msg, &memory, simple_long, FALSE);
+    ok(output == value, "got output %#lx\n", output);
+    ok(memory == (unsigned char *)&output, "got memory %p\n", memory);
+    ok(msg.Buffer == wire + sizeof(value), "got buffer %p\n", msg.Buffer);
+    ok(!msg.pAllocAllNodesContext, "allocation context was not cleared\n");
+    ok(!my_alloc_called, "alloc called %d\n", my_alloc_called);
+
+    msg.Buffer = wire;
+    exception = 0;
+    RpcTryExcept
+    {
+        NdrByteCountPointerUnmarshall(&msg, &memory, short_long, FALSE);
+    }
+    RpcExcept(TRUE)
+    {
+        exception = RpcExceptionCode();
+    }
+    RpcEndExcept
+    ok(exception == RPC_X_BYTE_COUNT_TOO_SMALL, "got exception %lu\n", exception);
+
+    *(DWORD *)(wire + 0) = 0x11111111;
+    *(DWORD *)(wire + 4) = 0x22222222;
+    memset(&complex_memory, 0, sizeof(complex_memory));
+    memory = complex_memory.bytes;
+    msg.Buffer = wire;
+    msg.BufferLength = sizeof(wire);
+    my_alloc_called = 0;
+    NdrByteCountPointerUnmarshall(&msg, &memory, complex_struct, FALSE);
+    ok(memory == complex_memory.bytes, "got memory %p\n", memory);
+    ok(complex_memory.values[0] == 0x11111111, "got first value %#lx\n", complex_memory.values[0]);
+    ok(complex_memory.values[1] == 0x22222222, "got second value %#lx\n", complex_memory.values[1]);
+    ok(msg.Buffer == wire + 8, "got buffer %p\n", msg.Buffer);
+    ok(!msg.pAllocAllNodesContext, "allocation context was not cleared\n");
+    ok(!my_alloc_called, "alloc called %d\n", my_alloc_called);
+
+    msg.BufferLength = 1;
+    NdrByteCountPointerBufferSize(&msg, complex_memory.bytes, complex_struct);
+    ok(msg.BufferLength == 12, "got buffer length %lu\n", msg.BufferLength);
+
+    msg.BufferStart = wire;
+    msg.BufferEnd = wire + sizeof(wire);
+    my_free_called = 0;
+    NdrByteCountPointerFree(&msg, wire + 1, simple_long);
+    ok(!my_free_called, "free called %d\n", my_free_called);
+    allocated = malloc(4);
+    NdrByteCountPointerFree(&msg, allocated, simple_long);
+    ok(my_free_called == 1, "free called %d\n", my_free_called);
 }
 
 static void test_conformant_array(void)
@@ -3040,11 +3314,14 @@ START_TEST( ndr_marshall )
     test_nontrivial_pointer_types();
     test_simple_struct();
     test_struct_align();
+    test_hard_struct();
+    test_supplement();
     test_iface_ptr();
     test_fullpointer_xlat();
     test_client_init();
     test_server_init();
     test_ndr_allocate();
+    test_byte_count_pointer();
     test_conformant_array();
     test_conformant_string();
     test_nonconformant_string();

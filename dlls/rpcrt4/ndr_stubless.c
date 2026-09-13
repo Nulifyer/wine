@@ -42,6 +42,8 @@
 #include "cpsf.h"
 #include "ndr_misc.h"
 #include "ndr_stubless.h"
+#include "rpc_binding.h"
+#include "rpc_message.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(rpc);
 
@@ -471,6 +473,8 @@ static size_t basetype_arg_size( unsigned char fc )
     case FC_INT3264:
     case FC_UINT3264:
         return sizeof(INT_PTR);
+    case FC_SYSTEM_HANDLE:
+        return sizeof(HANDLE);
     default:
         FIXME("Unhandled basetype %#x.\n", fc);
         return 0;
@@ -837,6 +841,20 @@ static LONG_PTR ndr_client_call( const MIDL_STUB_DESC *stub_desc, const PFORMAT_
         TRACE( "UNMARSHAL\n" );
         client_do_args(stub_msg, format, STUBLESS_UNMARSHAL, fpu_args,
                        number_of_params, (unsigned char *)&retval);
+
+        if (procedure_number == 7 && stack_top[1])
+        {
+            DWORD *status = stack_top[1];
+            HMODULE rpcss = GetModuleHandleW(L"rpcss.dll");
+
+            TRACE("linuxnt: proc7 rpcss %p status %08lx %08lx %08lx %08lx\n",
+                  rpcss, status[0], status[1], status[2], status[3]);
+            if (status[1] == 4 && rpcss)
+            {
+                TRACE("linuxnt: delaying rpcss.dll after SERVICE_RUNNING\n");
+                Sleep(10000);
+            }
+        }
     }
     __FINALLY_CTX(ndr_client_call_finally, &finally_ctx)
 
@@ -1213,6 +1231,22 @@ static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
     return retval_ptr;
 }
 
+static size_t get_retval_size(MIDL_STUB_MESSAGE *stub_msg, PFORMAT_STRING format,
+                              unsigned short number_of_params)
+{
+    const NDR_PARAM_OIF *params = (const NDR_PARAM_OIF *)format;
+    unsigned int i;
+
+    for (i = 0; i < number_of_params; i++)
+    {
+        if (!params[i].attr.IsReturn) continue;
+        if (params[i].attr.IsBasetype) return basetype_arg_size(params[i].u.type_format_char);
+        return calc_arg_size(stub_msg, &stub_msg->StubDesc->pFormatTypes[params[i].u.type_offset]);
+    }
+
+    return 0;
+}
+
 /***********************************************************************
  *            NdrStubCall2 [RPCRT4.@]
  *
@@ -1530,12 +1564,7 @@ static void do_ndr_async_client_call( const MIDL_STUB_DESC *pStubDesc, PFORMAT_S
     const NDR_PROC_HEADER * pProcHeader = (const NDR_PROC_HEADER *)&pFormat[0];
     RPC_STATUS status;
 
-    /* Later NDR language versions probably won't be backwards compatible */
-    if (pStubDesc->Version > 0x60001)
-    {
-        FIXME("Incompatible stub description version: 0x%lx\n", pStubDesc->Version);
-        RpcRaiseException(RPC_X_WRONG_STUB_VERSION);
-    }
+    TRACE("NDR Version: 0x%lx\n", pStubDesc->Version);
 
     async_call_data = I_RpcAllocate(sizeof(*async_call_data) + sizeof(MIDL_STUB_MESSAGE) + sizeof(RPC_MESSAGE));
     if (!async_call_data) RpcRaiseException(RPC_X_NO_MEMORY);
@@ -1782,6 +1811,16 @@ RPC_STATUS NdrpCompleteAsyncClientCall(RPC_ASYNC_STATE *pAsync, void *Reply)
         pStubMsg->BufferStart = pStubMsg->RpcMsg->Buffer;
         pStubMsg->BufferEnd = pStubMsg->BufferStart + pStubMsg->BufferLength;
         pStubMsg->Buffer = pStubMsg->BufferStart;
+        if ((pStubMsg->RpcMsg->ProcNum & ~RPC_FLAGS_VALID_BIT) == 1)
+        {
+            ULONG_PTR *stack = (ULONG_PTR *)pStubMsg->StackTop;
+
+            TRACE("linuxnt: async proc 1 reply length %lu data %s\n", pStubMsg->BufferLength,
+                  debugstr_an((const char *)pStubMsg->BufferStart, pStubMsg->BufferLength));
+            TRACE("linuxnt: async proc 1 stack before %p %p %p %p %p %p\n",
+                  (void *)stack[0], (void *)stack[1], (void *)stack[2],
+                  (void *)stack[3], (void *)stack[4], (void *)stack[5]);
+        }
     }
 
     /* convert strings, floating point values and endianness into our
@@ -1795,6 +1834,19 @@ RPC_STATUS NdrpCompleteAsyncClientCall(RPC_ASYNC_STATE *pAsync, void *Reply)
     TRACE( "UNMARSHAL\n" );
     client_do_args(pStubMsg, async_call_data->pParamFormat, STUBLESS_UNMARSHAL,
                    FALSE, async_call_data->number_of_params, Reply);
+
+    if ((pStubMsg->RpcMsg->ProcNum & ~RPC_FLAGS_VALID_BIT) == 1)
+    {
+        ULONG_PTR *stack = (ULONG_PTR *)pStubMsg->StackTop;
+
+        TRACE("linuxnt: async proc 1 stack after %p %p %p %p %p %p reply %s\n",
+              (void *)stack[0], (void *)stack[1], (void *)stack[2],
+              (void *)stack[3], (void *)stack[4], (void *)stack[5],
+              debugstr_an((const char *)Reply, sizeof(LONG_PTR)));
+        if (stack[4])
+            TRACE("linuxnt: async proc 1 output header %s\n",
+                  debugstr_an((const char *)stack[4], 48));
+    }
 
 cleanup:
     if (pStubMsg->fHasNewCorrDesc)
@@ -1901,6 +1953,7 @@ RPCRTAPI LONG RPC_ENTRY NdrAsyncStubCall(struct IRpcStubBuffer* pThis,
 
 void RPC_ENTRY NdrAsyncServerCall(PRPC_MESSAGE pRpcMsg)
 {
+    PRPC_MESSAGE async_rpc_msg;
     const MIDL_SERVER_INFO *pServerInfo;
     const MIDL_STUB_DESC *pStubDesc;
     PFORMAT_STRING pFormat;
@@ -1928,7 +1981,11 @@ void RPC_ENTRY NdrAsyncServerCall(PRPC_MESSAGE pRpcMsg)
     async_call_data->pProcHeader = pProcHeader;
 
     async_call_data->pStubMsg = (PMIDL_STUB_MESSAGE)(async_call_data + 1);
-    *(PRPC_MESSAGE)(async_call_data->pStubMsg + 1) = *pRpcMsg;
+    async_rpc_msg = (PRPC_MESSAGE)(async_call_data->pStubMsg + 1);
+    *async_rpc_msg = *pRpcMsg;
+    async_call_data->request_buffer = pRpcMsg->Buffer;
+    if (pRpcMsg->ReservedForRuntime)
+        RPCRT4_GrabConnection(pRpcMsg->ReservedForRuntime);
 
     if (pProcHeader->Oi_flags & Oi_HAS_RPCFLAGS)
     {
@@ -1982,7 +2039,7 @@ void RPC_ENTRY NdrAsyncServerCall(PRPC_MESSAGE pRpcMsg)
         RpcRaiseException(RPC_X_BAD_STUB_DATA);
     }
 
-    NdrServerInitializeNew(pRpcMsg, async_call_data->pStubMsg, pStubDesc);
+    NdrServerInitializeNew(async_rpc_msg, async_call_data->pStubMsg, pStubDesc);
 
     /* create the full pointer translation tables, if requested */
     if (pProcHeader->Oi_flags & Oi_FULL_PTR_USED)
@@ -2069,9 +2126,15 @@ void RPC_ENTRY NdrAsyncServerCall(PRPC_MESSAGE pRpcMsg)
     /* 2. INITOUT */
     TRACE("INITOUT\n");
     async_call_data->retval_ptr = stub_do_args(async_call_data->pStubMsg, pFormat, STUBLESS_INITOUT, async_call_data->number_of_params);
+    async_call_data->retval_size = get_retval_size(async_call_data->pStubMsg, pFormat,
+                                                   async_call_data->number_of_params);
 
     /* 3. CALLSERVER */
     TRACE("CALLSERVER\n");
+    async_call_data->pStubMsg->Buffer = NULL;
+    async_call_data->pStubMsg->BufferLength = 0;
+    pRpcMsg->RpcFlags |= RPC_BUFFER_ASYNC;
+    pRpcMsg->Buffer = NULL;
     if (pServerInfo->ThunkTable && pServerInfo->ThunkTable[pRpcMsg->ProcNum])
         pServerInfo->ThunkTable[pRpcMsg->ProcNum](async_call_data->pStubMsg);
     else
@@ -2086,6 +2149,8 @@ RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply)
     struct async_call_data *async_call_data;
     /* the type of pass we are currently doing */
     enum stubless_phase phase;
+    RpcConnection *conn;
+    RpcPktHdr *response;
     RPC_STATUS status = RPC_S_OK;
 
     if (!pAsync->StubInfo)
@@ -2093,13 +2158,14 @@ RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply)
 
     async_call_data = pAsync->StubInfo;
     pStubMsg = async_call_data->pStubMsg;
+    conn = pStubMsg->RpcMsg->ReservedForRuntime;
 
     TRACE("pAsync %p, pAsync->StubInfo %p, pFormat %p\n", pAsync, pAsync->StubInfo, async_call_data->pHandleFormat);
 
     if (async_call_data->retval_ptr)
     {
-        TRACE("stub implementation returned 0x%Ix\n", *(LONG_PTR *)Reply);
-        *async_call_data->retval_ptr = *(LONG_PTR *)Reply;
+        TRACE("stub implementation returned %zu bytes\n", async_call_data->retval_size);
+        memcpy(async_call_data->retval_ptr, Reply, async_call_data->retval_size);
     }
     else
         TRACE("void stub implementation\n");
@@ -2141,6 +2207,23 @@ RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply)
         }
     }
 
+    pStubMsg->RpcMsg->BufferLength = pStubMsg->Buffer - (unsigned char *)pStubMsg->RpcMsg->Buffer;
+    if (conn)
+    {
+        response = RPCRT4_BuildResponseHeader(pStubMsg->RpcMsg->DataRepresentation,
+                                              pStubMsg->RpcMsg->BufferLength);
+        if (response)
+        {
+            status = RPCRT4_Send(conn, response, pStubMsg->RpcMsg->Buffer,
+                                 pStubMsg->RpcMsg->BufferLength);
+            free(response);
+        }
+        else
+            status = RPC_S_OUT_OF_RESOURCES;
+
+        RPCRT4_ReleaseConnection(conn);
+    }
+
 #if 0 /* FIXME */
     if (ext_flags.HasNewCorrDesc)
     {
@@ -2160,10 +2243,12 @@ RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply)
 
     /* free server function stack */
     free(async_call_data->pStubMsg->StackTop);
+    I_RpcFree(async_call_data->request_buffer);
+    I_RpcFree(pStubMsg->RpcMsg->Buffer);
     I_RpcFree(async_call_data);
     I_RpcFree(pAsync);
 
-    return S_OK;
+    return status;
 }
 
 static const RPC_SYNTAX_IDENTIFIER ndr_syntax_id =
