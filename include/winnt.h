@@ -4782,6 +4782,7 @@ typedef struct _SID_AND_ATTRIBUTES_HASH {
 #define DOMAIN_USER_RID_ADMIN                   __MSABI_LONG(0x000001F4)
 #define DOMAIN_USER_RID_GUEST                   __MSABI_LONG(0x000001F5)
 #define DOMAIN_USER_RID_KRBTGT                  __MSABI_LONG(0x000001F6)
+#define DOMAIN_USER_RID_DEFAULT_ACCOUNT         __MSABI_LONG(0x000001F7)
 #define DOMAIN_USER_RID_MAX                     __MSABI_LONG(0x000003E7)
 
 #define DOMAIN_GROUP_RID_ADMINS                 __MSABI_LONG(0x00000200)
@@ -4979,6 +4980,9 @@ typedef enum {
     WinLocalAccountSid                          = 105,
     WinLocalAccountAndAdministratorSid          = 106,
     WinAccountProtectedUsersSid                 = 107,
+    WinCapabilityAppointmentsSid                = 108,
+    WinCapabilityContactsSid                    = 109,
+    WinAccountDefaultSystemManagedSid           = 110,
 } WELL_KNOWN_SID_TYPE;
 
 /*
@@ -5793,6 +5797,7 @@ typedef enum _POWER_INFORMATION_LEVEL {
         VerifyProcessorPowerPolicyAc,
         VerifyProcessorPowerPolicyDc,
         ProcessorPowerPolicyCurrent,
+        PowerInformationInternal = 87,
         UpdateBlackBoxRecorder = 94
 } POWER_INFORMATION_LEVEL;
 

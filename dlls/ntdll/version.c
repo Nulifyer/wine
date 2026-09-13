@@ -122,58 +122,58 @@ static const RTL_OSVERSIONINFOEXW VersionData[NB_WINDOWS_VERSIONS] =
     /* WINXP */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 5, 1, 2600, VER_PLATFORM_WIN32_NT,
-        L"Service Pack 3", 3, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION,
+        L"Service Pack 3", 3, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_WORKSTATION,
         30 /* FIXME: Great, a reserved field with a value! */
     },
     /* WINXP64 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 3790, VER_PLATFORM_WIN32_NT,
-        L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
+        L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_WORKSTATION, 0
     },
     /* WIN2K3 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 3790, VER_PLATFORM_WIN32_NT,
-        L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
+        L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_SERVER, 0
     },
     /* WINVISTA */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 6002, VER_PLATFORM_WIN32_NT,
-        L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
+        L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_WORKSTATION, 0
     },
     /* WIN2K8 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 6002, VER_PLATFORM_WIN32_NT,
-        L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
+        L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_SERVER, 0
     },
     /* WIN7 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 7601, VER_PLATFORM_WIN32_NT,
-        L"Service Pack 1", 1, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
+        L"Service Pack 1", 1, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_WORKSTATION, 0
     },
     /* WIN2K8R2 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 7601, VER_PLATFORM_WIN32_NT,
-        L"Service Pack 1", 1, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
+        L"Service Pack 1", 1, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_SERVER, 0
     },
     /* WIN8 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 6, 2, 9200, VER_PLATFORM_WIN32_NT,
-        L"", 0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
+        L"", 0, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_WORKSTATION, 0
     },
     /* WIN81 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 6, 3, 9600, VER_PLATFORM_WIN32_NT,
-        L"", 0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
+        L"", 0, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_WORKSTATION, 0
     },
     /* WIN10 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 10, 0, 19045, VER_PLATFORM_WIN32_NT,
-        L"", 0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
+        L"", 0, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_WORKSTATION, 0
     },
     /* WIN11 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 10, 0, 22000, VER_PLATFORM_WIN32_NT,
-        L"", 0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
+        L"", 0, 0, VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL, VER_NT_WORKSTATION, 0
     },
 };
 
@@ -269,6 +269,7 @@ static BOOL get_nt_registry_version( RTL_OSVERSIONINFOEXW *version )
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr )) return FALSE;
 
     memset( version, 0, sizeof(*version) );
+    version->wSuiteMask = VER_SUITE_SINGLEUSERTS | VER_SUITE_TERMINAL;
 
     RtlInitUnicodeString( &valueW, L"CurrentMajorVersionNumber" );
     if (!NtQueryValueKey( hkey, &valueW, KeyValuePartialInformation, tmp, sizeof(tmp)-1, &count ) &&
@@ -362,7 +363,6 @@ static BOOL get_nt_registry_version( RTL_OSVERSIONINFOEXW *version )
             NtClose( hkey2 );
         }
 
-        /* FIXME: get wSuiteMask */
     }
 
     NtClose( hkey );
@@ -568,6 +568,15 @@ ULONG WINAPI RtlGetCurrentServiceSessionId(void)
 {
     const struct silo_shared_data *data = active_silo_shared_data();
     return data ? data->service_session_id : 0;
+}
+
+/***********************************************************************
+ *           RtlGetActiveConsoleId    (NTDLL.@)
+ */
+ULONG WINAPI RtlGetActiveConsoleId(void)
+{
+    const struct silo_shared_data *data = active_silo_shared_data();
+    return data ? data->active_console_id : user_shared_data->ActiveConsoleId;
 }
 
 /***********************************************************************

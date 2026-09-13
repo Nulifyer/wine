@@ -21,6 +21,7 @@ SOURCES = \
 	debugbuffer.c \
 	env.c \
 	error.c \
+	feature.c \
 	exception.c \
 	handletable.c \
 	heap.c \
@@ -45,6 +46,7 @@ SOURCES = \
 	signal_i386.c \
 	signal_x86_64.c \
 	string.c \
+	switchback.c \
 	sync.c \
 	thread.c \
 	threadpool.c \

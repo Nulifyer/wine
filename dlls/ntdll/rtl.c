@@ -219,23 +219,69 @@ NTSTATUS WINAPI RtlGetPersistedStateLocation( const WCHAR *source_id,
     return STATUS_SUCCESS;
 }
 
+static LONG boot_good_status;
+static LONG boot_checkpoint_status;
+
+static LONG *get_writable_boot_status( ULONG item_type )
+{
+    switch (item_type)
+    {
+    case 4:  /* RtlBsdItemBootGood */
+        return &boot_good_status;
+    case 9:  /* RtlBsdItemBootCheckpoint */
+        return &boot_checkpoint_status;
+    default:
+        return NULL;
+    }
+}
+
 /***********************************************************************
  *             RtlGetSystemBootStatus  (NTDLL.@)
  *
  * LinuxNT exposes the feature-configuration state consumed by Wininit.
- * The remaining boot-status classes need a system-owned persistent store.
+ * The boot-good and checkpoint values are process-local compatibility state
+ * for LSASS until the server owns a persistent boot-status store.
  */
 NTSTATUS WINAPI RtlGetSystemBootStatus( ULONG item_type, void *buffer,
                                         ULONG buffer_length, ULONG *return_length )
 {
     static const ULONG feature_configuration_state = 4;
+    const ULONG *value = &feature_configuration_state;
+    LONG *writable;
 
-    if (item_type != 17) return STATUS_INVALID_PARAMETER;
-    if (buffer_length < sizeof(feature_configuration_state)) return STATUS_BUFFER_TOO_SMALL;
+    if (item_type != 17)
+    {
+        if (!(writable = get_writable_boot_status( item_type ))) return STATUS_INVALID_PARAMETER;
+        value = (const ULONG *)writable;
+    }
+    if (buffer_length < sizeof(*value)) return STATUS_BUFFER_TOO_SMALL;
     if (!buffer) return STATUS_INVALID_PARAMETER;
 
-    memcpy( buffer, &feature_configuration_state, sizeof(feature_configuration_state) );
-    if (return_length) *return_length = sizeof(feature_configuration_state);
+    memcpy( buffer, value, sizeof(*value) );
+    if (return_length) *return_length = sizeof(*value);
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *             RtlSetSystemBootStatus  (NTDLL.@)
+ *
+ * LSASS writes RtlBsdItemBootGood and RtlBsdItemBootCheckpoint as ULONGs.
+ * Keep those exact values process-local until boot status has a persistent
+ * server-side owner.
+ */
+NTSTATUS WINAPI RtlSetSystemBootStatus( ULONG item_type, const void *buffer,
+                                        ULONG buffer_length, ULONG *return_length )
+{
+    LONG *target;
+    ULONG value;
+
+    if (!(target = get_writable_boot_status( item_type ))) return STATUS_INVALID_PARAMETER;
+    if (buffer_length < sizeof(value)) return STATUS_BUFFER_TOO_SMALL;
+    if (!buffer) return STATUS_INVALID_PARAMETER;
+
+    memcpy( &value, buffer, sizeof(value) );
+    InterlockedExchange( target, value );
+    if (return_length) *return_length = sizeof(value);
     return STATUS_SUCCESS;
 }
 
@@ -1705,6 +1751,14 @@ BOOL WINAPI RtlSetCurrentTransaction(HANDLE new_transaction)
 }
 
 /**********************************************************************
+ *           RtlGetCurrentProcessorNumber [NTDLL.@]
+ */
+ULONG WINAPI RtlGetCurrentProcessorNumber(void)
+{
+    return NtGetCurrentProcessorNumber();
+}
+
+/**********************************************************************
  *           RtlGetCurrentProcessorNumberEx [NTDLL.@]
  */
 void WINAPI RtlGetCurrentProcessorNumberEx(PROCESSOR_NUMBER *processor)
@@ -1899,7 +1953,44 @@ void WINAPI RtlRbRemoveNode( RTL_RB_TREE *tree, RTL_BALANCED_NODE *node )
 void WINAPI RtlInitializeGenericTableAvl(PRTL_AVL_TABLE table, PRTL_AVL_COMPARE_ROUTINE compare,
                                          PRTL_AVL_ALLOCATE_ROUTINE allocate, PRTL_AVL_FREE_ROUTINE free, void *context)
 {
-    FIXME("%p %p %p %p %p: stub\n", table, compare, allocate, free, context);
+    memset(table, 0, sizeof(*table));
+    table->BalancedRoot.Parent = &table->BalancedRoot;
+    table->CompareRoutine = compare;
+    table->AllocateRoutine = allocate;
+    table->FreeRoutine = free;
+    table->TableContext = context;
+}
+
+static RTL_BALANCED_LINKS *rtl_avl_successor(RTL_BALANCED_LINKS *links)
+{
+    RTL_BALANCED_LINKS *parent;
+
+    if (links->RightChild)
+    {
+        links = links->RightChild;
+        while (links->LeftChild) links = links->LeftChild;
+        return links;
+    }
+
+    while ((parent = links->Parent) && parent->RightChild == links) links = parent;
+    if (parent && parent->LeftChild == links) return parent;
+    return NULL;
+}
+
+static RTL_BALANCED_LINKS *rtl_avl_predecessor(RTL_BALANCED_LINKS *links)
+{
+    RTL_BALANCED_LINKS *parent;
+
+    if (links->LeftChild)
+    {
+        links = links->LeftChild;
+        while (links->RightChild) links = links->RightChild;
+        return links;
+    }
+
+    while ((parent = links->Parent) && parent->LeftChild == links) links = parent;
+    if (parent && parent->RightChild == links) return parent;
+    return NULL;
 }
 
 /******************************************************************************
@@ -1907,11 +1998,31 @@ void WINAPI RtlInitializeGenericTableAvl(PRTL_AVL_TABLE table, PRTL_AVL_COMPARE_
  */
 void * WINAPI RtlEnumerateGenericTableWithoutSplayingAvl(RTL_AVL_TABLE *table, PVOID *previous)
 {
-    static int warn_once;
+    RTL_BALANCED_LINKS *links;
 
-    if (!warn_once++)
-        FIXME("(%p, %p) stub!\n", table, previous);
-    return NULL;
+    if (!table->NumberGenericTableElements) return NULL;
+
+    if ((links = *previous))
+    {
+        if (!(links = rtl_avl_successor(links))) return NULL;
+    }
+    else
+    {
+        links = table->BalancedRoot.RightChild;
+        while (links->LeftChild) links = links->LeftChild;
+    }
+
+    *previous = links;
+    return links + 1;
+}
+
+/******************************************************************************
+ *           RtlEnumerateGenericTableAvl  (NTDLL.@)
+ */
+void * WINAPI RtlEnumerateGenericTableAvl(RTL_AVL_TABLE *table, BOOLEAN restart)
+{
+    if (restart) table->RestartKey = NULL;
+    return RtlEnumerateGenericTableWithoutSplayingAvl(table, (void **)&table->RestartKey);
 }
 
 /******************************************************************************
@@ -1919,16 +2030,378 @@ void * WINAPI RtlEnumerateGenericTableWithoutSplayingAvl(RTL_AVL_TABLE *table, P
  */
 ULONG WINAPI RtlNumberGenericTableElementsAvl(RTL_AVL_TABLE *table)
 {
-    FIXME("(%p) stub!\n", table);
-    return 0;
+    return table->NumberGenericTableElements;
+}
+
+/******************************************************************************
+ *  RtlIsGenericTableEmptyAvl  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlIsGenericTableEmptyAvl(RTL_AVL_TABLE *table)
+{
+    return !table->NumberGenericTableElements;
+}
+
+static void rtl_avl_replace_child(RTL_AVL_TABLE *table, RTL_BALANCED_LINKS *old,
+                                  RTL_BALANCED_LINKS *new)
+{
+    RTL_BALANCED_LINKS *parent = old->Parent;
+
+    if (parent == &table->BalancedRoot)
+        table->BalancedRoot.RightChild = new;
+    else if (parent->LeftChild == old)
+        parent->LeftChild = new;
+    else
+        parent->RightChild = new;
+    if (new) new->Parent = parent;
+}
+
+static RTL_BALANCED_LINKS *rtl_avl_rotate_left(RTL_AVL_TABLE *table, RTL_BALANCED_LINKS *links)
+{
+    RTL_BALANCED_LINKS *right = links->RightChild;
+
+    rtl_avl_replace_child(table, links, right);
+    links->RightChild = right->LeftChild;
+    if (links->RightChild) links->RightChild->Parent = links;
+    right->LeftChild = links;
+    links->Parent = right;
+    return right;
+}
+
+static RTL_BALANCED_LINKS *rtl_avl_rotate_right(RTL_AVL_TABLE *table, RTL_BALANCED_LINKS *links)
+{
+    RTL_BALANCED_LINKS *left = links->LeftChild;
+
+    rtl_avl_replace_child(table, links, left);
+    links->LeftChild = left->RightChild;
+    if (links->LeftChild) links->LeftChild->Parent = links;
+    left->RightChild = links;
+    links->Parent = left;
+    return left;
+}
+
+static unsigned int rtl_avl_depth(const RTL_BALANCED_LINKS *links)
+{
+    unsigned int left, right;
+
+    if (!links) return 0;
+    left = rtl_avl_depth(links->LeftChild);
+    right = rtl_avl_depth(links->RightChild);
+    return 1 + max(left, right);
+}
+
+static void rtl_avl_rebalance_after_insert(RTL_AVL_TABLE *table, RTL_BALANCED_LINKS *links)
+{
+    RTL_BALANCED_LINKS *parent, *child, *middle;
+    int balance;
+
+    while ((parent = links->Parent) != &table->BalancedRoot)
+    {
+        balance = parent->LeftChild == links ? -1 : 1;
+        if (!parent->Balance)
+        {
+            parent->Balance = balance;
+            links = parent;
+            continue;
+        }
+        if (parent->Balance != balance)
+        {
+            parent->Balance = 0;
+            break;
+        }
+
+        if (balance < 0)
+        {
+            child = parent->LeftChild;
+            if (child->Balance <= 0)
+            {
+                rtl_avl_rotate_right(table, parent);
+                parent->Balance = 0;
+                child->Balance = 0;
+            }
+            else
+            {
+                middle = child->RightChild;
+                if (middle->Balance < 0)
+                {
+                    parent->Balance = 1;
+                    child->Balance = 0;
+                }
+                else if (middle->Balance > 0)
+                {
+                    parent->Balance = 0;
+                    child->Balance = -1;
+                }
+                else
+                {
+                    parent->Balance = 0;
+                    child->Balance = 0;
+                }
+                middle->Balance = 0;
+                rtl_avl_rotate_left(table, child);
+                rtl_avl_rotate_right(table, parent);
+            }
+        }
+        else
+        {
+            child = parent->RightChild;
+            if (child->Balance >= 0)
+            {
+                rtl_avl_rotate_left(table, parent);
+                parent->Balance = 0;
+                child->Balance = 0;
+            }
+            else
+            {
+                middle = child->LeftChild;
+                if (middle->Balance > 0)
+                {
+                    parent->Balance = -1;
+                    child->Balance = 0;
+                }
+                else if (middle->Balance < 0)
+                {
+                    parent->Balance = 0;
+                    child->Balance = 1;
+                }
+                else
+                {
+                    parent->Balance = 0;
+                    child->Balance = 0;
+                }
+                middle->Balance = 0;
+                rtl_avl_rotate_right(table, child);
+                rtl_avl_rotate_left(table, parent);
+            }
+        }
+        break;
+    }
+
+    table->BalancedRoot.Balance = 0;
+    table->DepthOfTree = rtl_avl_depth(table->BalancedRoot.RightChild);
+}
+
+static void rtl_avl_rebalance_after_delete(RTL_AVL_TABLE *table, RTL_BALANCED_LINKS *parent,
+                                           int balance)
+{
+    RTL_BALANCED_LINKS *child, *middle, *root, *grand;
+
+    while (parent != &table->BalancedRoot)
+    {
+        parent->Balance += balance;
+        if (parent->Balance == -1 || parent->Balance == 1) break;
+
+        root = parent;
+        if (parent->Balance == 2)
+        {
+            child = parent->RightChild;
+            if (child->Balance >= 0)
+            {
+                root = rtl_avl_rotate_left(table, parent);
+                if (!child->Balance)
+                {
+                    parent->Balance = 1;
+                    child->Balance = -1;
+                    break;
+                }
+                parent->Balance = 0;
+                child->Balance = 0;
+            }
+            else
+            {
+                middle = child->LeftChild;
+                if (middle->Balance > 0)
+                {
+                    parent->Balance = -1;
+                    child->Balance = 0;
+                }
+                else if (middle->Balance < 0)
+                {
+                    parent->Balance = 0;
+                    child->Balance = 1;
+                }
+                else
+                {
+                    parent->Balance = 0;
+                    child->Balance = 0;
+                }
+                middle->Balance = 0;
+                rtl_avl_rotate_right(table, child);
+                root = rtl_avl_rotate_left(table, parent);
+            }
+        }
+        else if (parent->Balance == -2)
+        {
+            child = parent->LeftChild;
+            if (child->Balance <= 0)
+            {
+                root = rtl_avl_rotate_right(table, parent);
+                if (!child->Balance)
+                {
+                    parent->Balance = -1;
+                    child->Balance = 1;
+                    break;
+                }
+                parent->Balance = 0;
+                child->Balance = 0;
+            }
+            else
+            {
+                middle = child->RightChild;
+                if (middle->Balance < 0)
+                {
+                    parent->Balance = 1;
+                    child->Balance = 0;
+                }
+                else if (middle->Balance > 0)
+                {
+                    parent->Balance = 0;
+                    child->Balance = -1;
+                }
+                else
+                {
+                    parent->Balance = 0;
+                    child->Balance = 0;
+                }
+                middle->Balance = 0;
+                rtl_avl_rotate_left(table, child);
+                root = rtl_avl_rotate_right(table, parent);
+            }
+        }
+
+        grand = root->Parent;
+        if (grand == &table->BalancedRoot) break;
+        balance = grand->LeftChild == root ? 1 : -1;
+        parent = grand;
+    }
+
+    table->BalancedRoot.Balance = 0;
+    table->DepthOfTree = rtl_avl_depth(table->BalancedRoot.RightChild);
+}
+
+/***********************************************************************
+ *           RtlDeleteElementGenericTableAvl  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlDeleteElementGenericTableAvl(RTL_AVL_TABLE *table, void *buffer)
+{
+    RTL_BALANCED_LINKS *links = table->BalancedRoot.RightChild;
+    RTL_BALANCED_LINKS *parent, *child, *successor, *successor_parent;
+    RTL_GENERIC_COMPARE_RESULTS result;
+    int balance;
+
+    while (links)
+    {
+        result = table->CompareRoutine(table, buffer, links + 1);
+        if (result == GenericLessThan)
+            links = links->LeftChild;
+        else if (result == GenericGreaterThan)
+            links = links->RightChild;
+        else
+            break;
+    }
+    if (!links) return FALSE;
+
+    if (table->RestartKey == links) table->RestartKey = rtl_avl_predecessor(links);
+
+    if (!links->LeftChild || !links->RightChild)
+    {
+        child = links->LeftChild ? links->LeftChild : links->RightChild;
+        parent = links->Parent;
+        balance = parent->LeftChild == links ? 1 : -1;
+        rtl_avl_replace_child(table, links, child);
+    }
+    else
+    {
+        successor = links->RightChild;
+        while (successor->LeftChild) successor = successor->LeftChild;
+        successor_parent = successor->Parent;
+
+        if (successor_parent == links)
+        {
+            parent = successor;
+            balance = -1;
+            successor->LeftChild = links->LeftChild;
+            successor->LeftChild->Parent = successor;
+            rtl_avl_replace_child(table, links, successor);
+            successor->Balance = links->Balance;
+        }
+        else
+        {
+            parent = successor_parent;
+            balance = 1;
+            successor_parent->LeftChild = successor->RightChild;
+            if (successor->RightChild) successor->RightChild->Parent = successor_parent;
+            successor->LeftChild = links->LeftChild;
+            successor->LeftChild->Parent = successor;
+            successor->RightChild = links->RightChild;
+            successor->RightChild->Parent = successor;
+            rtl_avl_replace_child(table, links, successor);
+            successor->Balance = links->Balance;
+        }
+    }
+
+    table->NumberGenericTableElements--;
+    table->DeleteCount++;
+    table->OrderedPointer = NULL;
+    table->WhichOrderedElement = 0;
+    table->FreeRoutine(table, links);
+    if (parent != &table->BalancedRoot)
+        rtl_avl_rebalance_after_delete(table, parent, balance);
+    else
+        table->DepthOfTree = rtl_avl_depth(table->BalancedRoot.RightChild);
+    return TRUE;
 }
 
 /***********************************************************************
  *           RtlInsertElementGenericTableAvl  (NTDLL.@)
  */
-void WINAPI RtlInsertElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer, ULONG size, BOOL *element)
+void * WINAPI RtlInsertElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer, ULONG size, BOOLEAN *element)
 {
-    FIXME("%p %p %lu %p: stub\n", table, buffer, size, element);
+    RTL_BALANCED_LINKS *links, *parent = &table->BalancedRoot;
+    RTL_GENERIC_COMPARE_RESULTS result = GenericEqual;
+    void *data;
+
+    links = table->BalancedRoot.RightChild;
+    while (links)
+    {
+        data = links + 1;
+        result = table->CompareRoutine(table, buffer, data);
+        if (result == GenericLessThan)
+            parent = links, links = links->LeftChild;
+        else if (result == GenericGreaterThan)
+            parent = links, links = links->RightChild;
+        else
+        {
+            if (element) *element = FALSE;
+            table->OrderedPointer = NULL;
+            table->WhichOrderedElement = 0;
+            return data;
+        }
+    }
+
+    if (size > ~(ULONG)0 - sizeof(*links) ||
+        !(links = table->AllocateRoutine(table, size + sizeof(*links))))
+    {
+        if (element) *element = FALSE;
+        return NULL;
+    }
+
+    memset(links, 0, sizeof(*links));
+    links->Parent = parent;
+    if (parent == &table->BalancedRoot)
+        table->BalancedRoot.RightChild = links;
+    else if (result == GenericLessThan)
+        parent->LeftChild = links;
+    else
+        parent->RightChild = links;
+
+    data = links + 1;
+    memcpy(data, buffer, size);
+    table->NumberGenericTableElements++;
+    table->OrderedPointer = NULL;
+    table->WhichOrderedElement = 0;
+    rtl_avl_rebalance_after_insert(table, links);
+    if (element) *element = TRUE;
+    return data;
 }
 
 /******************************************************************************
@@ -1936,7 +2409,21 @@ void WINAPI RtlInsertElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer, 
  */
 void * WINAPI RtlLookupElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer)
 {
-    FIXME("(%p, %p) stub!\n", table, buffer);
+    RTL_BALANCED_LINKS *links = table->BalancedRoot.RightChild;
+    RTL_GENERIC_COMPARE_RESULTS result;
+    void *data;
+
+    while (links)
+    {
+        data = links + 1;
+        result = table->CompareRoutine(table, buffer, data);
+        if (result == GenericLessThan)
+            links = links->LeftChild;
+        else if (result == GenericGreaterThan)
+            links = links->RightChild;
+        else
+            return data;
+    }
     return NULL;
 }
 

@@ -32,6 +32,7 @@
 #include "ntstatus.h"
 #include "windef.h"
 #include "winbase.h"
+#include "winnls.h"
 #include "winnt.h"
 #include "winternl.h"
 #include "ntdll_misc.h"
@@ -326,6 +327,56 @@ NTSTATUS WINAPI LdrAccessResource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY
 /**********************************************************************
  *	RtlFindMessage  (NTDLL.@)
  */
+static HMODULE load_alternate_message_module( HMODULE module, LANGID lang )
+{
+    WCHAR locale_buffer[LOCALE_NAME_MAX_LENGTH];
+    UNICODE_STRING locale = { 0, sizeof(locale_buffer), locale_buffer };
+    LDR_DATA_TABLE_ENTRY *module_entry;
+    UNICODE_STRING path;
+    const WCHAR *filename;
+    WCHAR *buffer, *p;
+    HMODULE alternate;
+    SIZE_T prefix_len, filename_len, path_len;
+    NTSTATUS status;
+
+    if ((ULONG_PTR)module & 3) return NULL;
+    if (LdrFindEntryForAddress( module, &module_entry )) return NULL;
+
+    if (!lang && RtlpQueryDefaultUILanguage( &lang, FALSE )) return NULL;
+    if (RtlLcidToLocaleName( MAKELCID( lang, SORT_DEFAULT ), &locale, 0, FALSE )) return NULL;
+
+    filename = module_entry->FullDllName.Buffer + module_entry->FullDllName.Length / sizeof(WCHAR);
+    while (filename > module_entry->FullDllName.Buffer && filename[-1] != '\\' && filename[-1] != '/')
+        filename--;
+
+    prefix_len = filename - module_entry->FullDllName.Buffer;
+    filename_len = module_entry->FullDllName.Length / sizeof(WCHAR) - prefix_len;
+    path_len = prefix_len + locale.Length / sizeof(WCHAR) + 1 + filename_len + 4;
+    if (path_len >= 0x7fff || !(buffer = RtlAllocateHeap( GetProcessHeap(), 0,
+                                                         (path_len + 1) * sizeof(WCHAR) )))
+        return NULL;
+
+    p = buffer;
+    memcpy( p, module_entry->FullDllName.Buffer, prefix_len * sizeof(WCHAR) );
+    p += prefix_len;
+    memcpy( p, locale.Buffer, locale.Length );
+    p += locale.Length / sizeof(WCHAR);
+    *p++ = '\\';
+    memcpy( p, filename, filename_len * sizeof(WCHAR) );
+    p += filename_len;
+    memcpy( p, L".mui", 5 * sizeof(WCHAR) );
+
+    path.Buffer = buffer;
+    path.Length = path_len * sizeof(WCHAR);
+    path.MaximumLength = (path_len + 1) * sizeof(WCHAR);
+    TRACE( "loading alternate message module %s\n", debugstr_us(&path) );
+
+    status = LdrGetDllHandle( NULL, 0, &path, &alternate );
+    if (status) status = LdrLoadDll( NULL, NULL, &path, &alternate );
+    RtlFreeHeap( GetProcessHeap(), 0, buffer );
+    return status ? NULL : alternate;
+}
+
 NTSTATUS WINAPI RtlFindMessage( HMODULE hmod, ULONG type, ULONG lang,
                                 ULONG msg_id, const MESSAGE_RESOURCE_ENTRY **ret )
 {
@@ -342,7 +393,14 @@ NTSTATUS WINAPI RtlFindMessage( HMODULE hmod, ULONG type, ULONG lang,
     info.Language = lang;
 
     if ((status = LdrFindResource_U( hmod, &info, 3, &rsrc )) != STATUS_SUCCESS)
-        return status;
+    {
+        HMODULE alternate;
+
+        if (!(alternate = load_alternate_message_module( hmod, lang )) ||
+            (status = LdrFindResource_U( alternate, &info, 3, &rsrc )) != STATUS_SUCCESS)
+            return status;
+        hmod = alternate;
+    }
     if ((status = LdrAccessResource( hmod, rsrc, &ptr, NULL )) != STATUS_SUCCESS)
         return status;
 

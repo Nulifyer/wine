@@ -41,6 +41,12 @@ NTSTATUS WINAPI wow64_NtDeleteWnfStateName( UINT *args )
     const ULONGLONG *name = get_ptr( &args );
     return NtDeleteWnfStateName( name );
 }
+NTSTATUS WINAPI wow64_NtDeleteWnfStateData( UINT *args )
+{
+    const ULONGLONG *name = get_ptr( &args );
+    const void *scope = get_ptr( &args );
+    return NtDeleteWnfStateData( name, scope );
+}
 NTSTATUS WINAPI wow64_NtQueryWnfStateData( UINT *args )
 {
     const ULONGLONG *name = get_ptr( &args );

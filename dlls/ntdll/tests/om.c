@@ -55,6 +55,9 @@ static NTSTATUS (WINAPI *pNtOpenTimer)( PHANDLE, ACCESS_MASK, const POBJECT_ATTR
 static NTSTATUS (WINAPI *pNtCreateSection)( PHANDLE, ACCESS_MASK, const POBJECT_ATTRIBUTES, const PLARGE_INTEGER,
                                             ULONG, ULONG, HANDLE );
 static NTSTATUS (WINAPI *pNtOpenSection)( PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES );
+static NTSTATUS (WINAPI *pNtOpenSession)( PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES );
+static NTSTATUS (WINAPI *pNtNotifyChangeSession)( HANDLE, ULONG, const LARGE_INTEGER *, IO_SESSION_EVENT,
+                                                  IO_SESSION_STATE, IO_SESSION_STATE, const void *, ULONG );
 static NTSTATUS (WINAPI *pNtOpenFile)    ( PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK, ULONG, ULONG );
 static NTSTATUS (WINAPI *pNtClose)       ( HANDLE );
 static NTSTATUS (WINAPI *pNtCreateNamedPipeFile)( PHANDLE, ULONG, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
@@ -1672,6 +1675,52 @@ static void _test_object_name( unsigned line, HANDLE handle, const WCHAR *expect
     status = pNtQueryObject( handle, ObjectNameInformation, buffer, sizeof(UNICODE_STRING) - 1, &len );
     ok_(__FILE__,line)( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %lx for %s\n",
                         status, debugstr_w(expected_name) );
+}
+
+static void test_open_session(void)
+{
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING name;
+    NTSTATUS status;
+    LARGE_INTEGER timestamp;
+    WCHAR path[32];
+    HANDLE handle;
+
+    if (!pNtOpenSession || !pNtNotifyChangeSession)
+    {
+        win_skip( "session object functions are not available\n" );
+        return;
+    }
+    if (!winetest_platform_is_wine)
+    {
+        win_skip( "session state mutation test is Wine-specific\n" );
+        return;
+    }
+
+    swprintf( path, ARRAY_SIZE(path), L"\\KernelObjects\\Session%u", NtCurrentTeb()->Peb->SessionId );
+    RtlInitUnicodeString( &name, path );
+    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+    handle = (HANDLE)0xdeadbeef;
+    status = pNtOpenSession( &handle, GENERIC_READ | GENERIC_WRITE, &attr );
+    ok( status == STATUS_SUCCESS, "NtOpenSession failed %#lx\n", status );
+    if (!status)
+    {
+        ok( !!handle, "NtOpenSession returned a null handle\n" );
+        timestamp.QuadPart = 1;
+        status = pNtNotifyChangeSession( handle, 1, &timestamp, IoSessionEventCreated,
+                                         IoSessionStateCreated, IoSessionStateInitialized, NULL, 0 );
+        ok( status == STATUS_SUCCESS, "NtNotifyChangeSession failed %#lx\n", status );
+        status = pNtNotifyChangeSession( handle, 2, &timestamp, IoSessionEventIgnore,
+                                         (IO_SESSION_STATE)9, IoSessionStateCreated, NULL, 0 );
+        ok( status == STATUS_SUCCESS, "ignore notification failed %#lx\n", status );
+        status = pNtNotifyChangeSession( (HANDLE)0xdeadbeef, 2, &timestamp, IoSessionEventConnected,
+                                         IoSessionStateConnected, IoSessionStateCreated, NULL, 0 );
+        ok( status == STATUS_INVALID_HANDLE, "invalid handle returned %#lx\n", status );
+        status = pNtNotifyChangeSession( handle, 2, &timestamp, IoSessionEventMax,
+                                         IoSessionStateConnected, IoSessionStateCreated, NULL, 0 );
+        ok( status == STATUS_INVALID_PARAMETER, "invalid event returned %#lx\n", status );
+        pNtClose( handle );
+    }
 }
 
 static void test_query_object(void)
@@ -3917,6 +3966,8 @@ START_TEST(om)
     pNtOpenTimer            =  (void *)GetProcAddress(hntdll, "NtOpenTimer");
     pNtCreateSection        =  (void *)GetProcAddress(hntdll, "NtCreateSection");
     pNtOpenSection          =  (void *)GetProcAddress(hntdll, "NtOpenSection");
+    pNtOpenSession          =  (void *)GetProcAddress(hntdll, "NtOpenSession");
+    pNtNotifyChangeSession  =  (void *)GetProcAddress(hntdll, "NtNotifyChangeSession");
     pNtQueryObject          =  (void *)GetProcAddress(hntdll, "NtQueryObject");
     pNtReleaseSemaphore     =  (void *)GetProcAddress(hntdll, "NtReleaseSemaphore");
     pNtCreateKeyedEvent     =  (void *)GetProcAddress(hntdll, "NtCreateKeyedEvent");
@@ -3943,6 +3994,7 @@ START_TEST(om)
     test_directory();
     test_symboliclink();
     test_query_object();
+    test_open_session();
     test_type_mismatch();
     test_null_device();
     test_process();

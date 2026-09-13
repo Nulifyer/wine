@@ -42,18 +42,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(reg);
  *
  *  See NtCreateKey.
  */
-NTSTATUS WINAPI RtlpNtCreateKey( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
-                                 ULONG TitleIndex, const UNICODE_STRING *class, ULONG options,
-                                 PULONG dispos )
+NTSTATUS WINAPI RtlpNtCreateKey( PHANDLE retkey, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
+                                 ULONG title_index, const UNICODE_STRING *class, PULONG dispos )
 {
-    OBJECT_ATTRIBUTES oa;
-
-    if (attr)
-    {
-        oa = *attr;
-        oa.Attributes &= ~(OBJ_PERMANENT|OBJ_EXCLUSIVE);
-        attr = &oa;
-    }
+    if (attr) attr->Attributes &= ~(OBJ_PERMANENT | OBJ_EXCLUSIVE);
 
     return NtCreateKey(retkey, access, attr, 0, NULL, 0, dispos);
 }

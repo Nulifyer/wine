@@ -395,6 +395,19 @@ struct luid
     int          high_part;
 };
 
+/* Identity shared by token queries and captured ALPC security. */
+struct token_identity
+{
+    struct luid token_id;
+    struct luid authentication_id;
+    struct luid modified_id;
+};
+
+struct token_audit_policy
+{
+    unsigned char per_user_policy[27];
+};
+
 struct luid_attr
 {
     struct luid  luid;
@@ -1132,7 +1145,7 @@ typedef volatile struct
     int          socket_fd;      /* file descriptor for process socket */
     unsigned int access;         /* access rights for process object */
     unsigned short machine;      /* architecture that the new process will use */
-    int          native_session; /* per-session native child of the reserved bootstrap */
+    int          native_session; /* native-subsystem child in the admitted startup chain */
     unsigned int protection;     /* PS_PROTECTION value requested for the new process */
     data_size_t  info_size;      /* size of startup info */
     data_size_t  handles_size;   /* length of explicit handles list */
@@ -3638,6 +3651,43 @@ enum caret_state
     VARARG(acl,acl);            /* default dacl to set */
 @END
 
+@REQ(set_token_session_id)
+    obj_handle_t    handle;     /* handle to the token */
+    unsigned int    session_id; /* session identifier */
+@END
+
+/* Stop retaining the logon-session reference associated with a token */
+@REQ(set_token_session_reference)
+    obj_handle_t    handle;     /* handle to the token */
+@END
+
+@REQ(set_token_mandatory_policy)
+    obj_handle_t    handle;     /* handle to the token */
+    unsigned int    policy;     /* TOKEN_MANDATORY_POLICY_* flags */
+@END
+
+@REQ(set_token_audit_policy)
+    obj_handle_t    handle;     /* handle to the token */
+    struct token_audit_policy policy; /* per-user audit policy */
+@END
+
+@REQ(set_token_origin)
+    obj_handle_t    handle;     /* handle to the token */
+    struct luid     origin;     /* originating logon session */
+@END
+
+@REQ(get_token_audit_policy)
+    obj_handle_t    handle;     /* handle to the token */
+@REPLY
+    struct token_audit_policy policy; /* per-user audit policy */
+@END
+
+@REQ(get_token_origin)
+    obj_handle_t    handle;     /* handle to the token */
+@REPLY
+    struct luid     origin;     /* originating logon session */
+@END
+
 @REQ(set_security_object)
     obj_handle_t    handle;       /* handle to the object */
     unsigned int    security_info; /* which parts of security descriptor to set */
@@ -3919,9 +3969,9 @@ struct handle_info
 @REQ(get_token_info)
     obj_handle_t   handle;        /* handle to the object */
 @REPLY
-    struct luid    token_id;      /* locally-unique identifier of the token */
-    struct luid    modified_id;   /* locally-unique identifier of the modified version of the token */
+    struct token_identity identity; /* token, authentication and modification identities */
     unsigned int   session_id;    /* token session id */
+    unsigned int   mandatory_policy; /* TOKEN_MANDATORY_POLICY_* flags */
     int            primary;       /* is the token primary or impersonation? */
     int            impersonation_level; /* level of impersonation */
     int            elevation_type; /* elevation type (TokenElevation*) */
@@ -4412,6 +4462,13 @@ enum inproc_sync_type
 @END
 
 
+struct alpc_security_qos
+{
+    int impersonation_level;
+    int tracking_mode;
+    int effective_only;
+};
+
 /* Shared ALPC result, including metadata returned for an undersized buffer. */
 struct alpc_message_info
 {
@@ -4424,11 +4481,12 @@ struct alpc_message_info
     data_size_t size;
     unsigned int sequence;
     unsigned int callback_id;
-    unsigned int context_valid;
+    unsigned int attributes_valid;
 };
 
 /* Send to or receive from a listening ALPC port queue. */
 @REQ(alpc_send_receive)
+    unsigned int receive_attributes;
     obj_handle_t handle;
     unsigned int flags;
     unsigned int message_id;
@@ -4447,6 +4505,7 @@ struct alpc_message_info
 
 /* Fetch the result of one private synchronous ALPC message wait. */
 @REQ(alpc_get_message_result)
+    unsigned int receive_attributes;
     obj_handle_t handle;
     unsigned int wait_status;
 @REPLY
@@ -4473,6 +4532,7 @@ struct alpc_message_info
 @END
 
 @REQ(alpc_get_connect_result)
+    unsigned int receive_attributes;
     obj_handle_t handle;
 @REPLY
     unsigned int status;
@@ -4508,6 +4568,14 @@ struct alpc_message_info
 
 @REQ(alpc_disconnect_port)
     obj_handle_t handle;
+@END
+
+/* Apply the security context retained by an endpoint or delivered request. */
+@REQ(alpc_impersonate_client)
+    obj_handle_t handle;
+    unsigned int message_present;
+    unsigned int message_id;
+    unsigned int callback_id;
 @END
 
 /* Install the one system-wide ALPC endpoint that receives hard errors. */
@@ -4620,4 +4688,48 @@ struct alpc_message_info
     unsigned int change_stamp;
     unsigned int events;
     VARARG(data,bytes);
+@END
+
+/* Adjust the groups held by a token. Keep new requests appended for protocol compatibility. */
+@REQ(adjust_token_groups)
+    obj_handle_t  handle;              /* handle to the token */
+    int           reset;               /* reset groups to their default state? */
+    int           get_modified_state;  /* get modified groups? */
+    unsigned int  group_count;         /* number of groups in the request */
+    unsigned int  previous_length;     /* size of the caller's previous-state buffer */
+    unsigned int  groups_offset;       /* caller ABI offset of TOKEN_GROUPS.Groups */
+    unsigned int  group_entry_size;    /* caller ABI size of SID_AND_ATTRIBUTES */
+    VARARG(groups,bytes);               /* attributes array followed by packed SIDs */
+@REPLY
+    unsigned int  len;                 /* total caller ABI length required */
+    unsigned int  group_count;         /* number of modified groups */
+    unsigned int  sid_len;             /* byte length of packed modified group SIDs */
+    VARARG(groups,bytes);               /* attributes array followed by packed SIDs */
+@END
+
+/* Delete only a WNF state's data while retaining the state name. */
+@REQ(delete_wnf_state_data)
+    unsigned __int64 state_name;
+    unsigned int session_id;
+    int explicit_scope;
+@END
+
+/* Query the state returned by AlpcBasicInformation. Keep new requests appended. */
+@REQ(alpc_query_information)
+    obj_handle_t handle;
+@REPLY
+    unsigned int flags;
+    unsigned int sequence;
+    client_ptr_t context;
+@END
+
+/* Update the I/O state owned by a pre-created session directory. */
+@REQ(notify_change_session)
+    obj_handle_t handle;
+    timeout_t timestamp;
+    unsigned int sequence;
+    unsigned int event;
+    unsigned int new_state;
+    unsigned int previous_state;
+    VARARG(payload,bytes);
 @END

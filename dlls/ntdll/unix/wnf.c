@@ -74,6 +74,22 @@ NTSTATUS WINAPI NtDeleteWnfStateName( const ULONGLONG *name )
     return status;
 }
 
+NTSTATUS WINAPI NtDeleteWnfStateData( const ULONGLONG *name, const void *scope )
+{
+    NTSTATUS status;
+
+    if (!name) return STATUS_ACCESS_VIOLATION;
+    SERVER_START_REQ( delete_wnf_state_data )
+    {
+        req->state_name = *name;
+        req->explicit_scope = !!scope;
+        req->session_id = scope ? *(const ULONG *)scope : 0;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 NTSTATUS WINAPI NtQueryWnfStateData( const ULONGLONG *name, const GUID *type,
                                     const void *scope, ULONG *stamp, void *buffer, ULONG *size )
 {

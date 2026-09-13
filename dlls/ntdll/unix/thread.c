@@ -1560,6 +1560,8 @@ static DECLSPEC_NORETURN void exit_thread( int status )
 void exit_process( int status )
 {
     pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: unix process %u exiting with NT status %#x\n", getpid(), status );
     process_exit_wrapper( get_unix_exit_code( status ));
 }
 

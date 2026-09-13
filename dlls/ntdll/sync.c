@@ -34,6 +34,7 @@
 #include "wine/debug.h"
 #include "wine/list.h"
 #include "wine/exception.h"
+#include "wine/server.h"
 #include "ntdll_misc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(sync);
@@ -43,6 +44,80 @@ static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
 {
     if (!timeout) return "(infinite)";
     return wine_dbgstr_longlong( timeout->QuadPart );
+}
+
+/**************************************************************************
+ *           NtOpenSession   (NTDLL.@)
+ *
+ * Wine represents the kernel session namespace with its pre-created
+ * \Sessions\<id> directory. Returning a directory handle also connects
+ * NtOpenSession to ObjectSessionObjectInformation, whose server-side owner
+ * validates and transfers that directory to the native session manager.
+ */
+NTSTATUS WINAPI NtOpenSession( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
+{
+    static const WCHAR kernel_prefix[] = L"\\KernelObjects\\Session";
+    OBJECT_ATTRIBUTES translated_attr;
+    UNICODE_STRING translated_name;
+    const UNICODE_STRING *name;
+    unsigned int i, count, id = 0;
+    WCHAR path[32];
+
+    if (!attr || !(name = attr->ObjectName) || attr->RootDirectory ||
+        name->Length <= (ARRAY_SIZE(kernel_prefix) - 1) * sizeof(WCHAR) ||
+        memcmp( name->Buffer, kernel_prefix, (ARRAY_SIZE(kernel_prefix) - 1) * sizeof(WCHAR) ))
+        return NtOpenDirectoryObject( handle, access, attr );
+
+    count = name->Length / sizeof(WCHAR);
+    for (i = ARRAY_SIZE(kernel_prefix) - 1; i < count; ++i)
+    {
+        unsigned int digit;
+
+        if (name->Buffer[i] < '0' || name->Buffer[i] > '9')
+            return NtOpenDirectoryObject( handle, access, attr );
+        digit = name->Buffer[i] - '0';
+        if (id > (~0u - digit) / 10)
+            return NtOpenDirectoryObject( handle, access, attr );
+        id = id * 10 + digit;
+    }
+
+    swprintf( path, ARRAY_SIZE(path), L"\\Sessions\\%u", id );
+    RtlInitUnicodeString( &translated_name, path );
+    translated_attr = *attr;
+    translated_attr.ObjectName = &translated_name;
+    return NtOpenDirectoryObject( handle, access, &translated_attr );
+}
+
+/**************************************************************************
+ *           NtNotifyChangeSession   (NTDLL.@)
+ *
+ * Session directories are server-owned objects, so keep their I/O session
+ * state in the server as well. The payload is transient notification data;
+ * it is validated and delivered with the request but is not retained.
+ */
+NTSTATUS WINAPI NtNotifyChangeSession( HANDLE handle, ULONG sequence, const LARGE_INTEGER *timestamp,
+                                       IO_SESSION_EVENT event, IO_SESSION_STATE new_state,
+                                       IO_SESSION_STATE previous_state, const void *payload,
+                                       ULONG payload_size )
+{
+    NTSTATUS status;
+
+    if (!timestamp || payload_size > IO_SESSION_MAX_PAYLOAD_SIZE || (payload_size && !payload))
+        return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( notify_change_session )
+    {
+        req->handle = wine_server_obj_handle( handle );
+        req->sequence = sequence;
+        req->timestamp = timestamp->QuadPart;
+        req->event = event;
+        req->new_state = new_state;
+        req->previous_state = previous_state;
+        wine_server_add_data( req, payload, payload_size );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
 }
 
 /******************************************************************
@@ -199,7 +274,10 @@ static ULONG crit_sect_default_flags(void)
  */
 NTSTATUS WINAPI RtlInitializeCriticalSection( RTL_CRITICAL_SECTION *crit )
 {
-    return RtlInitializeCriticalSectionEx( crit, 0, crit_sect_default_flags() );
+    NTSTATUS status = RtlInitializeCriticalSectionEx( crit, 0, crit_sect_default_flags() );
+
+    TRACE( "caller=%p status=%#lx\n", __builtin_return_address( 0 ), status );
+    return status;
 }
 
 

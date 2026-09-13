@@ -1762,6 +1762,7 @@ static int init_thread( struct thread *thread, int reply_fd, int wait_fd )
 DECL_HANDLER(init_first_thread)
 {
     struct process *process = current->process;
+    data_size_t i;
     int fd;
 
     process->page_size = req->page_size;
@@ -1774,6 +1775,17 @@ DECL_HANDLER(init_first_thread)
     }
     current->unix_pid = process->unix_pid = req->unix_pid;
     current->unix_tid = req->unix_tid;
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+    {
+        fprintf( stderr, "linuxnt: server process-started winpid=%04x unix=%d image=",
+                 process->id, process->unix_pid );
+        for (i = 0; i < process->imagelen / sizeof(WCHAR); i++)
+        {
+            WCHAR ch = process->image[i];
+            fputc( ch >= 0x20 && ch < 0x7f ? ch : '?', stderr );
+        }
+        fputc( '\n', stderr );
+    }
 
     if (!process->parent_id)
         process->affinity = current->affinity = get_thread_affinity( current );

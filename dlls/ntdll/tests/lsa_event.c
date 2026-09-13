@@ -15,7 +15,72 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
+#include "evntprov.h"
 #include "wine/test.h"
+
+static void test_security_provider(void)
+{
+    ULONG (WINAPI *pEtwRegisterSecurityProvider)(void);
+    ULONG (WINAPI *pEtwWriteUMSecurityEvent)(const EVENT_DESCRIPTOR *, USHORT, ULONG,
+                                             EVENT_DATA_DESCRIPTOR *);
+    EVENT_DESCRIPTOR descriptor = {0};
+    ULONG ret;
+
+    pEtwRegisterSecurityProvider = (void *)GetProcAddress( GetModuleHandleW( L"ntdll.dll" ),
+                                                           "EtwRegisterSecurityProvider" );
+    ok( pEtwRegisterSecurityProvider != NULL, "EtwRegisterSecurityProvider is not exported\n" );
+    if (!pEtwRegisterSecurityProvider) return;
+
+    ret = pEtwRegisterSecurityProvider();
+    ok( ret == ERROR_SUCCESS, "EtwRegisterSecurityProvider returned %lu\n", ret );
+
+    pEtwWriteUMSecurityEvent = (void *)GetProcAddress( GetModuleHandleW( L"ntdll.dll" ),
+                                                       "EtwWriteUMSecurityEvent" );
+    ok( pEtwWriteUMSecurityEvent != NULL, "EtwWriteUMSecurityEvent is not exported\n" );
+    if (!pEtwWriteUMSecurityEvent) return;
+
+    ret = pEtwWriteUMSecurityEvent( NULL, 0, 0, NULL );
+    ok( ret == ERROR_INVALID_PARAMETER, "NULL descriptor returned %lu\n", ret );
+    ret = pEtwWriteUMSecurityEvent( &descriptor, 0, 0, NULL );
+    ok( ret == ERROR_SUCCESS, "EtwWriteUMSecurityEvent returned %lu\n", ret );
+}
+
+static void test_report_event(void)
+{
+    BOOL (WINAPI *pEvtIntReportEventAndSourceAsync)(HANDLE, const WCHAR *, USHORT, USHORT,
+                                                    ULONG, PSID, USHORT, ULONG,
+                                                    const WCHAR **, void *);
+    static const WCHAR sourceW[] = L"Wine test";
+    BOOL ret;
+
+    pEvtIntReportEventAndSourceAsync = (void *)GetProcAddress( GetModuleHandleW( L"ntdll.dll" ),
+                                                               "EvtIntReportEventAndSourceAsync" );
+    ok( pEvtIntReportEventAndSourceAsync != NULL,
+        "EvtIntReportEventAndSourceAsync is not exported\n" );
+    if (!pEvtIntReportEventAndSourceAsync) return;
+
+    SetLastError( 0xdeadbeef );
+    ret = pEvtIntReportEventAndSourceAsync( NULL, sourceW, EVENTLOG_ERROR_TYPE, 0, 1,
+                                            NULL, 0, 0, NULL, NULL );
+    ok( ret == TRUE, "EvtIntReportEventAndSourceAsync returned %d\n", ret );
+    ok( GetLastError() == ERROR_SUCCESS, "last error is %lu\n", GetLastError() );
+}
+
+static void test_cpu_speed(void)
+{
+    NTSTATUS (WINAPI *pEtwpGetCpuSpeed)(ULONG *);
+    ULONG speed = 0;
+    NTSTATUS status;
+
+    pEtwpGetCpuSpeed = (void *)GetProcAddress( GetModuleHandleW( L"ntdll.dll" ),
+                                               "EtwpGetCpuSpeed" );
+    ok( pEtwpGetCpuSpeed != NULL, "EtwpGetCpuSpeed is not exported\n" );
+    if (!pEtwpGetCpuSpeed) return;
+
+    status = pEtwpGetCpuSpeed( &speed );
+    ok( status == STATUS_SUCCESS, "EtwpGetCpuSpeed returned %#lx\n", status );
+    ok( speed != 0, "EtwpGetCpuSpeed returned a zero speed\n" );
+}
 
 START_TEST(lsa_event)
 {
@@ -25,6 +90,10 @@ START_TEST(lsa_event)
     LARGE_INTEGER timeout;
     HANDLE event;
     NTSTATUS status;
+
+    test_security_provider();
+    test_report_event();
+    test_cpu_speed();
 
     RtlInitUnicodeString( &name, event_nameW );
     InitializeObjectAttributes( &attributes, &name, OBJ_CASE_INSENSITIVE, NULL, NULL );

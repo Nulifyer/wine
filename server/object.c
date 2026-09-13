@@ -670,7 +670,7 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     char *ptr;
 
     if (!set_info) return 1;
-    if (set_info & SACL_SECURITY_INFORMATION)
+    if (set_info & (SACL_SECURITY_INFORMATION | PROCESS_TRUST_LABEL_SECURITY_INFORMATION))
     {
         struct token *effective = thread_get_impersonation_token( current );
         if (!token_authorize_trust_labels( effective, sd ) ||
@@ -720,11 +720,11 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
         new_sd.control |= SE_SACL_PRESENT;
         new_sd.sacl_len = sd->sacl_len;
     }
-    else if (set_info & LABEL_SECURITY_INFORMATION && present)
+    else if (set_info & (LABEL_SECURITY_INFORMATION | PROCESS_TRUST_LABEL_SECURITY_INFORMATION) && present)
     {
         const struct acl *old_sacl = NULL;
         if (obj->sd && obj->sd->control & SE_SACL_PRESENT) old_sacl = sd_get_sacl( obj->sd, &present );
-        if (!(replaced_sacl = replace_security_labels( old_sacl, sacl ))) return 0;
+        if (!(replaced_sacl = replace_security_labels( old_sacl, sacl, set_info ))) return 0;
         new_sd.control |= SE_SACL_PRESENT;
         new_sd.sacl_len = replaced_sacl->size;
         sacl = replaced_sacl;

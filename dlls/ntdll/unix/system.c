@@ -4832,6 +4832,24 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
         return STATUS_SUCCESS;
     }
 
+    case PowerInformationInternal:
+    {
+        const ULONG *internal = input;
+
+        if (!input || in_size < 2 * sizeof(*internal)) return STATUS_INVALID_PARAMETER;
+        if (internal[0] != 4)
+        {
+            WARN( "Unimplemented internal power information action: %u\n", internal[0] );
+            return STATUS_NOT_IMPLEMENTED;
+        }
+        if (!output || out_size < sizeof(BOOLEAN)) return STATUS_BUFFER_TOO_SMALL;
+
+        /* PowerInternalUserAbsencePredictionCapability is true only on an AoAc-capable,
+         * multi-session platform. Wine currently advertises neither AoAc nor connected standby. */
+        *(BOOLEAN *)output = FALSE;
+        return STATUS_SUCCESS;
+    }
+
     case UpdateBlackBoxRecorder:
         if (!input || output || out_size) return STATUS_INVALID_PARAMETER;
         if (in_size < 32) return STATUS_BUFFER_TOO_SMALL;

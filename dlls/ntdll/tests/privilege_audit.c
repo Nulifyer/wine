@@ -21,17 +21,20 @@
 static NTSTATUS (WINAPI *pNtOpenProcessToken)(HANDLE, DWORD, HANDLE *);
 static NTSTATUS (WINAPI *pNtPrivilegeObjectAuditAlarm)(UNICODE_STRING *, HANDLE, HANDLE,
                                                        ULONG, PRIVILEGE_SET *, BOOLEAN);
+static NTSTATUS (WINAPI *pNtPrivilegedServiceAuditAlarm)(UNICODE_STRING *, UNICODE_STRING *,
+                                                         HANDLE, PRIVILEGE_SET *, BOOLEAN);
 
 START_TEST(privilege_audit)
 {
     HMODULE ntdll = GetModuleHandleA( "ntdll.dll" );
     PRIVILEGE_SET before, privileges;
-    UNICODE_STRING subsystem;
+    UNICODE_STRING subsystem, service;
     HANDLE query_token, no_query_token;
     NTSTATUS status;
 
     pNtOpenProcessToken = (void *)GetProcAddress( ntdll, "NtOpenProcessToken" );
     pNtPrivilegeObjectAuditAlarm = (void *)GetProcAddress( ntdll, "NtPrivilegeObjectAuditAlarm" );
+    pNtPrivilegedServiceAuditAlarm = (void *)GetProcAddress( ntdll, "NtPrivilegedServiceAuditAlarm" );
     if (!pNtPrivilegeObjectAuditAlarm)
     {
         win_skip( "NtPrivilegeObjectAuditAlarm is not available.\n" );
@@ -39,6 +42,7 @@ START_TEST(privilege_audit)
     }
 
     RtlInitUnicodeString( &subsystem, L"Services" );
+    RtlInitUnicodeString( &service, L"WineTestService" );
     memset( &privileges, 0, sizeof(privileges) );
     privileges.PrivilegeCount = 1;
     privileges.Control = PRIVILEGE_SET_ALL_NECESSARY;
@@ -74,6 +78,23 @@ START_TEST(privilege_audit)
     status = pNtPrivilegeObjectAuditAlarm( &subsystem, NULL, no_query_token, 0,
                                            &privileges, FALSE );
     ok( status == STATUS_ACCESS_DENIED, "got status %#lx.\n", status );
+
+    if (pNtPrivilegedServiceAuditAlarm)
+    {
+        before = privileges;
+        status = pNtPrivilegedServiceAuditAlarm( &subsystem, &service, query_token,
+                                                  &privileges, FALSE );
+        ok( status == STATUS_SUCCESS, "NtPrivilegedServiceAuditAlarm returned %#lx.\n", status );
+        ok( !memcmp( &privileges, &before, sizeof(privileges) ), "privilege set changed.\n" );
+
+        status = pNtPrivilegedServiceAuditAlarm( &subsystem, &service, (HANDLE)0xdead,
+                                                  &privileges, FALSE );
+        ok( status == STATUS_INVALID_HANDLE, "got status %#lx.\n", status );
+        status = pNtPrivilegedServiceAuditAlarm( &subsystem, &service, no_query_token,
+                                                  &privileges, FALSE );
+        ok( status == STATUS_ACCESS_DENIED, "got status %#lx.\n", status );
+    }
+    else win_skip( "NtPrivilegedServiceAuditAlarm is not available.\n" );
 
     NtClose( no_query_token );
     NtClose( query_token );

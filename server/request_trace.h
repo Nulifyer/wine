@@ -18,6 +18,8 @@ static void dump_obj_locator( const char *prefix, const struct obj_locator *val 
 static void dump_ratio( const char *prefix, const struct ratio *val );
 static void dump_rectangle( const char *prefix, const struct rectangle *val );
 static void dump_timeout( const char *prefix, const timeout_t *val );
+static void dump_token_audit_policy( const char *prefix, const struct token_audit_policy *val );
+static void dump_token_identity( const char *prefix, const struct token_identity *val );
 static void dump_uint64( const char *prefix, const unsigned __int64 *val );
 static void dump_varargs_acl( const char *prefix, data_size_t size );
 static void dump_varargs_apc_call( const char *prefix, data_size_t size );
@@ -2774,6 +2776,55 @@ static void dump_set_token_default_dacl_request( const struct set_token_default_
     dump_varargs_acl( ", acl=", cur_size );
 }
 
+static void dump_set_token_session_id_request( const struct set_token_session_id_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", session_id=%08x", req->session_id );
+}
+
+static void dump_set_token_session_reference_request( const struct set_token_session_reference_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_set_token_mandatory_policy_request( const struct set_token_mandatory_policy_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", policy=%08x", req->policy );
+}
+
+static void dump_set_token_audit_policy_request( const struct set_token_audit_policy_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_token_audit_policy( ", policy=", &req->policy );
+}
+
+static void dump_set_token_origin_request( const struct set_token_origin_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_luid( ", origin=", &req->origin );
+}
+
+static void dump_get_token_audit_policy_request( const struct get_token_audit_policy_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_token_audit_policy_reply( const struct get_token_audit_policy_reply *req )
+{
+    dump_token_audit_policy( " policy=", &req->policy );
+}
+
+static void dump_get_token_origin_request( const struct get_token_origin_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_token_origin_reply( const struct get_token_origin_reply *req )
+{
+    dump_luid( " origin=", &req->origin );
+}
+
 static void dump_set_security_object_request( const struct set_security_object_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -3088,9 +3139,9 @@ static void dump_get_token_info_request( const struct get_token_info_request *re
 
 static void dump_get_token_info_reply( const struct get_token_info_reply *req )
 {
-    dump_luid( " token_id=", &req->token_id );
-    dump_luid( ", modified_id=", &req->modified_id );
+    dump_token_identity( " identity=", &req->identity );
     fprintf( stderr, ", session_id=%08x", req->session_id );
+    fprintf( stderr, ", mandatory_policy=%08x", req->mandatory_policy );
     fprintf( stderr, ", primary=%d", req->primary );
     fprintf( stderr, ", impersonation_level=%d", req->impersonation_level );
     fprintf( stderr, ", elevation_type=%d", req->elevation_type );
@@ -3610,7 +3661,8 @@ static void dump_alpc_create_port_reply( const struct alpc_create_port_reply *re
 
 static void dump_alpc_send_receive_request( const struct alpc_send_receive_request *req )
 {
-    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, " receive_attributes=%08x", req->receive_attributes );
+    fprintf( stderr, ", handle=%04x", req->handle );
     fprintf( stderr, ", flags=%08x", req->flags );
     fprintf( stderr, ", message_id=%08x", req->message_id );
     fprintf( stderr, ", send=%d", req->send );
@@ -3630,7 +3682,8 @@ static void dump_alpc_send_receive_reply( const struct alpc_send_receive_reply *
 
 static void dump_alpc_get_message_result_request( const struct alpc_get_message_result_request *req )
 {
-    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, " receive_attributes=%08x", req->receive_attributes );
+    fprintf( stderr, ", handle=%04x", req->handle );
     fprintf( stderr, ", wait_status=%08x", req->wait_status );
 }
 
@@ -3662,7 +3715,8 @@ static void dump_alpc_connect_port_reply( const struct alpc_connect_port_reply *
 
 static void dump_alpc_get_connect_result_request( const struct alpc_get_connect_result_request *req )
 {
-    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, " receive_attributes=%08x", req->receive_attributes );
+    fprintf( stderr, ", handle=%04x", req->handle );
 }
 
 static void dump_alpc_get_connect_result_reply( const struct alpc_get_connect_result_reply *req )
@@ -3709,6 +3763,14 @@ static void dump_alpc_open_sender_process_reply( const struct alpc_open_sender_p
 static void dump_alpc_disconnect_port_request( const struct alpc_disconnect_port_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_impersonate_client_request( const struct alpc_impersonate_client_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", message_present=%08x", req->message_present );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", callback_id=%08x", req->callback_id );
 }
 
 static void dump_set_default_hard_error_port_request( const struct set_default_hard_error_port_request *req )
@@ -3853,6 +3915,56 @@ static void dump_complete_wnf_subscription_reply( const struct complete_wnf_subs
     fprintf( stderr, ", change_stamp=%08x", req->change_stamp );
     fprintf( stderr, ", events=%08x", req->events );
     dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_adjust_token_groups_request( const struct adjust_token_groups_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", reset=%d", req->reset );
+    fprintf( stderr, ", get_modified_state=%d", req->get_modified_state );
+    fprintf( stderr, ", group_count=%08x", req->group_count );
+    fprintf( stderr, ", previous_length=%08x", req->previous_length );
+    fprintf( stderr, ", groups_offset=%08x", req->groups_offset );
+    fprintf( stderr, ", group_entry_size=%08x", req->group_entry_size );
+    dump_varargs_bytes( ", groups=", cur_size );
+}
+
+static void dump_adjust_token_groups_reply( const struct adjust_token_groups_reply *req )
+{
+    fprintf( stderr, " len=%08x", req->len );
+    fprintf( stderr, ", group_count=%08x", req->group_count );
+    fprintf( stderr, ", sid_len=%08x", req->sid_len );
+    dump_varargs_bytes( ", groups=", cur_size );
+}
+
+static void dump_delete_wnf_state_data_request( const struct delete_wnf_state_data_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+    fprintf( stderr, ", session_id=%08x", req->session_id );
+    fprintf( stderr, ", explicit_scope=%d", req->explicit_scope );
+}
+
+static void dump_alpc_query_information_request( const struct alpc_query_information_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_query_information_reply( const struct alpc_query_information_reply *req )
+{
+    fprintf( stderr, " flags=%08x", req->flags );
+    fprintf( stderr, ", sequence=%08x", req->sequence );
+    dump_uint64( ", context=", &req->context );
+}
+
+static void dump_notify_change_session_request( const struct notify_change_session_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_timeout( ", timestamp=", &req->timestamp );
+    fprintf( stderr, ", sequence=%08x", req->sequence );
+    fprintf( stderr, ", event=%08x", req->event );
+    fprintf( stderr, ", new_state=%08x", req->new_state );
+    fprintf( stderr, ", previous_state=%08x", req->previous_state );
+    dump_varargs_bytes( ", payload=", cur_size );
 }
 
 typedef void (*dump_func)( const void *req );
@@ -4093,6 +4205,13 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_token_groups_request,
     (dump_func)dump_get_token_default_dacl_request,
     (dump_func)dump_set_token_default_dacl_request,
+    (dump_func)dump_set_token_session_id_request,
+    (dump_func)dump_set_token_session_reference_request,
+    (dump_func)dump_set_token_mandatory_policy_request,
+    (dump_func)dump_set_token_audit_policy_request,
+    (dump_func)dump_set_token_origin_request,
+    (dump_func)dump_get_token_audit_policy_request,
+    (dump_func)dump_get_token_origin_request,
     (dump_func)dump_set_security_object_request,
     (dump_func)dump_get_security_object_request,
     (dump_func)dump_get_system_handles_request,
@@ -4179,6 +4298,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_accept_connect_port_request,
     (dump_func)dump_alpc_open_sender_process_request,
     (dump_func)dump_alpc_disconnect_port_request,
+    (dump_func)dump_alpc_impersonate_client_request,
     (dump_func)dump_set_default_hard_error_port_request,
     (dump_func)dump_set_process_exception_port_request,
     (dump_func)dump_get_process_critical_state_request,
@@ -4193,6 +4313,10 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_wnf_process_event_request,
     (dump_func)dump_query_wnf_state_info_request,
     (dump_func)dump_complete_wnf_subscription_request,
+    (dump_func)dump_adjust_token_groups_request,
+    (dump_func)dump_delete_wnf_state_data_request,
+    (dump_func)dump_alpc_query_information_request,
+    (dump_func)dump_notify_change_session_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4432,6 +4556,13 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_token_default_dacl_reply,
     NULL,
     NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    (dump_func)dump_get_token_audit_policy_reply,
+    (dump_func)dump_get_token_origin_reply,
+    NULL,
     (dump_func)dump_get_security_object_reply,
     (dump_func)dump_get_system_handles_reply,
     (dump_func)dump_get_tcp_connections_reply,
@@ -4519,6 +4650,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     NULL,
+    NULL,
     (dump_func)dump_get_process_critical_state_reply,
     (dump_func)dump_get_process_protection_reply,
     NULL,
@@ -4531,6 +4663,10 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_query_wnf_state_info_reply,
     (dump_func)dump_complete_wnf_subscription_reply,
+    (dump_func)dump_adjust_token_groups_reply,
+    NULL,
+    (dump_func)dump_alpc_query_information_reply,
+    NULL,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -4769,6 +4905,13 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "get_token_groups",
     "get_token_default_dacl",
     "set_token_default_dacl",
+    "set_token_session_id",
+    "set_token_session_reference",
+    "set_token_mandatory_policy",
+    "set_token_audit_policy",
+    "set_token_origin",
+    "get_token_audit_policy",
+    "get_token_origin",
     "set_security_object",
     "get_security_object",
     "get_system_handles",
@@ -4855,6 +4998,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "alpc_accept_connect_port",
     "alpc_open_sender_process",
     "alpc_disconnect_port",
+    "alpc_impersonate_client",
     "set_default_hard_error_port",
     "set_process_exception_port",
     "get_process_critical_state",
@@ -4869,6 +5013,10 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_wnf_process_event",
     "query_wnf_state_info",
     "complete_wnf_subscription",
+    "adjust_token_groups",
+    "delete_wnf_state_data",
+    "alpc_query_information",
+    "notify_change_session",
 };
 
 static const struct
@@ -4892,6 +5040,8 @@ static const struct
     { "CANCELLED",                   STATUS_CANCELLED },
     { "CANNOT_DELETE",               STATUS_CANNOT_DELETE },
     { "CANNOT_IMPERSONATE",          STATUS_CANNOT_IMPERSONATE },
+    { "CANT_DISABLE_MANDATORY",      STATUS_CANT_DISABLE_MANDATORY },
+    { "CANT_ENABLE_DENY_ONLY",       STATUS_CANT_ENABLE_DENY_ONLY },
     { "CANT_OPEN_ANONYMOUS",         STATUS_CANT_OPEN_ANONYMOUS },
     { "CHILD_MUST_BE_VOLATILE",      STATUS_CHILD_MUST_BE_VOLATILE },
     { "CONNECTION_ABORTED",          STATUS_CONNECTION_ABORTED },
@@ -4929,6 +5079,7 @@ static const struct
     { "INFO_LENGTH_MISMATCH",        STATUS_INFO_LENGTH_MISMATCH },
     { "INSTANCE_NOT_AVAILABLE",      STATUS_INSTANCE_NOT_AVAILABLE },
     { "INSUFFICIENT_RESOURCES",      STATUS_INSUFFICIENT_RESOURCES },
+    { "INTEGER_OVERFLOW",            STATUS_INTEGER_OVERFLOW },
     { "INVALID_ACL",                 STATUS_INVALID_ACL },
     { "INVALID_ADDRESS",             STATUS_INVALID_ADDRESS },
     { "INVALID_ADDRESS_COMPONENT",   STATUS_INVALID_ADDRESS_COMPONENT },

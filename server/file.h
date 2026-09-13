@@ -220,6 +220,8 @@ extern struct object *create_console_device( struct object *root, struct unicode
                                               unsigned int attr, const struct security_descriptor *sd );
 extern struct object *create_socket_device( struct object *root, struct unicode_str name,
                                               unsigned int attr, const struct security_descriptor *sd );
+extern struct object *create_ksec_device( struct object *root, struct unicode_str name,
+                                          unsigned int attr, const struct security_descriptor *sd );
 extern struct object *create_unix_device( struct object *root, struct unicode_str name,
                                           unsigned int attr, const struct security_descriptor *sd, const char *unix_path );
 

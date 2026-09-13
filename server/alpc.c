@@ -66,6 +66,12 @@ enum alpc_port_status
     DISCONNECTED
 };
 
+enum alpc_kernel_port
+{
+    ALPC_KERNEL_PORT_NONE,
+    ALPC_KERNEL_POWER_PORT
+};
+
 struct alpc_port
 {
     struct object            obj;                   /* object header */
@@ -99,24 +105,30 @@ struct alpc_port
     client_ptr_t            context;
     enum alpc_port_enum_type type;                  /* communication port or connection port */
     enum alpc_port_status    status;                /* port status */
+    enum alpc_kernel_port    kernel_port;            /* server-owned kernel compatibility endpoint */
+    struct token            *client_token;          /* captured connecting security */
+    int                      impersonation_level, tracking_mode;
     struct thread           *thread;                /* thread owning the port */
     unsigned int             flags;                 /* flags in port attributes */
     mem_size_t               max_msg_len;           /* max message length in port attributes */
 };
 
-/* The registry owns each live request. Endpoint pointers are weak: final
- * handle close removes every request using that endpoint before destruction.
- * A queued message points back only while its copy remains in a port queue. */
+/* The registry owns each live request. Endpoint pointers are weak and are
+ * cleared or removed on final handle close. A released private reply retains
+ * identity until its operation consumes or abandons it. */
 struct alpc_request
 {
     struct list entry;
     struct alpc_port *source, *target, *queue;
     struct alpc_message *message;
+    struct alpc_message *reply; /* weak, while a released private reply is fetched */
     struct alpc_wait *wait; /* weak; its private handle owns the blocking call */
     unsigned int id, wow64, canceled, released;
     client_ptr_t message_context;
     process_id_t pid;
     thread_id_t tid;
+    struct token *token; /* retained after the sending endpoint closes */
+    int impersonation_level;
 };
 
 struct alpc_wait
@@ -148,8 +160,50 @@ struct alpc_message
     struct list entry;
     struct alpc_request *request;
     struct alpc_message_info info;
+    struct token *token; /* owned security capture for this receipt */
     unsigned char data[];
 };
+
+static void free_message_request( struct alpc_request *request );
+
+/* Messages keep security alive independently of weak endpoint pointers. */
+static void free_message( struct alpc_message *message )
+{
+    if (!message) return;
+    if (message->request && message->request->reply == message) free_message_request( message->request );
+    if (message->token) release_object( message->token );
+    free( message );
+}
+
+/* Token metadata is a bounded prefix of successful variable reply data.
+ * Error and short paths publish only the fixed message information. */
+static int get_receive_capacity( unsigned int attributes, data_size_t *capacity )
+{
+    data_size_t prefix = attributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE ? sizeof(struct token_identity) : 0;
+    if ((attributes & ~ALPC_MESSAGE_TOKEN_ATTRIBUTE) || get_reply_max_size() < prefix)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return 0;
+    }
+    *capacity = get_reply_max_size() - prefix;
+    return 1;
+}
+
+static int set_message_reply( const struct alpc_message *message, unsigned int attributes )
+{
+    struct token_identity identity = {0};
+    data_size_t prefix = attributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE ? sizeof(identity) : 0;
+    unsigned char *data;
+    if (!prefix && !message->info.size) return 1;
+    if (!(data = set_reply_data_size( prefix + message->info.size ))) return 0;
+    if (prefix)
+    {
+        if (message->token) token_get_identity( message->token, &identity );
+        memcpy( data, &identity, prefix );
+    }
+    if (message->info.size) memcpy( data + prefix, message->data, message->info.size );
+    return 1;
+}
 
 struct alpc_port_init_data
 {
@@ -194,6 +248,7 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     port->flags       = data->flags;
     port->max_msg_len = data->max_msg_len;
     port->status      = UNINITIALIZED;
+    port->kernel_port = ALPC_KERNEL_PORT_NONE;
     port->thread      = (struct thread *)grab_object( current );
     list_init( &port->messages );
     list_init( &port->receive_waiters );
@@ -201,6 +256,8 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     list_init( &port->accepted_entry );
     list_init( &port->pending_connections );
     list_init( &port->pending_entry );
+    port->client_token = NULL;
+    port->impersonation_level = port->tracking_mode = 0;
     port->peer = NULL;
     port->connection_port = NULL;
     port->pending_listener = NULL;
@@ -252,10 +309,10 @@ static void alpc_port_destroy( struct object *obj )
     LIST_FOR_EACH_ENTRY_SAFE( message, next, &port->messages, struct alpc_message, entry )
     {
         list_remove( &message->entry );
-        free( message );
+        free_message( message );
     }
     assert( !port->peer && !port->pending_listener && list_empty( &port->pending_connections ) );
-    free( port->connect_reply );
+    free_message( port->connect_reply );
     if (port->connection_port)
     {
         list_remove( &port->accepted_entry );
@@ -263,6 +320,7 @@ static void alpc_port_destroy( struct object *obj )
     }
     if (port->sync) release_object( port->sync );
     if (port->connect_sync) release_object( port->connect_sync );
+    if (port->client_token) release_object( port->client_token );
     release_object( port->thread );
 }
 
@@ -298,6 +356,7 @@ static struct alpc_message *new_message( const void *data, data_size_t size, uns
     if (!(message = mem_alloc( sizeof(*message) + size ))) return NULL;
     if (!id && !(id = ++next_message_id)) id = ++next_message_id;
     message->request = NULL;
+    message->token = NULL;
     memset( &message->info, 0, sizeof(message->info) );
     message->info.callback_id = id;
     message->info.id = id;
@@ -317,7 +376,7 @@ static void set_message_destination( struct alpc_message *message, struct alpc_p
     message->info.port_context = port->context;
     message->info.message_context = message_context;
     message->info.sequence = ++port->receive_sequence;
-    message->info.context_valid = ALPC_MESSAGE_CONTEXT_ATTRIBUTE;
+    message->info.attributes_valid |= ALPC_MESSAGE_CONTEXT_ATTRIBUTE;
     port->initial_message_context = 0;
 }
 
@@ -342,8 +401,10 @@ static void lose_message_wait( struct alpc_request *request )
 static void free_message_request( struct alpc_request *request )
 {
     if (request->message) request->message->request = NULL;
+    if (request->reply) request->reply->request = NULL;
     lose_message_wait( request );
     list_remove( &request->entry );
+    if (request->token) release_object( request->token );
     free( request );
 }
 
@@ -359,6 +420,12 @@ static struct alpc_message *new_cancellation( struct alpc_request *request )
     message->info.pid = request->pid;
     message->info.tid = request->tid;
     return message;
+}
+
+static void cancel_queued_message( struct alpc_message *message )
+{
+    message->info.size = 0;
+    message->info.type = ALPC_MESSAGE_TYPE_CANCELED | (message->info.type & 0x1000);
 }
 
 static void cancel_message_request( struct alpc_request *request, struct alpc_port *queue )
@@ -384,8 +451,7 @@ static void cancel_message_request( struct alpc_request *request, struct alpc_po
             set_message_destination( message, queue, request->message_context );
             list_add_tail( &queue->messages, &message->entry );
         }
-        message->info.size = 0;
-        message->info.type = ALPC_MESSAGE_TYPE_CANCELED | (message->info.type & 0x1000);
+        cancel_queued_message( message );
     }
     if (message && (delivered || queue != request->queue)) notify_port( queue );
     if (delivered && queue == request->queue)
@@ -443,7 +509,7 @@ static void alpc_wait_destroy( struct object *obj )
 {
     struct alpc_wait *wait = (struct alpc_wait *)obj;
     assert( !wait->request && !wait->handle && !wait->receive_port );
-    free( wait->reply );
+    free_message( wait->reply );
     if (wait->sync) release_object( wait->sync );
     release_object( wait->thread );
 }
@@ -557,6 +623,36 @@ static void close_message_requests( struct alpc_port *port )
     struct alpc_request *request, *next;
     LIST_FOR_EACH_ENTRY_SAFE( request, next, &message_requests, struct alpc_request, entry )
     {
+        if (request->released)
+        {
+            if (request->reply)
+            {
+                /* Delivery to a private operation survives endpoint close.
+                 * Keep identity, but never retain a dangling endpoint. */
+                if (request->source == port) request->source = NULL;
+                if (request->target == port) request->target = NULL;
+                if (request->queue == port) request->queue = NULL;
+            }
+            else if (request->target == port || request->queue == port)
+            {
+                if (request->message)
+                {
+                    list_remove( &request->message->entry );
+                    free_message( request->message );
+                    request->message = NULL;
+                }
+                free_message_request( request );
+            }
+            else if (request->source == port)
+            {
+                /* A queued reply has not reached its receiver. Retain its
+                 * registry identity while turning that copy into cancellation. */
+                if (request->message) cancel_queued_message( request->message );
+                request->source = NULL;
+                request->canceled = 1;
+            }
+            continue;
+        }
         if (request->source == port)
         {
             lose_message_wait( request );
@@ -569,7 +665,7 @@ static void close_message_requests( struct alpc_port *port )
             if (request->message)
             {
                 list_remove( &request->message->entry );
-                free( request->message );
+                free_message( request->message );
                 request->message = NULL;
             }
             free_message_request( request );
@@ -581,10 +677,15 @@ static void disconnect_message_requests( struct alpc_port *port )
 {
     struct alpc_request *request, *next;
     LIST_FOR_EACH_ENTRY_SAFE( request, next, &message_requests, struct alpc_request, entry )
-        if (request->source == port)
+        if (request->source == port && !request->reply)
         {
             struct alpc_message *copy;
             int synchronous = !!request->wait;
+            if (request->released)
+            {
+                if (request->message) cancel_queued_message( request->message );
+                continue;
+            }
             lose_message_wait( request );
             if (!synchronous && (copy = new_cancellation( request )))
             {
@@ -635,6 +736,18 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
             return 0;
         }
         target = port->peer;
+        if (!id && target->kernel_port == ALPC_KERNEL_POWER_PORT)
+        {
+            /* The kernel power manager consumes policy updates without a
+             * user-mode reply. Kernel-originated notifications are not yet
+             * synthesized. */
+            if (flags & 0x20000)
+            {
+                set_error( STATUS_NOT_IMPLEMENTED );
+                return 0;
+            }
+            return 1;
+        }
         if (!id && port->connection_port && !(target->flags & 0x20000))
         {
             set_error( STATUS_LPC_REQUESTS_NOT_ALLOWED );
@@ -650,9 +763,22 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
             set_error( STATUS_INVALID_MESSAGE );
             return 0;
         }
-        if (request->target != port && request->target->connection_port != port)
+        /* A released private reply is already owned by the waiting operation.
+         * Retain its request for result cleanup and impersonation, but reject
+         * another reply independently of the retargeted endpoint pointers. */
+        if (request->released && request->reply)
+        {
+            set_error( STATUS_INVALID_MESSAGE );
+            return 0;
+        }
+        if (!request->target || (request->target != port && request->target->connection_port != port))
         {
             set_error( STATUS_ACCESS_DENIED );
+            return 0;
+        }
+        if (request->released)
+        {
+            set_error( STATUS_INVALID_MESSAGE );
             return 0;
         }
         origin = request->target;
@@ -661,7 +787,7 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
             if (request->message)
             {
                 list_remove( &request->message->entry );
-                free( request->message );
+                free_message( request->message );
                 request->message = NULL;
             }
             free_message_request( request );
@@ -683,10 +809,26 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
         return 0;
     }
     if (!(message = new_message( data, size, type | (wow64 ? 0x1000 : 0), id, current ))) return 0;
+    if (!origin->connection_port && !origin->tracking_mode && origin->client_token)
+    {
+        message->token = (struct token *)grab_object( origin->client_token );
+        message->info.attributes_valid |= ALPC_MESSAGE_TOKEN_ATTRIBUTE;
+    }
+    else if (!origin->connection_port && origin->tracking_mode &&
+             (flags & 0x20000) && (origin->flags & 0x10000))
+    {
+        /* A dynamically tracked datagram has no stable sender context and
+         * cannot be impersonated.  A synchronous sender is blocked until its
+         * reply, so retain its current effective token for authorization while
+         * keeping the token receipt attribute private. */
+        message->token = (struct token *)grab_object( thread_get_impersonation_token( current ) );
+    }
     received_context = request ? request->message_context : target->initial_message_context;
     if (!request && !(flags & 0x10000) && port->type == COMMUNICATION_PORT)
     {
-        if (!(request = mem_alloc( sizeof(*request) ))) { free( message ); return 0; }
+        if (!(request = mem_alloc( sizeof(*request) ))) { free_message( message ); return 0; }
+        request->token = NULL;
+        request->reply = NULL;
         request->wait = NULL;
         request->message_context = message_context;
         request->released = 0;
@@ -694,11 +836,28 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
         request->message = NULL;
         list_add_tail( &message_requests, &request->entry );
     }
+    if (request)
+    {
+        if (request->token) release_object( request->token );
+        request->token = message->token ? (struct token *)grab_object( message->token ) : NULL;
+        request->impersonation_level = origin->impersonation_level;
+        request->message_context = message_context;
+        request->source = origin;
+        request->target = target;
+        request->queue = queue;
+        request->pid = current->process->id;
+        request->tid = current->id;
+        request->wow64 = wow64;
+        request->canceled = 0;
+    }
     set_message_destination( message, target, received_context );
     if (request && request->wait)
     {
         struct alpc_wait *receiver = request->wait;
         receiver->info = message->info;
+        /* A private synchronous result omits token metadata. If the buffer
+         * is short, ordinary recovery still observes the queued receipt. */
+        receiver->info.attributes_valid &= ~ALPC_MESSAGE_TOKEN_ATTRIBUTE;
         receiver->request = NULL;
         request->wait = NULL;
         if (message->info.size <= receiver->capacity)
@@ -706,16 +865,11 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
             receiver->reply = message;
             receiver->status = STATUS_SUCCESS;
             signal_sync( receiver->sync );
-            if (flags & 0x10000) free_message_request( request );
-            else
+            if (flags & 0x10000)
             {
-                request->message_context = message_context;
-                request->source = origin;
-                request->target = target;
-                request->queue = queue;
-                request->pid = current->process->id;
-                request->tid = current->id;
-                request->wow64 = wow64;
+                request->released = 1;
+                request->reply = message;
+                message->request = request;
             }
             return 1;
         }
@@ -728,22 +882,11 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
     }
     if (request)
     {
-        if (flags & 0x10000) free_message_request( request );
-        else
-        {
-            request->wait = wait;
-            if (wait) wait->request = request;
-            request->message_context = message_context;
-            request->source = origin;
-            request->wow64 = wow64;
-            request->canceled = 0;
-            request->pid = current->process->id;
-            request->tid = current->id;
-            request->target = target;
-            request->queue = queue;
-            request->message = message;
-            message->request = request;
-        }
+        if (flags & 0x10000) request->released = 1;
+        request->wait = wait;
+        if (wait) wait->request = request;
+        request->message = message;
+        message->request = request;
     }
     list_add_tail( &queue->messages, &message->entry );
     notify_port( queue );
@@ -910,6 +1053,19 @@ done:
     release_object( port );
 }
 
+/* Return the state exposed by AlpcBasicInformation. */
+DECL_HANDLER(alpc_query_information)
+{
+    struct alpc_port *port;
+
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                    ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
+    reply->flags = port->flags;
+    reply->sequence = port->receive_sequence;
+    reply->context = port->context;
+    release_object( port );
+}
+
 /* Create an ALPC port */
 DECL_HANDLER(alpc_create_port)
 {
@@ -928,9 +1084,12 @@ DECL_HANDLER(alpc_send_receive)
 {
     struct alpc_port *port;
     struct alpc_message *message;
+    data_size_t capacity;
     data_size_t size = get_req_data_size();
     struct alpc_wait *wait = NULL;
+    int reply_receive;
 
+    if (!get_receive_capacity( req->receive_attributes, &capacity )) return;
     if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
                                                     ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
     if (port->thread->process != current->process)
@@ -938,7 +1097,9 @@ DECL_HANDLER(alpc_send_receive)
         set_error( STATUS_ACCESS_DENIED );
         goto done;
     }
-    if ((req->flags & 0x20000) && (!req->send || req->message_id || (req->flags & 0x10000)))
+    reply_receive = (req->flags & 0x20000) && req->send && req->receive && req->message_id;
+    if ((req->flags & 0x20000) &&
+        (!req->send || (req->message_id && !req->receive) || (req->flags & 0x10000)))
     {
         set_error( STATUS_INVALID_PARAMETER_2 );
         goto done;
@@ -949,8 +1110,9 @@ DECL_HANDLER(alpc_send_receive)
         set_error( STATUS_NOT_IMPLEMENTED );
         goto done;
     }
-    if ((req->flags & 0x20000) && !(wait = create_message_wait( get_reply_max_size() ))) goto done;
-    if (req->send && !send_message( port, req->flags, req->message_id, req->wow64, req->message_context,
+    if ((req->flags & 0x20000) && !reply_receive && !(wait = create_message_wait( capacity ))) goto done;
+    if (req->send && !send_message( port, reply_receive ? 1 : req->flags, req->message_id,
+                                    req->wow64, req->message_context,
                                     get_req_data(), size, wait )) goto done;
     if (wait)
     {
@@ -968,7 +1130,7 @@ DECL_HANDLER(alpc_send_receive)
                 set_error( STATUS_TIMEOUT );
                 goto done;
             }
-            if (!(wait = create_message_wait( get_reply_max_size() ))) goto done;
+            if (!(wait = create_message_wait( capacity ))) goto done;
             wait->receive_port = port;
             list_add_tail( &port->receive_waiters, &wait->receive_entry );
             reply->wait_handle = wait->handle;
@@ -979,14 +1141,14 @@ DECL_HANDLER(alpc_send_receive)
     }
     message = LIST_ENTRY( list_head( &port->messages ), struct alpc_message, entry );
     reply->info = message->info;
-    if (message->info.size > get_reply_max_size())
+    if (message->info.size > capacity)
     {
         set_error( STATUS_BUFFER_TOO_SMALL );
         goto done;
     }
 
-    if (message->info.size && !set_reply_data( message->data, message->info.size )) goto done;
-    free( take_message( port ) );
+    if (!set_message_reply( message, req->receive_attributes )) goto done;
+    free_message( take_message( port ) );
 
 done:
     if (wait)
@@ -1002,6 +1164,8 @@ DECL_HANDLER(alpc_get_message_result)
 {
     struct alpc_wait *wait;
     struct alpc_message *message;
+    data_size_t capacity;
+    if (!get_receive_capacity( req->receive_attributes, &capacity )) return;
     if (!(wait = (struct alpc_wait *)get_handle_obj( current->process, req->handle, 0, &alpc_wait_ops ))) return;
     if (wait->thread != current || wait->handle != req->handle) set_error( STATUS_ACCESS_DENIED );
     else
@@ -1015,10 +1179,10 @@ DECL_HANDLER(alpc_get_message_result)
         set_error( wait->status );
         if (!wait->status && (message = wait->reply))
         {
-            if (message->info.size > get_reply_max_size()) set_error( STATUS_BUFFER_TOO_SMALL );
-            else if (!message->info.size || set_reply_data( message->data, message->info.size ))
+            if (message->info.size > capacity) set_error( STATUS_BUFFER_TOO_SMALL );
+            else if (set_message_reply( message, req->receive_attributes ))
             {
-                free( wait->reply );
+                free_message( wait->reply );
                 wait->reply = NULL;
             }
         }
@@ -1031,17 +1195,29 @@ DECL_HANDLER(alpc_get_message_result)
  * acceptance completes. */
 DECL_HANDLER(alpc_connect_port)
 {
-    const unsigned char *data = get_req_data();
+    static const WCHAR power_port_name[] = {'\\','P','o','w','e','r','P','o','r','t'};
+    const struct alpc_security_qos *qos = get_req_data();
+    const unsigned char *data = (const unsigned char *)(qos + 1);
     data_size_t size = get_req_data_size(), payload_size;
     struct unicode_str name;
     const struct sid *sid;
-    struct alpc_port *listener = NULL, *client = NULL;
+    struct alpc_port *listener = NULL, *client = NULL, *server = NULL;
     struct alpc_message *message;
     struct alpc_port_init_data init = { .type = COMMUNICATION_PORT, .flags = req->port_flags,
                                         .max_msg_len = req->max_msg_len };
+    struct alpc_port_init_data server_init = { .type = COMMUNICATION_PORT, .server = 1,
+                                               .flags = req->port_flags,
+                                               .max_msg_len = req->max_msg_len };
     struct object_params params = { .ops = &alpc_port_ops, .init_data = &init };
+    struct object_params server_params = { .ops = &alpc_port_ops, .init_data = &server_init };
     obj_handle_t lookup = 0, handle = 0;
 
+    if (size < sizeof(*qos)) { set_error( STATUS_INVALID_PARAMETER ); return; }
+    size -= sizeof(*qos);
+    if (qos->tracking_mode != SECURITY_STATIC_TRACKING && qos->tracking_mode != SECURITY_DYNAMIC_TRACKING)
+    { set_error( STATUS_INVALID_PARAMETER ); return; }
+    if (qos->impersonation_level < SecurityAnonymous || qos->impersonation_level > SecurityDelegation)
+    { set_error( STATUS_BAD_IMPERSONATION_LEVEL ); return; }
     if (req->name_size > size || req->name_size % sizeof(WCHAR) || req->sid_size > size - req->name_size)
     {
         set_error( STATUS_INVALID_PARAMETER );
@@ -1062,6 +1238,52 @@ DECL_HANDLER(alpc_connect_port)
         return;
     }
     payload_size = size - req->name_size - req->sid_size;
+    if (!req->rootdir && !req->attributes && name.len == sizeof(power_port_name) &&
+        !memcmp( name.str, power_port_name, sizeof(power_port_name) ))
+    {
+        if (req->sid_size || payload_size)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            goto done;
+        }
+        if (!(client = create_named_object( &params ))) goto done;
+        client->impersonation_level = qos->impersonation_level;
+        client->tracking_mode = qos->tracking_mode;
+        if (qos->tracking_mode == SECURITY_DYNAMIC_TRACKING)
+            client->client_token = (struct token *)grab_object( thread_get_impersonation_token( current ) );
+        else if (!(client->client_token = token_duplicate_impersonation( thread_get_impersonation_token( current ),
+                                           qos->impersonation_level, qos->effective_only & 1 ))) goto done;
+        if (!(handle = alloc_handle( current->process, client, ALPC_PORT_ALL_ACCESS, 0 ))) goto done;
+        if (!(client->connect_sync = create_internal_sync( 1, 1 )) ||
+            !(client->connecting_wait_handle = alloc_handle( current->process, client->connect_sync,
+                                                             SYNCHRONIZE, 0 )))
+        {
+            close_handle( current->process, handle );
+            handle = 0;
+            goto done;
+        }
+        if (!(server = create_named_object( &server_params )))
+        {
+            close_handle( current->process, handle );
+            handle = 0;
+            goto done;
+        }
+        server->kernel_port = ALPC_KERNEL_POWER_PORT;
+        server->impersonation_level = client->impersonation_level;
+        server->tracking_mode = client->tracking_mode;
+        if (!client->tracking_mode)
+            server->client_token = (struct token *)grab_object( client->client_token );
+        server->peer = (struct alpc_port *)grab_object( client );
+        client->peer = (struct alpc_port *)grab_object( server );
+        server->status = client->status = CONNECTED;
+        client->connect_status = STATUS_SUCCESS;
+        client->context = handle;
+        client->connecting_handle = handle;
+        list_add_tail( &connecting_ports, &client->connecting_entry );
+        reply->handle = handle;
+        reply->wait_handle = client->connecting_wait_handle;
+        goto done;
+    }
     if (!(lookup = open_object( current->process, req->rootdir, ALPC_PORT_QUERY_STATE,
                                 &alpc_port_ops, name, req->attributes ))) return;
     if (!(listener = (struct alpc_port *)get_handle_obj( current->process, lookup,
@@ -1083,6 +1305,12 @@ DECL_HANDLER(alpc_connect_port)
         goto done;
     }
     if (!(client = create_named_object( &params ))) goto done;
+    client->impersonation_level = qos->impersonation_level;
+    client->tracking_mode = qos->tracking_mode;
+    if (qos->tracking_mode == SECURITY_DYNAMIC_TRACKING)
+        client->client_token = (struct token *)grab_object( thread_get_impersonation_token( current ) );
+    else if (!(client->client_token = token_duplicate_impersonation( thread_get_impersonation_token( current ),
+                                       qos->impersonation_level, qos->effective_only & 1 ))) goto done;
     if (!(handle = alloc_handle( current->process, client, ALPC_PORT_ALL_ACCESS, 0 ))) goto done;
     if (!(message = new_message( data + req->name_size + req->sid_size, payload_size,
                                 ALPC_MESSAGE_TYPE_CONNECTION_REQUEST | 0x2000 |
@@ -1094,10 +1322,12 @@ DECL_HANDLER(alpc_connect_port)
     if (!(client->connect_sync = create_internal_sync( 1, 0 )) ||
         !(client->connecting_wait_handle = alloc_handle( current->process, client->connect_sync, SYNCHRONIZE, 0 )))
     {
-        free( message );
+        free_message( message );
         close_handle( current->process, handle );
         goto done;
     }
+    message->token = (struct token *)grab_object( client->client_token );
+    message->info.attributes_valid |= ALPC_MESSAGE_TOKEN_ATTRIBUTE;
     client->context = handle;
     client->initial_message_context = req->message_context;
     message->info.sequence = ++listener->receive_sequence;
@@ -1116,6 +1346,7 @@ DECL_HANDLER(alpc_connect_port)
     dispatch_receives( listener );
 
 done:
+    if (server) release_object( server );
     if (client) release_object( client );
     if (listener) release_object( listener );
     if (lookup) close_handle( current->process, lookup );
@@ -1125,6 +1356,8 @@ DECL_HANDLER(alpc_get_connect_result)
 {
     struct alpc_port *client;
     struct alpc_message *message;
+    data_size_t capacity;
+    if (!get_receive_capacity( req->receive_attributes, &capacity )) return;
     if (!(client = (struct alpc_port *)get_handle_obj( current->process, req->handle,
                                                       ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
     if (client->thread != current || client->connecting_handle != req->handle)
@@ -1145,14 +1378,14 @@ DECL_HANDLER(alpc_get_connect_result)
         goto done;
     }
     reply->info = message->info;
-    if (message->info.size > get_reply_max_size())
+    if (message->info.size > capacity)
     {
         set_error( STATUS_BUFFER_TOO_SMALL );
         goto done;
     }
-    if (message->info.size && !set_reply_data( message->data, message->info.size )) goto done;
+    if (!set_message_reply( message, req->receive_attributes )) goto done;
 
-    free( message );
+    free_message( message );
     client->connect_reply = NULL;
     finish_connect_operation( client );
 done:
@@ -1217,6 +1450,9 @@ DECL_HANDLER(alpc_accept_connect_port)
     if (!(handle = alloc_handle( current->process, server, ALPC_PORT_ALL_ACCESS, req->attributes ))) goto done;
     server->connection_port = (struct alpc_port *)grab_object( listener );
     list_add_tail( &listener->accepted_connections, &server->accepted_entry );
+    server->impersonation_level = client->impersonation_level;
+    server->tracking_mode = client->tracking_mode;
+    if (!client->tracking_mode) server->client_token = (struct token *)grab_object( client->client_token );
     server->wow64 = client->wow64;
     server->context = req->context ? req->context : handle;
     server->peer = (struct alpc_port *)grab_object( client );
@@ -1233,7 +1469,7 @@ DECL_HANDLER(alpc_accept_connect_port)
     unlink_pending( client );
     reply->handle = handle;
 done:
-    free( message );
+    free_message( message );
     if (server) release_object( server );
     release_object( listener );
 }
@@ -1281,6 +1517,67 @@ DECL_HANDLER(alpc_disconnect_port)
         detach_peer( port );
         dispatch_all_receives();
     }
+    release_object( port );
+}
+
+/* Handle access precedes message lookup. The caller supplies identity only;
+ * sender IDs and message type are not authorization credentials. */
+DECL_HANDLER(alpc_impersonate_client)
+{
+    struct alpc_port *port, *client;
+    struct alpc_request *request;
+    struct token *source = NULL, *token = NULL;
+    int level = SecurityAnonymous, found = 0;
+
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                    ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
+    if (!req->message_present)
+    {
+        if (port->connection_port)
+        {
+            if (port->tracking_mode) { set_error( STATUS_ACCESS_DENIED ); goto done; }
+            source = port->client_token;
+            level = port->impersonation_level;
+        }
+    }
+    else
+    {
+        LIST_FOR_EACH_ENTRY( request, &message_requests, struct alpc_request, entry )
+            if (request->id == req->message_id && request->id == req->callback_id)
+            {
+                found = 1;
+                if (!request->target || (request->target != port && request->target->connection_port != port) || !request->token)
+                { set_error( STATUS_ACCESS_DENIED ); goto done; }
+                source = request->token;
+                level = request->impersonation_level;
+                break;
+            }
+        if (!found)
+        {
+            LIST_FOR_EACH_ENTRY( client, &connecting_ports, struct alpc_port, connecting_entry )
+                if (client->connection_id == req->message_id && client->connection_id == req->callback_id &&
+                    client->request_delivered)
+                {
+                    if (client->pending_listener != port) { set_error( STATUS_ACCESS_DENIED ); goto done; }
+                    found = 1;
+                    break;
+                }
+        }
+        if (!found) { set_error( STATUS_INVALID_MESSAGE ); goto done; }
+    }
+    if (source)
+    {
+        /* Cross-user credential exceptions are not in the observed contract.
+         * Do not grant high-level impersonation without a known authority. */
+        if (level > SecurityIdentification &&
+            !equal_sid( token_get_user( source ), token_get_user( thread_get_impersonation_token( current ) ) ) &&
+            !thread_single_check_privilege( current, SeImpersonatePrivilege ))
+        { set_error( STATUS_NOT_IMPLEMENTED ); goto done; }
+        if (!(token = token_duplicate_impersonation( source, level, FALSE ))) goto done;
+    }
+    if (current->token) release_object( current->token );
+    current->token = token;
+done:
     release_object( port );
 }
 

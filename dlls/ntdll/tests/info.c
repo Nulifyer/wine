@@ -1758,6 +1758,31 @@ static void test_power_black_box_update(void)
     ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got %08lx\n", status);
 }
 
+static void test_power_user_absence_prediction_capability(void)
+{
+    ULONG input[2] = {4, 0}; /* PowerInternalUserAbsencePredictionCapability */
+    BOOLEAN capable = 0xcc;
+    NTSTATUS status;
+
+    status = pNtPowerInformation(PowerInformationInternal, input, sizeof(input), &capable, sizeof(capable));
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+    if (status == STATUS_SUCCESS)
+    {
+        ok(capable == FALSE || capable == TRUE, "Expected a Boolean capability, got %#x\n", capable);
+        if (winetest_platform_is_wine)
+            ok(!capable, "Wine unexpectedly reported AoAc multi-session capability\n");
+    }
+
+    status = pNtPowerInformation(PowerInformationInternal, NULL, 0, &capable, sizeof(capable));
+    ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got %08lx\n", status);
+
+    status = pNtPowerInformation(PowerInformationInternal, input, sizeof(input) - 1, &capable, sizeof(capable));
+    ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got %08lx\n", status);
+
+    status = pNtPowerInformation(PowerInformationInternal, input, sizeof(input), NULL, 0);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Expected STATUS_BUFFER_TOO_SMALL, got %08lx\n", status);
+}
+
 static void test_query_processor_power_info(void)
 {
     NTSTATUS status;
@@ -1913,6 +1938,12 @@ static void test_query_process_wow64(void)
 
 static void test_query_process_basic(void)
 {
+    struct
+    {
+        SIZE_T size;
+        PROCESS_BASIC_INFORMATION basic_info;
+        ULONG flags;
+    } extended;
     NTSTATUS status;
     ULONG ReturnLength;
     PROCESS_BASIC_INFORMATION pbi;
@@ -1944,6 +1975,18 @@ static void test_query_process_basic(void)
     status = NtQueryInformationProcess(GetCurrentProcess(), ProcessBasicInformation, &pbi, sizeof(pbi), &ReturnLength);
     ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
     ok( sizeof(pbi) == ReturnLength, "Inconsistent length %ld\n", ReturnLength);
+
+    memset( &extended, 0xcc, sizeof(extended) );
+    extended.size = sizeof(extended);
+    ReturnLength = 0xdeadbeef;
+    status = NtQueryInformationProcess( GetCurrentProcess(), ProcessBasicInformation,
+                                        &extended, sizeof(extended), &ReturnLength );
+    ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status );
+    ok( ReturnLength == sizeof(extended), "Inconsistent length %lu\n", ReturnLength );
+    ok( extended.basic_info.UniqueProcessId == pbi.UniqueProcessId,
+        "Expected process id %Ix, got %Ix\n", pbi.UniqueProcessId,
+        extended.basic_info.UniqueProcessId );
+    ok( !(extended.flags & 1), "Unexpected protected-process flag %#lx\n", extended.flags );
 
     status = NtQueryInformationProcess(GetCurrentProcess(), ProcessBasicInformation, &pbi, sizeof(pbi) * 2, &ReturnLength);
     ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08lx\n", status);
@@ -4838,6 +4881,7 @@ START_TEST(info)
     /* NtPowerInformation */
     test_query_battery();
     test_power_black_box_update();
+    test_power_user_absence_prediction_capability();
     test_query_processor_power_info();
 
     /* NtQueryInformationProcess */

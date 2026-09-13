@@ -987,6 +987,9 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
     }
     SERVER_END_REQ;
 
+    if (getenv( "LINUXNT_DEBUG_NAMED_EVENTS" ) && attr && attr->ObjectName)
+        fprintf( stderr, "linuxnt: pid=%u NtCreateEvent name=%s status=%#x handle=%p\n",
+                 getpid(), debugstr_us( attr->ObjectName ), ret, *handle );
     free( objattr );
     return ret;
 }
@@ -1015,6 +1018,9 @@ NTSTATUS WINAPI NtOpenSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJEC
         *handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
+    if (getenv( "LINUXNT_DEBUG_NAMED_EVENTS" ) && attr && attr->ObjectName)
+        fprintf( stderr, "linuxnt: pid=%u NtOpenEvent name=%s status=%#x handle=%p\n",
+                 getpid(), debugstr_us( attr->ObjectName ), ret, *handle );
     return ret;
 }
 

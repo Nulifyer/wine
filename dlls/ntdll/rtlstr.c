@@ -174,6 +174,8 @@ void WINAPI RtlInitUnicodeString(
     PUNICODE_STRING target, /* [I/O] Buffered unicode string to be initialized */
     PCWSTR source)          /* [I]   '\0' terminated unicode string used to initialize target */
 {
+    TRACE("linuxnt: RtlInitUnicodeString caller %p source %s\n",
+          __builtin_return_address(0), debugstr_w(source));
     if ((target->Buffer = (PWSTR) source))
     {
         unsigned int length = wcslen(source) * sizeof(WCHAR);
@@ -447,8 +449,13 @@ BOOLEAN WINAPI RtlEqualString( const STRING *s1, const STRING *s2, BOOLEAN CaseI
 BOOLEAN WINAPI RtlEqualUnicodeString( const UNICODE_STRING *s1, const UNICODE_STRING *s2,
                                       BOOLEAN CaseInsensitive )
 {
-    if (s1->Length != s2->Length) return FALSE;
-    return !RtlCompareUnicodeString( s1, s2, CaseInsensitive );
+    BOOLEAN equal = s1->Length == s2->Length &&
+                    !RtlCompareUnicodeString( s1, s2, CaseInsensitive );
+
+    TRACE("linuxnt: RtlEqualUnicodeString caller %p %s %s insensitive %u -> %u\n",
+          __builtin_return_address(0), debugstr_wn(s1->Buffer, s1->Length / sizeof(WCHAR)),
+          debugstr_wn(s2->Buffer, s2->Length / sizeof(WCHAR)), CaseInsensitive, equal);
+    return equal;
 }
 
 

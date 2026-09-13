@@ -37,6 +37,42 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
+static const USHORT protected_access_by_source_signer[] =
+{
+    0x000, 0x002, 0x004, 0x108, 0x110, 0x13e, 0x17e, 0x1fe, 0x000
+};
+
+/***********************************************************************
+ *             RtlTestProtectedAccess  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlTestProtectedAccess( UCHAR source, UCHAR target )
+{
+    unsigned int source_signer = source >> 4;
+    unsigned int target_signer = target >> 4;
+    unsigned int target_type = target & 7;
+
+    if (!target_type) return TRUE;
+    if ((source & 7) < target_type) return FALSE;
+    if (source_signer >= ARRAY_SIZE(protected_access_by_source_signer)) return FALSE;
+    return !!(protected_access_by_source_signer[source_signer] & (1u << target_signer));
+}
+
+/***********************************************************************
+ *             RtlValidProcessProtection  (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlValidProcessProtection( UCHAR protection )
+{
+    static const UCHAR valid[] =
+    {
+        0x00, 0x08, 0x12, 0x21, 0x31, 0x41, 0x51, 0x52, 0x61, 0x62, 0x72, 0x81
+    };
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(valid); ++i)
+        if (protection == valid[i]) return TRUE;
+    return FALSE;
+}
+
 /* wrappers for symcrypt */
 SYMCRYPT_CPU_FEATURES SYMCRYPT_CALL SymCryptCpuFeaturesNeverPresent(void) { return 0; }
 void SYMCRYPT_CALL SymCryptFatal( UINT32 fatalCode ) { }
@@ -82,22 +118,6 @@ static size_t acl_bytesInUse(PACL pAcl)
 	ace = (PACE_HEADER)(((BYTE*)ace)+ace->AceSize);
     }
     return bytesInUse;
-}
-
-/* helper function to copy an ACL */
-static BOOLEAN copy_acl(DWORD nDestinationAclLength, PACL pDestinationAcl, PACL pSourceAcl)
-{
-    DWORD size;
-
-    if (!pSourceAcl || !RtlValidAcl(pSourceAcl))
-        return FALSE;
-
-    size = pSourceAcl->AclSize;
-    if (nDestinationAclLength < size)
-        return FALSE;
-
-    memmove(pDestinationAcl, pSourceAcl, size);
-    return TRUE;
 }
 
 /* generically adds an ACE to an ACL */
@@ -206,6 +226,33 @@ NTSTATUS WINAPI RtlAllocateAndInitializeSid (
         break;
     }
     *pSid = tmp_sid;
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ *  RtlAllocateAndInitializeSidEx             [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlAllocateAndInitializeSidEx( PSID_IDENTIFIER_AUTHORITY authority,
+                                               BYTE sub_authority_count,
+                                               ULONG *sub_authorities, PSID *sid )
+{
+    SID *ret;
+
+    TRACE( "(%p, %u, %p, %p)\n", authority, sub_authority_count, sub_authorities, sid );
+
+    if (sub_authority_count > SID_MAX_SUB_AUTHORITIES) return STATUS_INVALID_PARAMETER;
+
+    if (!(ret = RtlAllocateHeap( GetProcessHeap(), 0,
+                                 RtlLengthRequiredSid( sub_authority_count ) )))
+        return STATUS_NO_MEMORY;
+
+    ret->Revision = SID_REVISION;
+    ret->SubAuthorityCount = sub_authority_count;
+    ret->IdentifierAuthority = *authority;
+    if (sub_authority_count)
+        memcpy( ret->SubAuthority, sub_authorities,
+                sub_authority_count * sizeof(*sub_authorities) );
+    *sid = ret;
     return STATUS_SUCCESS;
 }
 
@@ -379,6 +426,93 @@ LPBYTE WINAPI RtlSubAuthorityCountSid(PSID pSid)
 }
 
 /**************************************************************************
+ *                 RtlSidHashInitialize                [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlSidHashInitialize( SID_AND_ATTRIBUTES *attrs, ULONG count,
+                                      SID_AND_ATTRIBUTES_HASH *hash )
+{
+    ULONG i, hash_count;
+
+    if (!hash) return STATUS_INVALID_PARAMETER;
+
+    memset( hash, 0, sizeof(*hash) );
+    if (!attrs || !count) return STATUS_SUCCESS;
+
+    hash->SidCount = count;
+    hash->SidAttr = attrs;
+    hash_count = min( count, 8 * sizeof(hash->Hash[0]) );
+
+    for (i = 0; i < hash_count; i++)
+    {
+        SID *sid = attrs[i].Sid;
+        BYTE value = *((BYTE *)sid + 4 + 4 * sid->SubAuthorityCount);
+        SID_HASH_ENTRY bit = (SID_HASH_ENTRY)1 << i;
+
+        hash->Hash[value & 0x0f] |= bit;
+        hash->Hash[16 + (value >> 4)] |= bit;
+    }
+    return STATUS_SUCCESS;
+}
+
+/**************************************************************************
+ *                 RtlSidHashLookup                    [NTDLL.@]
+ */
+SID_AND_ATTRIBUTES * WINAPI RtlSidHashLookup( SID_AND_ATTRIBUTES_HASH *hash, PSID sid )
+{
+    SID_HASH_ENTRY candidates;
+    ULONG i, hash_count, sid_len;
+    BYTE value;
+
+    if (!hash || !sid) return NULL;
+
+    value = *((BYTE *)sid + 4 + 4 * ((SID *)sid)->SubAuthorityCount);
+    candidates = hash->Hash[value & 0x0f] & hash->Hash[16 + (value >> 4)];
+    hash_count = min( hash->SidCount, 8 * sizeof(hash->Hash[0]) );
+    sid_len = RtlLengthSid( sid );
+
+    for (i = 0; i < hash_count; i++)
+    {
+        PSID candidate;
+
+        if (!(candidates & ((SID_HASH_ENTRY)1 << i))) continue;
+        candidate = hash->SidAttr[i].Sid;
+        if (RtlLengthSid( candidate ) == sid_len && !memcmp( candidate, sid, sid_len ))
+            return &hash->SidAttr[i];
+    }
+
+    for (; i < hash->SidCount; i++)
+    {
+        PSID candidate = hash->SidAttr[i].Sid;
+
+        if (RtlLengthSid( candidate ) == sid_len && !memcmp( candidate, sid, sid_len ))
+            return &hash->SidAttr[i];
+    }
+    return NULL;
+}
+
+/**************************************************************************
+ *                 NtCreateTokenEx                      [NTDLL.@]
+ */
+NTSTATUS WINAPI NtCreateTokenEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
+                                 TOKEN_TYPE type, LUID *token_id, LARGE_INTEGER *expire,
+                                 TOKEN_USER *user, TOKEN_GROUPS *groups, TOKEN_PRIVILEGES *privs,
+                                 void *user_attrs, void *device_attrs, TOKEN_GROUPS *device_groups,
+                                 TOKEN_MANDATORY_POLICY *mandatory_policy, TOKEN_OWNER *owner,
+                                 TOKEN_PRIMARY_GROUP *group, TOKEN_DEFAULT_DACL *dacl,
+                                 TOKEN_SOURCE *source )
+{
+    TRACE( "(%p,0x%08lx,%p,%d,%p,%p,%p,%p,%p,%p,%p,%p,%p,%p,%p,%p,%p)\n",
+           handle, access, attr, type, token_id, expire, user, groups, privs, user_attrs,
+           device_attrs, device_groups, mandatory_policy, owner, group, dacl, source );
+
+    if (user_attrs || device_attrs || device_groups)
+        FIXME( "token security attributes and device groups are not supported\n" );
+
+    return NtCreateToken( handle, access, attr, type, token_id, expire, user, groups, privs,
+                          owner, group, dacl, source );
+}
+
+/**************************************************************************
  *                 RtlCopySid				[NTDLL.@]
  */
 NTSTATUS WINAPI RtlCopySid( DWORD destlen, PSID dest, PSID source )
@@ -453,91 +587,160 @@ NTSTATUS WINAPI RtlCreateSecurityDescriptor(
 }
 
 /**************************************************************************
+ * RtlCreateAndSetSD                              [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlCreateAndSetSD( RTL_ACE_DATA *ace_data, ULONG ace_count, PSID owner_sid,
+                                   PSID group_sid, PSECURITY_DESCRIPTOR *new_sd )
+{
+    ULONG dacl_size = sizeof(ACL), sacl_size = sizeof(ACL), max_ace_size = 0;
+    ACL *dacl = NULL, *sacl = NULL;
+    SECURITY_DESCRIPTOR *sd;
+    BYTE *ace_buffer = NULL;
+    ULONG total_size, i;
+    HANDLE heap = GetProcessHeap();
+    NTSTATUS status;
+
+    TRACE( "(%p,%lu,%p,%p,%p)\n", ace_data, ace_count, owner_sid, group_sid, new_sd );
+
+    for (i = 0; i < ace_count; i++)
+    {
+        ULONG ace_size = RtlLengthSid( *ace_data[i].Sid ) + 12;
+        ULONG *acl_size;
+
+        switch (ace_data[i].AceType)
+        {
+        case ACCESS_ALLOWED_ACE_TYPE:
+        case ACCESS_DENIED_ACE_TYPE:
+            acl_size = &dacl_size;
+            break;
+        case SYSTEM_AUDIT_ACE_TYPE:
+            acl_size = &sacl_size;
+            break;
+        default:
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (*acl_size > ~(ULONG)0 - ace_size) return STATUS_NO_MEMORY;
+        *acl_size += ace_size;
+        if (ace_size > max_ace_size) max_ace_size = ace_size;
+    }
+
+    total_size = sizeof(*sd);
+    if (dacl_size != sizeof(ACL))
+    {
+        if (total_size > ~(ULONG)0 - dacl_size) return STATUS_NO_MEMORY;
+        total_size += dacl_size;
+    }
+    if (sacl_size != sizeof(ACL))
+    {
+        if (total_size > ~(ULONG)0 - sacl_size) return STATUS_NO_MEMORY;
+        total_size += sacl_size;
+    }
+
+    if (!(sd = RtlAllocateHeap( heap, 0, total_size ))) return STATUS_NO_MEMORY;
+
+    if (dacl_size != sizeof(ACL))
+    {
+        dacl = (ACL *)(sd + 1);
+        status = RtlCreateAcl( dacl, dacl_size, ACL_REVISION );
+        if (status) goto failed;
+    }
+    if (sacl_size != sizeof(ACL))
+    {
+        sacl = (ACL *)((BYTE *)(sd + 1) + (dacl ? dacl_size : 0));
+        status = RtlCreateAcl( sacl, sacl_size, ACL_REVISION );
+        if (status) goto failed;
+    }
+
+    if (max_ace_size && !(ace_buffer = RtlAllocateHeap( heap, 0, max_ace_size )))
+    {
+        status = STATUS_NO_MEMORY;
+        goto failed;
+    }
+
+    for (i = 0; i < ace_count; i++)
+    {
+        PSID sid = *ace_data[i].Sid;
+        ULONG sid_size = RtlLengthSid( sid );
+        ULONG ace_size = sid_size + 12;
+        ACE_HEADER *header = (ACE_HEADER *)ace_buffer;
+        ACL *acl;
+
+        memset( ace_buffer, 0, ace_size );
+        header->AceType = ace_data[i].AceType;
+        header->AceFlags = ace_data[i].InheritFlags | ace_data[i].AceFlags;
+        header->AceSize = ace_size;
+        *(ACCESS_MASK *)(ace_buffer + sizeof(*header)) = ace_data[i].Mask;
+
+        status = RtlCopySid( sid_size, ace_buffer + sizeof(*header) + sizeof(ACCESS_MASK), sid );
+        if (status) goto failed;
+
+        acl = ace_data[i].AceType == SYSTEM_AUDIT_ACE_TYPE ? sacl : dacl;
+        status = RtlAddAce( acl, ACL_REVISION, ~(ULONG)0, header, ace_size );
+        if (status) goto failed;
+    }
+
+    if ((status = RtlCreateSecurityDescriptor( sd, SECURITY_DESCRIPTOR_REVISION ))) goto failed;
+    if ((status = RtlSetOwnerSecurityDescriptor( sd, owner_sid, FALSE ))) goto failed;
+    if ((status = RtlSetGroupSecurityDescriptor( sd, group_sid, FALSE ))) goto failed;
+    if ((status = RtlSetDaclSecurityDescriptor( sd, TRUE, dacl, FALSE ))) goto failed;
+    if ((status = RtlSetSaclSecurityDescriptor( sd, sacl != NULL, sacl, FALSE ))) goto failed;
+
+    *new_sd = sd;
+    RtlFreeHeap( heap, 0, ace_buffer );
+    return STATUS_SUCCESS;
+
+failed:
+    RtlFreeHeap( heap, 0, ace_buffer );
+    RtlFreeHeap( heap, 0, sd );
+    return status;
+}
+
+static ULONG align_security_descriptor_size( ULONG size )
+{
+    return (size + sizeof(ULONG) - 1) & ~(sizeof(ULONG) - 1);
+}
+
+/**************************************************************************
  * RtlCopySecurityDescriptor            [NTDLL.@]
  *
- * Copies an absolute or self-relative SECURITY_DESCRIPTOR.
- *
- * PARAMS
- *  pSourceSD      [O] SD to copy from.
- *  pDestinationSD [I] Destination SD.
- *
- * RETURNS
- *  Success: STATUS_SUCCESS.
- *  Failure: STATUS_UNKNOWN_REVISION if rev is incorrect.
+ * Allocates a copy of an absolute or self-relative SECURITY_DESCRIPTOR.
  */
-NTSTATUS WINAPI RtlCopySecurityDescriptor(PSECURITY_DESCRIPTOR pSourceSD, PSECURITY_DESCRIPTOR pDestinationSD)
+NTSTATUS WINAPI RtlCopySecurityDescriptor( PSECURITY_DESCRIPTOR source,
+                                           PSECURITY_DESCRIPTOR *destination )
 {
-    PSID Owner, Group;
-    PACL Dacl, Sacl;
-    DWORD length;
+    SECURITY_DESCRIPTOR_RELATIVE *relative = source;
+    SECURITY_DESCRIPTOR *absolute = source;
+    SECURITY_DESCRIPTOR_CONTROL control = absolute->Control;
+    PSID owner, group;
+    ACL *dacl, *sacl;
+    ULONG size = sizeof(*relative);
 
-    if (((SECURITY_DESCRIPTOR *)pSourceSD)->Control & SE_SELF_RELATIVE)
+    if (control & SE_SELF_RELATIVE)
     {
-        SECURITY_DESCRIPTOR_RELATIVE *src = pSourceSD;
-        SECURITY_DESCRIPTOR_RELATIVE *dst = pDestinationSD;
-
-        if (src->Revision != SECURITY_DESCRIPTOR_REVISION)
-            return STATUS_UNKNOWN_REVISION;
-
-        *dst = *src;
-        if (src->Owner)
-        {
-            Owner = (PSID)SELF_RELATIVE_FIELD( src, Owner );
-            length = RtlLengthSid( Owner );
-            RtlCopySid(length, SELF_RELATIVE_FIELD( dst, Owner ), Owner);
-        }
-        if (src->Group)
-        {
-            Group = (PSID)SELF_RELATIVE_FIELD( src, Group );
-            length = RtlLengthSid( Group );
-            RtlCopySid(length, SELF_RELATIVE_FIELD( dst, Group ), Group);
-        }
-        if ((src->Control & SE_SACL_PRESENT) && src->Sacl)
-        {
-            Sacl = (PACL)SELF_RELATIVE_FIELD( src, Sacl );
-            copy_acl(Sacl->AclSize, (PACL)SELF_RELATIVE_FIELD( dst, Sacl ), Sacl);
-        }
-        if ((src->Control & SE_DACL_PRESENT) && src->Dacl)
-        {
-            Dacl = (PACL)SELF_RELATIVE_FIELD( src, Dacl );
-            copy_acl(Dacl->AclSize, (PACL)SELF_RELATIVE_FIELD( dst, Dacl ), Dacl);
-        }
+        owner = relative->Owner ? (PSID)SELF_RELATIVE_FIELD(relative, Owner) : NULL;
+        group = relative->Group ? (PSID)SELF_RELATIVE_FIELD(relative, Group) : NULL;
+        dacl = (control & SE_DACL_PRESENT) && relative->Dacl
+            ? (ACL *)SELF_RELATIVE_FIELD(relative, Dacl) : NULL;
+        sacl = (control & SE_SACL_PRESENT) && relative->Sacl
+            ? (ACL *)SELF_RELATIVE_FIELD(relative, Sacl) : NULL;
     }
     else
     {
-        SECURITY_DESCRIPTOR *src = pSourceSD;
-        SECURITY_DESCRIPTOR *dst = pDestinationSD;
-
-        if (src->Revision != SECURITY_DESCRIPTOR_REVISION)
-            return STATUS_UNKNOWN_REVISION;
-
-        *dst = *src;
-        if (src->Owner)
-        {
-            length = RtlLengthSid( src->Owner );
-            dst->Owner = RtlAllocateHeap(GetProcessHeap(), 0, length);
-            RtlCopySid(length, dst->Owner, src->Owner);
-        }
-        if (src->Group)
-        {
-            length = RtlLengthSid( src->Group );
-            dst->Group = RtlAllocateHeap(GetProcessHeap(), 0, length);
-            RtlCopySid(length, dst->Group, src->Group);
-        }
-        if (src->Control & SE_SACL_PRESENT)
-        {
-            length = src->Sacl->AclSize;
-            dst->Sacl = RtlAllocateHeap(GetProcessHeap(), 0, length);
-            copy_acl(length, dst->Sacl, src->Sacl);
-        }
-        if (src->Control & SE_DACL_PRESENT)
-        {
-            length = src->Dacl->AclSize;
-            dst->Dacl = RtlAllocateHeap(GetProcessHeap(), 0, length);
-            copy_acl(length, dst->Dacl, src->Dacl);
-        }
+        owner = absolute->Owner;
+        group = absolute->Group;
+        dacl = (control & SE_DACL_PRESENT) ? absolute->Dacl : NULL;
+        sacl = (control & SE_SACL_PRESENT) ? absolute->Sacl : NULL;
     }
 
+    if (owner) size += align_security_descriptor_size( RtlLengthSid(owner) );
+    if (group) size += align_security_descriptor_size( RtlLengthSid(group) );
+    if (dacl) size += align_security_descriptor_size( dacl->AclSize );
+    if (sacl) size += align_security_descriptor_size( sacl->AclSize );
+
+    if (!(*destination = RtlAllocateHeap( GetProcessHeap(), 0, size )))
+        return STATUS_NO_MEMORY;
+    memcpy( *destination, source, size );
     return STATUS_SUCCESS;
 }
 
@@ -557,7 +760,7 @@ BOOLEAN WINAPI RtlValidRelativeSecurityDescriptor(PSECURITY_DESCRIPTOR descripto
     ULONG length, SECURITY_INFORMATION info)
 {
     FIXME("%p,%lu,%ld: semi-stub\n", descriptor, length, info);
-    return RtlValidSecurityDescriptor(descriptor) == STATUS_SUCCESS;
+    return RtlValidSecurityDescriptor(descriptor);
 }
 
 /**************************************************************************
@@ -1172,6 +1375,186 @@ NTSTATUS WINAPI RtlNewSecurityObjectWithMultipleInheritance(PSECURITY_DESCRIPTOR
     return RtlNewSecurityObjectEx(parent, creator, descr, NULL, is_container, flags, token, mapping);
 }
 
+static NTSTATUS validate_security_object_dacl( ACL *acl )
+{
+    ACE_HEADER *ace;
+    ULONG i;
+
+    if (!acl) return STATUS_SUCCESS;
+    if (!RtlValidAcl( acl )) return STATUS_INVALID_ACL;
+
+    ace = (ACE_HEADER *)(acl + 1);
+    for (i = 0; i < acl->AceCount; ++i)
+    {
+        if (ace->AceType != ACCESS_ALLOWED_ACE_TYPE && ace->AceType != ACCESS_DENIED_ACE_TYPE)
+            return STATUS_NOT_SUPPORTED;
+        ace = (ACE_HEADER *)((BYTE *)ace + ace->AceSize);
+    }
+    return STATUS_SUCCESS;
+}
+
+static void map_security_object_dacl( SECURITY_DESCRIPTOR_RELATIVE *descriptor,
+                                      const GENERIC_MAPPING *mapping )
+{
+    ACL *acl;
+    ACE_HEADER *ace;
+    ULONG i;
+
+    if (!descriptor->Dacl) return;
+    acl = (ACL *)((BYTE *)descriptor + descriptor->Dacl);
+    ace = (ACE_HEADER *)(acl + 1);
+    for (i = 0; i < acl->AceCount; ++i)
+    {
+        if (!(ace->AceFlags & INHERIT_ONLY_ACE))
+        {
+            ACCESS_MASK *mask = (ACCESS_MASK *)((BYTE *)ace + sizeof(*ace));
+            RtlMapGenericMask( mask, mapping );
+            *mask &= mapping->GenericAll;
+        }
+        ace = (ACE_HEADER *)((BYTE *)ace + ace->AceSize);
+    }
+}
+
+/******************************************************************************
+ *  RtlCreateUserSecurityObject                         [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlCreateUserSecurityObject( RTL_ACE_DATA *ace_data, ULONG ace_count,
+                                              PSID owner_sid, PSID group_sid,
+                                              BOOLEAN is_directory, GENERIC_MAPPING *mapping,
+                                              PSECURITY_DESCRIPTOR *new_sd )
+{
+    SECURITY_DESCRIPTOR_RELATIVE *relative;
+    SECURITY_DESCRIPTOR *absolute;
+    ULONG size = 0;
+    NTSTATUS status;
+
+    TRACE( "%p,%lu,%p,%p,%u,%p,%p\n", ace_data, ace_count, owner_sid, group_sid,
+           is_directory, mapping, new_sd );
+
+    if (!mapping || !new_sd) return STATUS_INVALID_PARAMETER;
+
+    status = RtlCreateAndSetSD( ace_data, ace_count, owner_sid, group_sid,
+                                (PSECURITY_DESCRIPTOR *)&absolute );
+    if (status) return status;
+
+    status = RtlMakeSelfRelativeSD( absolute, NULL, &size );
+    if (status != STATUS_BUFFER_TOO_SMALL) goto done;
+    if (!(relative = RtlAllocateHeap( GetProcessHeap(), 0, size )))
+    {
+        status = STATUS_NO_MEMORY;
+        goto done;
+    }
+
+    status = RtlMakeSelfRelativeSD( absolute, (PSECURITY_DESCRIPTOR)relative, &size );
+    if (status)
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, relative );
+        goto done;
+    }
+
+    map_security_object_dacl( relative, mapping );
+    *new_sd = (PSECURITY_DESCRIPTOR)relative;
+
+done:
+    RtlFreeHeap( GetProcessHeap(), 0, absolute );
+    return status;
+}
+
+/******************************************************************************
+ *  RtlSetSecurityObject                         [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlSetSecurityObject( SECURITY_INFORMATION info, PSECURITY_DESCRIPTOR modification,
+                                      PSECURITY_DESCRIPTOR *object, PGENERIC_MAPPING mapping,
+                                      HANDLE token )
+{
+    static const SECURITY_DESCRIPTOR_CONTROL preserved_sacl_control =
+        SE_SACL_PRESENT | SE_SACL_DEFAULTED | SE_SACL_AUTO_INHERITED | SE_SACL_PROTECTED;
+    SECURITY_DESCRIPTOR_RELATIVE *relative;
+    SECURITY_DESCRIPTOR combined;
+    SECURITY_DESCRIPTOR *current;
+    SECURITY_DESCRIPTOR *mod = modification;
+    PSID owner, group;
+    ACL *dacl = NULL, *sacl = NULL;
+    BOOLEAN present = FALSE, defaulted = FALSE;
+    ULONG size, offset, component_size;
+    NTSTATUS status;
+    BYTE *buffer;
+
+    TRACE("%#lx,%p,%p,%p,%p\n", info, modification, object, mapping, token);
+
+    if (info != DACL_SECURITY_INFORMATION) return STATUS_NOT_SUPPORTED;
+    if (!object || !(current = *object)) return STATUS_INVALID_SECURITY_DESCR;
+    if (!modification || !mapping) return STATUS_INVALID_PARAMETER;
+    if (!RtlValidSecurityDescriptor( current )) return STATUS_INVALID_SECURITY_DESCR;
+
+    memset( &combined, 0, sizeof(combined) );
+    combined.Revision = SECURITY_DESCRIPTOR_REVISION;
+
+    if ((status = RtlGetOwnerSecurityDescriptor( current, &owner, &defaulted ))) return status;
+    if (!owner || !RtlValidSid( owner )) return STATUS_INVALID_OWNER;
+    combined.Owner = owner;
+    if (defaulted) combined.Control |= SE_OWNER_DEFAULTED;
+
+    if ((status = RtlGetGroupSecurityDescriptor( current, &group, &defaulted ))) return status;
+    if (!group || !RtlValidSid( group )) return STATUS_INVALID_PRIMARY_GROUP;
+    combined.Group = group;
+    if (defaulted) combined.Control |= SE_GROUP_DEFAULTED;
+
+    if ((status = RtlGetDaclSecurityDescriptor( modification, &present, &dacl, &defaulted ))) return status;
+    if (!present) return STATUS_NOT_SUPPORTED;
+    if ((status = validate_security_object_dacl( dacl ))) return status;
+    combined.Dacl = dacl;
+    combined.Control |= SE_DACL_PRESENT | (mod->Control & SE_DACL_PROTECTED);
+
+    present = defaulted = FALSE;
+    if ((status = RtlGetSaclSecurityDescriptor( current, &present, &sacl, &defaulted ))) return status;
+    if (present)
+    {
+        combined.Sacl = sacl;
+        combined.Control |= current->Control & preserved_sacl_control;
+    }
+
+    size = sizeof(*relative);
+    if (sacl) size += align_security_descriptor_size( sacl->AclSize );
+    if (dacl) size += align_security_descriptor_size( dacl->AclSize );
+    size += align_security_descriptor_size( RtlLengthSid( owner ) );
+    size += align_security_descriptor_size( RtlLengthSid( group ) );
+
+    if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
+    memset( buffer, 0, size );
+    relative = (SECURITY_DESCRIPTOR_RELATIVE *)buffer;
+    relative->Revision = SECURITY_DESCRIPTOR_REVISION;
+    relative->Control = combined.Control | SE_SELF_RELATIVE;
+    offset = sizeof(*relative);
+
+    if (sacl)
+    {
+        relative->Sacl = offset;
+        memcpy( buffer + offset, sacl, sacl->AclSize );
+        offset += align_security_descriptor_size( sacl->AclSize );
+    }
+    if (dacl)
+    {
+        relative->Dacl = offset;
+        memcpy( buffer + offset, dacl, dacl->AclSize );
+        offset += align_security_descriptor_size( dacl->AclSize );
+    }
+
+    relative->Owner = offset;
+    component_size = RtlLengthSid( owner );
+    memcpy( buffer + offset, owner, component_size );
+    offset += align_security_descriptor_size( component_size );
+
+    relative->Group = offset;
+    component_size = RtlLengthSid( group );
+    memcpy( buffer + offset, group, component_size );
+
+    map_security_object_dacl( relative, mapping );
+    RtlFreeHeap( GetProcessHeap(), 0, current );
+    *object = (PSECURITY_DESCRIPTOR)relative;
+    return STATUS_SUCCESS;
+}
+
 /******************************************************************************
  *  RtlDeleteSecurityObject		[NTDLL.@]
  */
@@ -1565,6 +1948,28 @@ NTSTATUS WINAPI RtlGetAce(PACL pAcl,DWORD dwAceIndex,LPVOID *pAce )
 	return STATUS_SUCCESS;
 }
 
+/******************************************************************************
+ *  RtlGetAcesBufferSize                              [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlGetAcesBufferSize( PACL acl, ULONG *size )
+{
+    ACE_HEADER *ace;
+    ULONG i, total = 0;
+
+    TRACE( "(%p,%p)\n", acl, size );
+
+    if (!acl || !size) return STATUS_INVALID_PARAMETER;
+
+    ace = (ACE_HEADER *)(acl + 1);
+    for (i = 0; i < acl->AceCount; i++)
+    {
+        total += ace->AceSize;
+        ace = (ACE_HEADER *)((BYTE *)ace + ace->AceSize);
+    }
+    *size = total;
+    return STATUS_SUCCESS;
+}
+
 /*************************************************************************
  * RtlAreAllAccessesGranted   [NTDLL.@]
  */
@@ -1852,20 +2257,23 @@ done:
 }
 
 /******************************************************************************
- *  RtlImpersonateSelf		[NTDLL.@]
+ *  RtlImpersonateSelfEx		[NTDLL.@]
  *
  * Makes an impersonation token that represents the process user and assigns
  * to the current thread.
  *
  * PARAMS
  *  ImpersonationLevel [I] Level at which to impersonate.
+ *  AdditionalAccess   [I] Additional access rights for the returned token.
+ *  ThreadToken        [O] Optional returned token handle.
  *
  * RETURNS
  *  Success: STATUS_SUCCESS.
  *  Failure: NTSTATUS code.
  */
 NTSTATUS WINAPI
-RtlImpersonateSelf(SECURITY_IMPERSONATION_LEVEL ImpersonationLevel)
+RtlImpersonateSelfEx( SECURITY_IMPERSONATION_LEVEL ImpersonationLevel,
+                      ACCESS_MASK AdditionalAccess, HANDLE *ThreadToken )
 {
     SECURITY_QUALITY_OF_SERVICE qos;
     NTSTATUS Status;
@@ -1873,7 +2281,9 @@ RtlImpersonateSelf(SECURITY_IMPERSONATION_LEVEL ImpersonationLevel)
     HANDLE ProcessToken;
     HANDLE ImpersonationToken;
 
-    TRACE("(%08x)\n", ImpersonationLevel);
+    TRACE("(%08x, %08x, %p)\n", ImpersonationLevel, AdditionalAccess, ThreadToken);
+
+    if (!ThreadToken && AdditionalAccess) return STATUS_INVALID_PARAMETER_2;
 
     Status = NtOpenProcessToken( NtCurrentProcess(), TOKEN_DUPLICATE,
                                  &ProcessToken);
@@ -1887,7 +2297,7 @@ RtlImpersonateSelf(SECURITY_IMPERSONATION_LEVEL ImpersonationLevel)
     InitializeObjectAttributes( &attr, NULL, 0, NULL, NULL );
     attr.SecurityQualityOfService = &qos;
 
-    Status = NtDuplicateToken( ProcessToken, TOKEN_IMPERSONATE, &attr, FALSE,
+    Status = NtDuplicateToken( ProcessToken, TOKEN_IMPERSONATE | AdditionalAccess, &attr, FALSE,
                                TokenImpersonation, &ImpersonationToken );
     if (Status != STATUS_SUCCESS)
     {
@@ -1900,10 +2310,21 @@ RtlImpersonateSelf(SECURITY_IMPERSONATION_LEVEL ImpersonationLevel)
                                      &ImpersonationToken,
                                      sizeof(ImpersonationToken) );
 
-    NtClose( ImpersonationToken );
+    if (Status || !ThreadToken)
+        NtClose( ImpersonationToken );
+    else
+        *ThreadToken = ImpersonationToken;
     NtClose( ProcessToken );
 
     return Status;
+}
+
+/******************************************************************************
+ *  RtlImpersonateSelf		[NTDLL.@]
+ */
+NTSTATUS WINAPI RtlImpersonateSelf( SECURITY_IMPERSONATION_LEVEL ImpersonationLevel )
+{
+    return RtlImpersonateSelfEx( ImpersonationLevel, 0, NULL );
 }
 
 
@@ -2100,5 +2521,110 @@ NTSTATUS WINAPI RtlDeriveCapabilitySidsFromName( UNICODE_STRING *cap_name, PSID 
     sid->SubAuthority[0] = SECURITY_BUILTIN_DOMAIN_RID;
     memcpy( sid->SubAuthority + 1, hash, sizeof(hash) );
 
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ * RtlCheckTokenCapability (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlCheckTokenCapability( HANDLE token, PSID capability_sid, BOOLEAN *has_capability )
+{
+    TOKEN_GROUPS *groups;
+    NTSTATUS status;
+    ULONG size, i;
+
+    TRACE( "token %p, capability_sid %p, has_capability %p.\n",
+           token, capability_sid, has_capability );
+
+    if (!has_capability) return STATUS_ACCESS_VIOLATION;
+    *has_capability = FALSE;
+    if (!RtlValidSid( capability_sid )) return STATUS_INVALID_SID;
+
+    if (!token) token = GetCurrentThreadEffectiveToken();
+    status = NtQueryInformationToken( token, TokenGroups, NULL, 0, &size );
+    if (status != STATUS_BUFFER_TOO_SMALL) return status;
+    if (!(groups = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
+
+    status = NtQueryInformationToken( token, TokenGroups, groups, size, &size );
+    if (!status)
+    {
+        for (i = 0; i < groups->GroupCount; ++i)
+        {
+            if ((groups->Groups[i].Attributes & SE_GROUP_ENABLED) &&
+                RtlEqualSid( groups->Groups[i].Sid, capability_sid ))
+            {
+                *has_capability = TRUE;
+                break;
+            }
+        }
+    }
+
+    RtlFreeHeap( GetProcessHeap(), 0, groups );
+    return status;
+}
+
+/***********************************************************************
+ *             RtlGetAppContainerSidType  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlGetAppContainerSidType( PSID sid_ptr, ULONG *type )
+{
+    static const SID_IDENTIFIER_AUTHORITY authority = { SECURITY_APP_PACKAGE_AUTHORITY };
+    SID *sid = sid_ptr;
+
+    if (sid->Revision != SID_REVISION || sid->SubAuthorityCount < 2 ||
+        memcmp( &sid->IdentifierAuthority, &authority, sizeof(authority) ) ||
+        sid->SubAuthority[0] != SECURITY_APP_PACKAGE_BASE_RID)
+    {
+        *type = 0;
+        return STATUS_NOT_APPCONTAINER;
+    }
+
+    if (sid->SubAuthorityCount == 12)
+    {
+        *type = 1;
+        return STATUS_SUCCESS;
+    }
+    if (sid->SubAuthorityCount == 8)
+    {
+        *type = 2;
+        return STATUS_SUCCESS;
+    }
+
+    *type = 3;
+    return STATUS_NOT_APPCONTAINER;
+}
+
+/***********************************************************************
+ *             RtlGetAppContainerNamedObjectPath  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlGetAppContainerNamedObjectPath( HANDLE token, PSID appcontainer_sid,
+                                                    BOOLEAN relative_path, UNICODE_STRING *path )
+{
+    DWORD is_appcontainer;
+    NTSTATUS status;
+
+    TRACE( "(%p,%p,%u,%p)\n", token, appcontainer_sid, relative_path, path );
+
+    if (!path) return STATUS_INVALID_PARAMETER;
+    if (token && appcontainer_sid) return STATUS_INVALID_PARAMETER_MIX;
+
+    if (appcontainer_sid)
+    {
+        FIXME( "AppContainer named-object paths are not supported.\n" );
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    if (!token) token = GetCurrentThreadEffectiveToken();
+    status = NtQueryInformationToken( token, TokenIsAppContainer, &is_appcontainer,
+                                      sizeof(is_appcontainer), NULL );
+    if (status) return status;
+
+    if (is_appcontainer)
+    {
+        FIXME( "AppContainer named-object paths are not supported.\n" );
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    memset( path, 0, sizeof(*path) );
     return STATUS_SUCCESS;
 }

@@ -597,7 +597,8 @@ static void start_sigkill_timer( struct process *process )
 struct process *create_process( int fd, struct process *parent, unsigned int flags,
                                 const struct startup_info_data *info,
                                 const struct security_descriptor *sd, const obj_handle_t *handles,
-                                unsigned int handle_count, struct token *token, int session_id )
+                                unsigned int handle_count, struct token *token, int session_id,
+                                int preserve_trust )
 {
     struct process *process;
 
@@ -627,6 +628,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->base_priority   = 8;
     process->disable_boost   = 0;
     process->handle_checking_mode = 0;
+    process->native_session_owner = 0;
     process->subsystem_process = 0;
     process->critical        = 0;
     process->protection      = 0;
@@ -702,10 +704,11 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
             process->handles = alloc_handle_table( process, 0 );
         /* Note: for security reasons, starting a new process does not attempt
          * to use the current impersonation token for the new process */
-        /* Native-machine startup children keep the trust carried by their
-         * authenticated parent token. The sealed initial process is the root
-         * of that chain; ordinary Wine process creation still strips trust. */
-        if (is_native_machine())
+        /* Process trust crosses only an admitted native-startup boundary or
+         * an explicitly protected creation. Native-machine mode alone must
+         * not trust ordinary children. Protected-process requests are
+         * validated below. */
+        if (preserve_trust || (flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS))
             process->token = token_duplicate( token ? token : parent->token, TRUE, 0,
                                               NULL, NULL, 0, NULL, 0 );
         else
@@ -739,7 +742,7 @@ int init_native_bootstrap( int socket, int image, int pid )
     struct process *process;
     struct thread *thread;
 
-    if (!(process = create_process( socket, NULL, 0, NULL, NULL, NULL, 0, NULL, -1 )))
+    if (!(process = create_process( socket, NULL, 0, NULL, NULL, NULL, 0, NULL, -1, 0 )))
     {
         close( image );
         return 0;
@@ -969,10 +972,59 @@ struct process *get_process_from_handle( obj_handle_t handle, unsigned int acces
                                              access, &process_ops );
 }
 
+static void debug_process_exit( const char *event, struct process *process, int exit_code,
+                                process_id_t requester )
+{
+    data_size_t i;
+
+    if (!getenv( "LINUXNT_DEBUG_PROCESS_EXITS" )) return;
+    fprintf( stderr, "linuxnt: server %s winpid=%04x unix=%d status=%#x requester=%04x image=",
+             event, process->id, process->unix_pid, exit_code, requester );
+    for (i = 0; i < process->imagelen / sizeof(WCHAR); i++)
+    {
+        WCHAR ch = process->image[i];
+        fputc( ch >= 0x20 && ch < 0x7f ? ch : '?', stderr );
+    }
+    fputc( '\n', stderr );
+}
+
 /* terminate a process with the given exit code */
 static void terminate_process( struct process *process, struct thread *skip, int exit_code )
 {
+    static const char svchost_name[] = "svchost.exe";
+    static unsigned int svchost_exit_count;
+    const char *delay_svchost_exit = getenv( "LINUXNT_DEBUG_DELAY_SVCHOST_EXIT" );
+    const char *delay_svchost_seconds = getenv( "LINUXNT_DEBUG_DELAY_SVCHOST_EXIT_SECONDS" );
+    unsigned int delay_seconds = 10;
     struct thread *thread;
+    data_size_t i;
+
+    if (delay_svchost_seconds && atoi( delay_svchost_seconds ) > 0)
+        delay_seconds = min( atoi( delay_svchost_seconds ), 60 );
+
+    debug_process_exit( "terminating", process, exit_code, current ? current->process->id : 0 );
+
+    if (delay_svchost_exit &&
+        process->imagelen / sizeof(WCHAR) >= sizeof(svchost_name) - 1)
+    {
+        data_size_t start = process->imagelen / sizeof(WCHAR) - (sizeof(svchost_name) - 1);
+        for (i = 0; i < sizeof(svchost_name) - 1; i++)
+        {
+            WCHAR ch = process->image[start + i];
+            if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+            if (ch != svchost_name[i]) break;
+        }
+        if (i == sizeof(svchost_name) - 1)
+        {
+            svchost_exit_count++;
+            if (!atoi( delay_svchost_exit ) || svchost_exit_count == atoi( delay_svchost_exit ))
+            {
+                fprintf( stderr, "linuxnt: delaying svchost.exe unix=%d for %u seconds before termination\n",
+                         process->unix_pid, delay_seconds );
+                usleep( delay_seconds * 1000000 );
+            }
+        }
+    }
 
     grab_object( process );  /* make sure it doesn't get freed when threads die */
     process->is_terminating = 1;
@@ -1079,6 +1131,7 @@ void remove_process_thread( struct process *process, struct thread *thread )
     {
         /* we have removed the last running thread, exit the process */
         process->exit_code = thread->exit_code;
+        debug_process_exit( "process-exited", process, process->exit_code, 0 );
         generate_debug_event( thread, DbgExitProcessStateChange, process );
         list_remove( &process->entry );
         process_killed( process );
@@ -1208,6 +1261,8 @@ DECL_HANDLER(new_process)
     const obj_handle_t *job_handles = NULL;
     unsigned int i, job_handle_count;
     int native_session_id = -1;
+    int native_session_owner = 0;
+    int preserve_trust = 0;
     struct job *job;
 
     if (socket_fd == -1)
@@ -1249,14 +1304,17 @@ DECL_HANDLER(new_process)
 
     if (req->native_session)
     {
-        if (parent != current->process || !parent->native_bootstrap_pid)
+        if (parent == current->process && parent->native_bootstrap_pid &&
+            (req->flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES))
         {
-            set_error( STATUS_ACCESS_DENIED );
-            close( socket_fd );
-            release_object( parent );
-            return;
+            native_session_id = next_native_session_id;
+            native_session_owner = 1;
+            preserve_trust = 1;
         }
-        native_session_id = next_native_session_id;
+        else if (parent == current->process && parent->native_session_owner)
+        {
+            preserve_trust = 1;
+        }
     }
 
     /* If a job further in the job chain does not permit breakaway process creation
@@ -1381,13 +1439,14 @@ DECL_HANDLER(new_process)
 
     if (!(process = create_process( socket_fd, parent, req->flags, info->data, params.sd,
                                     handles, req->handles_size / sizeof(*handles), token,
-                                    native_session_id )))
+                                    native_session_id, preserve_trust )))
         goto done;
+    process->native_session_owner = native_session_owner;
     if (req->flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS)
     {
         if (!is_native_machine() ||
             !equal_sid( token_get_user( process->token ), &local_system_sid ) ||
-            (req->protection != 0x61 && req->protection != 0x41))
+            (req->protection != 0x61 && req->protection != 0x51 && req->protection != 0x41))
         {
             set_error( STATUS_ACCESS_DENIED );
             goto done;
@@ -1583,11 +1642,24 @@ DECL_HANDLER(init_process_done)
 /* open a handle to a process */
 DECL_HANDLER(open_process)
 {
+    struct luid_attr debug = { SeDebugPrivilege, SE_PRIVILEGE_ENABLED };
     struct process *process = get_process_from_id( req->pid );
+    struct token *token = current->token ? current->token : current->process->token;
     reply->handle = 0;
     if (process)
     {
-        reply->handle = alloc_handle( current->process, process, req->access, req->attributes );
+        if (token_check_privileges( token, TRUE, &debug, 1, NULL ))
+        {
+            unsigned int access = map_obj_access( &process->obj, req->access );
+
+            /* SeDebugPrivilege bypasses the process DACL, but not the
+             * protected-process access ceiling enforced by process_check_access(). */
+            if (!access) set_error( STATUS_ACCESS_DENIED );
+            else if (process_check_access( &process->obj, token, &access ))
+                reply->handle = alloc_handle_no_access_check( current->process, process,
+                                                              access, req->attributes );
+        }
+        else reply->handle = alloc_handle( current->process, process, req->access, req->attributes );
         release_object( process );
     }
 }

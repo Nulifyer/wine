@@ -75,6 +75,7 @@ extern int token_check_privileges( struct token *token, int all_required,
                                    unsigned int count, struct luid_attr *usedprivs );
 extern struct token *token_duplicate_for_unprotected_process( struct token *source );
 extern struct token *token_duplicate_impersonation( struct token *token, int level, int effective_only );
+extern void token_get_identity( struct token *token, struct token_identity *identity );
 extern const struct acl *token_get_default_dacl( struct token *token );
 extern const struct sid *token_get_owner( struct token *token );
 extern const struct sid *token_get_user( struct token *token );
@@ -147,7 +148,8 @@ static inline int thread_single_check_privilege( struct thread *thread, struct l
 
 extern int sd_is_valid( const struct security_descriptor *sd, data_size_t size );
 extern struct acl *extract_security_labels( const struct acl *sacl, unsigned int info );
-extern struct acl *replace_security_labels( const struct acl *old_sacl, const struct acl *new_sacl );
+extern struct acl *replace_security_labels( const struct acl *old_sacl, const struct acl *new_sacl,
+                                            unsigned int info );
 
 /* gets the discretionary access control list from a security descriptor */
 static inline const struct acl *sd_get_dacl( const struct security_descriptor *sd, int *present )

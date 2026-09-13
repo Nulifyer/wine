@@ -23,6 +23,8 @@
 #include <winternl.h>
 #include <ntstatus.h>
 #include "wine/debug.h"
+#include "wine/alpc.h"
+#include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(alpc);
 
@@ -90,55 +92,91 @@ NTSTATUS WINAPI RtlSendMsgToSm( HANDLE connection_handle, ALPC_PORT_MESSAGE *mes
     return *(NTSTATUS *)((BYTE *)message + 0x2c);
 }
 
+/***********************************************************************
+ *           NtAlpcConnectPortEx    (NTDLL.@)
+ *
+ * The extended entry point names the connection port through object
+ * attributes.  Wine's existing connection owner takes the same lookup
+ * attributes separately from the name, so the security-neutral subset can
+ * be adapted without adding a second ALPC connection implementation.
+ */
+NTSTATUS WINAPI NtAlpcConnectPortEx( HANDLE *port_handle,
+                                     OBJECT_ATTRIBUTES *connection_port_attributes,
+                                     OBJECT_ATTRIBUTES *client_port_attributes,
+                                     ALPC_PORT_ATTRIBUTES *port_attributes, ULONG flags,
+                                     SECURITY_DESCRIPTOR *server_security_requirements,
+                                     ALPC_PORT_MESSAGE *connection_message, SIZE_T *buffer_length,
+                                     ALPC_MESSAGE_ATTRIBUTES *out_message_attributes,
+                                     ALPC_MESSAGE_ATTRIBUTES *in_message_attributes,
+                                     LARGE_INTEGER *timeout )
+{
+    OBJECT_ATTRIBUTES lookup_attributes;
+
+    TRACE( "%p %p %p %p %#lx %p %p %p %p %p %p\n", port_handle,
+           connection_port_attributes, client_port_attributes, port_attributes, flags,
+           server_security_requirements, connection_message, buffer_length,
+           out_message_attributes, in_message_attributes, timeout );
+
+    if (!port_handle || !connection_port_attributes) return STATUS_ACCESS_VIOLATION;
+    if (connection_port_attributes->Length != sizeof(*connection_port_attributes) ||
+        !connection_port_attributes->ObjectName)
+        return STATUS_INVALID_PARAMETER;
+
+    /* The current server does not yet model client-port object attributes or
+     * server security-descriptor authorization.  Do not silently discard
+     * either contract. */
+    if (client_port_attributes || server_security_requirements) return STATUS_NOT_IMPLEMENTED;
+
+    lookup_attributes = *connection_port_attributes;
+    lookup_attributes.ObjectName = NULL;
+    return NtAlpcConnectPort( port_handle, connection_port_attributes->ObjectName,
+                              &lookup_attributes, port_attributes, flags, NULL,
+                              connection_message, buffer_length, out_message_attributes,
+                              in_message_attributes, timeout );
+}
+
+/***********************************************************************
+ *           NtAlpcQueryInformation    (NTDLL.@)
+ */
+NTSTATUS WINAPI NtAlpcQueryInformation( HANDLE port_handle, ULONG information_class,
+                                        void *information, ULONG length, ULONG *return_length )
+{
+    ALPC_BASIC_INFORMATION *basic = information;
+    NTSTATUS status;
+
+    TRACE( "%p %lu %p %lu %p\n", port_handle, information_class, information,
+           length, return_length );
+
+    if (information_class) return STATUS_INVALID_INFO_CLASS;
+    if (return_length) *return_length = sizeof(*basic);
+    if (length < sizeof(*basic)) return STATUS_INFO_LENGTH_MISMATCH;
+    if (!basic) return STATUS_ACCESS_VIOLATION;
+
+    SERVER_START_REQ( alpc_query_information )
+    {
+        req->handle = wine_server_obj_handle( port_handle );
+        if (!(status = wine_server_call( req )))
+        {
+            basic->Flags = reply->flags;
+            basic->SequenceNo = reply->sequence;
+            basic->PortContext = wine_server_get_ptr( reply->context );
+        }
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 SIZE_T WINAPI AlpcGetHeaderSize(ULONG attribute_flags)
 {
-    static const struct
-    {
-        ULONG attribute;
-        SIZE_T size;
-    } attribute_sizes[] =
-    {
-        /* Attribute with a higher bit is stored before that with a lower bit */
-        {ALPC_MESSAGE_SECURITY_ATTRIBUTE, sizeof(ALPC_SECURITY_ATTR)},
-        {ALPC_MESSAGE_VIEW_ATTRIBUTE, sizeof(ALPC_VIEW_ATTR)},
-        {ALPC_MESSAGE_CONTEXT_ATTRIBUTE, sizeof(ALPC_CONTEXT_ATTR)},
-        {ALPC_MESSAGE_HANDLE_ATTRIBUTE, sizeof(ALPC_HANDLE_ATTR)},
-        {ALPC_MESSAGE_TOKEN_ATTRIBUTE, sizeof(ALPC_TOKEN_ATTR)},
-        {ALPC_MESSAGE_DIRECT_ATTRIBUTE, sizeof(ALPC_DIRECT_ATTR)},
-        {ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE, sizeof(ALPC_WORK_ON_BEHALF_ATTR)},
-    };
-    unsigned int i;
-    SIZE_T size;
-
     TRACE("%#lx.\n", attribute_flags);
-
-    size = sizeof(ALPC_MESSAGE_ATTRIBUTES);
-    for (i = 0; i < ARRAY_SIZE(attribute_sizes); i++)
-    {
-        if (attribute_flags & attribute_sizes[i].attribute)
-            size += attribute_sizes[i].size;
-    }
-
-    return size;
+    return wine_alpc_get_header_size( attribute_flags );
 }
 
 void * WINAPI AlpcGetMessageAttribute(ALPC_MESSAGE_ATTRIBUTES *attributes, ULONG attribute_flag)
 {
     TRACE("%p, %lx.\n", attributes, attribute_flag);
 
-    /* If no flag is specified */
-    if (!attribute_flag)
-        return NULL;
-
-    /* If more than one flag is specified */
-    if (attribute_flag & (attribute_flag - 1))
-        return NULL;
-
-    /* If the specified flag is not in allocated attributes */
-    if ((attribute_flag & attributes->AllocatedAttributes & ALPC_MESSAGE_ATTRIBUTE_ALL) != attribute_flag)
-        return NULL;
-
-    return (unsigned char *)attributes + AlpcGetHeaderSize(attributes->AllocatedAttributes & ~(attribute_flag | (attribute_flag - 1)));
+    return wine_alpc_get_attribute( attributes, attribute_flag );
 }
 
 NTSTATUS WINAPI AlpcInitializeMessageAttribute(ULONG attribute_flags, ALPC_MESSAGE_ATTRIBUTES *buffer,

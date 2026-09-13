@@ -2,6 +2,7 @@ TESTDLL   = ntdll.dll
 IMPORTS   = user32 advapi32
 
 SOURCES = \
+	access_audit.c \
 	alpc.c \
 	atom.c \
 	boot_status.c \
@@ -12,6 +13,7 @@ SOURCES = \
 	environment_var.c \
 	error.c \
 	exception.c \
+	feature.c \
 	file.c \
 	generated.c \
 	hash_table.c \
@@ -32,8 +34,10 @@ SOURCES = \
 	rtlstr.c \
 	service_session.c \
 	string.c \
+	switchback.c \
 	system_root.c \
 	sync.c \
+	token.c \
 	testdll.c \
 	testdll.spec \
 	thread.c \

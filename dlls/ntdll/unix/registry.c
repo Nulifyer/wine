@@ -26,7 +26,9 @@
 #endif
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "ntstatus.h"
 #include "winternl.h"
@@ -89,6 +91,9 @@ NTSTATUS WINAPI NtInitializeRegistry( BOOLEAN boot_condition )
 NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
                              ULONG index, const UNICODE_STRING *class, ULONG options, ULONG *dispos )
 {
+    static const WCHAR securityW[] =
+        {'\\','R','e','g','i','s','t','r','y','\\','M','a','c','h','i','n','e','\\',
+         'S','e','c','u','r','i','t','y'};
     unsigned int ret;
     data_size_t len;
     struct object_attributes *objattr;
@@ -112,6 +117,11 @@ NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
         *key = wine_server_ptr_handle( reply->hkey );
     }
     SERVER_END_REQ;
+
+    if ((ret == STATUS_SUCCESS || ret == STATUS_OBJECT_NAME_EXISTS) && access == 0x2001d &&
+        attr->ObjectName->Length == sizeof(securityW) &&
+        !memcmp( attr->ObjectName->Buffer, securityW, sizeof(securityW) ) &&
+        getenv( "LINUXNT_DEBUG_DELAY_SAM_CREATE" )) sleep( 15 );
 
     if (ret == STATUS_OBJECT_NAME_EXISTS)
     {
@@ -147,6 +157,9 @@ NTSTATUS WINAPI NtCreateKeyTransacted( HANDLE *key, ACCESS_MASK access, const OB
  */
 NTSTATUS WINAPI NtOpenKeyEx( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr, ULONG options )
 {
+    static const WCHAR security_samW[] =
+        {'\\','R','e','g','i','s','t','r','y','\\','M','a','c','h','i','n','e','\\',
+         'S','e','c','u','r','i','t','y','\\','S','A','M'};
     unsigned int ret;
     ULONG attributes;
 
@@ -170,6 +183,11 @@ NTSTATUS WINAPI NtOpenKeyEx( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
         *key = wine_server_ptr_handle( reply->hkey );
     }
     SERVER_END_REQ;
+
+    if (ret == STATUS_SUCCESS && attr->ObjectName->Length == sizeof(security_samW) &&
+        !memcmp( attr->ObjectName->Buffer, security_samW, sizeof(security_samW) ) &&
+        getenv( "LINUXNT_DEBUG_DELAY_SAM_OPEN" )) sleep( 15 );
+
     TRACE("<- %p\n", *key);
     return ret;
 }
@@ -519,7 +537,8 @@ NTSTATUS WINAPI NtEnumerateValueKey( HANDLE handle, ULONG index, KEY_VALUE_INFOR
             copy_key_value_info( info_class, info, length, reply->type, reply->namelen,
                                  wine_server_reply_size(reply) - reply->namelen );
             *result_len = fixed_size + reply->total;
-            if (length < *result_len) ret = STATUS_BUFFER_OVERFLOW;
+            if (length < fixed_size) ret = STATUS_BUFFER_TOO_SMALL;
+            else if (length < *result_len) ret = STATUS_BUFFER_OVERFLOW;
         }
     }
     SERVER_END_REQ;

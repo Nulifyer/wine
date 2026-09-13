@@ -88,6 +88,9 @@ struct directory
     struct object     obj;        /* object header */
     struct namespace *entries;    /* directory's name space */
     unsigned int      native_session_initialized : 1;
+    unsigned int      session_sequence;
+    timeout_t         session_timestamp;
+    unsigned int      session_state;
 };
 
 struct directory_init_data
@@ -176,6 +179,9 @@ static bool directory_init( struct object *obj, const void *init_data )
     const struct directory_init_data *data = init_data;
 
     dir->native_session_initialized = 0;
+    dir->session_sequence = 0;
+    dir->session_timestamp = 0;
+    dir->session_state = 0;
     return !!(dir->entries = create_namespace( data->hash_size ));
 }
 
@@ -350,18 +356,26 @@ void init_directories( struct fd *intl_fd )
     /* Directories */
     static const WCHAR dir_globalW[] = {'?','?'};
     static const WCHAR dir_driverW[] = {'D','r','i','v','e','r'};
+    static const WCHAR dir_driver_storeW[] = {'D','r','i','v','e','r','S','t','o','r','e'};
+    static const WCHAR dir_driver_store_nodesW[] = {'N','o','d','e','s'};
     static const WCHAR dir_deviceW[] = {'D','e','v','i','c','e'};
     static const WCHAR dir_objtypeW[] = {'O','b','j','e','c','t','T','y','p','e','s'};
     static const WCHAR dir_kernelW[] = {'K','e','r','n','e','l','O','b','j','e','c','t','s'};
     static const WCHAR dir_nlsW[] = {'N','L','S'};
     static const WCHAR dir_securityW[] = {'S','e','c','u','r','i','t','y'};
+    static const WCHAR dir_umdf_portsW[] =
+        {'U','M','D','F','C','o','m','m','u','n','i','c','a','t','i','o','n','P','o','r','t','s'};
     static const struct unicode_str dir_global_str = {dir_globalW, sizeof(dir_globalW)};
     static const struct unicode_str dir_driver_str = {dir_driverW, sizeof(dir_driverW)};
+    static const struct unicode_str dir_driver_store_str = {dir_driver_storeW, sizeof(dir_driver_storeW)};
+    static const struct unicode_str dir_driver_store_nodes_str = {dir_driver_store_nodesW,
+                                                                   sizeof(dir_driver_store_nodesW)};
     static const struct unicode_str dir_device_str = {dir_deviceW, sizeof(dir_deviceW)};
     static const struct unicode_str dir_objtype_str = {dir_objtypeW, sizeof(dir_objtypeW)};
     static const struct unicode_str dir_kernel_str = {dir_kernelW, sizeof(dir_kernelW)};
     static const struct unicode_str dir_nls_str = {dir_nlsW, sizeof(dir_nlsW)};
     static const struct unicode_str dir_security_str = {dir_securityW, sizeof(dir_securityW)};
+    static const struct unicode_str dir_umdf_ports_str = {dir_umdf_portsW, sizeof(dir_umdf_portsW)};
 
     /* symlinks */
     static const WCHAR link_dosdevW[] = {'D','o','s','D','e','v','i','c','e','s'};
@@ -397,11 +411,13 @@ void init_directories( struct fd *intl_fd )
     static const WCHAR mailslotW[] = {'M','a','i','l','S','l','o','t'};
     static const WCHAR condrvW[] = {'C','o','n','D','r','v'};
     static const WCHAR nullW[] = {'N','u','l','l'};
+    static const WCHAR ksecddW[] = {'K','s','e','c','D','D'};
     static const WCHAR afdW[] = {'A','f','d'};
     static const struct unicode_str named_pipe_str = {named_pipeW, sizeof(named_pipeW)};
     static const struct unicode_str mailslot_str = {mailslotW, sizeof(mailslotW)};
     static const struct unicode_str condrv_str = {condrvW, sizeof(condrvW)};
     static const struct unicode_str null_str = {nullW, sizeof(nullW)};
+    static const struct unicode_str ksecdd_str = {ksecddW, sizeof(ksecddW)};
     static const struct unicode_str afd_str = {afdW, sizeof(afdW)};
 
     /* events */
@@ -438,24 +454,32 @@ void init_directories( struct fd *intl_fd )
     static const struct unicode_str user_data_str = {user_dataW, sizeof(user_dataW)};
     static const struct unicode_str session_str = {sessionW, sizeof(sessionW)};
 
-    struct directory *dir_driver, *dir_device, *dir_global, *dir_kernel, *dir_nls, *dir_security;
+    struct directory *dir_driver, *dir_driver_store, *dir_driver_store_nodes;
+    struct directory *dir_device, *dir_global, *dir_kernel, *dir_nls, *dir_security, *dir_umdf_ports;
     struct object *named_pipe_device, *mailslot_device, *null_device, *atom_table;
     struct mapping *session_mapping;
     unsigned int i;
 
     root_directory = create_directory( NULL, empty_str, OBJ_PERMANENT, HASH_SIZE, NULL );
     dir_driver     = create_directory( &root_directory->obj, dir_driver_str, OBJ_PERMANENT, HASH_SIZE, NULL );
+    dir_driver_store = create_directory( &root_directory->obj, dir_driver_store_str,
+                                         OBJ_PERMANENT, HASH_SIZE, NULL );
+    dir_driver_store_nodes = create_directory( &dir_driver_store->obj, dir_driver_store_nodes_str,
+                                               OBJ_PERMANENT, HASH_SIZE, NULL );
     dir_device     = create_directory( &root_directory->obj, dir_device_str, OBJ_PERMANENT, HASH_SIZE, NULL );
     dir_objtype    = create_directory( &root_directory->obj, dir_objtype_str, OBJ_PERMANENT, HASH_SIZE, NULL );
     dir_kernel     = create_directory( &root_directory->obj, dir_kernel_str, OBJ_PERMANENT, HASH_SIZE, NULL );
     dir_global     = create_directory( &root_directory->obj, dir_global_str, OBJ_PERMANENT, HASH_SIZE, NULL );
     dir_nls        = create_directory( &root_directory->obj, dir_nls_str, OBJ_PERMANENT, HASH_SIZE, NULL );
     dir_security   = create_directory( &root_directory->obj, dir_security_str, OBJ_PERMANENT, HASH_SIZE, NULL );
+    dir_umdf_ports = create_directory( &root_directory->obj, dir_umdf_ports_str,
+                                       OBJ_PERMANENT, HASH_SIZE, NULL );
 
     /* devices */
     named_pipe_device = create_named_pipe_device( &dir_device->obj, named_pipe_str, OBJ_PERMANENT, NULL );
     mailslot_device   = create_mailslot_device( &dir_device->obj, mailslot_str, OBJ_PERMANENT, NULL );
     null_device       = create_unix_device( &dir_device->obj, null_str, OBJ_PERMANENT, NULL, "/dev/null" );
+    release_object( create_ksec_device( &dir_device->obj, ksecdd_str, OBJ_PERMANENT, NULL ));
     release_object( create_console_device( &dir_device->obj, condrv_str, OBJ_PERMANENT, NULL ));
     release_object( create_socket_device( &dir_device->obj, afd_str, OBJ_PERMANENT, NULL ));
 
@@ -511,11 +535,14 @@ void init_directories( struct fd *intl_fd )
     release_object( null_device );
     release_object( root_directory );
     release_object( dir_driver );
+    release_object( dir_driver_store_nodes );
+    release_object( dir_driver_store );
     release_object( dir_device );
     release_object( dir_objtype );
     release_object( dir_kernel );
     release_object( dir_nls );
     release_object( dir_security );
+    release_object( dir_umdf_ports );
     release_object( dir_global );
 }
 
@@ -549,6 +576,13 @@ static int is_current_session_directory( const struct directory *dir )
     for (i = 0; i < len; ++i)
         if (name->name[i] != id[i]) return 0;
     return 1;
+}
+
+static int is_session_directory( const struct directory *dir )
+{
+    const struct object_name *name = dir->obj.name;
+
+    return name && name->parent == &dir_sessions->obj;
 }
 
 static void unlink_precreated_session_directory( struct directory *parent,
@@ -590,6 +624,29 @@ DECL_HANDLER(set_session_object)
             unlink_precreated_session_directory( dir, bnoW, sizeof(bnoW) );
             unlink_precreated_session_directory( dir, windowsW, sizeof(windowsW) );
         }
+    }
+    release_object( dir );
+}
+
+DECL_HANDLER(notify_change_session)
+{
+    struct directory *dir;
+
+    if (!(dir = (struct directory *)get_handle_obj( current->process, req->handle,
+                                                     DIRECTORY_CREATE_OBJECT,
+                                                     &directory_ops ))) return;
+    if (!is_session_directory( dir ))
+        set_error( STATUS_OBJECT_TYPE_MISMATCH );
+    else if (req->event >= 7 || (req->event && (!req->new_state || req->new_state >= 9)) ||
+             !req->previous_state || req->previous_state >= 9 ||
+             get_req_data_size() > 256)
+        set_error( STATUS_INVALID_PARAMETER );
+    else
+    {
+        dir->session_sequence = req->sequence;
+        dir->session_timestamp = req->timestamp;
+        /* The Ignore cleanup notification carries no resulting state. */
+        if (req->event) dir->session_state = req->new_state;
     }
     release_object( dir );
 }

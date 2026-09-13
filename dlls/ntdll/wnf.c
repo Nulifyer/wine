@@ -27,11 +27,10 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wnf);
 
-typedef NTSTATUS (WINAPI *wnf_callback)( ULONGLONG, ULONG, const GUID *, void *, const void *, ULONG );
 struct rtl_wnf_subscription
 {
     struct list entry;
-    wnf_callback callback;
+    PWNF_USER_CALLBACK callback;
     void *context;
     ULONG stamp, references;
     ULONGLONG delivery_serial;
@@ -50,6 +49,15 @@ static RTL_CRITICAL_SECTION lock = { NULL, -1, 0, 0, 0, 0 };
 static RTL_CONDITION_VARIABLE completion;
 static HANDLE notification_event;
 static NTSTATUS dispatcher_error;
+static LONG next_serialization_group;
+
+ULONG WINAPI RtlAllocateWnfSerializationGroup(void)
+{
+    ULONG group;
+
+    do group = InterlockedIncrement( &next_serialization_group ); while (!group);
+    return group;
+}
 
 static void release_subscription( struct rtl_wnf_subscription *sub )
 {
@@ -166,6 +174,18 @@ NTSTATUS WINAPI RtlPublishWnfStateData( ULONGLONG state, const GUID *type, const
 {
     return NtUpdateWnfStateData( &state, data, length, type, explicit_scope, 0, FALSE );
 }
+NTSTATUS WINAPI RtlQueryWnfStateData( ULONG *stamp, ULONGLONG state, PWNF_USER_CALLBACK callback,
+                                      void *context, const GUID *type )
+{
+    char data[4096];
+    ULONG query_stamp, size = sizeof(data);
+    NTSTATUS status;
+
+    TRACE( "%p, %#I64x, %p, %p, %s\n", stamp, state, callback, context, debugstr_guid(type) );
+    if ((status = NtQueryWnfStateData( &state, type, NULL, &query_stamp, data, &size ))) return status;
+    *stamp = query_stamp;
+    return callback( state, query_stamp, type, context, data, size );
+}
 NTSTATUS WINAPI RtlTestAndPublishWnfStateData( ULONGLONG state, const GUID *type,
                                                const void *data, ULONG length,
                                                const void *explicit_scope, ULONG matching_stamp )
@@ -174,7 +194,7 @@ NTSTATUS WINAPI RtlTestAndPublishWnfStateData( ULONGLONG state, const GUID *type
                                  matching_stamp, TRUE );
 }
 NTSTATUS WINAPI RtlSubscribeWnfStateChangeNotification( void **subscription, ULONGLONG state,
-                                                        ULONG stamp, wnf_callback callback, void *context,
+                                                        ULONG stamp, PWNF_USER_CALLBACK callback, void *context,
                                                         const GUID *type, ULONG group, ULONG flags )
 {
     struct rtl_wnf_name *name, *selected = NULL;
@@ -182,7 +202,7 @@ NTSTATUS WINAPI RtlSubscribeWnfStateChangeNotification( void **subscription, ULO
     BOOL created = FALSE;
     NTSTATUS status;
     if (!subscription || !callback) return STATUS_INVALID_PARAMETER;
-    if (type || group || flags) return STATUS_NOT_IMPLEMENTED;
+    if (type || flags) return STATUS_NOT_IMPLEMENTED;
     if (!(sub = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*sub) ))) return STATUS_NO_MEMORY;
     sub->callback = callback;
     sub->context = context;

@@ -662,10 +662,29 @@ DECL_HANDLER(set_handle_info)
 DECL_HANDLER(dup_handle)
 {
     struct process *src, *dst = NULL;
+    struct process *debug_dst;
+    int debug = getenv( "LINUXNT_DEBUG_DUP_HANDLES" ) != NULL;
+    process_id_t src_pid = 0, dst_pid = 0;
 
     reply->handle = 0;
+    if (debug)
+    {
+        fprintf( stderr, "linuxnt: dup_handle caller=%04x src_process=%#x src_handle=%#x "
+                 "dst_process=%#x access=%#x attributes=%#x options=%#x\n",
+                 current->process->id, req->src_process, req->src_handle, req->dst_process,
+                 req->access, req->attributes, req->options );
+        if ((debug_dst = get_process_from_handle( req->dst_process, 0 )))
+        {
+            fprintf( stderr, "linuxnt: dup_handle destination pid=%04x granted=%#x protection=%#x\n",
+                     debug_dst->id, get_handle_access( current->process, req->dst_process ),
+                     debug_dst->protection );
+            release_object( debug_dst );
+        }
+        set_error( STATUS_SUCCESS );
+    }
     if ((src = get_process_from_handle( req->src_process, PROCESS_DUP_HANDLE )))
     {
+        src_pid = src->id;
         if (req->options & DUPLICATE_MAKE_GLOBAL)
         {
             reply->handle = duplicate_handle( src, req->src_handle, NULL,
@@ -673,6 +692,7 @@ DECL_HANDLER(dup_handle)
         }
         else if ((dst = get_process_from_handle( req->dst_process, PROCESS_DUP_HANDLE )))
         {
+            dst_pid = dst->id;
             reply->handle = duplicate_handle( src, req->src_handle, dst,
                                               req->access, req->attributes, req->options );
             release_object( dst );
@@ -682,6 +702,10 @@ DECL_HANDLER(dup_handle)
             close_handle( src, req->src_handle );
         release_object( src );
     }
+    if (debug)
+        fprintf( stderr, "linuxnt: dup_handle result caller=%04x handle=%#x status=%#x"
+                 " src_pid=%04x dst_pid=%04x\n", current->process->id, reply->handle,
+                 get_error(), src_pid, dst_pid );
 }
 
 DECL_HANDLER(get_object_info)
@@ -725,21 +749,13 @@ DECL_HANDLER(set_security_object)
         return;
     }
 
-    /* Dedicated trust-label replacement needs a measured merge/removal
-     * contract. Never report success while leaving the label unchanged. */
-    if (req->security_info & PROCESS_TRUST_LABEL_SECURITY_INFORMATION)
-    {
-        set_error( STATUS_NOT_SUPPORTED );
-        return;
-    }
-
     if (req->security_info & OWNER_SECURITY_INFORMATION ||
         req->security_info & GROUP_SECURITY_INFORMATION ||
         req->security_info & LABEL_SECURITY_INFORMATION)
         access |= WRITE_OWNER;
     if (req->security_info & SACL_SECURITY_INFORMATION)
         access |= ACCESS_SYSTEM_SECURITY;
-    if (req->security_info & DACL_SECURITY_INFORMATION)
+    if (req->security_info & (DACL_SECURITY_INFORMATION | PROCESS_TRUST_LABEL_SECURITY_INFORMATION))
         access |= WRITE_DAC;
 
     if (!(obj = get_handle_obj( current->process, req->handle, access, NULL ))) return;

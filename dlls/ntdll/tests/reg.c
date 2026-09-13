@@ -154,6 +154,7 @@ static NTSTATUS (WINAPI * pRtlFreeHeap)(PVOID, ULONG, PVOID);
 static LPVOID   (WINAPI * pRtlAllocateHeap)(PVOID,ULONG,ULONG);
 static NTSTATUS (WINAPI * pRtlZeroMemory)(PVOID, ULONG);
 static NTSTATUS (WINAPI * pRtlCreateRegistryKey)(ULONG, PWSTR);
+static NTSTATUS (WINAPI * pRtlpNtCreateKey)(PHANDLE,ACCESS_MASK,OBJECT_ATTRIBUTES*,ULONG,const UNICODE_STRING*,PULONG);
 static NTSTATUS (WINAPI * pRtlpNtQueryValueKey)(HANDLE,ULONG*,PBYTE,DWORD*,void *);
 static NTSTATUS (WINAPI * pRtlInitializeRXact)(HANDLE,BOOLEAN,void **);
 static NTSTATUS (WINAPI * pRtlStartRXact)(void *);
@@ -216,6 +217,7 @@ static BOOL InitFunctionPtrs(void)
     NTDLL_GET_PROC(RtlAllocateHeap)
     NTDLL_GET_PROC(RtlZeroMemory)
     NTDLL_GET_PROC(RtlCreateRegistryKey)
+    NTDLL_GET_PROC(RtlpNtCreateKey)
     NTDLL_GET_PROC(RtlpNtQueryValueKey)
     NTDLL_GET_PROC(RtlInitializeRXact)
     NTDLL_GET_PROC(RtlStartRXact)
@@ -577,6 +579,24 @@ static void test_NtCreateKey(void)
     pNtClose(key);
 }
 
+static void test_RtlpNtCreateKey(void)
+{
+    OBJECT_ATTRIBUTES attr;
+    ULONG disposition;
+    NTSTATUS status;
+    HANDLE key;
+
+    InitializeObjectAttributes(&attr, &winetestpath, OBJ_PERMANENT | OBJ_EXCLUSIVE, 0, 0);
+    disposition = 0xdeadbeef;
+    status = pRtlpNtCreateKey(&key, KEY_ALL_ACCESS, &attr, 0, NULL, &disposition);
+    ok(status == STATUS_SUCCESS, "RtlpNtCreateKey failed: %#lx\n", status);
+    ok(disposition == REG_CREATED_NEW_KEY || disposition == REG_OPENED_EXISTING_KEY,
+       "unexpected disposition: %lu\n", disposition);
+    ok(!(attr.Attributes & (OBJ_PERMANENT | OBJ_EXCLUSIVE)),
+       "attributes were not filtered: %#lx\n", attr.Attributes);
+    if (!status) pNtClose(key);
+}
+
 static void test_NtSetValueKey(void)
 {
     HANDLE key;
@@ -672,6 +692,13 @@ static void test_NtQueryValueKey(void)
     InitializeObjectAttributes(&attr, &winetestpath, 0, 0, 0);
     status = pNtOpenKey(&key, KEY_READ|KEY_SET_VALUE, &attr);
     ok(status == STATUS_SUCCESS, "NtOpenKey Failed: 0x%08lx\n", status);
+
+    len = 0xdeadbeef;
+    status = pNtEnumerateValueKey(key, 0, KeyValueBasicInformation, NULL, 0, &len);
+    ok(status == STATUS_BUFFER_TOO_SMALL,
+       "NtEnumerateValueKey should have returned STATUS_BUFFER_TOO_SMALL instead of 0x%08lx\n", status);
+    ok(len >= FIELD_OFFSET(KEY_VALUE_BASIC_INFORMATION, Name),
+       "NtEnumerateValueKey returned invalid len %lu\n", len);
 
     len = FIELD_OFFSET(KEY_VALUE_BASIC_INFORMATION, Name[0]);
     basic_info = HeapAlloc(GetProcessHeap(), 0, sizeof(*basic_info));
@@ -3335,6 +3362,7 @@ START_TEST(reg)
     pRtlAppendUnicodeToString(&winetestpath, L"\\WineTest");
 
     test_NtCreateKey();
+    test_RtlpNtCreateKey();
     test_NtOpenKey();
     test_NtSetValueKey();
     test_RtlCheckRegistryKey();

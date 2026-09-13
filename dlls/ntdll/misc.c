@@ -281,6 +281,62 @@ void WINAPI WinSqmSetIfMaxDWORD(DWORD unk1, DWORD unk2, DWORD unk3)
 }
 
 /******************************************************************************
+ *                  EvtIntReportEventAndSourceAsync (NTDLL.@)
+ */
+BOOL WINAPI EvtIntReportEventAndSourceAsync( HANDLE handle, const WCHAR *source, USHORT type,
+                                             USHORT category, ULONG event_id, PSID user_sid,
+                                             USHORT string_count, ULONG data_size,
+                                             const WCHAR **strings, void *data )
+{
+    unsigned int i;
+
+    FIXME("(%p, %s, %u, %u, %#lx, %p, %u, %lu, %p, %p): stub\n", handle,
+          debugstr_w(source), type, category, event_id, user_sid, string_count, data_size,
+          strings, data);
+    if ((event_id == 0xc0001b58 || event_id == 0xc0001b7e) && strings)
+        for (i = 0; i < string_count; ++i)
+            FIXME("event %lu string[%u]=%s\n", event_id & 0xffff, i, debugstr_w(strings[i]));
+
+    RtlSetLastWin32Error( ERROR_SUCCESS );
+    return TRUE;
+}
+
+/******************************************************************************
+ *                  EtwpGetCpuSpeed (NTDLL.@)
+ */
+NTSTATUS WINAPI EtwpGetCpuSpeed( ULONG *speed )
+{
+    static const WCHAR path[] =
+        L"\\Registry\\Machine\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0";
+    struct
+    {
+        KEY_VALUE_PARTIAL_INFORMATION info;
+        ULONG extra;
+    } buffer;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING key_name, value_name;
+    ULONG size, value;
+    HANDLE key;
+    NTSTATUS status;
+
+    RtlInitUnicodeString( &key_name, path );
+    InitializeObjectAttributes( &attr, &key_name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+    if ((status = NtOpenKey( &key, KEY_QUERY_VALUE, &attr ))) return status;
+
+    RtlInitUnicodeString( &value_name, L"~MHz" );
+    status = NtQueryValueKey( key, &value_name, KeyValuePartialInformation,
+                              &buffer, sizeof(buffer), &size );
+    NtClose( key );
+    if (status) return status;
+    if (buffer.info.Type != REG_DWORD || buffer.info.DataLength != sizeof(value))
+        return STATUS_OBJECT_TYPE_MISMATCH;
+
+    memcpy( &value, buffer.info.Data, sizeof(value) );
+    *speed = value;
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
  *                  EtwEventActivityIdControl (NTDLL.@)
  */
 ULONG WINAPI EtwEventActivityIdControl(ULONG code, GUID *guid)
@@ -311,6 +367,27 @@ ULONG WINAPI EtwEventRegister( LPCGUID provider, PENABLECALLBACK callback, PVOID
     if (!handle) return ERROR_INVALID_PARAMETER;
 
     *handle = 0xdeadbeef;
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ *                  EtwRegisterSecurityProvider (NTDLL.@)
+ */
+ULONG WINAPI EtwRegisterSecurityProvider(void)
+{
+    WARN("stub.\n");
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ *                  EtwWriteUMSecurityEvent (NTDLL.@)
+ */
+ULONG WINAPI EtwWriteUMSecurityEvent( PCEVENT_DESCRIPTOR descriptor, USHORT event_property,
+                                      ULONG count, PEVENT_DATA_DESCRIPTOR data )
+{
+    FIXME("(%p, %u, %lu, %p) stub.\n", descriptor, event_property, count, data);
+
+    if (!descriptor) return ERROR_INVALID_PARAMETER;
     return ERROR_SUCCESS;
 }
 
@@ -451,6 +528,17 @@ ULONG WINAPI EtwEventWriteEx( REGHANDLE handle, const EVENT_DESCRIPTOR *descript
     FIXME( "(%s, %p, %#I64x, %lu, %p, %p, %lu, %p): stub\n", wine_dbgstr_longlong(handle), descriptor, filter,
            flags, activity_id, related_activity_id, data_count, data );
     return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ *                  EtwEventWriteFull (NTDLL.@)
+ */
+ULONG WINAPI EtwEventWriteFull( REGHANDLE handle, const EVENT_DESCRIPTOR *descriptor, USHORT event_property,
+                                const GUID *activity_id, const GUID *related_activity_id,
+                                ULONG data_count, EVENT_DATA_DESCRIPTOR *data )
+{
+    return EtwEventWriteEx( handle, descriptor, 0, event_property, activity_id, related_activity_id,
+                            data_count, data );
 }
 
 /******************************************************************************

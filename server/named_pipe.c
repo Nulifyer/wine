@@ -33,6 +33,7 @@
 #include "windef.h"
 #include "winternl.h"
 #include "winioctl.h"
+#include "wine/rpc_transport.h"
 
 #include "file.h"
 #include "handle.h"
@@ -51,6 +52,15 @@ struct pipe_message
     struct iosb         *iosb;       /* message iosb */
     struct async        *async;      /* async of pending write */
     struct token        *token;      /* security context of the writer */
+    thread_id_t          client_tid; /* thread that issued the write */
+};
+
+struct pipe_system_handle
+{
+    struct list          entry;
+    ULONGLONG            id;
+    struct process      *process;
+    obj_handle_t         handle;
 };
 
 struct pipe_end
@@ -62,6 +72,7 @@ struct pipe_end
     struct named_pipe   *pipe;
     struct pipe_end     *connection; /* the other end of the pipe */
     process_id_t         client_pid; /* process that created the client */
+    thread_id_t          client_tid; /* thread that wrote the last message read */
     process_id_t         server_pid; /* process that created the server */
     struct token        *client_token; /* security context of the last message read */
     struct token        *static_token; /* client context captured at open */
@@ -70,6 +81,8 @@ struct pipe_end
     int                  effective_only;
     data_size_t          buffer_size;/* size of buffered data that doesn't block caller */
     struct list          message_queue;
+    struct list          system_handles; /* handles sent by the connected peer */
+    ULONGLONG            next_system_handle_id;
     struct async_queue   read_q;     /* read queue */
     struct async_queue   write_q;    /* write queue */
 };
@@ -407,6 +420,7 @@ static struct pipe_message *queue_message( struct pipe_end *pipe_end, struct ios
     message->iosb = (struct iosb *)grab_object( iosb );
     message->async = NULL;
     message->read_pos = 0;
+    message->client_tid = get_thread_id( current );
     list_add_tail( &pipe_end->message_queue, &message->entry );
     return message;
 }
@@ -430,8 +444,26 @@ static void free_message( struct pipe_message *message )
     free( message );
 }
 
+static void free_system_handle( struct pipe_system_handle *system_handle, int close )
+{
+    list_remove( &system_handle->entry );
+    if (close) close_handle( system_handle->process, system_handle->handle );
+    release_object( system_handle->process );
+    free( system_handle );
+}
+
+static void free_system_handles( struct pipe_end *pipe_end )
+{
+    struct pipe_system_handle *system_handle, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE( system_handle, next, &pipe_end->system_handles,
+                              struct pipe_system_handle, entry )
+        free_system_handle( system_handle, 1 );
+}
+
 static void pipe_end_set_client_token( struct pipe_end *pipe_end, struct pipe_message *message )
 {
+    pipe_end->client_tid = message->client_tid;
     if (!message->token) return;
     if (pipe_end->client_token) release_object( pipe_end->client_token );
     pipe_end->client_token = (struct token *)grab_object( message->token );
@@ -444,6 +476,7 @@ static void pipe_end_disconnect( struct pipe_end *pipe_end, unsigned int status 
     struct async *async;
 
     pipe_end->connection = NULL;
+    free_system_handles( pipe_end );
     if (status == STATUS_PIPE_DISCONNECTED && pipe_end->client_token)
     {
         release_object( pipe_end->client_token );
@@ -1267,6 +1300,11 @@ static void pipe_end_get_connection_attribute( struct pipe_end *pipe_end )
         value = &pipe_end->server_pid;
         value_size = sizeof(pipe_end->server_pid);
     }
+    else if (attr_size == sizeof("ClientThreadId") && !memcmp( attr, "ClientThreadId", attr_size ))
+    {
+        value = &pipe_end->client_tid;
+        value_size = sizeof(pipe_end->client_tid);
+    }
     else
     {
         set_error( STATUS_ILLEGAL_FUNCTION );
@@ -1282,10 +1320,127 @@ static void pipe_end_get_connection_attribute( struct pipe_end *pipe_end )
     set_reply_data( value, value_size );
 }
 
+static void pipe_end_system_handle( struct pipe_end *pipe_end )
+{
+    const struct wine_rpc_system_handle_request *params = get_req_data();
+    struct pipe_system_handle *system_handle;
+    process_id_t owner_pid, peer_pid;
+    ULONGLONG result;
+
+    if (get_req_data_size() != sizeof(*params))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (get_reply_max_size() < sizeof(result))
+    {
+        set_error( STATUS_BUFFER_TOO_SMALL );
+        return;
+    }
+    if (pipe_end->state != FILE_PIPE_CONNECTED_STATE || !pipe_end->connection)
+    {
+        set_error( STATUS_PIPE_DISCONNECTED );
+        return;
+    }
+
+    if (pipe_end->obj.ops == &pipe_server_ops)
+    {
+        owner_pid = pipe_end->server_pid;
+        peer_pid = pipe_end->client_pid;
+    }
+    else
+    {
+        owner_pid = pipe_end->client_pid;
+        peer_pid = pipe_end->server_pid;
+    }
+    if (owner_pid != get_process_id( current->process ))
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+
+    switch (params->operation)
+    {
+    case WINE_RPC_SYSTEM_HANDLE_SEND:
+        {
+            struct process *peer;
+            unsigned int options = params->options;
+            obj_handle_t source, target;
+
+            if ((ULONGLONG)(obj_handle_t)params->value != params->value ||
+                params->attributes & ~OBJ_INHERIT ||
+                options & ~(DUPLICATE_CLOSE_SOURCE | DUPLICATE_SAME_ACCESS |
+                            DUPLICATE_SAME_ATTRIBUTES))
+            {
+                set_error( STATUS_INVALID_PARAMETER );
+                return;
+            }
+            if (!(system_handle = mem_alloc( sizeof(*system_handle) ))) return;
+            if (!(peer = get_process_from_id( peer_pid )))
+            {
+                free( system_handle );
+                return;
+            }
+
+            source = (obj_handle_t)params->value;
+            target = duplicate_handle( current->process, source, peer, params->access,
+                                       params->attributes, options & ~DUPLICATE_CLOSE_SOURCE );
+            if (!target)
+            {
+                release_object( peer );
+                free( system_handle );
+                return;
+            }
+
+            result = pipe_end->connection->next_system_handle_id++;
+            if (!result) result = pipe_end->connection->next_system_handle_id++;
+            system_handle->id = result;
+            system_handle->process = peer;
+            system_handle->handle = target;
+            list_add_tail( &pipe_end->connection->system_handles, &system_handle->entry );
+
+            if (options & DUPLICATE_CLOSE_SOURCE) close_handle( current->process, source );
+            set_reply_data( &result, sizeof(result) );
+            return;
+        }
+
+    case WINE_RPC_SYSTEM_HANDLE_RECEIVE:
+        if (params->access || params->attributes || params->options)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
+        LIST_FOR_EACH_ENTRY( system_handle, &pipe_end->system_handles,
+                             struct pipe_system_handle, entry )
+        {
+            if (system_handle->id != params->value) continue;
+            if (system_handle->process != current->process)
+            {
+                set_error( STATUS_ACCESS_DENIED );
+                return;
+            }
+            result = system_handle->handle;
+            free_system_handle( system_handle, 0 );
+            set_reply_data( &result, sizeof(result) );
+            return;
+        }
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+
+    default:
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+}
+
 static void pipe_end_ioctl( struct pipe_end *pipe_end, ioctl_code_t code, struct async *async )
 {
     switch(code)
     {
+    case FSCTL_PIPE_WINE_RPC_SYSTEM_HANDLE:
+        pipe_end_system_handle( pipe_end );
+        break;
+
     case FSCTL_PIPE_GET_CONNECTION_ATTRIBUTE:
         pipe_end_get_connection_attribute( pipe_end );
         break;
@@ -1409,6 +1564,8 @@ static void init_pipe_end( struct pipe_end *pipe_end, struct named_pipe *pipe,
     pipe_end->buffer_size = buffer_size;
     init_async_queue( &pipe_end->read_q );
     init_async_queue( &pipe_end->write_q );
+    list_init( &pipe_end->system_handles );
+    pipe_end->next_system_handle_id = 1;
     list_init( &pipe_end->message_queue );
 }
 
@@ -1450,6 +1607,7 @@ static struct pipe_end *create_pipe_client( struct named_pipe *pipe, data_size_t
     init_pipe_end( client, pipe, 0, buffer_size );
     client->state = FILE_PIPE_CONNECTED_STATE;
     client->client_pid = get_process_id( current->process );
+    client->client_tid = get_thread_id( current );
 
     client->fd = alloc_pseudo_fd( &pipe_client_fd_ops, &client->obj, options );
     if (!client->fd)
@@ -1717,6 +1875,7 @@ static struct object *named_pipe_open_file( struct object *obj, unsigned int acc
         server->pipe_end.connection = client;
         client->connection = &server->pipe_end;
         server->pipe_end.client_pid = client->client_pid;
+        server->pipe_end.client_tid = client->client_tid;
         client->server_pid = server->pipe_end.server_pid;
         list_remove( &server->entry );
     }

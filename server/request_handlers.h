@@ -241,6 +241,13 @@ DECL_HANDLER(get_token_sid);
 DECL_HANDLER(get_token_groups);
 DECL_HANDLER(get_token_default_dacl);
 DECL_HANDLER(set_token_default_dacl);
+DECL_HANDLER(set_token_session_id);
+DECL_HANDLER(set_token_session_reference);
+DECL_HANDLER(set_token_mandatory_policy);
+DECL_HANDLER(set_token_audit_policy);
+DECL_HANDLER(set_token_origin);
+DECL_HANDLER(get_token_audit_policy);
+DECL_HANDLER(get_token_origin);
 DECL_HANDLER(set_security_object);
 DECL_HANDLER(get_security_object);
 DECL_HANDLER(get_system_handles);
@@ -327,6 +334,7 @@ DECL_HANDLER(alpc_get_connect_result);
 DECL_HANDLER(alpc_accept_connect_port);
 DECL_HANDLER(alpc_open_sender_process);
 DECL_HANDLER(alpc_disconnect_port);
+DECL_HANDLER(alpc_impersonate_client);
 DECL_HANDLER(set_default_hard_error_port);
 DECL_HANDLER(set_process_exception_port);
 DECL_HANDLER(get_process_critical_state);
@@ -341,6 +349,10 @@ DECL_HANDLER(unsubscribe_wnf_state);
 DECL_HANDLER(set_wnf_process_event);
 DECL_HANDLER(query_wnf_state_info);
 DECL_HANDLER(complete_wnf_subscription);
+DECL_HANDLER(adjust_token_groups);
+DECL_HANDLER(delete_wnf_state_data);
+DECL_HANDLER(alpc_query_information);
+DECL_HANDLER(notify_change_session);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -579,6 +591,13 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_token_groups,
     (req_handler)req_get_token_default_dacl,
     (req_handler)req_set_token_default_dacl,
+    (req_handler)req_set_token_session_id,
+    (req_handler)req_set_token_session_reference,
+    (req_handler)req_set_token_mandatory_policy,
+    (req_handler)req_set_token_audit_policy,
+    (req_handler)req_set_token_origin,
+    (req_handler)req_get_token_audit_policy,
+    (req_handler)req_get_token_origin,
     (req_handler)req_set_security_object,
     (req_handler)req_get_security_object,
     (req_handler)req_get_system_handles,
@@ -665,6 +684,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_alpc_accept_connect_port,
     (req_handler)req_alpc_open_sender_process,
     (req_handler)req_alpc_disconnect_port,
+    (req_handler)req_alpc_impersonate_client,
     (req_handler)req_set_default_hard_error_port,
     (req_handler)req_set_process_exception_port,
     (req_handler)req_get_process_critical_state,
@@ -679,6 +699,10 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_wnf_process_event,
     (req_handler)req_query_wnf_state_info,
     (req_handler)req_complete_wnf_subscription,
+    (req_handler)req_adjust_token_groups,
+    (req_handler)req_delete_wnf_state_data,
+    (req_handler)req_alpc_query_information,
+    (req_handler)req_notify_change_session,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -720,6 +744,8 @@ C_ASSERT( sizeof(struct rawinput_device) == 12 );
 C_ASSERT( sizeof(struct rectangle) == 16 );
 C_ASSERT( sizeof(struct startup_info_data) == 96 );
 C_ASSERT( sizeof(struct thread_info) == 40 );
+C_ASSERT( sizeof(struct token_audit_policy) == 27 );
+C_ASSERT( sizeof(struct token_identity) == 24 );
 C_ASSERT( sizeof(struct user_apc) == 40 );
 C_ASSERT( sizeof(thread_id_t) == 4 );
 C_ASSERT( sizeof(timeout_t) == 8 );
@@ -2087,6 +2113,28 @@ C_ASSERT( offsetof(struct get_token_default_dacl_reply, acl_len) == 8 );
 C_ASSERT( sizeof(struct get_token_default_dacl_reply) == 16 );
 C_ASSERT( offsetof(struct set_token_default_dacl_request, handle) == 12 );
 C_ASSERT( sizeof(struct set_token_default_dacl_request) == 16 );
+C_ASSERT( offsetof(struct set_token_session_id_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_token_session_id_request, session_id) == 16 );
+C_ASSERT( sizeof(struct set_token_session_id_request) == 24 );
+C_ASSERT( offsetof(struct set_token_session_reference_request, handle) == 12 );
+C_ASSERT( sizeof(struct set_token_session_reference_request) == 16 );
+C_ASSERT( offsetof(struct set_token_mandatory_policy_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_token_mandatory_policy_request, policy) == 16 );
+C_ASSERT( sizeof(struct set_token_mandatory_policy_request) == 24 );
+C_ASSERT( offsetof(struct set_token_audit_policy_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_token_audit_policy_request, policy) == 16 );
+C_ASSERT( sizeof(struct set_token_audit_policy_request) == 48 );
+C_ASSERT( offsetof(struct set_token_origin_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_token_origin_request, origin) == 16 );
+C_ASSERT( sizeof(struct set_token_origin_request) == 24 );
+C_ASSERT( offsetof(struct get_token_audit_policy_request, handle) == 12 );
+C_ASSERT( sizeof(struct get_token_audit_policy_request) == 16 );
+C_ASSERT( offsetof(struct get_token_audit_policy_reply, policy) == 8 );
+C_ASSERT( sizeof(struct get_token_audit_policy_reply) == 40 );
+C_ASSERT( offsetof(struct get_token_origin_request, handle) == 12 );
+C_ASSERT( sizeof(struct get_token_origin_request) == 16 );
+C_ASSERT( offsetof(struct get_token_origin_reply, origin) == 8 );
+C_ASSERT( sizeof(struct get_token_origin_reply) == 16 );
 C_ASSERT( offsetof(struct set_security_object_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_security_object_request, security_info) == 16 );
 C_ASSERT( sizeof(struct set_security_object_request) == 24 );
@@ -2224,16 +2272,16 @@ C_ASSERT( offsetof(struct grant_process_admin_token_request, handle) == 12 );
 C_ASSERT( sizeof(struct grant_process_admin_token_request) == 16 );
 C_ASSERT( offsetof(struct get_token_info_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_token_info_request) == 16 );
-C_ASSERT( offsetof(struct get_token_info_reply, token_id) == 8 );
-C_ASSERT( offsetof(struct get_token_info_reply, modified_id) == 16 );
-C_ASSERT( offsetof(struct get_token_info_reply, session_id) == 24 );
-C_ASSERT( offsetof(struct get_token_info_reply, primary) == 28 );
-C_ASSERT( offsetof(struct get_token_info_reply, impersonation_level) == 32 );
-C_ASSERT( offsetof(struct get_token_info_reply, elevation_type) == 36 );
-C_ASSERT( offsetof(struct get_token_info_reply, is_elevated) == 40 );
-C_ASSERT( offsetof(struct get_token_info_reply, group_count) == 44 );
-C_ASSERT( offsetof(struct get_token_info_reply, privilege_count) == 48 );
-C_ASSERT( sizeof(struct get_token_info_reply) == 56 );
+C_ASSERT( offsetof(struct get_token_info_reply, identity) == 8 );
+C_ASSERT( offsetof(struct get_token_info_reply, session_id) == 32 );
+C_ASSERT( offsetof(struct get_token_info_reply, mandatory_policy) == 36 );
+C_ASSERT( offsetof(struct get_token_info_reply, primary) == 40 );
+C_ASSERT( offsetof(struct get_token_info_reply, impersonation_level) == 44 );
+C_ASSERT( offsetof(struct get_token_info_reply, elevation_type) == 48 );
+C_ASSERT( offsetof(struct get_token_info_reply, is_elevated) == 52 );
+C_ASSERT( offsetof(struct get_token_info_reply, group_count) == 56 );
+C_ASSERT( offsetof(struct get_token_info_reply, privilege_count) == 60 );
+C_ASSERT( sizeof(struct get_token_info_reply) == 64 );
 C_ASSERT( offsetof(struct create_linked_token_request, handle) == 12 );
 C_ASSERT( sizeof(struct create_linked_token_request) == 16 );
 C_ASSERT( offsetof(struct create_linked_token_reply, linked) == 8 );
@@ -2490,20 +2538,22 @@ C_ASSERT( offsetof(struct alpc_create_port_request, max_msg_len) == 16 );
 C_ASSERT( sizeof(struct alpc_create_port_request) == 24 );
 C_ASSERT( offsetof(struct alpc_create_port_reply, handle) == 8 );
 C_ASSERT( sizeof(struct alpc_create_port_reply) == 16 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, handle) == 12 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, flags) == 16 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, message_id) == 20 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, send) == 24 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, receive) == 28 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, wow64) == 32 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, no_wait) == 36 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, message_context) == 40 );
-C_ASSERT( sizeof(struct alpc_send_receive_request) == 48 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, receive_attributes) == 12 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, handle) == 16 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, flags) == 20 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, message_id) == 24 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, send) == 28 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, receive) == 32 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, wow64) == 36 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, no_wait) == 40 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, message_context) == 48 );
+C_ASSERT( sizeof(struct alpc_send_receive_request) == 56 );
 C_ASSERT( offsetof(struct alpc_send_receive_reply, wait_handle) == 8 );
 C_ASSERT( offsetof(struct alpc_send_receive_reply, info) == 16 );
 C_ASSERT( sizeof(struct alpc_send_receive_reply) == 64 );
-C_ASSERT( offsetof(struct alpc_get_message_result_request, handle) == 12 );
-C_ASSERT( offsetof(struct alpc_get_message_result_request, wait_status) == 16 );
+C_ASSERT( offsetof(struct alpc_get_message_result_request, receive_attributes) == 12 );
+C_ASSERT( offsetof(struct alpc_get_message_result_request, handle) == 16 );
+C_ASSERT( offsetof(struct alpc_get_message_result_request, wait_status) == 20 );
 C_ASSERT( sizeof(struct alpc_get_message_result_request) == 24 );
 C_ASSERT( offsetof(struct alpc_get_message_result_reply, info) == 8 );
 C_ASSERT( sizeof(struct alpc_get_message_result_reply) == 56 );
@@ -2520,8 +2570,9 @@ C_ASSERT( sizeof(struct alpc_connect_port_request) == 64 );
 C_ASSERT( offsetof(struct alpc_connect_port_reply, handle) == 8 );
 C_ASSERT( offsetof(struct alpc_connect_port_reply, wait_handle) == 12 );
 C_ASSERT( sizeof(struct alpc_connect_port_reply) == 16 );
-C_ASSERT( offsetof(struct alpc_get_connect_result_request, handle) == 12 );
-C_ASSERT( sizeof(struct alpc_get_connect_result_request) == 16 );
+C_ASSERT( offsetof(struct alpc_get_connect_result_request, receive_attributes) == 12 );
+C_ASSERT( offsetof(struct alpc_get_connect_result_request, handle) == 16 );
+C_ASSERT( sizeof(struct alpc_get_connect_result_request) == 24 );
 C_ASSERT( offsetof(struct alpc_get_connect_result_reply, status) == 8 );
 C_ASSERT( offsetof(struct alpc_get_connect_result_reply, info) == 16 );
 C_ASSERT( sizeof(struct alpc_get_connect_result_reply) == 64 );
@@ -2548,6 +2599,11 @@ C_ASSERT( offsetof(struct alpc_open_sender_process_reply, handle) == 8 );
 C_ASSERT( sizeof(struct alpc_open_sender_process_reply) == 16 );
 C_ASSERT( offsetof(struct alpc_disconnect_port_request, handle) == 12 );
 C_ASSERT( sizeof(struct alpc_disconnect_port_request) == 16 );
+C_ASSERT( offsetof(struct alpc_impersonate_client_request, handle) == 12 );
+C_ASSERT( offsetof(struct alpc_impersonate_client_request, message_present) == 16 );
+C_ASSERT( offsetof(struct alpc_impersonate_client_request, message_id) == 20 );
+C_ASSERT( offsetof(struct alpc_impersonate_client_request, callback_id) == 24 );
+C_ASSERT( sizeof(struct alpc_impersonate_client_request) == 32 );
 C_ASSERT( offsetof(struct set_default_hard_error_port_request, handle) == 12 );
 C_ASSERT( sizeof(struct set_default_hard_error_port_request) == 16 );
 C_ASSERT( offsetof(struct set_process_exception_port_request, process) == 12 );
@@ -2625,3 +2681,32 @@ C_ASSERT( offsetof(struct complete_wnf_subscription_reply, type_high) == 32 );
 C_ASSERT( offsetof(struct complete_wnf_subscription_reply, change_stamp) == 40 );
 C_ASSERT( offsetof(struct complete_wnf_subscription_reply, events) == 44 );
 C_ASSERT( sizeof(struct complete_wnf_subscription_reply) == 48 );
+C_ASSERT( offsetof(struct adjust_token_groups_request, handle) == 12 );
+C_ASSERT( offsetof(struct adjust_token_groups_request, reset) == 16 );
+C_ASSERT( offsetof(struct adjust_token_groups_request, get_modified_state) == 20 );
+C_ASSERT( offsetof(struct adjust_token_groups_request, group_count) == 24 );
+C_ASSERT( offsetof(struct adjust_token_groups_request, previous_length) == 28 );
+C_ASSERT( offsetof(struct adjust_token_groups_request, groups_offset) == 32 );
+C_ASSERT( offsetof(struct adjust_token_groups_request, group_entry_size) == 36 );
+C_ASSERT( sizeof(struct adjust_token_groups_request) == 40 );
+C_ASSERT( offsetof(struct adjust_token_groups_reply, len) == 8 );
+C_ASSERT( offsetof(struct adjust_token_groups_reply, group_count) == 12 );
+C_ASSERT( offsetof(struct adjust_token_groups_reply, sid_len) == 16 );
+C_ASSERT( sizeof(struct adjust_token_groups_reply) == 24 );
+C_ASSERT( offsetof(struct delete_wnf_state_data_request, state_name) == 16 );
+C_ASSERT( offsetof(struct delete_wnf_state_data_request, session_id) == 24 );
+C_ASSERT( offsetof(struct delete_wnf_state_data_request, explicit_scope) == 28 );
+C_ASSERT( sizeof(struct delete_wnf_state_data_request) == 32 );
+C_ASSERT( offsetof(struct alpc_query_information_request, handle) == 12 );
+C_ASSERT( sizeof(struct alpc_query_information_request) == 16 );
+C_ASSERT( offsetof(struct alpc_query_information_reply, flags) == 8 );
+C_ASSERT( offsetof(struct alpc_query_information_reply, sequence) == 12 );
+C_ASSERT( offsetof(struct alpc_query_information_reply, context) == 16 );
+C_ASSERT( sizeof(struct alpc_query_information_reply) == 24 );
+C_ASSERT( offsetof(struct notify_change_session_request, handle) == 12 );
+C_ASSERT( offsetof(struct notify_change_session_request, timestamp) == 16 );
+C_ASSERT( offsetof(struct notify_change_session_request, sequence) == 24 );
+C_ASSERT( offsetof(struct notify_change_session_request, event) == 28 );
+C_ASSERT( offsetof(struct notify_change_session_request, new_state) == 32 );
+C_ASSERT( offsetof(struct notify_change_session_request, previous_state) == 36 );
+C_ASSERT( sizeof(struct notify_change_session_request) == 40 );

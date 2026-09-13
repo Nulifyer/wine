@@ -201,7 +201,12 @@ struct threadpool_object
         } wait;
         struct
         {
-            PTP_ALPC_CALLBACK callback;
+            union
+            {
+                PTP_ALPC_CALLBACK callback;
+                PTP_ALPC_CALLBACK_EX callback_ex;
+            };
+            BOOL extended;
             HANDLE lease;
             ULONG_PTR key;
             struct list entry; /* active registrations, locked via ioqueue.cs */
@@ -825,6 +830,14 @@ NTSTATUS WINAPI RtlCreateTimerQueue(PHANDLE NewTimerQueue)
 
     *NewTimerQueue = q;
     return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *              RtlDeleteTimerQueue   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlDeleteTimerQueue(HANDLE timer_queue)
+{
+    return RtlDeleteTimerQueueEx(timer_queue, NULL);
 }
 
 /***********************************************************************
@@ -2407,9 +2420,19 @@ static void tp_object_execute( struct threadpool_object *object, BOOL wait_threa
 
         case TP_OBJECT_TYPE_ALPC:
         {
-            TRACE( "executing ALPC callback %p(%p, %p, %p)\n", object->u.alpc.callback,
-                   callback_instance, object->userdata, object );
-            object->u.alpc.callback( callback_instance, object->userdata, (TP_ALPC *)object );
+            if (object->u.alpc.extended)
+            {
+                TRACE( "executing extended ALPC callback %p(%p, %p, %p, %p)\n",
+                       object->u.alpc.callback_ex, callback_instance, object->userdata, object, NULL );
+                object->u.alpc.callback_ex( callback_instance, object->userdata,
+                                            (TP_ALPC *)object, NULL );
+            }
+            else
+            {
+                TRACE( "executing ALPC callback %p(%p, %p, %p)\n", object->u.alpc.callback,
+                       callback_instance, object->userdata, object );
+                object->u.alpc.callback( callback_instance, object->userdata, (TP_ALPC *)object );
+            }
             break;
         }
 
@@ -2555,17 +2578,16 @@ NTSTATUS WINAPI TpAllocCleanupGroup( TP_CLEANUP_GROUP **out )
     return tp_group_alloc( (struct threadpool_group **)out );
 }
 
-/***********************************************************************
- *           TpAllocAlpcCompletion    (NTDLL.@)
- */
-NTSTATUS WINAPI TpAllocAlpcCompletion( TP_ALPC **out, HANDLE port, PTP_ALPC_CALLBACK callback,
-                                       void *userdata, TP_CALLBACK_ENVIRON *environment )
+static NTSTATUS tp_alloc_alpc_completion( TP_ALPC **out, HANDLE port,
+                                          PTP_ALPC_CALLBACK callback,
+                                          PTP_ALPC_CALLBACK_EX callback_ex,
+                                          void *userdata, TP_CALLBACK_ENVIRON *environment )
 {
     struct threadpool_object *object;
     struct threadpool *pool;
     NTSTATUS status;
 
-    TRACE( "%p %p %p %p %p\n", out, port, callback, userdata, environment );
+    TRACE( "%p %p %p/%p %p %p\n", out, port, callback, callback_ex, userdata, environment );
     *out = NULL;
     if (!(object = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object) )))
         return STATUS_NO_MEMORY;
@@ -2575,7 +2597,9 @@ NTSTATUS WINAPI TpAllocAlpcCompletion( TP_ALPC **out, HANDLE port, PTP_ALPC_CALL
         return status;
     }
     object->type = TP_OBJECT_TYPE_ALPC;
-    object->u.alpc.callback = callback;
+    object->u.alpc.extended = !!callback_ex;
+    if (callback_ex) object->u.alpc.callback_ex = callback_ex;
+    else object->u.alpc.callback = callback;
     tp_object_initialize( object, pool, userdata, environment );
 
     RtlEnterCriticalSection( &ioqueue.cs );
@@ -2616,9 +2640,31 @@ NTSTATUS WINAPI TpAllocAlpcCompletion( TP_ALPC **out, HANDLE port, PTP_ALPC_CALL
     return STATUS_SUCCESS;
 }
 
+/***********************************************************************
+ *           TpAllocAlpcCompletion    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpAllocAlpcCompletion( TP_ALPC **out, HANDLE port, PTP_ALPC_CALLBACK callback,
+                                       void *userdata, TP_CALLBACK_ENVIRON *environment )
+{
+    TRACE( "%p %p %p %p %p\n", out, port, callback, userdata, environment );
+    return tp_alloc_alpc_completion( out, port, callback, NULL, userdata, environment );
+}
+
+/***********************************************************************
+ *           TpAllocAlpcCompletionEx    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpAllocAlpcCompletionEx( TP_ALPC **out, HANDLE port,
+                                         PTP_ALPC_CALLBACK_EX callback, void *userdata,
+                                         TP_CALLBACK_ENVIRON *environment )
+{
+    TRACE( "%p %p %p %p %p\n", out, port, callback, userdata, environment );
+    return tp_alloc_alpc_completion( out, port, NULL, callback, userdata, environment );
+}
+
 void WINAPI TpReleaseAlpcCompletion( TP_ALPC *alpc )
 {
     struct threadpool_object *object = (struct threadpool_object *)alpc;
+    if (!object) return;
     assert( object->type == TP_OBJECT_TYPE_ALPC );
     tp_object_prepare_shutdown( object );
     object->shutdown = TRUE;
@@ -2628,6 +2674,7 @@ void WINAPI TpReleaseAlpcCompletion( TP_ALPC *alpc )
 void WINAPI TpWaitForAlpcCompletion( TP_ALPC *alpc )
 {
     struct threadpool_object *object = (struct threadpool_object *)alpc;
+    if (!object) return;
     assert( object->type == TP_OBJECT_TYPE_ALPC );
     tp_object_wait( object, FALSE );
 }

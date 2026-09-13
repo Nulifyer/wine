@@ -49,6 +49,8 @@
 @ stdcall DbgUiStopDebugging(long)
 @ stdcall DbgUiWaitStateChange(ptr ptr)
 @ stdcall DbgUserBreakPoint()
+@ stdcall EvtIntReportEventAndSourceAsync(ptr wstr long long long ptr long long ptr ptr)
+@ stdcall EtwpGetCpuSpeed(ptr)
 @ stdcall EtwEventActivityIdControl(long ptr)
 @ stdcall EtwEventEnabled(int64 ptr)
 @ stdcall EtwEventProviderEnabled(int64 long int64)
@@ -57,17 +59,20 @@
 @ stdcall EtwEventUnregister(int64)
 @ stdcall EtwEventWrite(int64 ptr long ptr)
 @ stdcall EtwEventWriteEx(int64 ptr int64 long ptr ptr long ptr)
+@ stdcall EtwEventWriteFull(int64 ptr long ptr ptr long ptr)
 @ stdcall EtwEventWriteString(int64 long int64 wstr)
 @ stdcall EtwEventWriteTransfer(int64 ptr ptr ptr long ptr)
 @ stdcall EtwGetTraceEnableFlags(int64)
 @ stdcall EtwGetTraceEnableLevel(int64)
 @ stdcall -ret64 EtwGetTraceLoggerHandle(ptr)
 @ stdcall EtwLogTraceEvent(int64 ptr)
+@ stdcall EtwRegisterSecurityProvider()
 @ stdcall EtwRegisterTraceGuidsA(ptr ptr ptr long ptr str str ptr)
 @ stdcall EtwRegisterTraceGuidsW(ptr ptr ptr long ptr wstr wstr ptr)
 @ varargs EtwTraceMessage(int64 long ptr long)
 @ stdcall EtwTraceMessageVa(int64 long ptr long ptr)
 @ stdcall EtwUnregisterTraceGuids(int64)
+@ stdcall EtwWriteUMSecurityEvent(ptr long long ptr)
 # @ stub KiFastSystemCall
 # @ stub KiFastSystemCallRet
 # @ stub KiIntSystemCall
@@ -158,8 +163,10 @@
 @ stdcall -syscall NtAllocateVirtualMemoryEx(long ptr ptr long long ptr long)
 @ stdcall -syscall NtAlpcAcceptConnectPort(ptr ptr long ptr ptr ptr ptr ptr long)
 @ stdcall -syscall NtAlpcConnectPort(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr)
+@ stdcall NtAlpcConnectPortEx(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtAlpcCreatePort(ptr ptr ptr)
 @ stdcall -syscall NtAlpcDisconnectPort(ptr long)
+@ stdcall NtAlpcQueryInformation(ptr long ptr long ptr)
 @ stdcall -syscall NtAlpcSetInformation(ptr long ptr long)
 @ stdcall -syscall NtAlpcImpersonateClientOfPort(ptr ptr ptr)
 @ stdcall -syscall NtAlpcOpenSenderProcess(ptr long ptr long long ptr)
@@ -215,6 +222,7 @@
 @ stdcall -syscall NtCreateThreadEx(ptr long ptr long ptr ptr long long long long ptr)
 @ stdcall -syscall NtCreateTimer(ptr long ptr long)
 @ stdcall -syscall NtCreateToken(ptr long ptr long ptr ptr ptr ptr ptr ptr ptr ptr ptr)
+@ stdcall NtCreateTokenEx(ptr long ptr long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtCreateTransaction(ptr long ptr ptr long long long long ptr ptr)
 @ stdcall -syscall NtCreateUserProcess(ptr ptr long long ptr ptr long long ptr ptr ptr)
 @ stdcall -syscall NtCreateWaitCompletionPacket(ptr long ptr)
@@ -286,6 +294,7 @@
 @ stdcall -syscall NtNotifyChangeDirectoryFile(long long ptr ptr ptr ptr long long long)
 @ stdcall -syscall NtNotifyChangeKey(long long ptr ptr ptr long long ptr long long)
 @ stdcall -syscall NtNotifyChangeMultipleKeys(long long ptr long ptr ptr ptr long long ptr long long)
+@ stdcall NtNotifyChangeSession(long long ptr long long long ptr long)
 @ stdcall -syscall=0x0058 NtOpenDirectoryObject(ptr long ptr)
 @ stdcall -syscall=0x0040 NtOpenEvent(ptr long ptr)
 # @ stub NtOpenEventPair
@@ -304,6 +313,7 @@
 @ stdcall -syscall=0x0030 NtOpenProcessTokenEx(long long long ptr)
 @ stdcall -syscall=0x0037 NtOpenSection(ptr long ptr)
 @ stdcall -syscall NtOpenSemaphore(ptr long ptr)
+@ stdcall NtOpenSession(ptr long ptr)
 @ stdcall -syscall NtOpenSymbolicLinkObject (ptr long ptr)
 @ stdcall -syscall NtOpenThread(ptr long ptr ptr)
 @ stdcall -syscall=0x0024 NtOpenThreadToken(long long long ptr)
@@ -313,7 +323,7 @@
 @ stdcall -syscall=0x005f NtPowerInformation(long ptr long ptr long)
 @ stdcall -syscall NtPrivilegeCheck(ptr ptr ptr)
 @ stdcall -syscall NtPrivilegeObjectAuditAlarm(ptr long long long ptr long)
-# @ stub NtPrivilegedServiceAuditAlarm
+@ stdcall -syscall NtPrivilegedServiceAuditAlarm(ptr ptr long ptr long)
 @ stdcall -syscall=0x0050 NtProtectVirtualMemory(long ptr ptr long ptr)
 @ stdcall -syscall NtPulseEvent(long ptr)
 @ stdcall -syscall=0x003d NtQueryAttributesFile(ptr ptr)
@@ -431,7 +441,7 @@
 @ stdcall -syscall NtSetThreadExecutionState(long ptr)
 @ stdcall -syscall=0x0062 NtSetTimer(long ptr ptr ptr long long ptr)
 @ stdcall -syscall NtSetTimerResolution(long long ptr)
-# @ stub NtSetUuidSeed
+@ stdcall -syscall NtSetUuidSeed(ptr)
 @ stdcall -syscall=0x0060 NtSetValueKey(long ptr long long ptr long)
 @ stdcall -syscall NtSetVolumeInformationFile(long ptr ptr long long)
 @ stdcall -syscall NtShutdownSystem(long)
@@ -524,8 +534,10 @@
 @ stdcall RtlAcquirePrivilege(ptr long long ptr)
 @ stdcall RtlAdjustPrivilege(long long long ptr)
 @ stdcall RtlAllocateAndInitializeSid (ptr long long long long long long long long long ptr)
+@ stdcall RtlAllocateAndInitializeSidEx(ptr long ptr ptr)
 @ stdcall RtlAllocateHandle(ptr ptr)
 @ stdcall RtlAllocateHeap(long long long)
+@ stdcall RtlAllocateWnfSerializationGroup()
 @ stdcall RtlAnsiCharToUnicodeChar(ptr)
 @ stdcall RtlAnsiStringToUnicodeSize(ptr)
 @ stdcall RtlAnsiStringToUnicodeString(ptr ptr long)
@@ -552,6 +564,7 @@
 # @ stub RtlCheckForOrphanedCriticalSections
 # @ stub RtlCheckProcessParameters
 @ stdcall RtlCheckRegistryKey(long ptr)
+@ stdcall RtlCheckTokenCapability(long ptr ptr)
 @ stdcall RtlClearAllBits(ptr)
 @ stdcall RtlClearBits(ptr long long)
 # @ stub RtlCloneMemoryStream
@@ -595,7 +608,7 @@
 @ stdcall RtlCopyUnicodeString(ptr ptr)
 @ stdcall RtlCreateAcl(ptr long long)
 @ stdcall RtlCreateActivationContext(ptr ptr)
-@ stub RtlCreateAndSetSD
+@ stdcall RtlCreateAndSetSD(ptr long ptr ptr ptr)
 @ stdcall RtlCreateAtomTable(long ptr)
 # @ stub RtlCreateBootStatusDataFile
 @ stdcall RtlCreateEnvironment(long ptr)
@@ -617,7 +630,7 @@
 @ stdcall RtlCreateUnicodeStringFromAsciiz(ptr str)
 @ stdcall RtlCreateUserProcess(ptr long ptr ptr ptr long long long long ptr)
 @ stdcall RtlCreateUserProcessEx(ptr ptr long ptr ptr)
-@ stub RtlCreateUserSecurityObject
+@ stdcall RtlCreateUserSecurityObject(ptr long ptr ptr long ptr ptr)
 @ stdcall RtlCreateUserStack(long long long long long ptr)
 @ stdcall RtlCreateUserThread(long ptr long long long long ptr ptr ptr ptr)
 @ stdcall RtlCustomCPToUnicodeN(ptr ptr long ptr str long)
@@ -639,7 +652,7 @@
 @ stdcall RtlDeleteHashTable(ptr)
 @ stdcall -arch=!i386 RtlDeleteGrowableFunctionTable(ptr)
 @ stdcall RtlDeleteElementGenericTable(ptr ptr)
-@ stub RtlDeleteElementGenericTableAvl
+@ stdcall RtlDeleteElementGenericTableAvl(ptr ptr)
 @ cdecl -arch=!i386 RtlDeleteFunctionTable(ptr)
 @ stdcall RtlDeleteNoSplay(ptr ptr)
 @ stub RtlDeleteOwnersRanges
@@ -648,7 +661,7 @@
 @ stdcall RtlDeleteResource(ptr)
 @ stdcall RtlDeleteSecurityObject(ptr)
 @ stdcall RtlDeleteTimer(ptr ptr ptr)
-# @ stub RtlDeleteTimerQueue
+@ stdcall RtlDeleteTimerQueue(ptr)
 @ stdcall RtlDeleteTimerQueueEx(ptr ptr)
 @ stdcall RtlDeregisterWait(ptr)
 @ stdcall RtlDeregisterWaitEx(ptr ptr)
@@ -686,7 +699,7 @@
 @ stdcall RtlEnterCriticalSection(ptr)
 @ stub RtlEnumProcessHeaps
 @ stdcall RtlEnumerateGenericTable(ptr long)
-# @ stub RtlEnumerateGenericTableAvl
+@ stdcall RtlEnumerateGenericTableAvl(ptr long)
 # @ stub RtlEnumerateGenericTableLikeADirectory
 @ stdcall RtlEnumerateGenericTableWithoutSplaying(ptr ptr)
 @ stdcall RtlEnumerateGenericTableWithoutSplayingAvl(ptr ptr)
@@ -756,12 +769,17 @@
 @ stdcall RtlGUIDFromString(ptr ptr)
 @ stub RtlGenerate8dot3Name
 @ stdcall RtlGetAce(ptr long ptr)
+@ stdcall RtlGetAcesBufferSize(ptr ptr)
 @ stdcall RtlGetActiveActivationContext(ptr)
+@ stdcall RtlGetActiveConsoleId()
+@ stdcall RtlGetAppContainerNamedObjectPath(long ptr long ptr)
+@ stdcall RtlGetAppContainerSidType(ptr ptr)
 @ stdcall RtlGetCallersAddress(ptr ptr)
 @ stdcall RtlGetCompressionWorkSpaceSize(long ptr ptr)
 @ stdcall RtlGetControlSecurityDescriptor(ptr ptr ptr)
 @ stdcall RtlGetCurrentDirectory_U(long ptr)
 @ stdcall RtlGetCurrentPeb()
+@ stdcall RtlGetCurrentProcessorNumber()
 @ stdcall RtlGetCurrentProcessorNumberEx(ptr)
 @ stdcall RtlGetCurrentServiceSessionId()
 @ stdcall RtlGetCurrentTransaction()
@@ -824,6 +842,7 @@
 @ stdcall RtlImageRvaToSection(ptr long long)
 @ stdcall RtlImageRvaToVa(ptr long long ptr)
 @ stdcall RtlImpersonateSelf(long)
+@ stdcall RtlImpersonateSelfEx(long long ptr)
 @ stdcall RtlInitAnsiString(ptr str)
 @ stdcall RtlInitAnsiStringEx(ptr str)
 @ stdcall RtlInitBarrier(ptr long long)
@@ -895,7 +914,7 @@
 @ stdcall -arch=x86_64 -norelay RtlIsEcCode(ptr)
 @ stdcall RtlIsGenericTableEmpty(ptr)
 @ stdcall RtlIsFeatureEnabledForEnterprise(long)
-# @ stub RtlIsGenericTableEmptyAvl
+@ stdcall RtlIsGenericTableEmptyAvl(ptr)
 @ stdcall RtlIsMultiSessionSku()
 @ stdcall RtlIsMultiUsersInSessionSku()
 @ stdcall RtlIsNameLegalDOS8Dot3(ptr ptr ptr)
@@ -971,6 +990,7 @@
 @ stdcall RtlPrefixUnicodeString(ptr ptr long)
 @ stdcall RtlProcessFlsData(ptr long)
 @ stdcall RtlPublishWnfStateData(int64 ptr ptr long ptr)
+@ stdcall RtlQueryWnfStateData(ptr int64 ptr ptr ptr)
 @ stub RtlPropertySetNameToGuid
 @ stub RtlProtectHeap
 @ stdcall RtlPushFrame(ptr)
@@ -981,6 +1001,7 @@
 @ stdcall RtlQueryElevationFlags(ptr)
 @ stdcall RtlQueryEnvironmentVariable_U(ptr ptr ptr)
 @ stdcall RtlQueryEnvironmentVariable(ptr ptr long ptr long ptr)
+@ stdcall RtlQueryFeatureConfiguration(long long ptr ptr)
 @ stdcall RtlQueryHeapInformation(long long ptr long ptr)
 @ stdcall RtlQueryInformationAcl(ptr ptr long long)
 @ stdcall RtlQueryInformationActivationContext(long long ptr long ptr long ptr)
@@ -1082,12 +1103,14 @@
 @ stdcall RtlSetSaclSecurityDescriptor(ptr long ptr long)
 @ stdcall RtlSetSearchPathMode(long)
 # @ stub RtlSetSecurityDescriptorRMControl
-@ stub RtlSetSecurityObject
+@ stdcall RtlSetSecurityObject(long ptr ptr ptr long)
 # @ stub RtlSetSecurityObjectEx
+@ stdcall RtlSetSystemBootStatus(long ptr long ptr)
 @ stdcall RtlSetThreadErrorMode(long ptr)
 @ stdcall RtlSetThreadIsCritical(long ptr long)
 @ stdcall RtlSetThreadPlaceholderCompatibilityMode(long)
 @ stdcall RtlSetThreadPreferredUILanguages(long ptr ptr)
+@ stdcall RtlSetThreadSubProcessTag(ptr)
 # @ stub RtlSetThreadPoolStartFunc
 @ stdcall RtlSetTimeZoneInformation(ptr)
 # @ stub RtlSetTimer
@@ -1095,6 +1118,8 @@
 @ stub RtlSetUnicodeCallouts
 @ stdcall RtlSetUserFlagsHeap(ptr long ptr long long)
 @ stdcall RtlSetUserValueHeap(ptr long ptr ptr)
+@ stdcall RtlSidHashInitialize(ptr long ptr)
+@ stdcall RtlSidHashLookup(ptr ptr)
 @ stdcall RtlSizeHeap(long long ptr)
 @ stdcall RtlSleepConditionVariableCS(ptr ptr ptr)
 @ stdcall RtlSleepConditionVariableSRW(ptr ptr ptr long)
@@ -1108,6 +1133,7 @@
 @ stdcall RtlSubtreeSuccessor(ptr)
 @ stdcall RtlSystemTimeToLocalTime(ptr ptr)
 @ stdcall RtlTestAndPublishWnfStateData(int64 ptr ptr long ptr long)
+@ stdcall RtlTestProtectedAccess(long long)
 @ stdcall RtlTimeFieldsToTime(ptr ptr)
 @ stdcall RtlTimeToElapsedTimeFields(ptr ptr)
 @ stdcall RtlTimeToSecondsSince1970(ptr ptr)
@@ -1127,8 +1153,8 @@
 @ stdcall RtlUTF8ToUnicodeN(ptr long ptr ptr long)
 @ stdcall -fastcall -arch=i386 -norelay RtlUlongByteSwap(long)
 @ stdcall -fastcall -arch=i386 -norelay RtlUlonglongByteSwap(int64)
-# @ stub RtlUnhandledExceptionFilter2
-# @ stub RtlUnhandledExceptionFilter
+@ stdcall RtlUnhandledExceptionFilter2(ptr str)
+@ stdcall RtlUnhandledExceptionFilter(ptr)
 @ stdcall RtlUnicodeStringToAnsiSize(ptr)
 @ stdcall RtlUnicodeStringToAnsiString(ptr ptr long)
 @ stub RtlUnicodeStringToCountedOemString
@@ -1161,6 +1187,7 @@
 @ stdcall -norelay RtlUserThreadStart(ptr ptr)
 @ stdcall -fastcall -arch=i386 -norelay RtlUshortByteSwap(long)
 @ stdcall RtlValidAcl(ptr)
+@ stdcall RtlValidProcessProtection(long)
 @ stdcall RtlValidRelativeSecurityDescriptor(ptr long long)
 @ stdcall RtlValidSecurityDescriptor(ptr)
 @ stdcall RtlValidSid(ptr)
@@ -1202,7 +1229,7 @@
 # @ stub RtlpApplyLengthFunction
 # @ stub RtlpEnsureBufferSize
 # @ stub RtlpNotOwnerCriticalSection
-@ stdcall RtlpNtCreateKey(ptr long ptr long ptr long ptr)
+@ stdcall RtlpNtCreateKey(ptr long ptr long ptr ptr)
 @ stdcall RtlpNtEnumerateSubKey(ptr ptr long)
 @ stdcall RtlpNtMakeTemporaryKey(ptr)
 @ stdcall RtlpNtOpenKey(ptr long ptr)
@@ -1210,12 +1237,15 @@
 @ stdcall RtlpNtSetValueKey(ptr long ptr long)
 @ stdcall RtlpQueryDefaultUILanguage(ptr long)
 @ stdcall RtlpUnWaitCriticalSection(ptr)
+@ stdcall RtlpVerifyAndCommitUILanguageSettings(long)
 @ stdcall RtlpWaitForCriticalSection(ptr)
 @ stdcall RtlxAnsiStringToUnicodeSize(ptr) RtlAnsiStringToUnicodeSize
 @ stdcall RtlxOemStringToUnicodeSize(ptr) RtlOemStringToUnicodeSize
 @ stdcall RtlxUnicodeStringToAnsiSize(ptr) RtlUnicodeStringToAnsiSize
 @ stdcall RtlxUnicodeStringToOemSize(ptr) RtlUnicodeStringToOemSize
+@ stdcall SbSelectProcedure(long long ptr long)
 @ stdcall TpAllocAlpcCompletion(ptr ptr ptr ptr ptr)
+@ stdcall TpAllocAlpcCompletionEx(ptr ptr ptr ptr ptr)
 @ stdcall TpAllocCleanupGroup(ptr)
 @ stdcall TpAllocIoCompletion(ptr ptr ptr ptr ptr)
 @ stdcall TpAllocPool(ptr ptr)
@@ -1408,6 +1438,7 @@
 @ stdcall -private ZwNotifyChangeDirectoryFile(long long ptr ptr ptr ptr long long long) NtNotifyChangeDirectoryFile
 @ stdcall -private ZwNotifyChangeKey(long long ptr ptr ptr long long ptr long long) NtNotifyChangeKey
 @ stdcall -private ZwNotifyChangeMultipleKeys(long long ptr long ptr ptr ptr long long ptr long long) NtNotifyChangeMultipleKeys
+@ stdcall -private ZwNotifyChangeSession(long long ptr long long long ptr long) NtNotifyChangeSession
 @ stdcall -private ZwOpenDirectoryObject(ptr long ptr) NtOpenDirectoryObject
 @ stdcall -private ZwOpenEvent(ptr long ptr) NtOpenEvent
 # @ stub ZwOpenEventPair
@@ -1426,6 +1457,7 @@
 @ stdcall -private ZwOpenProcessTokenEx(long long long ptr) NtOpenProcessTokenEx
 @ stdcall -private ZwOpenSection(ptr long ptr) NtOpenSection
 @ stdcall -private ZwOpenSemaphore(ptr long ptr) NtOpenSemaphore
+@ stdcall -private ZwOpenSession(ptr long ptr) NtOpenSession
 @ stdcall -private ZwOpenSymbolicLinkObject (ptr long ptr) NtOpenSymbolicLinkObject
 @ stdcall -private ZwOpenThread(ptr long ptr ptr) NtOpenThread
 @ stdcall -private ZwOpenThreadToken(long long long ptr) NtOpenThreadToken
@@ -1435,7 +1467,7 @@
 @ stdcall -private ZwPowerInformation(long ptr long ptr long) NtPowerInformation
 @ stdcall -private ZwPrivilegeCheck(ptr ptr ptr) NtPrivilegeCheck
 @ stdcall -private ZwPrivilegeObjectAuditAlarm(ptr long long long ptr long) NtPrivilegeObjectAuditAlarm
-# @ stub ZwPrivilegedServiceAuditAlarm
+@ stdcall -private ZwPrivilegedServiceAuditAlarm(ptr ptr long ptr long) NtPrivilegedServiceAuditAlarm
 @ stdcall -private ZwProtectVirtualMemory(long ptr ptr long ptr) NtProtectVirtualMemory
 @ stdcall -private ZwPulseEvent(long ptr) NtPulseEvent
 @ stdcall -private ZwQueryAttributesFile(ptr ptr) NtQueryAttributesFile
@@ -1553,7 +1585,7 @@
 @ stdcall -private ZwSetThreadExecutionState(long ptr) NtSetThreadExecutionState
 @ stdcall -private ZwSetTimer(long ptr ptr ptr long long ptr) NtSetTimer
 @ stdcall -private ZwSetTimerResolution(long long ptr) NtSetTimerResolution
-# @ stub ZwSetUuidSeed
+@ stdcall -private ZwSetUuidSeed(ptr) NtSetUuidSeed
 @ stdcall -private ZwSetValueKey(long ptr long long ptr long) NtSetValueKey
 @ stdcall -private ZwSetVolumeInformationFile(long ptr ptr long long) NtSetVolumeInformationFile
 @ stdcall -private ZwShutdownSystem(long) NtShutdownSystem
@@ -1833,10 +1865,12 @@
 @ cdecl wine_get_host_version(ptr ptr)
 
 @ stdcall -syscall NtCreateWnfStateName(ptr long long long ptr long ptr)
+@ stdcall -syscall NtDeleteWnfStateData(ptr ptr)
 @ stdcall -syscall NtDeleteWnfStateName(ptr)
 @ stdcall -syscall NtQueryWnfStateData(ptr ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtUpdateWnfStateData(ptr ptr long ptr ptr long long)
 @ stdcall -private ZwCreateWnfStateName(ptr long long long ptr long ptr) NtCreateWnfStateName
+@ stdcall -private ZwDeleteWnfStateData(ptr ptr) NtDeleteWnfStateData
 @ stdcall -private ZwDeleteWnfStateName(ptr) NtDeleteWnfStateName
 @ stdcall -private ZwQueryWnfStateData(ptr ptr ptr ptr ptr ptr) NtQueryWnfStateData
 @ stdcall -private ZwUpdateWnfStateData(ptr ptr long ptr ptr long long) NtUpdateWnfStateData

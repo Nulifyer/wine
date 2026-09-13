@@ -563,6 +563,21 @@ NTSTATUS WINAPI RtlpQueryDefaultUILanguage( LANGID *lang, BOOLEAN system )
 }
 
 
+/**************************************************************************
+ *      RtlpVerifyAndCommitUILanguageSettings   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlpVerifyAndCommitUILanguageSettings( BOOLEAN shutdown )
+{
+    LANGID lang;
+    NTSTATUS status;
+
+    status = NtQueryInstallUILanguage( &lang );
+    if (!status && !find_lcid_entry( locale_table, lang )) status = STATUS_INVALID_PARAMETER;
+    FIXME( "stub: shutdown %u, status %#lx\n", shutdown, status );
+    return status;
+}
+
+
 /******************************************************************
  *      RtlInitCodePageTable   (NTDLL.@)
  */

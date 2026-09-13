@@ -70,6 +70,7 @@ struct process
     int                  critical;        /* break-on-termination policy */
     int                  disable_boost;   /* disable priority boost */
     unsigned int         handle_checking_mode; /* process handle checking policy */
+    unsigned int         native_session_owner:1; /* admitted per-session native startup owner */
     unsigned int         subsystem_process:1; /* registered native subsystem owner */
     int                  suspend;         /* global process suspend count */
     unsigned int         is_system:1;     /* is it a system process? */
@@ -114,7 +115,8 @@ extern int validate_native_bootstrap_image( struct process *process, int fd );
 extern struct process *create_process( int fd, struct process *parent, unsigned int flags,
                                        const struct startup_info_data *info,
                                        const struct security_descriptor *sd, const obj_handle_t *handles,
-                                       unsigned int handle_count, struct token *token, int session_id );
+                                       unsigned int handle_count, struct token *token, int session_id,
+                                       int preserve_trust );
 extern data_size_t get_process_startup_info_size( struct process *process );
 extern struct thread *get_process_first_thread( struct process *process );
 extern struct process *get_process_from_id( process_id_t id );

@@ -4114,8 +4114,10 @@ static void MODULE_FlushModrefs(void)
  */
 static NTSTATUS MODULE_DecRefCount( LDR_DDAG_NODE *node, void *context )
 {
+    SINGLE_LIST_ENTRY *entry, *mark;
     LDR_DATA_TABLE_ENTRY *mod;
     WINE_MODREF *wm;
+    unsigned int incoming = 0;
 
     mod = CONTAINING_RECORD( node->Modules.Flink, LDR_DATA_TABLE_ENTRY, NodeModuleLink );
     wm = CONTAINING_RECORD( mod, WINE_MODREF, ldr );
@@ -4126,13 +4128,30 @@ static NTSTATUS MODULE_DecRefCount( LDR_DDAG_NODE *node, void *context )
     if ( wm->ldr.LoadCount <= 0 )
         return STATUS_SUCCESS;
 
+    /* A direct unload may only consume dynamic references. Static importers
+     * retain one reference each until their own dependency walk releases it. */
+    if (!context && (mark = node->IncomingDependencies.Tail))
+    {
+        for (entry = mark->Next; ; entry = entry->Next)
+        {
+            incoming++;
+            if (entry == mark) break;
+        }
+        if (wm->ldr.LoadCount <= incoming)
+        {
+            TRACE("(%s) preserving %u static dependency references\n",
+                  debugstr_w(wm->ldr.BaseDllName.Buffer), incoming);
+            return STATUS_SUCCESS;
+        }
+    }
+
     --wm->ldr.LoadCount;
     TRACE("(%s) ldr.LoadCount: %d\n", debugstr_w(wm->ldr.BaseDllName.Buffer), wm->ldr.LoadCount );
 
     if ( wm->ldr.LoadCount == 0 )
     {
         wm->ldr.Flags |= LDR_UNLOAD_IN_PROGRESS;
-        walk_node_dependencies( node, context, MODULE_DecRefCount );
+        walk_node_dependencies( node, (void *)1, MODULE_DecRefCount );
         wm->ldr.Flags &= ~LDR_UNLOAD_IN_PROGRESS;
         module_push_unload_trace( wm );
     }

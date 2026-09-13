@@ -103,6 +103,8 @@ struct token
 {
     struct object  obj;             /* object header */
     struct luid    token_id;        /* system-unique id of token */
+    struct luid    authentication_id; /* logon session that created the token */
+    struct luid    origin;          /* originating logon session */
     struct luid    modified_id;     /* new id allocated every time token is modified */
     struct list    privileges;      /* privileges available to the token */
     struct list    groups;          /* groups that the user of this token belongs to (sid_and_attributes) */
@@ -114,6 +116,8 @@ struct token
     struct sid    *primary_group;   /* SID of user's primary group (points to one of groups) */
     unsigned int   primary;         /* is this a primary or impersonation token? */
     unsigned int   session_id;      /* token session id */
+    unsigned int   mandatory_policy; /* TOKEN_MANDATORY_POLICY_* flags */
+    struct token_audit_policy audit_policy; /* per-user audit policy */
     struct acl    *default_dacl;    /* the default DACL to assign to objects created by this user */
     int            impersonation_level; /* impersonation level this token is capable of if non-primary token */
     int            elevation;       /* elevation type */
@@ -372,8 +376,16 @@ struct acl *extract_security_labels( const struct acl *sacl, unsigned int info )
     return label_acl;
 }
 
-/* replace security labels in an existing SACL */
-struct acl *replace_security_labels( const struct acl *old_sacl, const struct acl *new_sacl )
+static int security_label_is_selected( const struct ace *ace, unsigned int info )
+{
+    return (ace->type == SYSTEM_MANDATORY_LABEL_ACE_TYPE && (info & LABEL_SECURITY_INFORMATION)) ||
+           (ace->type == SYSTEM_PROCESS_TRUST_LABEL_ACE_TYPE &&
+            (info & PROCESS_TRUST_LABEL_SECURITY_INFORMATION));
+}
+
+/* replace the selected security-label classes in an existing SACL */
+struct acl *replace_security_labels( const struct acl *old_sacl, const struct acl *new_sacl,
+                                     unsigned int info )
 {
     const struct ace *ace;
     struct ace *replaced_ace;
@@ -387,7 +399,7 @@ struct acl *replace_security_labels( const struct acl *old_sacl, const struct ac
         revision = max( revision, old_sacl->revision );
         for (i = 0, ace = ace_first( old_sacl ); i < old_sacl->count; i++, ace = ace_next( ace ))
         {
-            if (ace->type == SYSTEM_MANDATORY_LABEL_ACE_TYPE) continue;
+            if (security_label_is_selected( ace, info )) continue;
             size += ace->size;
             count++;
         }
@@ -398,7 +410,7 @@ struct acl *replace_security_labels( const struct acl *old_sacl, const struct ac
         revision = max( revision, new_sacl->revision );
         for (i = 0, ace = ace_first( new_sacl ); i < new_sacl->count; i++, ace = ace_next( ace ))
         {
-            if (ace->type != SYSTEM_MANDATORY_LABEL_ACE_TYPE) continue;
+            if (!security_label_is_selected( ace, info )) continue;
             size += ace->size;
             count++;
         }
@@ -422,14 +434,14 @@ struct acl *replace_security_labels( const struct acl *old_sacl, const struct ac
     if (old_sacl)
     {
         for (i = 0, ace = ace_first( old_sacl ); i < old_sacl->count; i++, ace = ace_next( ace ))
-            if (ace->type != SYSTEM_MANDATORY_LABEL_ACE_TYPE)
+            if (!security_label_is_selected( ace, info ))
                 replaced_ace = mem_append( replaced_ace, ace, ace->size );
     }
 
     if (new_sacl)
     {
         for (i = 0, ace = ace_first( new_sacl ); i < new_sacl->count; i++, ace = ace_next( ace ))
-            if (ace->type == SYSTEM_MANDATORY_LABEL_ACE_TYPE)
+            if (security_label_is_selected( ace, info ))
                 replaced_ace = mem_append( replaced_ace, ace, ace->size );
     }
 
@@ -532,6 +544,10 @@ static struct token *create_token( unsigned int primary, unsigned int session_id
         unsigned int i;
 
         allocate_luid( &token->token_id );
+        token->authentication_id.low_part = 0;
+        token->authentication_id.high_part = 0;
+        token->origin.low_part = 0;
+        token->origin.high_part = 0;
         if (modified_id)
             token->modified_id = *modified_id;
         else
@@ -543,6 +559,8 @@ static struct token *create_token( unsigned int primary, unsigned int session_id
         token->restricted = 0;
         token->primary = primary;
         token->session_id = session_id;
+        token->mandatory_policy = TOKEN_MANDATORY_POLICY_NO_WRITEUP;
+        memset( &token->audit_policy, 0, sizeof(token->audit_policy) );
         /* primary tokens don't have impersonation levels */
         if (primary)
             token->impersonation_level = -1;
@@ -581,6 +599,14 @@ static struct token *create_token( unsigned int primary, unsigned int session_id
                 token->owner = &group->sid;
                 token->primary_group = &group->sid;
             }
+        }
+
+        /* NtCreateToken represents a user SID primary group with the index
+         * immediately following the transmitted group list. */
+        if (primary_group == group_count)
+        {
+            token->owner = token->user;
+            token->primary_group = token->user;
         }
 
         /* copy privileges */
@@ -636,17 +662,16 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
                                const struct luid_attr *remove_privs, unsigned int remove_priv_count,
                                const struct sid *remove_groups, unsigned int remove_group_count)
 {
-    const struct luid *modified_id =
-        primary || (impersonation_level == src_token->impersonation_level) ?
-            &src_token->modified_id : NULL;
+    /* Duplication changes token identity, not the captured source version. */
+    const struct luid *modified_id = &src_token->modified_id;
     struct token *token = NULL;
     struct privilege *privilege;
     struct group *group;
 
-    if (!primary &&
-        (impersonation_level < SecurityAnonymous ||
-         impersonation_level > SecurityDelegation ||
-         (!src_token->primary && (impersonation_level > src_token->impersonation_level))))
+    if ((primary && !src_token->primary && src_token->impersonation_level < SecurityImpersonation) ||
+        (!primary && (impersonation_level < SecurityAnonymous ||
+                      impersonation_level > SecurityDelegation ||
+                      (!src_token->primary && impersonation_level > src_token->impersonation_level))))
     {
         set_error( STATUS_BAD_IMPERSONATION_LEVEL );
         return NULL;
@@ -662,6 +687,10 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
         release_object( token );
         return NULL;
     }
+    token->authentication_id = src_token->authentication_id;
+    token->origin = src_token->origin;
+    token->mandatory_policy = src_token->mandatory_policy;
+    token->audit_policy = src_token->audit_policy;
 
     token->restricted = src_token->restricted;
     LIST_FOR_EACH_ENTRY( group, &src_token->restricting, struct group, entry )
@@ -776,6 +805,13 @@ struct token *token_duplicate_impersonation( struct token *source, int level, in
         }
     }
     return token;
+}
+
+void token_get_identity( struct token *token, struct token_identity *identity )
+{
+    identity->token_id = token->token_id;
+    identity->modified_id = token->modified_id;
+    identity->authentication_id = token->authentication_id;
 }
 
 static struct acl *create_default_dacl( const struct sid *user )
@@ -960,6 +996,8 @@ struct token *token_create_native_system(void)
     free( dacl );
     if (!token) return NULL;
     token->primary_group = token->user;
+    token->authentication_id.low_part = 0x3e7; /* SYSTEM_LUID */
+    token->authentication_id.high_part = 0;
     if (!(token->trust_level = memdup( &native_trust, sid_len( &native_trust ) )))
     {
         release_object( token );
@@ -986,6 +1024,24 @@ static struct privilege *token_find_privilege( struct token *token, struct luid 
         }
     }
     return NULL;
+}
+
+/* Return whether a token group was selected and, if so, its requested enabled state. */
+static int get_adjusted_group_state( const struct group *group, int reset,
+                                     const struct sid_attrs *groups, unsigned int group_count,
+                                     int *enabled )
+{
+    unsigned int i;
+    int found = reset;
+
+    if (reset) *enabled = !!(group->attrs & SE_GROUP_ENABLED_BY_DEFAULT);
+    for (i = 0; !reset && i < group_count; i++)
+    {
+        if (!equal_sid( &group->sid, groups[i].sid )) continue;
+        *enabled = !!(groups[i].attrs & SE_GROUP_ENABLED);
+        found = TRUE;
+    }
+    return found;
 }
 
 static unsigned int token_adjust_privileges( struct token *token, const struct luid_attr *privs,
@@ -1384,7 +1440,7 @@ DECL_HANDLER(create_token)
         return;
     }
 
-    if (req->primary_group < 0 || req->primary_group >= req->group_count)
+    if (req->primary_group < 0 || req->primary_group > req->group_count)
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -1441,6 +1497,8 @@ DECL_HANDLER(create_token)
                           privs, req->priv_count, dacl, NULL, req->primary_group, req->impersonation_level, 0 );
     if (token)
     {
+        token->authentication_id.low_part = req->token_id.low_part;
+        token->authentication_id.high_part = req->token_id.high_part;
         reply->token = alloc_handle( current->process, token, req->access, params.attr );
         release_object( token );
     }
@@ -1482,6 +1540,138 @@ DECL_HANDLER(open_token)
                 set_error( STATUS_NO_TOKEN );
             release_object( process );
         }
+    }
+}
+
+/* adjust the groups held by a token */
+DECL_HANDLER(adjust_token_groups)
+{
+    struct token *token;
+    unsigned int access = TOKEN_ADJUST_GROUPS;
+
+    if (req->get_modified_state) access |= TOKEN_QUERY;
+
+    if ((token = (struct token *)get_handle_obj( current->process, req->handle,
+                                                 access, &token_ops )))
+    {
+        const unsigned int *attrs = get_req_data();
+        const struct sid *sid;
+        struct sid_attrs *groups = NULL;
+        struct group *group;
+        data_size_t data_size = get_req_data_size();
+        size_t attrs_size, sid_size = 0;
+        unsigned int i, modified_count = 0;
+        int enabled;
+
+        if (req->reset && req->group_count)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            goto done;
+        }
+        if (req->group_count > data_size / sizeof(*attrs))
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            goto done;
+        }
+        attrs_size = req->group_count * sizeof(*attrs);
+        sid = (const struct sid *)((const char *)attrs + attrs_size);
+
+        if (req->group_count && !(groups = mem_alloc( req->group_count * sizeof(*groups) )))
+            goto done;
+        for (i = 0; i < req->group_count; i++)
+        {
+            size_t remaining = data_size - attrs_size - sid_size;
+
+            if (!sid_valid_size( sid, remaining ))
+            {
+                set_error( STATUS_INVALID_PARAMETER );
+                goto done;
+            }
+            groups[i].attrs = attrs[i];
+            groups[i].sid = sid;
+            sid_size += sid_len( sid );
+            sid = (const struct sid *)((const char *)sid + sid_len( sid ));
+        }
+        if (attrs_size + sid_size != data_size)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            goto done;
+        }
+
+        sid_size = 0;
+        LIST_FOR_EACH_ENTRY( group, &token->groups, struct group, entry )
+        {
+            if (!get_adjusted_group_state( group, req->reset, groups, req->group_count, &enabled ) ||
+                enabled == !!(group->attrs & SE_GROUP_ENABLED))
+                continue;
+
+            if (!enabled && (group->attrs & SE_GROUP_MANDATORY))
+            {
+                set_error( STATUS_CANT_DISABLE_MANDATORY );
+                goto done;
+            }
+            if (enabled && (group->attrs & SE_GROUP_USE_FOR_DENY_ONLY))
+            {
+                set_error( STATUS_CANT_ENABLE_DENY_ONLY );
+                goto done;
+            }
+            modified_count++;
+            sid_size += sid_len( &group->sid );
+        }
+
+        reply->group_count = modified_count;
+        reply->sid_len = sid_size;
+        if (!req->group_entry_size ||
+            modified_count > (~0u - req->groups_offset - sid_size) / req->group_entry_size)
+        {
+            set_error( STATUS_INTEGER_OVERFLOW );
+            goto done;
+        }
+        reply->len = req->groups_offset + modified_count * req->group_entry_size + sid_size;
+
+        if (req->get_modified_state)
+        {
+            unsigned int *reply_attrs;
+            struct sid *reply_sid;
+
+            if (req->previous_length < reply->len)
+            {
+                set_error( STATUS_BUFFER_TOO_SMALL );
+                goto done;
+            }
+            if (modified_count)
+            {
+                if (!(reply_attrs = set_reply_data_size( modified_count * sizeof(*reply_attrs) + sid_size )))
+                    goto done;
+                reply_sid = (struct sid *)(reply_attrs + modified_count);
+                LIST_FOR_EACH_ENTRY( group, &token->groups, struct group, entry )
+                {
+                    if (!get_adjusted_group_state( group, req->reset, groups, req->group_count,
+                                                   &enabled ) ||
+                        enabled == !!(group->attrs & SE_GROUP_ENABLED))
+                        continue;
+                    *reply_attrs++ = group->attrs;
+                    reply_sid = copy_sid( reply_sid, &group->sid );
+                }
+            }
+        }
+
+        if (modified_count)
+        {
+            allocate_luid( &token->modified_id );
+            LIST_FOR_EACH_ENTRY( group, &token->groups, struct group, entry )
+            {
+                if (!get_adjusted_group_state( group, req->reset, groups, req->group_count,
+                                               &enabled ))
+                    continue;
+                if (enabled) group->attrs |= SE_GROUP_ENABLED;
+                else group->attrs &= ~SE_GROUP_ENABLED;
+            }
+        }
+
+    done:
+        free( groups );
+        release_object( token );
     }
 }
 
@@ -1841,9 +2031,9 @@ DECL_HANDLER(get_token_info)
 
     if ((token = (struct token *)get_handle_obj( current->process, req->handle, TOKEN_QUERY, &token_ops )))
     {
-        reply->token_id = token->token_id;
-        reply->modified_id = token->modified_id;
+        token_get_identity( token, &reply->identity );
         reply->session_id = token->session_id;
+        reply->mandatory_policy = token->mandatory_policy;
         reply->primary = token->primary;
         reply->impersonation_level = token->impersonation_level;
         reply->elevation_type = token->elevation;
@@ -1903,6 +2093,104 @@ DECL_HANDLER(set_token_default_dacl)
         if (acl_size)
             token->default_dacl = memdup( acl, acl_size );
 
+        release_object( token );
+    }
+}
+
+DECL_HANDLER(set_token_session_id)
+{
+    struct token *token;
+
+    if ((token = (struct token *)get_handle_obj( current->process, req->handle,
+                                                 TOKEN_ADJUST_SESSIONID,
+                                                 &token_ops )))
+    {
+        if (!thread_single_check_privilege( current, SeTcbPrivilege ))
+            set_error( STATUS_PRIVILEGE_NOT_HELD );
+        else
+            token_set_session_id( token, req->session_id );
+        release_object( token );
+    }
+}
+
+DECL_HANDLER(set_token_session_reference)
+{
+    struct luid_attr privilege = { SeTcbPrivilege, 0 };
+    struct token *token;
+
+    if ((token = (struct token *)get_handle_obj( current->process, req->handle,
+                                                 TOKEN_ADJUST_DEFAULT,
+                                                 &token_ops )))
+    {
+        struct token *effective = thread_get_impersonation_token( current );
+
+        if (!token_check_privileges( effective, TRUE, &privilege, 1, NULL ))
+            set_error( STATUS_PRIVILEGE_NOT_HELD );
+        /* Wine does not retain kernel logon-session objects, so there is no
+         * session reference to release after validating access and privilege. */
+        release_object( token );
+    }
+}
+
+DECL_HANDLER(set_token_mandatory_policy)
+{
+    struct token *token;
+
+    if ((token = (struct token *)get_handle_obj( current->process, req->handle,
+                                                 TOKEN_ADJUST_DEFAULT,
+                                                 &token_ops )))
+    {
+        token->mandatory_policy = req->policy;
+        release_object( token );
+    }
+}
+
+DECL_HANDLER(set_token_audit_policy)
+{
+    struct token *token;
+
+    if ((token = (struct token *)get_handle_obj( current->process, req->handle,
+                                                 TOKEN_ADJUST_DEFAULT,
+                                                 &token_ops )))
+    {
+        token->audit_policy = req->policy;
+        release_object( token );
+    }
+}
+
+DECL_HANDLER(set_token_origin)
+{
+    struct token *token;
+
+    if ((token = (struct token *)get_handle_obj( current->process, req->handle,
+                                                 TOKEN_ADJUST_DEFAULT,
+                                                 &token_ops )))
+    {
+        token->origin = req->origin;
+        release_object( token );
+    }
+}
+
+DECL_HANDLER(get_token_audit_policy)
+{
+    struct token *token;
+
+    if ((token = (struct token *)get_handle_obj( current->process, req->handle,
+                                                 TOKEN_QUERY, &token_ops )))
+    {
+        reply->policy = token->audit_policy;
+        release_object( token );
+    }
+}
+
+DECL_HANDLER(get_token_origin)
+{
+    struct token *token;
+
+    if ((token = (struct token *)get_handle_obj( current->process, req->handle,
+                                                 TOKEN_QUERY, &token_ops )))
+    {
+        reply->origin = token->origin;
         release_object( token );
     }
 }

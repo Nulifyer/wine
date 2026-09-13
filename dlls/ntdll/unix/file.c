@@ -2140,6 +2140,21 @@ static unsigned int server_get_unix_name( HANDLE handle, char **unix_name )
     return ret;
 }
 
+static BOOL is_ntfs_reparse_index( HANDLE handle )
+{
+    static const char suffix[] = "/$Extend/$Reparse:$R:$INDEX_ALLOCATION";
+    char *unix_name;
+    size_t len;
+    BOOL ret = FALSE;
+
+    if (server_get_unix_name( handle, &unix_name )) return FALSE;
+    len = strlen( unix_name );
+    if (len >= sizeof(suffix) - 1)
+        ret = !strcasecmp( unix_name + len - sizeof(suffix) + 1, suffix );
+    free( unix_name );
+    return ret;
+}
+
 static NTSTATUS server_get_name_info( HANDLE handle, FILE_NAME_INFORMATION *info, LONG *name_len )
 {
     data_size_t size = 1024;
@@ -2920,7 +2935,7 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTI
         return STATUS_INVALID_INFO_CLASS;
     case FileReparsePointInformation:
         if (length != sizeof(FILE_REPARSE_POINT_INFORMATION)) return STATUS_INFO_LENGTH_MISMATCH;
-        return STATUS_INVALID_INFO_CLASS;
+        break;
     default:
         return STATUS_INVALID_INFO_CLASS;
     }
@@ -2936,6 +2951,18 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTI
     }
 
     io->Information = 0;
+
+    /* FileReparsePointInformation is only valid for a filesystem's reparse
+     * index, not for ordinary directories.  Wine has no persistent NTFS
+     * reparse index yet; expose the synthetic index directory as empty. */
+    if (info_class == FileReparsePointInformation)
+    {
+        status = is_ntfs_reparse_index( handle ) ? STATUS_NO_MORE_FILES : STATUS_INVALID_INFO_CLASS;
+        io->Status = status;
+        if (needs_close) close( fd );
+        return status;
+    }
+
     if (mask && mask->Length == 0) mask = NULL;
 
     mutex_lock( &dir_mutex );

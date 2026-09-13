@@ -31,6 +31,34 @@
 
 #define WNF_NAME_KEY 0x41c64e6da3bc0074ULL
 #define WNF_FT_LAST_PROCESS_PROMOTION_TRIGGER 0x41c61a2ba3bc2875ULL
+#define WNF_PNPA_DEVNODES_CHANGED 0x0096003da3bc0875ULL
+#define WNF_PNPA_DEVNODES_CHANGED_SESSION 0x0096003da3bc1035ULL
+#define WNF_PNPA_VOLUMES_CHANGED 0x0096003da3bc1875ULL
+#define WNF_PNPA_VOLUMES_CHANGED_SESSION 0x0096003da3bc2035ULL
+#define WNF_PNPA_HARDWAREPROFILES_CHANGED 0x0096003da3bc2875ULL
+#define WNF_PNPA_HARDWAREPROFILES_CHANGED_SESSION 0x0096003da3bc3035ULL
+#define WNF_PNPA_PORTS_CHANGED 0x0096003da3bc3875ULL
+#define WNF_PNPA_PORTS_CHANGED_SESSION 0x0096003da3bc4035ULL
+#define WNF_PO_SCENARIO_CHANGE 0x41c6013da3bce875ULL
+#define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
+
+static const struct sid network_service_sid =
+    { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_NETWORK_SERVICE_RID } };
+
+static const unsigned __int64 well_known_states[] =
+{
+    WNF_FT_LAST_PROCESS_PROMOTION_TRIGGER,
+    WNF_PNPA_DEVNODES_CHANGED,
+    WNF_PNPA_DEVNODES_CHANGED_SESSION,
+    WNF_PNPA_VOLUMES_CHANGED,
+    WNF_PNPA_VOLUMES_CHANGED_SESSION,
+    WNF_PNPA_HARDWAREPROFILES_CHANGED,
+    WNF_PNPA_HARDWAREPROFILES_CHANGED_SESSION,
+    WNF_PNPA_PORTS_CHANGED,
+    WNF_PNPA_PORTS_CHANGED_SESSION,
+    WNF_PO_SCENARIO_CHANGE,
+    WNF_RPCF_FWMAN_RUNNING,
+};
 
 static const WCHAR wnf_name[] = {'W','n','f','S','t','a','t','e'};
 static struct type_descr wnf_type =
@@ -79,7 +107,7 @@ static const struct object_ops wnf_ops =
     .dump = wnf_dump, .destroy = wnf_destroy,
 };
 
-static struct wnf_state *create_well_known_state( unsigned __int64 name )
+static struct wnf_state *create_well_known_state( unsigned __int64 name, unsigned int session )
 {
     struct wnf_state *state;
 
@@ -89,7 +117,11 @@ static struct wnf_state *create_well_known_state( unsigned __int64 name )
     state->creator = NULL;
     state->name = name;
     state->type_low = state->type_high = 0;
-    state->maximum = state->size = state->stamp = state->session = 0;
+    if (name == WNF_PO_SCENARIO_CHANGE) state->maximum = 20;
+    else if (name == WNF_RPCF_FWMAN_RUNNING) state->maximum = sizeof(unsigned int);
+    else state->maximum = 0;
+    state->size = state->stamp = 0;
+    state->session = session;
     state->has_type = 0;
     state->well_known = 1;
     state->data = NULL;
@@ -165,6 +197,7 @@ static struct wnf_state *find_state( unsigned __int64 name, int explicit_scope,
     struct session_search search = { session, 0 };
     unsigned int scope = ((name ^ WNF_NAME_KEY) >> 6) & 0xf;
     struct wnf_state *state;
+    unsigned int i;
     if (explicit_scope)
     {
         if (scope != 1) { set_error( STATUS_INVALID_PARAMETER ); return NULL; }
@@ -177,8 +210,8 @@ static struct wnf_state *find_state( unsigned __int64 name, int explicit_scope,
     else session = current->process->session_id;
     LIST_FOR_EACH_ENTRY( state, &states, struct wnf_state, entry )
         if (state->name == name && (scope != 1 || state->session == session)) return state;
-    if (name == WNF_FT_LAST_PROCESS_PROMOTION_TRIGGER)
-        return create_well_known_state( name );
+    for (i = 0; i < sizeof(well_known_states) / sizeof(well_known_states[0]); i++)
+        if (name == well_known_states[i]) return create_well_known_state( name, scope == 1 ? session : 0 );
     set_error( STATUS_OBJECT_NAME_NOT_FOUND );
     return NULL;
 }
@@ -189,6 +222,22 @@ static int check_state( struct wnf_state *state, unsigned int access, int has_ty
     if (state->has_type && (!has_type || state->type_low != type_low || state->type_high != type_high))
     { set_error( STATUS_INVALID_PARAMETER ); return 0; }
     return 1;
+}
+
+static int can_write_well_known_state( const struct wnf_state *state )
+{
+    const struct sid *user;
+    struct token *token;
+
+    if (!state->well_known) return 1;
+    token = current->token ? current->token : current->process->token;
+    user = token ? token_get_user( token ) : NULL;
+    if (user &&
+        ((state->name == WNF_PO_SCENARIO_CHANGE && equal_sid( user, &local_system_sid )) ||
+         (state->name == WNF_RPCF_FWMAN_RUNNING &&
+          (equal_sid( user, &local_system_sid ) || equal_sid( user, &network_service_sid ))))) return 1;
+    set_error( STATUS_ACCESS_DENIED );
+    return 0;
 }
 
 DECL_HANDLER(create_wnf_state_name)
@@ -247,7 +296,7 @@ DECL_HANDLER(update_wnf_state_data)
     data_size_t size = get_req_data_size();
     void *data = NULL;
     if (!state || !check_state( state, 2, req->has_type, req->type_low, req->type_high )) return;
-    if (state->well_known) { set_error( STATUS_ACCESS_DENIED ); return; }
+    if (!can_write_well_known_state( state )) return;
     if (size > state->maximum) { set_error( STATUS_INVALID_PARAMETER ); return; }
     if (req->check_stamp && req->matching_stamp != state->stamp)
     { set_error( STATUS_UNSUCCESSFUL ); return; }
@@ -255,6 +304,20 @@ DECL_HANDLER(update_wnf_state_data)
     free( state->data );
     state->data = data;
     state->size = size;
+    state->stamp++;
+    notify_state( state, 1 );
+}
+
+DECL_HANDLER(delete_wnf_state_data)
+{
+    struct wnf_state *state = find_state( req->state_name, req->explicit_scope, req->session_id );
+    unsigned int access = 2;
+
+    if (!state || !check_object_access( NULL, &state->obj, &access )) return;
+    if (!can_write_well_known_state( state )) return;
+    free( state->data );
+    state->data = NULL;
+    state->size = 0;
     state->stamp++;
     notify_state( state, 1 );
 }

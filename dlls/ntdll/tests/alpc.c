@@ -30,6 +30,9 @@ DECL_FUNCPTR(AlpcGetHeaderSize)
 DECL_FUNCPTR(AlpcGetMessageAttribute)
 DECL_FUNCPTR(AlpcInitializeMessageAttribute)
 DECL_FUNCPTR(NtAlpcCreatePort)
+DECL_FUNCPTR(NtAlpcConnectPort)
+DECL_FUNCPTR(NtAlpcQueryInformation)
+DECL_FUNCPTR(NtAlpcSendWaitReceivePort)
 
 #undef DECL_FUNCPTR
 
@@ -46,6 +49,9 @@ static void init_functions(void)
     LOAD_FUNCPTR(AlpcGetMessageAttribute)
     LOAD_FUNCPTR(AlpcInitializeMessageAttribute)
     LOAD_FUNCPTR(NtAlpcCreatePort)
+    LOAD_FUNCPTR(NtAlpcConnectPort)
+    LOAD_FUNCPTR(NtAlpcQueryInformation)
+    LOAD_FUNCPTR(NtAlpcSendWaitReceivePort)
 
 #undef LOAD_FUNCPTR
 }
@@ -473,6 +479,79 @@ static void test_NtAlpcCreatePort(void)
     }
 }
 
+static void test_power_port(void)
+{
+    UNICODE_STRING name = RTL_CONSTANT_STRING(L"\\PowerPort");
+    ALPC_PORT_ATTRIBUTES port_attr;
+    HANDLE handle = NULL;
+    NTSTATUS status;
+
+    if (!pNtAlpcConnectPort)
+    {
+        win_skip("NtAlpcConnectPort is unavailable.\n");
+        return;
+    }
+
+    init_port_attr(&port_attr, 0x20000, 0x20000);
+    status = pNtAlpcConnectPort(&handle, &name, NULL, &port_attr, 0x20000,
+                                NULL, NULL, NULL, NULL, NULL, NULL);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    if (!status) CloseHandle(handle);
+}
+
+static void test_NtAlpcQueryInformation(void)
+{
+    ALPC_BASIC_INFORMATION info = {0xdeadbeef, 0xdeadbeef, (void *)0xdeadbeef};
+    ALPC_PORT_MESSAGE message;
+    ALPC_PORT_ATTRIBUTES attr = {0};
+    LARGE_INTEGER timeout = {0};
+    ULONG return_length = 0;
+    HANDLE handle = NULL;
+    NTSTATUS status;
+
+    if (!pNtAlpcQueryInformation || !pNtAlpcSendWaitReceivePort)
+    {
+        win_skip("NtAlpcQueryInformation is unavailable.\n");
+        return;
+    }
+
+    attr.Flags = 0x20000;
+    attr.MaxMessageLength = 0x400;
+    status = pNtAlpcCreatePort(&handle, NULL, &attr);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    if (status) return;
+
+    status = pNtAlpcQueryInformation(handle, 0, &info, sizeof(info), &return_length);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    ok(return_length == sizeof(info), "Got return length %lu.\n", return_length);
+    ok(info.Flags == attr.Flags, "Got flags %#lx.\n", info.Flags);
+    ok(info.SequenceNo == 0, "Got sequence number %lu.\n", info.SequenceNo);
+    ok(info.PortContext == NULL, "Got port context %p.\n", info.PortContext);
+
+    status = pNtAlpcSendWaitReceivePort(handle, 0, NULL, NULL, &message, NULL, NULL, &timeout);
+    ok(status == STATUS_TIMEOUT, "Got unexpected status %#lx.\n", status);
+
+    CloseHandle(handle);
+}
+
+static void test_reply_receive_validation(void)
+{
+    ALPC_PORT_MESSAGE send = {0}, receive;
+    NTSTATUS status;
+
+    if (!pNtAlpcSendWaitReceivePort)
+    {
+        win_skip("NtAlpcSendWaitReceivePort is unavailable.\n");
+        return;
+    }
+
+    send.TotalLength = sizeof(send);
+    send.MessageId = 1;
+    status = pNtAlpcSendWaitReceivePort((HANDLE)0xdead, 0x20000, &send, NULL,
+                                        &receive, NULL, NULL, NULL);
+    ok(status == STATUS_INVALID_HANDLE, "Got unexpected status %#lx.\n", status);
+}
+
 START_TEST(alpc)
 {
     init_functions();
@@ -481,4 +560,7 @@ START_TEST(alpc)
     test_AlpcGetMessageAttribute();
     test_AlpcInitializeMessageAttribute();
     test_NtAlpcCreatePort();
+    test_NtAlpcQueryInformation();
+    test_reply_receive_validation();
+    test_power_port();
 }

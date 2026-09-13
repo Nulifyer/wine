@@ -445,6 +445,25 @@ LONG WINAPI call_unhandled_exception_filter( PEXCEPTION_POINTERS eptr )
 }
 
 /*******************************************************************
+ *         RtlUnhandledExceptionFilter2   (NTDLL.@)
+ */
+LONG WINAPI RtlUnhandledExceptionFilter2( PEXCEPTION_POINTERS eptr, const char *prefix )
+{
+    (void)prefix;
+    if (eptr->ExceptionRecord->ExceptionCode == STATUS_POSSIBLE_DEADLOCK)
+        return EXCEPTION_CONTINUE_EXECUTION;
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+/*******************************************************************
+ *         RtlUnhandledExceptionFilter   (NTDLL.@)
+ */
+LONG WINAPI RtlUnhandledExceptionFilter( PEXCEPTION_POINTERS eptr )
+{
+    return RtlUnhandledExceptionFilter2( eptr, "" );
+}
+
+/*******************************************************************
  *         call_unhandled_exception_handler
  */
 EXCEPTION_DISPOSITION WINAPI call_unhandled_exception_handler( EXCEPTION_RECORD *rec, void *frame,

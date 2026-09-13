@@ -22,6 +22,7 @@
 
 #include <assert.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -416,8 +417,11 @@ static int generate_dll_event( struct thread *thread, int code, struct memory_vi
 /* return 1 if this is the main exe view */
 static int add_process_view( struct thread *thread, struct memory_view *view )
 {
+    static const char services_name[] = "services.exe";
+    static const char svchost_name[] = "svchost.exe";
     struct process *process = thread->process;
     struct unicode_str name;
+    data_size_t i;
 
     if (view->flags & SEC_IMAGE)
     {
@@ -432,6 +436,51 @@ static int add_process_view( struct thread *thread, struct memory_view *view )
             process->image = NULL;
             if (get_view_nt_name( view, &name ) && (process->image = memdup( name.str, name.len )))
                 process->imagelen = name.len;
+            if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+            {
+                fprintf( stderr, "linuxnt: server main-image winpid=%04x unix=%d image=",
+                         process->id, process->unix_pid );
+                for (i = 0; i < process->imagelen / sizeof(WCHAR); i++)
+                {
+                    WCHAR ch = process->image[i];
+                    fputc( ch >= 0x20 && ch < 0x7f ? ch : '?', stderr );
+                }
+                fputc( '\n', stderr );
+            }
+            if (getenv( "LINUXNT_DEBUG_DELAY_SERVICES_START" ) &&
+                process->imagelen / sizeof(WCHAR) >= sizeof(services_name) - 1)
+            {
+                data_size_t start = process->imagelen / sizeof(WCHAR) - (sizeof(services_name) - 1);
+                for (i = 0; i < sizeof(services_name) - 1; i++)
+                {
+                    WCHAR ch = process->image[start + i];
+                    if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+                    if (ch != services_name[i]) break;
+                }
+                if (i == sizeof(services_name) - 1)
+                {
+                    fprintf( stderr, "linuxnt: delaying services.exe unix=%d before main image reply\n",
+                             process->unix_pid );
+                    usleep( 10000000 );
+                }
+            }
+            if (getenv( "LINUXNT_DEBUG_DELAY_SVCHOST_START" ) &&
+                process->imagelen / sizeof(WCHAR) >= sizeof(svchost_name) - 1)
+            {
+                data_size_t start = process->imagelen / sizeof(WCHAR) - (sizeof(svchost_name) - 1);
+                for (i = 0; i < sizeof(svchost_name) - 1; i++)
+                {
+                    WCHAR ch = process->image[start + i];
+                    if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+                    if (ch != svchost_name[i]) break;
+                }
+                if (i == sizeof(svchost_name) - 1)
+                {
+                    fprintf( stderr, "linuxnt: delaying svchost.exe unix=%d before main image reply\n",
+                             process->unix_pid );
+                    usleep( 10000000 );
+                }
+            }
             process->image_info = view->image;
             list_add_head( &process->views, &view->entry );
             return 1;

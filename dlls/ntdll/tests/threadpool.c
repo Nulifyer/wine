@@ -42,6 +42,7 @@ static VOID     (WINAPI *pTpPostWork)(TP_WORK *);
 static NTSTATUS (WINAPI *pTpQueryPoolStackInformation)(TP_POOL *,TP_POOL_STACK_INFORMATION *);
 static VOID     (WINAPI *pTpReleaseCleanupGroup)(TP_CLEANUP_GROUP *);
 static VOID     (WINAPI *pTpReleaseCleanupGroupMembers)(TP_CLEANUP_GROUP *,BOOL,PVOID);
+static void     (WINAPI *pTpReleaseAlpcCompletion)(TP_ALPC *);
 static void     (WINAPI *pTpReleaseIoCompletion)(TP_IO *);
 static VOID     (WINAPI *pTpReleasePool)(TP_POOL *);
 static VOID     (WINAPI *pTpReleaseTimer)(TP_TIMER *);
@@ -54,6 +55,7 @@ static BOOL     (WINAPI *pTpSetTimerEx)(TP_TIMER *,LARGE_INTEGER *,LONG,LONG);
 static VOID     (WINAPI *pTpSetWait)(TP_WAIT *,HANDLE,LARGE_INTEGER *);
 static NTSTATUS (WINAPI *pTpSimpleTryPost)(PTP_SIMPLE_CALLBACK,PVOID,TP_CALLBACK_ENVIRON *);
 static void     (WINAPI *pTpStartAsyncIoOperation)(TP_IO *);
+static void     (WINAPI *pTpWaitForAlpcCompletion)(TP_ALPC *);
 static void     (WINAPI *pTpWaitForIoCompletion)(TP_IO *,BOOL);
 static VOID     (WINAPI *pTpWaitForTimer)(TP_TIMER *,BOOL);
 static VOID     (WINAPI *pTpWaitForWait)(TP_WAIT *,BOOL);
@@ -91,6 +93,7 @@ static BOOL init_threadpool(void)
     GET_PROC(TpQueryPoolStackInformation);
     GET_PROC(TpReleaseCleanupGroup);
     GET_PROC(TpReleaseCleanupGroupMembers);
+    GET_PROC(TpReleaseAlpcCompletion);
     GET_PROC(TpReleaseIoCompletion);
     GET_PROC(TpReleasePool);
     GET_PROC(TpReleaseTimer);
@@ -103,6 +106,7 @@ static BOOL init_threadpool(void)
     GET_PROC(TpSetWait);
     GET_PROC(TpSimpleTryPost);
     GET_PROC(TpStartAsyncIoOperation);
+    GET_PROC(TpWaitForAlpcCompletion);
     GET_PROC(TpWaitForIoCompletion);
     GET_PROC(TpWaitForTimer);
     GET_PROC(TpWaitForWait);
@@ -132,6 +136,18 @@ static DWORD CALLBACK rtl_work_cb(void *userdata)
     HANDLE semaphore = userdata;
     ReleaseSemaphore(semaphore, 1, NULL);
     return 0;
+}
+
+static void test_tp_alpc_null(void)
+{
+    if (!pTpWaitForAlpcCompletion || !pTpReleaseAlpcCompletion)
+    {
+        win_skip("ALPC threadpool functions are not available.\n");
+        return;
+    }
+
+    pTpWaitForAlpcCompletion(NULL);
+    pTpReleaseAlpcCompletion(NULL);
 }
 
 static void test_RtlQueueWorkItem(void)
@@ -2518,4 +2534,5 @@ START_TEST(threadpool)
     test_tp_io();
     test_kernel32_tp_io();
     test_tp_wait_early_closure();
+    test_tp_alpc_null();
 }

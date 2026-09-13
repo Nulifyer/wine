@@ -90,11 +90,19 @@ __ASM_STDCALL_FUNC( wrap_fastcall_func1, 8,
 
 /* Function ptrs for ntdll calls */
 static HMODULE hntdll = 0;
+static NTSTATUS  (WINAPI *pRtlAllocateAndInitializeSidEx)(PSID_IDENTIFIER_AUTHORITY,BYTE,PULONG,PSID *);
 static PRTL_SPLAY_LINKS (WINAPI *pRtlDelete)(PRTL_SPLAY_LINKS);
 static void      (WINAPI  *pRtlDeleteNoSplay)(PRTL_SPLAY_LINKS, PRTL_SPLAY_LINKS *);
 static BOOLEAN   (WINAPI  *pRtlDeleteElementGenericTable)(PRTL_GENERIC_TABLE,PVOID);
+static BOOLEAN   (WINAPI  *pRtlDeleteElementGenericTableAvl)(PRTL_AVL_TABLE,PVOID);
 static void *    (WINAPI  *pRtlEnumerateGenericTable)(PRTL_GENERIC_TABLE, BOOLEAN);
+static void *    (WINAPI  *pRtlEnumerateGenericTableAvl)(PRTL_AVL_TABLE, BOOLEAN);
 static void *    (WINAPI  *pRtlEnumerateGenericTableWithoutSplaying)(PRTL_GENERIC_TABLE, PVOID *);
+static void *    (WINAPI  *pRtlEnumerateGenericTableWithoutSplayingAvl)(PRTL_AVL_TABLE, PVOID *);
+static void *    (WINAPI  *pRtlInsertElementGenericTableAvl)(PRTL_AVL_TABLE, void *, ULONG, PBOOLEAN);
+static BOOLEAN   (WINAPI  *pRtlIsGenericTableEmptyAvl)(PRTL_AVL_TABLE);
+static void *    (WINAPI  *pRtlLookupElementGenericTableAvl)(PRTL_AVL_TABLE, void *);
+static ULONG     (WINAPI  *pRtlNumberGenericTableElementsAvl)(PRTL_AVL_TABLE);
 static VOID      (WINAPI  *pRtlMoveMemory)(LPVOID,LPCVOID,SIZE_T);
 static VOID      (WINAPI  *pRtlFillMemory)(LPVOID,SIZE_T,BYTE);
 static VOID      (WINAPI  *pRtlFillMemoryUlong)(LPVOID,SIZE_T,ULONG);
@@ -108,6 +116,7 @@ static void *    (WINAPI *pRtlGetElementGenericTable)(PRTL_GENERIC_TABLE, ULONG)
 static DWORD     (WINAPI *pRtlGetThreadErrorMode)(void);
 static NTSTATUS  (WINAPI *pRtlSetThreadErrorMode)(DWORD, LPDWORD);
 static PVOID     (WINAPI *pRtlInsertElementGenericTable)(PRTL_GENERIC_TABLE, PVOID, CLONG, PBOOLEAN);
+static PVOID     (WINAPI *pRtlInsertElementGenericTableAvl)(PRTL_AVL_TABLE, PVOID, ULONG, PBOOLEAN);
 static NTSTATUS  (WINAPI *pRtlIpv4AddressToStringExA)(const IN_ADDR *, USHORT, LPSTR, PULONG);
 static NTSTATUS  (WINAPI *pRtlIpv4StringToAddressExA)(PCSTR, BOOLEAN, IN_ADDR *, PUSHORT);
 static NTSTATUS  (WINAPI *pRtlIpv6AddressToStringExA)(struct in6_addr *, ULONG, USHORT, PCHAR, PULONG);
@@ -116,13 +125,19 @@ static NTSTATUS  (WINAPI *pRtlIpv6StringToAddressExW)(PCWSTR, struct in6_addr *,
 static BOOL      (WINAPI *pRtlIsCriticalSectionLocked)(CRITICAL_SECTION *);
 static BOOL      (WINAPI *pRtlIsCriticalSectionLockedByThread)(CRITICAL_SECTION *);
 static BOOLEAN   (WINAPI *pRtlIsGenericTableEmpty)(PRTL_GENERIC_TABLE);
+static BOOLEAN   (WINAPI *pRtlIsGenericTableEmptyAvl)(PRTL_AVL_TABLE);
 static NTSTATUS  (WINAPI *pRtlInitializeCriticalSectionEx)(CRITICAL_SECTION *, ULONG, ULONG);
 static void      (WINAPI *pRtlInitializeGenericTable)(RTL_GENERIC_TABLE *, PRTL_GENERIC_COMPARE_ROUTINE,
                                                       PRTL_GENERIC_ALLOCATE_ROUTINE, PRTL_GENERIC_FREE_ROUTINE,
                                                       void *);
+static void      (WINAPI *pRtlInitializeGenericTableAvl)(RTL_AVL_TABLE *, PRTL_AVL_COMPARE_ROUTINE,
+                                                         PRTL_AVL_ALLOCATE_ROUTINE, PRTL_AVL_FREE_ROUTINE,
+                                                         void *);
 static void *    (WINAPI *pRtlFindExportedRoutineByName)(HMODULE,const char *);
 static void *    (WINAPI *pRtlLookupElementGenericTable)(PRTL_GENERIC_TABLE, void *);
+static void *    (WINAPI *pRtlLookupElementGenericTableAvl)(PRTL_AVL_TABLE, void *);
 static ULONG     (WINAPI *pRtlNumberGenericTableElements)(PRTL_GENERIC_TABLE);
+static ULONG     (WINAPI *pRtlNumberGenericTableElementsAvl)(PRTL_AVL_TABLE);
 static NTSTATUS  (WINAPI *pLdrEnumerateLoadedModules)(void *, void *, void *);
 static NTSTATUS  (WINAPI *pLdrRegisterDllNotification)(ULONG, PLDR_DLL_NOTIFICATION_FUNCTION, void *, void **);
 static NTSTATUS  (WINAPI *pLdrUnregisterDllNotification)(void *);
@@ -130,8 +145,16 @@ static VOID      (WINAPI *pRtlGetDeviceFamilyInfoEnum)(ULONGLONG *,DWORD *,DWORD
 static void      (WINAPI *pRtlRbInsertNodeEx)(RTL_RB_TREE *, RTL_BALANCED_NODE *, BOOLEAN, RTL_BALANCED_NODE *);
 static void      (WINAPI *pRtlRbRemoveNode)(RTL_RB_TREE *, RTL_BALANCED_NODE *);
 static DWORD     (WINAPI *pRtlConvertDeviceFamilyInfoToString)(DWORD *, DWORD *, WCHAR *, WCHAR *);
+static NTSTATUS  (WINAPI *pRtlCopySecurityDescriptor)(PSECURITY_DESCRIPTOR,PSECURITY_DESCRIPTOR *);
+static NTSTATUS  (WINAPI *pRtlCreateAndSetSD)(PRTL_ACE_DATA,ULONG,PSID,PSID,PSECURITY_DESCRIPTOR *);
+static NTSTATUS  (WINAPI *pRtlCreateUserSecurityObject)(PRTL_ACE_DATA,ULONG,PSID,PSID,BOOLEAN,PGENERIC_MAPPING,PSECURITY_DESCRIPTOR *);
+static NTSTATUS  (WINAPI *pRtlGetAcesBufferSize)(PACL,PULONG);
 static NTSTATUS  (WINAPI *pRtlCreateServiceSid)(PUNICODE_STRING, PSID, PULONG);
 static NTSTATUS  (WINAPI *pRtlDeriveCapabilitySidsFromName)(UNICODE_STRING *, PSID, PSID);
+static NTSTATUS  (WINAPI *pRtlSidHashInitialize)(SID_AND_ATTRIBUTES *, ULONG, SID_AND_ATTRIBUTES_HASH *);
+static SID_AND_ATTRIBUTES * (WINAPI *pRtlSidHashLookup)(SID_AND_ATTRIBUTES_HASH *, PSID);
+static BOOLEAN   (WINAPI *pRtlTestProtectedAccess)(UCHAR, UCHAR);
+static BOOLEAN   (WINAPI *pRtlValidProcessProtection)(UCHAR);
 static NTSTATUS  (WINAPI *pRtlInitializeNtUserPfn)( const UINT64 *client_procsA, ULONG procsA_size,
                                                     const UINT64 *client_procsW, ULONG procsW_size,
                                                     const void *client_workers, ULONG workers_size );
@@ -166,11 +189,19 @@ static void InitFunctionPtrs(void)
     hntdll = LoadLibraryA("ntdll.dll");
     ok(hntdll != 0, "LoadLibrary failed\n");
     if (hntdll) {
+        pRtlAllocateAndInitializeSidEx = (void *)GetProcAddress(hntdll, "RtlAllocateAndInitializeSidEx");
         pRtlDelete = (void *)GetProcAddress(hntdll, "RtlDelete");
         pRtlDeleteElementGenericTable = (void *)GetProcAddress(hntdll, "RtlDeleteElementGenericTable");
+        pRtlDeleteElementGenericTableAvl = (void *)GetProcAddress(hntdll, "RtlDeleteElementGenericTableAvl");
         pRtlDeleteNoSplay = (void *)GetProcAddress(hntdll, "RtlDeleteNoSplay");
         pRtlEnumerateGenericTable = (void *)GetProcAddress(hntdll, "RtlEnumerateGenericTable");
+        pRtlEnumerateGenericTableAvl = (void *)GetProcAddress(hntdll, "RtlEnumerateGenericTableAvl");
         pRtlEnumerateGenericTableWithoutSplaying = (void *)GetProcAddress(hntdll, "RtlEnumerateGenericTableWithoutSplaying");
+        pRtlEnumerateGenericTableWithoutSplayingAvl = (void *)GetProcAddress(hntdll, "RtlEnumerateGenericTableWithoutSplayingAvl");
+        pRtlInsertElementGenericTableAvl = (void *)GetProcAddress(hntdll, "RtlInsertElementGenericTableAvl");
+        pRtlIsGenericTableEmptyAvl = (void *)GetProcAddress(hntdll, "RtlIsGenericTableEmptyAvl");
+        pRtlLookupElementGenericTableAvl = (void *)GetProcAddress(hntdll, "RtlLookupElementGenericTableAvl");
+        pRtlNumberGenericTableElementsAvl = (void *)GetProcAddress(hntdll, "RtlNumberGenericTableElementsAvl");
 	pRtlMoveMemory = (void *)GetProcAddress(hntdll, "RtlMoveMemory");
 	pRtlFillMemory = (void *)GetProcAddress(hntdll, "RtlFillMemory");
 	pRtlFillMemoryUlong = (void *)GetProcAddress(hntdll, "RtlFillMemoryUlong");
@@ -184,6 +215,7 @@ static void InitFunctionPtrs(void)
         pRtlGetThreadErrorMode = (void *)GetProcAddress(hntdll, "RtlGetThreadErrorMode");
         pRtlSetThreadErrorMode = (void *)GetProcAddress(hntdll, "RtlSetThreadErrorMode");
         pRtlInsertElementGenericTable = (void *)GetProcAddress(hntdll, "RtlInsertElementGenericTable");
+        pRtlInsertElementGenericTableAvl = (void *)GetProcAddress(hntdll, "RtlInsertElementGenericTableAvl");
         pRtlIpv4AddressToStringExA = (void *)GetProcAddress(hntdll, "RtlIpv4AddressToStringExA");
         pRtlIpv4StringToAddressExA = (void *)GetProcAddress(hntdll, "RtlIpv4StringToAddressExA");
         pRtlIpv6AddressToStringExA = (void *)GetProcAddress(hntdll, "RtlIpv6AddressToStringExA");
@@ -192,20 +224,32 @@ static void InitFunctionPtrs(void)
         pRtlIsCriticalSectionLocked = (void *)GetProcAddress(hntdll, "RtlIsCriticalSectionLocked");
         pRtlIsCriticalSectionLockedByThread = (void *)GetProcAddress(hntdll, "RtlIsCriticalSectionLockedByThread");
         pRtlIsGenericTableEmpty = (void *)GetProcAddress(hntdll, "RtlIsGenericTableEmpty");
+        pRtlIsGenericTableEmptyAvl = (void *)GetProcAddress(hntdll, "RtlIsGenericTableEmptyAvl");
         pRtlInitializeCriticalSectionEx = (void *)GetProcAddress(hntdll, "RtlInitializeCriticalSectionEx");
         pRtlInitializeGenericTable = (void *)GetProcAddress(hntdll, "RtlInitializeGenericTable");
+        pRtlInitializeGenericTableAvl = (void *)GetProcAddress(hntdll, "RtlInitializeGenericTableAvl");
         pRtlFindExportedRoutineByName = (void *)GetProcAddress(hntdll, "RtlFindExportedRoutineByName");
         pRtlLookupElementGenericTable = (void *)GetProcAddress(hntdll, "RtlLookupElementGenericTable");
+        pRtlLookupElementGenericTableAvl = (void *)GetProcAddress(hntdll, "RtlLookupElementGenericTableAvl");
         pRtlNumberGenericTableElements = (void *)GetProcAddress(hntdll, "RtlNumberGenericTableElements");
+        pRtlNumberGenericTableElementsAvl = (void *)GetProcAddress(hntdll, "RtlNumberGenericTableElementsAvl");
         pLdrEnumerateLoadedModules = (void *)GetProcAddress(hntdll, "LdrEnumerateLoadedModules");
         pLdrRegisterDllNotification = (void *)GetProcAddress(hntdll, "LdrRegisterDllNotification");
         pLdrUnregisterDllNotification = (void *)GetProcAddress(hntdll, "LdrUnregisterDllNotification");
         pRtlCreateServiceSid = (void *)GetProcAddress(hntdll, "RtlCreateServiceSid");
         pRtlDeriveCapabilitySidsFromName = (void *)GetProcAddress(hntdll, "RtlDeriveCapabilitySidsFromName");
+        pRtlSidHashInitialize = (void *)GetProcAddress(hntdll, "RtlSidHashInitialize");
+        pRtlSidHashLookup = (void *)GetProcAddress(hntdll, "RtlSidHashLookup");
+        pRtlTestProtectedAccess = (void *)GetProcAddress(hntdll, "RtlTestProtectedAccess");
+        pRtlValidProcessProtection = (void *)GetProcAddress(hntdll, "RtlValidProcessProtection");
         pRtlGetDeviceFamilyInfoEnum = (void *)GetProcAddress(hntdll, "RtlGetDeviceFamilyInfoEnum");
         pRtlRbInsertNodeEx = (void *)GetProcAddress(hntdll, "RtlRbInsertNodeEx");
         pRtlRbRemoveNode = (void *)GetProcAddress(hntdll, "RtlRbRemoveNode");
         pRtlConvertDeviceFamilyInfoToString = (void *)GetProcAddress(hntdll, "RtlConvertDeviceFamilyInfoToString");
+        pRtlCopySecurityDescriptor = (void *)GetProcAddress(hntdll, "RtlCopySecurityDescriptor");
+        pRtlCreateAndSetSD = (void *)GetProcAddress(hntdll, "RtlCreateAndSetSD");
+        pRtlCreateUserSecurityObject = (void *)GetProcAddress(hntdll, "RtlCreateUserSecurityObject");
+        pRtlGetAcesBufferSize = (void *)GetProcAddress(hntdll, "RtlGetAcesBufferSize");
         pRtlInitializeNtUserPfn = (void *)GetProcAddress(hntdll, "RtlInitializeNtUserPfn");
         pRtlRealPredecessor = (void *)GetProcAddress(hntdll, "RtlRealPredecessor");
         pRtlRealSuccessor = (void *)GetProcAddress(hntdll, "RtlRealSuccessor");
@@ -714,9 +758,11 @@ static void test_HandleTables(void)
 
 static void test_RtlAllocateAndInitializeSid(void)
 {
+    static ULONG sub_authorities[SID_MAX_SUB_AUTHORITIES];
     NTSTATUS ret;
     SID_IDENTIFIER_AUTHORITY sia = {{ 1, 2, 3, 4, 5, 6 }};
     PSID psid;
+    unsigned int i;
 
     ret = RtlAllocateAndInitializeSid(&sia, 0, 1, 2, 3, 4, 5, 6, 7, 8, &psid);
     ok(!ret, "RtlAllocateAndInitializeSid error %08lx\n", ret);
@@ -732,6 +778,39 @@ static void test_RtlAllocateAndInitializeSid(void)
 
     ret = RtlAllocateAndInitializeSid(&sia, 9, 1, 2, 3, 4, 5, 6, 7, 8, &psid);
     ok(ret == STATUS_INVALID_SID, "wrong error %08lx\n", ret);
+
+    if (!pRtlAllocateAndInitializeSidEx)
+    {
+        win_skip("RtlAllocateAndInitializeSidEx is not available.\n");
+        return;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(sub_authorities); ++i) sub_authorities[i] = 0x1000 + i;
+
+    psid = (void *)0xdeadbeef;
+    ret = pRtlAllocateAndInitializeSidEx(&sia, ARRAY_SIZE(sub_authorities),
+                                         sub_authorities, &psid);
+    ok(ret == STATUS_SUCCESS, "RtlAllocateAndInitializeSidEx error %08lx\n", ret);
+    if (ret == STATUS_SUCCESS)
+    {
+        SID *allocated = psid;
+
+        ok(allocated->Revision == SID_REVISION, "got revision %u\n", allocated->Revision);
+        ok(allocated->SubAuthorityCount == ARRAY_SIZE(sub_authorities),
+           "got sub-authority count %u\n", allocated->SubAuthorityCount);
+        ok(!memcmp(&allocated->IdentifierAuthority, &sia, sizeof(sia)),
+           "wrong identifier authority\n");
+        ok(!memcmp(allocated->SubAuthority, sub_authorities, sizeof(sub_authorities)),
+           "wrong sub-authorities\n");
+        ret = RtlFreeSid(psid);
+        ok(ret == STATUS_SUCCESS, "RtlFreeSid error %08lx\n", ret);
+    }
+
+    psid = (void *)0xdeadbeef;
+    ret = pRtlAllocateAndInitializeSidEx(&sia, SID_MAX_SUB_AUTHORITIES + 1,
+                                         sub_authorities, &psid);
+    ok(ret == STATUS_INVALID_PARAMETER, "wrong error %08lx\n", ret);
+    ok(psid == (void *)0xdeadbeef, "output changed to %p\n", psid);
 }
 
 static void test_RtlDeleteTimer(void)
@@ -3771,6 +3850,48 @@ static void test_RtlFirstFreeAce(void)
     HeapFree(GetProcessHeap(), 0, acl);
 }
 
+static void test_RtlGetAcesBufferSize(void)
+{
+    BYTE buffer[sizeof(ACL) + 16];
+    ACE_HEADER *first, *second;
+    ACL *acl = (ACL *)buffer;
+    ULONG size;
+    NTSTATUS status;
+
+    if (!pRtlGetAcesBufferSize)
+    {
+        win_skip("RtlGetAcesBufferSize is unavailable.\n");
+        return;
+    }
+
+    memset(buffer, 0, sizeof(buffer));
+    acl->AclRevision = ACL_REVISION;
+    acl->AclSize = sizeof(buffer);
+
+    size = 0xdeadbeef;
+    status = pRtlGetAcesBufferSize(acl, &size);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    ok(size == 0, "Got size %lu.\n", size);
+
+    first = (ACE_HEADER *)(acl + 1);
+    first->AceSize = 4;
+    second = (ACE_HEADER *)((BYTE *)first + first->AceSize);
+    second->AceSize = 12;
+    acl->AceCount = 2;
+    size = 0xdeadbeef;
+    status = pRtlGetAcesBufferSize(acl, &size);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    ok(size == 16, "Got size %lu.\n", size);
+
+    size = 0xdeadbeef;
+    status = pRtlGetAcesBufferSize(NULL, &size);
+    ok(status == STATUS_INVALID_PARAMETER, "Got status %#lx.\n", status);
+    ok(size == 0xdeadbeef, "Got size %#lx.\n", size);
+
+    status = pRtlGetAcesBufferSize(acl, NULL);
+    ok(status == STATUS_INVALID_PARAMETER, "Got status %#lx.\n", status);
+}
+
 static void test_RtlInitializeSid(void)
 {
     SID_IDENTIFIER_AUTHORITY sid_ident = { SECURITY_NT_AUTHORITY };
@@ -3807,6 +3928,87 @@ static void test_RtlCopySid(void)
     ok(status == STATUS_BUFFER_TOO_SMALL, "Unexpected status %#lx.\n", status);
 }
 
+static void test_RtlSidHash(void)
+{
+    SID_IDENTIFIER_AUTHORITY authority = { SECURITY_NT_AUTHORITY };
+    SID_AND_ATTRIBUTES_HASH hash, expected;
+    SID_AND_ATTRIBUTES attrs[66], *ret;
+    SID sids[66], missing;
+    ULONG hash_count, i;
+    NTSTATUS status;
+
+    if (!pRtlSidHashInitialize || !pRtlSidHashLookup)
+    {
+        win_skip("SID hash functions are unavailable.\n");
+        return;
+    }
+
+    status = pRtlSidHashInitialize(NULL, 0, NULL);
+    ok(status == STATUS_INVALID_PARAMETER, "Got status %#lx.\n", status);
+
+    memset(&hash, 0xcc, sizeof(hash));
+    status = pRtlSidHashInitialize(NULL, ARRAY_SIZE(attrs), &hash);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    memset(&expected, 0, sizeof(expected));
+    ok(!memcmp(&hash, &expected, sizeof(hash)), "Hash was not cleared.\n");
+
+    memset(sids, 0, sizeof(sids));
+    memset(attrs, 0, sizeof(attrs));
+    for (i = 0; i < ARRAY_SIZE(sids); i++)
+    {
+        status = RtlInitializeSid(&sids[i], &authority, 1);
+        ok(status == STATUS_SUCCESS, "Got status %#lx for SID %lu.\n", status, i);
+        sids[i].SubAuthority[0] = 0x100 + i;
+        attrs[i].Sid = &sids[i];
+        attrs[i].Attributes = 0x200 + i;
+    }
+
+    memset(&hash, 0xcc, sizeof(hash));
+    status = pRtlSidHashInitialize(attrs, ARRAY_SIZE(attrs), &hash);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    ok(hash.SidCount == ARRAY_SIZE(attrs), "Got SID count %lu.\n", hash.SidCount);
+    ok(hash.SidAttr == attrs, "Got SID array %p.\n", hash.SidAttr);
+
+    memset(&expected, 0, sizeof(expected));
+    expected.SidCount = ARRAY_SIZE(attrs);
+    expected.SidAttr = attrs;
+    hash_count = min(ARRAY_SIZE(attrs), 8 * sizeof(expected.Hash[0]));
+    for (i = 0; i < hash_count; i++)
+    {
+        BYTE value = sids[i].SubAuthority[0];
+        SID_HASH_ENTRY bit = (SID_HASH_ENTRY)1 << i;
+
+        expected.Hash[value & 0x0f] |= bit;
+        expected.Hash[16 + (value >> 4)] |= bit;
+    }
+    ok(!memcmp(&hash, &expected, sizeof(hash)), "Got unexpected hash contents.\n");
+
+    ret = pRtlSidHashLookup(&hash, &sids[0]);
+    ok(ret == &attrs[0], "Got entry %p, expected %p.\n", ret, &attrs[0]);
+    ret = pRtlSidHashLookup(&hash, &sids[hash_count / 2]);
+    ok(ret == &attrs[hash_count / 2], "Got entry %p, expected %p.\n",
+       ret, &attrs[hash_count / 2]);
+    ret = pRtlSidHashLookup(&hash, &sids[hash_count - 1]);
+    ok(ret == &attrs[hash_count - 1], "Got entry %p, expected %p.\n",
+       ret, &attrs[hash_count - 1]);
+    ret = pRtlSidHashLookup(&hash, &sids[hash_count + 1]);
+    ok(ret == &attrs[hash_count + 1], "Got entry %p, expected %p.\n",
+       ret, &attrs[hash_count + 1]);
+
+    status = RtlInitializeSid(&missing, &authority, 1);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    missing.SubAuthority[0] = 0xff;
+    ok(!pRtlSidHashLookup(&hash, &missing), "Found missing SID.\n");
+    ok(!pRtlSidHashLookup(NULL, &sids[0]), "Lookup accepted a NULL hash.\n");
+    ok(!pRtlSidHashLookup(&hash, NULL), "Lookup accepted a NULL SID.\n");
+
+    attrs[1].Sid = attrs[0].Sid;
+    status = pRtlSidHashInitialize(attrs, ARRAY_SIZE(attrs), &hash);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    ret = pRtlSidHashLookup(&hash, attrs[0].Sid);
+    ok(ret == &attrs[0], "Duplicate lookup returned %p, expected %p.\n", ret, &attrs[0]);
+}
+
 static void test_RtlValidSecurityDescriptor(void)
 {
     SECURITY_DESCRIPTOR *sd;
@@ -3828,6 +4030,376 @@ static void test_RtlValidSecurityDescriptor(void)
     ok(ret, "Unexpected return value %d.\n", ret);
 
     free(sd);
+}
+
+static void test_RtlValidRelativeSecurityDescriptor(void)
+{
+    SECURITY_DESCRIPTOR_RELATIVE sd;
+    BOOLEAN ret;
+
+    memset(&sd, 0, sizeof(sd));
+    sd.Revision = SECURITY_DESCRIPTOR_REVISION;
+    sd.Control = SE_SELF_RELATIVE;
+
+    ret = RtlValidRelativeSecurityDescriptor((SECURITY_DESCRIPTOR *)&sd, sizeof(sd), 0);
+    ok(ret, "Expected a valid relative security descriptor.\n");
+
+    sd.Revision = 0;
+    ret = RtlValidRelativeSecurityDescriptor((SECURITY_DESCRIPTOR *)&sd, sizeof(sd), 0);
+    ok(!ret, "Expected an invalid relative security descriptor.\n");
+}
+
+static PSECURITY_DESCRIPTOR create_security_object_descriptor(BOOL owner_present, BOOL group_present)
+{
+    static const SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
+    SECURITY_DESCRIPTOR_RELATIVE *descriptor;
+    BYTE *buffer;
+    SID *owner, *group;
+    ACL *dacl;
+    NTSTATUS status;
+
+    buffer = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, 72);
+    if (!buffer) return NULL;
+    descriptor = (SECURITY_DESCRIPTOR_RELATIVE *)buffer;
+    descriptor->Revision = SECURITY_DESCRIPTOR_REVISION;
+    descriptor->Control = SE_SELF_RELATIVE | SE_DACL_PRESENT;
+    descriptor->Dacl = 20;
+    descriptor->Owner = owner_present ? 48 : 0;
+    descriptor->Group = group_present ? 60 : 0;
+
+    dacl = (ACL *)(buffer + descriptor->Dacl);
+    status = RtlCreateAcl(dacl, 28, ACL_REVISION);
+    ok(!status, "RtlCreateAcl returned %#lx.\n", status);
+
+    owner = (SID *)(buffer + 48);
+    status = RtlInitializeSid(owner, (SID_IDENTIFIER_AUTHORITY *)&authority, 1);
+    ok(!status, "RtlInitializeSid returned %#lx.\n", status);
+    *RtlSubAuthoritySid(owner, 0) = SECURITY_LOCAL_SYSTEM_RID;
+
+    group = (SID *)(buffer + 60);
+    status = RtlInitializeSid(group, (SID_IDENTIFIER_AUTHORITY *)&authority, 1);
+    ok(!status, "RtlInitializeSid returned %#lx.\n", status);
+    *RtlSubAuthoritySid(group, 0) = SECURITY_BUILTIN_DOMAIN_RID;
+
+    status = RtlAddAccessAllowedAce(dacl, ACL_REVISION, 0x11, group);
+    ok(!status, "RtlAddAccessAllowedAce returned %#lx.\n", status);
+    return descriptor;
+}
+
+static void test_RtlCopySecurityDescriptor(void)
+{
+    PSECURITY_DESCRIPTOR source, copy = (void *)0xdeadbeef;
+    NTSTATUS status;
+    ULONG size;
+
+    if (!pRtlCopySecurityDescriptor)
+    {
+        win_skip("RtlCopySecurityDescriptor is unavailable.\n");
+        return;
+    }
+
+    source = create_security_object_descriptor(TRUE, TRUE);
+    ok(!!source, "Failed to create source descriptor.\n");
+    if (!source) return;
+
+    size = RtlLengthSecurityDescriptor(source);
+    ok(size == 72, "Got descriptor size %lu.\n", size);
+    status = pRtlCopySecurityDescriptor(source, &copy);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    if (status == STATUS_SUCCESS)
+    {
+        ok(copy != source, "Copy aliases source descriptor.\n");
+        ok(!memcmp(copy, source, size), "Copied descriptor differs from source.\n");
+        ok(RtlValidSecurityDescriptor(copy), "Copied descriptor is invalid.\n");
+        ((SECURITY_DESCRIPTOR *)source)->Revision = 2;
+        ok(((SECURITY_DESCRIPTOR *)copy)->Revision == SECURITY_DESCRIPTOR_REVISION,
+           "Copy changed with source descriptor.\n");
+        status = RtlDeleteSecurityObject(&copy);
+        ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    }
+
+    RtlFreeHeap(GetProcessHeap(), 0, source);
+}
+
+static void test_RtlSetSecurityObject(void)
+{
+    static const SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
+    const GENERIC_MAPPING mapping = {0x123, 0x456, 0x789, 0xabc};
+    SECURITY_DESCRIPTOR modification;
+    SECURITY_DESCRIPTOR_RELATIVE *relative;
+    PSECURITY_DESCRIPTOR descriptor, original;
+    BYTE replacement_acl_buffer[28];
+    BOOLEAN present, defaulted;
+    ACL *replacement_acl, *result_acl;
+    ACCESS_ALLOWED_ACE *ace;
+    SID replacement_sid;
+    NTSTATUS status;
+
+    replacement_acl = (ACL *)replacement_acl_buffer;
+    status = RtlCreateAcl(replacement_acl, sizeof(replacement_acl_buffer), ACL_REVISION);
+    ok(!status, "RtlCreateAcl returned %#lx.\n", status);
+    status = RtlInitializeSid(&replacement_sid, (SID_IDENTIFIER_AUTHORITY *)&authority, 1);
+    ok(!status, "RtlInitializeSid returned %#lx.\n", status);
+    *RtlSubAuthoritySid(&replacement_sid, 0) = SECURITY_BUILTIN_DOMAIN_RID;
+    status = RtlAddAccessAllowedAce(replacement_acl, ACL_REVISION, GENERIC_READ, &replacement_sid);
+    ok(!status, "RtlAddAccessAllowedAce returned %#lx.\n", status);
+
+    status = RtlCreateSecurityDescriptor(&modification, SECURITY_DESCRIPTOR_REVISION);
+    ok(!status, "RtlCreateSecurityDescriptor returned %#lx.\n", status);
+    status = RtlSetDaclSecurityDescriptor(&modification, TRUE, replacement_acl, FALSE);
+    ok(!status, "RtlSetDaclSecurityDescriptor returned %#lx.\n", status);
+    modification.Control |= SE_DACL_PROTECTED | SE_DACL_AUTO_INHERITED;
+
+    descriptor = create_security_object_descriptor(TRUE, TRUE);
+    original = descriptor;
+    status = RtlSetSecurityObject(DACL_SECURITY_INFORMATION, &modification, &descriptor,
+                                  (GENERIC_MAPPING *)&mapping, NULL);
+    ok(!status, "RtlSetSecurityObject returned %#lx.\n", status);
+    ok(descriptor != original, "Expected the descriptor allocation to be replaced.\n");
+    relative = descriptor;
+    ok(relative->Control == (SE_SELF_RELATIVE | SE_DACL_PRESENT | SE_DACL_PROTECTED),
+       "Unexpected control %#x.\n", relative->Control);
+    ok(relative->Dacl == 20, "Unexpected DACL offset %lu.\n", relative->Dacl);
+    ok(relative->Owner == 48, "Unexpected owner offset %lu.\n", relative->Owner);
+    ok(relative->Group == 60, "Unexpected group offset %lu.\n", relative->Group);
+    status = RtlGetDaclSecurityDescriptor(descriptor, &present, &result_acl, &defaulted);
+    ok(!status && present && !defaulted, "Unexpected DACL result %#lx, %u, %u.\n",
+       status, present, defaulted);
+    ace = (ACCESS_ALLOWED_ACE *)(result_acl + 1);
+    ok(ace->Mask == (mapping.GenericRead & mapping.GenericAll), "Unexpected mapped mask %#lx.\n", ace->Mask);
+    status = RtlDeleteSecurityObject(&descriptor);
+    ok(!status, "RtlDeleteSecurityObject returned %#lx.\n", status);
+
+    descriptor = create_security_object_descriptor(FALSE, TRUE);
+    original = descriptor;
+    status = RtlSetSecurityObject(DACL_SECURITY_INFORMATION, &modification, &descriptor,
+                                  (GENERIC_MAPPING *)&mapping, NULL);
+    ok(status == STATUS_INVALID_OWNER, "Expected STATUS_INVALID_OWNER, got %#lx.\n", status);
+    ok(descriptor == original, "Descriptor changed on failure.\n");
+    RtlFreeHeap(GetProcessHeap(), 0, descriptor);
+
+    descriptor = create_security_object_descriptor(TRUE, FALSE);
+    original = descriptor;
+    status = RtlSetSecurityObject(DACL_SECURITY_INFORMATION, &modification, &descriptor,
+                                  (GENERIC_MAPPING *)&mapping, NULL);
+    ok(status == STATUS_INVALID_PRIMARY_GROUP, "Expected STATUS_INVALID_PRIMARY_GROUP, got %#lx.\n", status);
+    ok(descriptor == original, "Descriptor changed on failure.\n");
+    RtlFreeHeap(GetProcessHeap(), 0, descriptor);
+}
+
+static void test_RtlCreateAndSetSD(void)
+{
+    struct sid2
+    {
+        SID sid;
+        ULONG second_subauthority;
+    } group_sid = { { SID_REVISION, 2, { SECURITY_NT_AUTHORITY },
+                      { SECURITY_BUILTIN_DOMAIN_RID } }, DOMAIN_ALIAS_RID_ADMINS };
+    SID owner_sid = { SID_REVISION, 1, { SECURITY_NT_AUTHORITY }, { SECURITY_LOCAL_SYSTEM_RID } };
+    PSID owner = &owner_sid, group = &group_sid.sid;
+    RTL_ACE_DATA ace_data[3];
+    SECURITY_DESCRIPTOR *sd;
+    ACE_HEADER *header;
+    ACCESS_MASK mask;
+    NTSTATUS status;
+    void *ace;
+
+    if (!pRtlCreateAndSetSD)
+    {
+        win_skip("RtlCreateAndSetSD is unavailable.\n");
+        return;
+    }
+
+    ok(sizeof(RTL_ACE_DATA) == (is_win64 ? 16 : 12), "Got structure size %Iu.\n",
+       sizeof(RTL_ACE_DATA));
+    ok(FIELD_OFFSET(RTL_ACE_DATA, Mask) == 4, "Got mask offset %lu.\n",
+       FIELD_OFFSET(RTL_ACE_DATA, Mask));
+    ok(FIELD_OFFSET(RTL_ACE_DATA, Sid) == 8, "Got SID offset %lu.\n",
+       FIELD_OFFSET(RTL_ACE_DATA, Sid));
+
+    memset(ace_data, 0, sizeof(ace_data));
+    ace_data[0].AceType = ACCESS_ALLOWED_ACE_TYPE;
+    ace_data[0].InheritFlags = OBJECT_INHERIT_ACE;
+    ace_data[0].AceFlags = INHERITED_ACE;
+    ace_data[0].Mask = GENERIC_READ;
+    ace_data[0].Sid = &owner;
+    ace_data[1].AceType = ACCESS_DENIED_ACE_TYPE;
+    ace_data[1].InheritFlags = CONTAINER_INHERIT_ACE;
+    ace_data[1].Mask = GENERIC_WRITE;
+    ace_data[1].Sid = &group;
+    ace_data[2].AceType = SYSTEM_AUDIT_ACE_TYPE;
+    ace_data[2].AceFlags = SUCCESSFUL_ACCESS_ACE_FLAG;
+    ace_data[2].Mask = GENERIC_EXECUTE;
+    ace_data[2].Sid = &owner;
+
+    sd = (void *)0xdeadbeef;
+    status = pRtlCreateAndSetSD(ace_data, ARRAY_SIZE(ace_data), owner, group,
+                                (PSECURITY_DESCRIPTOR *)&sd);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    if (status == STATUS_SUCCESS)
+    {
+        ok(sd->Revision == SECURITY_DESCRIPTOR_REVISION, "Got revision %u.\n", sd->Revision);
+        ok(sd->Control == (SE_DACL_PRESENT | SE_SACL_PRESENT), "Got control %#x.\n", sd->Control);
+        ok(sd->Owner == owner, "Got owner %p.\n", sd->Owner);
+        ok(sd->Group == group, "Got group %p.\n", sd->Group);
+        ok(sd->Dacl == (ACL *)(sd + 1), "Got DACL %p, expected %p.\n", sd->Dacl, sd + 1);
+        ok(sd->Sacl == (ACL *)((BYTE *)sd->Dacl + sd->Dacl->AclSize),
+           "Got SACL %p, expected %p.\n", sd->Sacl, (BYTE *)sd->Dacl + sd->Dacl->AclSize);
+        ok(sd->Dacl->AclRevision == ACL_REVISION, "Got DACL revision %u.\n", sd->Dacl->AclRevision);
+        ok(sd->Dacl->AceCount == 2, "Got DACL ACE count %u.\n", sd->Dacl->AceCount);
+        ok(sd->Dacl->AclSize == sizeof(ACL) + RtlLengthSid(owner) + 12 + RtlLengthSid(group) + 12,
+           "Got DACL size %u.\n", sd->Dacl->AclSize);
+
+        status = RtlGetAce(sd->Dacl, 0, &ace);
+        ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+        header = ace;
+        memcpy(&mask, (BYTE *)ace + sizeof(*header), sizeof(mask));
+        ok(header->AceType == ACCESS_ALLOWED_ACE_TYPE, "Got ACE type %u.\n", header->AceType);
+        ok(header->AceFlags == (OBJECT_INHERIT_ACE | INHERITED_ACE), "Got ACE flags %#x.\n",
+           header->AceFlags);
+        ok(header->AceSize == RtlLengthSid(owner) + 12, "Got ACE size %u.\n", header->AceSize);
+        ok(mask == GENERIC_READ, "Got access mask %#lx.\n", mask);
+        ok(RtlEqualSid((BYTE *)ace + sizeof(*header) + sizeof(mask), owner), "Got wrong SID.\n");
+
+        status = RtlGetAce(sd->Dacl, 1, &ace);
+        ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+        header = ace;
+        memcpy(&mask, (BYTE *)ace + sizeof(*header), sizeof(mask));
+        ok(header->AceType == ACCESS_DENIED_ACE_TYPE, "Got ACE type %u.\n", header->AceType);
+        ok(header->AceFlags == CONTAINER_INHERIT_ACE, "Got ACE flags %#x.\n", header->AceFlags);
+        ok(header->AceSize == RtlLengthSid(group) + 12, "Got ACE size %u.\n", header->AceSize);
+        ok(mask == GENERIC_WRITE, "Got access mask %#lx.\n", mask);
+        ok(RtlEqualSid((BYTE *)ace + sizeof(*header) + sizeof(mask), group), "Got wrong SID.\n");
+
+        ok(sd->Sacl->AclRevision == ACL_REVISION, "Got SACL revision %u.\n", sd->Sacl->AclRevision);
+        ok(sd->Sacl->AceCount == 1, "Got SACL ACE count %u.\n", sd->Sacl->AceCount);
+        ok(sd->Sacl->AclSize == sizeof(ACL) + RtlLengthSid(owner) + 12,
+           "Got SACL size %u.\n", sd->Sacl->AclSize);
+        status = RtlGetAce(sd->Sacl, 0, &ace);
+        ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+        header = ace;
+        memcpy(&mask, (BYTE *)ace + sizeof(*header), sizeof(mask));
+        ok(header->AceType == SYSTEM_AUDIT_ACE_TYPE, "Got ACE type %u.\n", header->AceType);
+        ok(header->AceFlags == SUCCESSFUL_ACCESS_ACE_FLAG, "Got ACE flags %#x.\n", header->AceFlags);
+        ok(header->AceSize == RtlLengthSid(owner) + 12, "Got ACE size %u.\n", header->AceSize);
+        ok(mask == GENERIC_EXECUTE, "Got access mask %#lx.\n", mask);
+        ok(RtlEqualSid((BYTE *)ace + sizeof(*header) + sizeof(mask), owner), "Got wrong SID.\n");
+
+        status = RtlDeleteSecurityObject((PSECURITY_DESCRIPTOR *)&sd);
+        ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    }
+
+    sd = (void *)0xdeadbeef;
+    status = pRtlCreateAndSetSD(NULL, 0, owner, group, (PSECURITY_DESCRIPTOR *)&sd);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    if (status == STATUS_SUCCESS)
+    {
+        ok(sd->Control == SE_DACL_PRESENT, "Got control %#x.\n", sd->Control);
+        ok(sd->Owner == owner, "Got owner %p.\n", sd->Owner);
+        ok(sd->Group == group, "Got group %p.\n", sd->Group);
+        ok(!sd->Dacl, "Got DACL %p.\n", sd->Dacl);
+        ok(!sd->Sacl, "Got SACL %p.\n", sd->Sacl);
+        status = RtlDeleteSecurityObject((PSECURITY_DESCRIPTOR *)&sd);
+        ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    }
+
+    ace_data[0].AceType = 3;
+    sd = (void *)0xdeadbeef;
+    status = pRtlCreateAndSetSD(ace_data, 1, owner, group, (PSECURITY_DESCRIPTOR *)&sd);
+    ok(status == STATUS_INVALID_PARAMETER, "Got status %#lx.\n", status);
+    ok(sd == (void *)0xdeadbeef, "Output changed to %p.\n", sd);
+}
+
+static void test_RtlCreateUserSecurityObject(void)
+{
+    GENERIC_MAPPING mapping = { 0x0001, 0x0002, 0x0004, 0x000f };
+    TOKEN_PRIMARY_GROUP *token_group = NULL;
+    TOKEN_OWNER *token_owner = NULL;
+    PSECURITY_DESCRIPTOR sd = NULL;
+    RTL_ACE_DATA ace_data;
+    BOOLEAN present, defaulted;
+    SECURITY_DESCRIPTOR_CONTROL control;
+    ACCESS_ALLOWED_ACE *ace;
+    PSID owner, group;
+    HANDLE token;
+    ACL *dacl;
+    DWORD size;
+    ULONG revision;
+    NTSTATUS status;
+
+    if (!pRtlCreateUserSecurityObject)
+    {
+        win_skip("RtlCreateUserSecurityObject is unavailable.\n");
+        return;
+    }
+
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+    {
+        win_skip("Failed to open the process token, error %lu.\n", GetLastError());
+        return;
+    }
+
+    size = 0;
+    GetTokenInformation(token, TokenOwner, NULL, 0, &size);
+    token_owner = HeapAlloc(GetProcessHeap(), 0, size);
+    if (!token_owner || !GetTokenInformation(token, TokenOwner, token_owner, size, &size))
+    {
+        win_skip("Failed to query the token owner, error %lu.\n", GetLastError());
+        goto done;
+    }
+
+    size = 0;
+    GetTokenInformation(token, TokenPrimaryGroup, NULL, 0, &size);
+    token_group = HeapAlloc(GetProcessHeap(), 0, size);
+    if (!token_group || !GetTokenInformation(token, TokenPrimaryGroup, token_group, size, &size))
+    {
+        win_skip("Failed to query the token primary group, error %lu.\n", GetLastError());
+        goto done;
+    }
+
+    memset(&ace_data, 0, sizeof(ace_data));
+    owner = token_owner->Owner;
+    group = token_group->PrimaryGroup;
+    ace_data.AceType = ACCESS_ALLOWED_ACE_TYPE;
+    ace_data.Mask = GENERIC_READ;
+    ace_data.Sid = &owner;
+
+    status = pRtlCreateUserSecurityObject(&ace_data, 1, owner, group, FALSE, &mapping, &sd);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    if (status) goto done;
+
+    status = RtlGetControlSecurityDescriptor(sd, &control, &revision);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    ok(control & SE_SELF_RELATIVE, "Descriptor is not self-relative, control %#x.\n", control);
+
+    status = RtlGetOwnerSecurityDescriptor(sd, &owner, &defaulted);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    ok(RtlEqualSid(owner, token_owner->Owner), "Got wrong owner SID.\n");
+    status = RtlGetGroupSecurityDescriptor(sd, &group, &defaulted);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    ok(RtlEqualSid(group, token_group->PrimaryGroup), "Got wrong group SID.\n");
+
+    status = RtlGetDaclSecurityDescriptor(sd, &present, &dacl, &defaulted);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+    ok(present && dacl && dacl->AceCount == 1, "Got DACL %p, present %u, ACE count %u.\n",
+       dacl, present, dacl ? dacl->AceCount : 0);
+    if (present && dacl && dacl->AceCount == 1)
+    {
+        status = RtlGetAce(dacl, 0, (void **)&ace);
+        ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+        ok(ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE, "Got ACE type %u.\n",
+           ace->Header.AceType);
+        ok(ace->Mask == mapping.GenericRead, "Got access mask %#lx.\n", ace->Mask);
+        ok(RtlEqualSid(&ace->SidStart, token_owner->Owner), "Got wrong ACE SID.\n");
+    }
+
+    status = RtlDeleteSecurityObject(&sd);
+    ok(status == STATUS_SUCCESS, "Got status %#lx.\n", status);
+
+done:
+    HeapFree(GetProcessHeap(), 0, token_group);
+    HeapFree(GetProcessHeap(), 0, token_owner);
+    CloseHandle(token);
 }
 
 static void test_RtlFindExportedRoutineByName(void)
@@ -4945,6 +5517,210 @@ static void WINAPI generic_free_proc(RTL_GENERIC_TABLE *table, void *ptr)
     free(ptr);
 }
 
+static RTL_GENERIC_COMPARE_RESULTS WINAPI avl_compare_proc(RTL_AVL_TABLE *table, void *p1, void *p2)
+{
+    int *value1 = p1, *value2 = p2;
+
+    if (*value1 < *value2) return GenericLessThan;
+    if (*value1 > *value2) return GenericGreaterThan;
+    return GenericEqual;
+}
+
+static void * WINAPI avl_allocate_proc(RTL_AVL_TABLE *table, LONG size)
+{
+    return malloc(size);
+}
+
+static void WINAPI avl_free_proc(RTL_AVL_TABLE *table, void *ptr)
+{
+    free(ptr);
+}
+
+static unsigned int validate_avl_tree(RTL_BALANCED_LINKS *links, RTL_BALANCED_LINKS *parent,
+                                      int *previous, unsigned int *count)
+{
+    unsigned int left_depth, right_depth;
+    int value, expected_balance;
+
+    if (!links) return 0;
+    ok(links->Parent == parent, "Got parent %p, expected %p.\n", links->Parent, parent);
+    left_depth = validate_avl_tree(links->LeftChild, links, previous, count);
+    value = *(int *)(links + 1);
+    if (*count) ok(*previous < value, "Values are out of order: %d then %d.\n", *previous, value);
+    *previous = value;
+    (*count)++;
+    right_depth = validate_avl_tree(links->RightChild, links, previous, count);
+    expected_balance = (int)right_depth - (int)left_depth;
+    ok(expected_balance >= -1 && expected_balance <= 1,
+       "Tree is not balanced at %d: left depth %u, right depth %u.\n",
+       value, left_depth, right_depth);
+    ok(links->Balance == expected_balance, "Got balance %d for %d, expected %d.\n",
+       links->Balance, value, expected_balance);
+    return 1 + max(left_depth, right_depth);
+}
+
+static void test_RtlEnumerateGenericTableAvl(void)
+{
+    struct avl_entry
+    {
+        RTL_BALANCED_LINKS links;
+        int value;
+    } entries[3];
+    RTL_AVL_TABLE table;
+    void *restart_key;
+    int *ret;
+
+    if (!pRtlInitializeGenericTableAvl || !pRtlEnumerateGenericTableAvl ||
+        !pRtlEnumerateGenericTableWithoutSplayingAvl)
+    {
+        win_skip("Generic AVL table functions are unavailable.\n");
+        return;
+    }
+
+    memset(&table, 0xff, sizeof(table));
+    pRtlInitializeGenericTableAvl(&table, avl_compare_proc, avl_allocate_proc,
+                                  avl_free_proc, (void *)0xdeadbeef);
+    ok(table.BalancedRoot.Parent == &table.BalancedRoot, "Got unexpected root parent %p.\n",
+       table.BalancedRoot.Parent);
+    ok(!table.BalancedRoot.LeftChild, "Got unexpected root left child %p.\n",
+       table.BalancedRoot.LeftChild);
+    ok(!table.BalancedRoot.RightChild, "Got unexpected root right child %p.\n",
+       table.BalancedRoot.RightChild);
+    ok(!table.OrderedPointer, "Got unexpected ordered pointer %p.\n", table.OrderedPointer);
+    ok(!table.WhichOrderedElement, "Got unexpected ordered element %lu.\n", table.WhichOrderedElement);
+    ok(!table.NumberGenericTableElements, "Got unexpected element count %lu.\n",
+       table.NumberGenericTableElements);
+    ok(!table.DepthOfTree, "Got unexpected tree depth %lu.\n", table.DepthOfTree);
+    ok(!table.RestartKey, "Got unexpected restart key %p.\n", table.RestartKey);
+    ok(!table.DeleteCount, "Got unexpected delete count %lu.\n", table.DeleteCount);
+    ok(table.CompareRoutine == avl_compare_proc, "Got unexpected compare routine.\n");
+    ok(table.AllocateRoutine == avl_allocate_proc, "Got unexpected allocate routine.\n");
+    ok(table.FreeRoutine == avl_free_proc, "Got unexpected free routine.\n");
+    ok(table.TableContext == (void *)0xdeadbeef, "Got unexpected table context %p.\n",
+       table.TableContext);
+
+    table.RestartKey = (void *)0xdeadbeef;
+    ret = pRtlEnumerateGenericTableAvl(&table, TRUE);
+    ok(!ret, "Got unexpected element %p.\n", ret);
+    ok(!table.RestartKey, "Got unexpected restart key %p.\n", table.RestartKey);
+
+    memset(entries, 0, sizeof(entries));
+    entries[0].value = 1;
+    entries[1].value = 2;
+    entries[2].value = 3;
+    table.BalancedRoot.RightChild = &entries[1].links;
+    entries[1].links.Parent = &table.BalancedRoot;
+    entries[1].links.LeftChild = &entries[0].links;
+    entries[1].links.RightChild = &entries[2].links;
+    entries[0].links.Parent = &entries[1].links;
+    entries[2].links.Parent = &entries[1].links;
+    table.NumberGenericTableElements = ARRAY_SIZE(entries);
+
+    restart_key = NULL;
+    ret = pRtlEnumerateGenericTableWithoutSplayingAvl(&table, &restart_key);
+    ok(ret == &entries[0].value, "Got unexpected first element %p.\n", ret);
+    ok(restart_key == &entries[0].links, "Got unexpected restart key %p.\n", restart_key);
+    ret = pRtlEnumerateGenericTableWithoutSplayingAvl(&table, &restart_key);
+    ok(ret == &entries[1].value, "Got unexpected second element %p.\n", ret);
+    ret = pRtlEnumerateGenericTableWithoutSplayingAvl(&table, &restart_key);
+    ok(ret == &entries[2].value, "Got unexpected third element %p.\n", ret);
+    ret = pRtlEnumerateGenericTableWithoutSplayingAvl(&table, &restart_key);
+    ok(!ret, "Got unexpected element %p.\n", ret);
+    ok(restart_key == &entries[2].links, "Got unexpected final restart key %p.\n", restart_key);
+
+    ret = pRtlEnumerateGenericTableAvl(&table, TRUE);
+    ok(ret == &entries[0].value, "Got unexpected first restarted element %p.\n", ret);
+    ret = pRtlEnumerateGenericTableAvl(&table, FALSE);
+    ok(ret == &entries[1].value, "Got unexpected second restarted element %p.\n", ret);
+    ret = pRtlEnumerateGenericTableAvl(&table, FALSE);
+    ok(ret == &entries[2].value, "Got unexpected third restarted element %p.\n", ret);
+    ret = pRtlEnumerateGenericTableAvl(&table, FALSE);
+    ok(!ret, "Got unexpected element %p.\n", ret);
+
+    if (pRtlInsertElementGenericTableAvl && pRtlDeleteElementGenericTableAvl &&
+        pRtlIsGenericTableEmptyAvl &&
+        pRtlLookupElementGenericTableAvl && pRtlNumberGenericTableElementsAvl)
+    {
+        static const int values[] = {30, 20, 10, 40, 50, 25, 27, 5, 4, 35, 45, 60, 55};
+        static const int delete_values[] = {4, 30, 20, 55, 10, 40, 27, 60, 5, 35, 25, 45, 50};
+        unsigned int i, count, depth;
+        BOOLEAN new_element;
+        int previous, missing = 99;
+
+        pRtlInitializeGenericTableAvl(&table, avl_compare_proc, avl_allocate_proc,
+                                      avl_free_proc, NULL);
+        ok(pRtlIsGenericTableEmptyAvl(&table), "New table is not empty.\n");
+        for (i = 0; i < ARRAY_SIZE(values); i++)
+        {
+            new_element = 0xcc;
+            ret = pRtlInsertElementGenericTableAvl(&table, (void *)&values[i], sizeof(values[i]),
+                                                    &new_element);
+            ok(ret && *ret == values[i], "Got result %p for %d.\n", ret, values[i]);
+            ok(new_element == TRUE, "Element %d was not reported new.\n", values[i]);
+            ok(pRtlNumberGenericTableElementsAvl(&table) == i + 1,
+               "Got element count %lu after insert %u.\n",
+               pRtlNumberGenericTableElementsAvl(&table), i);
+            previous = 0;
+            count = 0;
+            depth = validate_avl_tree(table.BalancedRoot.RightChild, &table.BalancedRoot,
+                                      &previous, &count);
+            ok(count == i + 1, "Validated %u elements, expected %u.\n", count, i + 1);
+            ok(table.DepthOfTree == depth, "Got depth %lu, expected %u.\n",
+               table.DepthOfTree, depth);
+        }
+        ok(!pRtlIsGenericTableEmptyAvl(&table), "Populated table is empty.\n");
+
+        for (i = 0; i < ARRAY_SIZE(values); i++)
+        {
+            ret = pRtlLookupElementGenericTableAvl(&table, (void *)&values[i]);
+            ok(ret && *ret == values[i], "Lookup returned %p for %d.\n", ret, values[i]);
+        }
+        ok(!pRtlLookupElementGenericTableAvl(&table, &missing), "Found missing value.\n");
+
+        new_element = 0xcc;
+        ret = pRtlInsertElementGenericTableAvl(&table, (void *)&values[3], sizeof(values[3]),
+                                                &new_element);
+        ok(ret && *ret == values[3], "Duplicate insert returned %p.\n", ret);
+        ok(new_element == FALSE, "Duplicate element was reported new.\n");
+        ok(pRtlNumberGenericTableElementsAvl(&table) == ARRAY_SIZE(values),
+           "Duplicate changed element count to %lu.\n",
+           pRtlNumberGenericTableElementsAvl(&table));
+
+        ret = pRtlEnumerateGenericTableAvl(&table, TRUE);
+        ok(ret && *ret == delete_values[0], "Got unexpected first enumerated value.\n");
+        for (i = 0; i < ARRAY_SIZE(delete_values); i++)
+        {
+            ok(pRtlDeleteElementGenericTableAvl(&table, (void *)&delete_values[i]),
+               "Failed to delete %d.\n", delete_values[i]);
+            ok(!pRtlLookupElementGenericTableAvl(&table, (void *)&delete_values[i]),
+               "Deleted value %d is still present.\n", delete_values[i]);
+            ok(pRtlNumberGenericTableElementsAvl(&table) == ARRAY_SIZE(delete_values) - i - 1,
+               "Got element count %lu after delete %u.\n",
+               pRtlNumberGenericTableElementsAvl(&table), i);
+            previous = 0;
+            count = 0;
+            depth = validate_avl_tree(table.BalancedRoot.RightChild, &table.BalancedRoot,
+                                      &previous, &count);
+            ok(count == ARRAY_SIZE(delete_values) - i - 1,
+               "Validated %u elements after delete %u.\n", count, i);
+            ok(table.DepthOfTree == depth, "Got depth %lu after delete, expected %u.\n",
+               table.DepthOfTree, depth);
+            if (!i)
+            {
+                ret = pRtlEnumerateGenericTableAvl(&table, FALSE);
+                ok(ret && *ret == 5, "Enumeration did not continue after deleting restart key.\n");
+            }
+        }
+        ok(pRtlIsGenericTableEmptyAvl(&table), "Deleted table is not empty.\n");
+        ok(!table.BalancedRoot.RightChild, "Deleted table still has root %p.\n",
+           table.BalancedRoot.RightChild);
+        ok(!pRtlDeleteElementGenericTableAvl(&table, &missing),
+           "Deleted missing value from empty table.\n");
+    }
+    else
+        win_skip("Generic AVL table mutation functions are unavailable.\n");
+}
+
 static void test_RtlInitializeGenericTable(void)
 {
     RTL_GENERIC_TABLE table;
@@ -5562,6 +6338,44 @@ static void test_pointer_encoding(void)
     ok( v == expected, "got %p, expected %p.\n", v, expected );
 }
 
+static void test_process_protection(void)
+{
+    static const UCHAR valid[] =
+    {
+        0x00, 0x08, 0x12, 0x21, 0x31, 0x41, 0x51, 0x52, 0x61, 0x62, 0x72, 0x81
+    };
+    static const USHORT access_rows[] =
+    {
+        0x003, 0x003, 0x007, 0x00b, 0x813, 0x823,
+        0x87b, 0x8ff, 0x97b, 0xbff, 0xfff, 0x003
+    };
+    unsigned int source, target, value;
+    BOOL expected;
+
+    if (!pRtlTestProtectedAccess || !pRtlValidProcessProtection)
+    {
+        win_skip("process protection helpers are unavailable.\n");
+        return;
+    }
+
+    for (value = 0; value <= 0xff; ++value)
+    {
+        expected = FALSE;
+        for (source = 0; source < ARRAY_SIZE(valid); ++source)
+            if (value == valid[source]) expected = TRUE;
+        ok(pRtlValidProcessProtection(value) == expected,
+           "validity for %#x was unexpected.\n", value);
+    }
+
+    for (source = 0; source < ARRAY_SIZE(valid); ++source)
+        for (target = 0; target < ARRAY_SIZE(valid); ++target)
+        {
+            expected = !!(access_rows[source] & (1u << target));
+            ok(pRtlTestProtectedAccess(valid[source], valid[target]) == expected,
+               "access from %#x to %#x was unexpected.\n", valid[source], valid[target]);
+        }
+}
+
 START_TEST(rtl)
 {
     InitFunctionPtrs();
@@ -5578,6 +6392,7 @@ START_TEST(rtl)
     test_RtlRandom();
     test_RtlAreAllAccessesGranted();
     test_RtlAreAnyAccessesGranted();
+    test_process_protection();
     test_RtlComputeCrc32();
     test_HandleTables();
     test_RtlAllocateAndInitializeSid();
@@ -5607,9 +6422,16 @@ START_TEST(rtl)
     test_RtlDestroyHeap();
     test_RtlCreateHeap();
     test_RtlFirstFreeAce();
+    test_RtlGetAcesBufferSize();
     test_RtlInitializeSid();
     test_RtlCopySid();
+    test_RtlSidHash();
     test_RtlValidSecurityDescriptor();
+    test_RtlValidRelativeSecurityDescriptor();
+    test_RtlCopySecurityDescriptor();
+    test_RtlSetSecurityObject();
+    test_RtlCreateAndSetSD();
+    test_RtlCreateUserSecurityObject();
     test_RtlFindExportedRoutineByName();
     test_RtlGetDeviceFamilyInfoEnum();
     test_RtlConvertDeviceFamilyInfoToString();
@@ -5622,6 +6444,7 @@ START_TEST(rtl)
     test_RtlSplay();
     test_RtlDeleteNoSplay();
     test_RtlDelete();
+    test_RtlEnumerateGenericTableAvl();
     test_RtlInitializeGenericTable();
     test_RtlNumberGenericTableElements();
     test_RtlIsGenericTableEmpty();

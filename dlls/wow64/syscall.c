@@ -612,7 +612,12 @@ NTSTATUS WINAPI wow64_NtAlpcImpersonateClientOfPort( UINT *args )
 
     ALPC_PORT_MESSAGE *msg;
 
-    return NtAlpcImpersonateClientOfPort( handle, alpc_port_message_32to64( &msg, msg32 ? (sizeof(*msg) + msg32->DataLength) : 0, msg32, TRUE ), reserved );
+    /* The type selects the message identity layout. Preserve native-width
+     * input when the caller did not mark a 32-bit message. */
+    if (msg32 && !(msg32->Type & 0x1000))
+        return NtAlpcImpersonateClientOfPort( handle, (ALPC_PORT_MESSAGE *)msg32, reserved );
+    return NtAlpcImpersonateClientOfPort( handle, alpc_port_message_32to64( &msg,
+                                         msg32 ? sizeof(*msg) + msg32->DataLength : 0, msg32, TRUE ), reserved );
 }
 
 /**********************************************************************

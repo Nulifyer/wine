@@ -43,6 +43,7 @@ static NTSTATUS  (WINAPI *pNtQueueApcThreadEx)(HANDLE handle, HANDLE reserve_han
 static NTSTATUS  (WINAPI *pNtQueueApcThreadEx2)(HANDLE handle, HANDLE reserve_handle, ULONG flags, PNTAPCFUNC func,
                                                 ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3);
 static NTSTATUS  (WINAPI *pRtlWow64GetProcessMachines)(HANDLE, WORD*, WORD*);
+static void *    (WINAPI *pRtlSetThreadSubProcessTag)(void *);
 
 #ifdef __x86_64__
 static NTSTATUS (WINAPI *pNtAllocateVirtualMemoryEx)(HANDLE, PVOID *, SIZE_T *, ULONG, ULONG,
@@ -64,6 +65,7 @@ static void init_function_pointers(void)
     GET_FUNC( NtQueueApcThreadEx );
     GET_FUNC( NtQueueApcThreadEx2 );
     GET_FUNC( NtResumeProcess );
+    GET_FUNC( RtlSetThreadSubProcessTag );
     GET_FUNC( RtlWow64GetProcessMachines );
     GET_FUNC( _errno );
 
@@ -74,6 +76,35 @@ static void init_function_pointers(void)
     hdll = GetModuleHandleA( "kernel32.dll" );
     GET_FUNC( IsWow64Process );
 #undef GET_FUNC
+}
+
+static void test_RtlSetThreadSubProcessTag(void)
+{
+    void *tag1 = (void *)(ULONG_PTR)0x12345678;
+    void *tag2 = (void *)(ULONG_PTR)0x87654321;
+    void *previous, *original;
+
+    if (!pRtlSetThreadSubProcessTag)
+    {
+        win_skip( "RtlSetThreadSubProcessTag is not available.\n" );
+        return;
+    }
+
+    original = NtCurrentTeb()->SubProcessTag;
+    previous = pRtlSetThreadSubProcessTag( tag1 );
+    ok( previous == original, "got previous tag %p, expected %p\n", previous, original );
+    ok( NtCurrentTeb()->SubProcessTag == tag1, "got current tag %p, expected %p\n",
+        NtCurrentTeb()->SubProcessTag, tag1 );
+
+    previous = pRtlSetThreadSubProcessTag( tag2 );
+    ok( previous == tag1, "got previous tag %p, expected %p\n", previous, tag1 );
+    ok( NtCurrentTeb()->SubProcessTag == tag2, "got current tag %p, expected %p\n",
+        NtCurrentTeb()->SubProcessTag, tag2 );
+
+    previous = pRtlSetThreadSubProcessTag( original );
+    ok( previous == tag2, "got previous tag %p, expected %p\n", previous, tag2 );
+    ok( NtCurrentTeb()->SubProcessTag == original, "got restored tag %p, expected %p\n",
+        NtCurrentTeb()->SubProcessTag, original );
 }
 
 static void CALLBACK test_NtCreateThreadEx_proc(void *param)
@@ -542,6 +573,7 @@ START_TEST(thread)
     }
 
     test_dbg_hidden_thread_creation();
+    test_RtlSetThreadSubProcessTag();
     test_unique_teb();
     test_errno();
     test_NtCreateUserProcess();

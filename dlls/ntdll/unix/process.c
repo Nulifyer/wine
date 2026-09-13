@@ -34,6 +34,9 @@
 #include <string.h>
 #include <time.h>
 #include <sys/socket.h>
+#ifdef HAVE_SYS_SYSCALL_H
+# include <sys/syscall.h>
+#endif
 #include <sys/time.h>
 #ifdef HAVE_SYS_TIMES_H
 # include <sys/times.h>
@@ -835,8 +838,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         req->socket_fd      = socketfd[1];
         req->access         = process_access;
         req->machine        = machine;
-        req->native_session = is_native_machine && pe_info.subsystem == IMAGE_SUBSYSTEM_NATIVE &&
-                              (process_flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES);
+        req->native_session = is_native_machine && pe_info.subsystem == IMAGE_SUBSYSTEM_NATIVE;
         req->protection     = protection;
         req->info_size      = startup_info_size;
         req->handles_size   = handles_size;
@@ -976,8 +978,28 @@ done:
  */
 NTSTATUS WINAPI NtTerminateProcess( HANDLE handle, LONG exit_code )
 {
+    const char *fail_fast_marker;
     unsigned int ret;
     BOOL self;
+
+    if (exit_code == STATUS_FAIL_FAST_EXCEPTION &&
+        (fail_fast_marker = getenv( "LINUXNT_DEBUG_STOP_FAIL_FAST" )))
+    {
+        FILE *file = fopen( fail_fast_marker, "w" );
+        int unix_tid = getpid();
+
+#ifdef linux
+        unix_tid = syscall( __NR_gettid );
+#endif
+
+        if (file)
+        {
+            fprintf( file, "%u %u\n", getpid(), unix_tid );
+            fclose( file );
+        }
+        fprintf( stderr, "linuxnt: waiting in process %u before fail-fast termination\n", getpid() );
+        for (;;) sleep( 1 );
+    }
 
     SERVER_START_REQ( terminate_process )
     {
@@ -1092,6 +1114,13 @@ void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid )
         ret = STATUS_INVALID_INFO_CLASS; \
         break
 
+struct process_extended_basic_information
+{
+    SIZE_T size;
+    PROCESS_BASIC_INFORMATION basic_info;
+    ULONG flags;
+};
+
 /**********************************************************************
  *           NtQueryInformationProcess  (NTDLL.@)
  */
@@ -1148,8 +1177,18 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
 
     case ProcessBasicInformation:
         {
-            PROCESS_BASIC_INFORMATION pbi;
+            struct process_extended_basic_information *extended = info;
+            PROCESS_BASIC_INFORMATION pbi, *output = &pbi;
             const ULONG_PTR affinity_mask = get_system_affinity_mask();
+            BOOL is_extended = info && size == sizeof(*extended) && extended->size == sizeof(*extended);
+
+            if (is_extended)
+            {
+                output = &extended->basic_info;
+                extended->flags = 0;
+                len = sizeof(*extended);
+            }
+            else len = sizeof(PROCESS_BASIC_INFORMATION);
 
             if (size >= sizeof(PROCESS_BASIC_INFORMATION))
             {
@@ -1174,14 +1213,25 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
                                 else
                                     pbi.PebBaseAddress = NULL;
                             }
+                            *output = pbi;
+                            if (is_extended)
+                            {
+                                SERVER_START_REQ( get_process_protection )
+                                {
+                                    req->handle = wine_server_obj_handle( handle );
+                                    if (!(ret = wine_server_call( req )) && reply->protection)
+                                        extended->flags |= 1; /* IsProtectedProcess */
+                                }
+                                SERVER_END_REQ;
+                            }
                         }
                     }
                     SERVER_END_REQ;
 
-                    memcpy( info, &pbi, sizeof(PROCESS_BASIC_INFORMATION) );
-                    len = sizeof(PROCESS_BASIC_INFORMATION);
+                    if (!is_extended) memcpy( info, &pbi, sizeof(PROCESS_BASIC_INFORMATION) );
                 }
-                if (size > sizeof(PROCESS_BASIC_INFORMATION)) ret = STATUS_INFO_LENGTH_MISMATCH;
+                if (!is_extended && size > sizeof(PROCESS_BASIC_INFORMATION))
+                    ret = STATUS_INFO_LENGTH_MISMATCH;
             }
             else
             {

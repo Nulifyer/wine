@@ -1751,11 +1751,19 @@ static void load_apiset_dll(void)
     init_unicode_string( &str, path );
     InitializeObjectAttributes( &attr, &str, 0, 0, NULL );
 
-    if (build_dir) asprintf( &name, "%s/dlls/apisetschema%s/apisetschema.dll", build_dir, pe_dir );
-    else asprintf( &name, "%s%s/apisetschema.dll", dll_dir, pe_dir );
+    asprintf( &name, "%s/drive_c/windows/system32/apisetschema.dll", config_dir );
     status = open_unix_file( &handle, name, GENERIC_READ | SYNCHRONIZE, &attr, 0,
                              FILE_SHARE_READ | FILE_SHARE_DELETE, FILE_OPEN,
                              FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE, NULL, 0 );
+    if (status)
+    {
+        free( name );
+        if (build_dir) asprintf( &name, "%s/dlls/apisetschema%s/apisetschema.dll", build_dir, pe_dir );
+        else asprintf( &name, "%s%s/apisetschema.dll", dll_dir, pe_dir );
+        status = open_unix_file( &handle, name, GENERIC_READ | SYNCHRONIZE, &attr, 0,
+                                 FILE_SHARE_READ | FILE_SHARE_DELETE, FILE_OPEN,
+                                 FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE, NULL, 0 );
+    }
     free( name );
 
     if (!status)

@@ -379,6 +379,19 @@ struct luid
     int          high_part;
 };
 
+
+struct token_identity
+{
+    struct luid token_id;
+    struct luid authentication_id;
+    struct luid modified_id;
+};
+
+struct token_audit_policy
+{
+    unsigned char per_user_policy[27];
+};
+
 struct luid_attr
 {
     struct luid  luid;
@@ -5069,6 +5082,87 @@ struct set_token_default_dacl_reply
     struct reply_header __header;
 };
 
+struct set_token_session_id_request
+{
+    struct request_header __header;
+    obj_handle_t    handle;
+    unsigned int    session_id;
+    char __pad_20[4];
+};
+struct set_token_session_id_reply
+{
+    struct reply_header __header;
+};
+
+
+struct set_token_session_reference_request
+{
+    struct request_header __header;
+    obj_handle_t    handle;
+};
+struct set_token_session_reference_reply
+{
+    struct reply_header __header;
+};
+
+struct set_token_mandatory_policy_request
+{
+    struct request_header __header;
+    obj_handle_t    handle;
+    unsigned int    policy;
+    char __pad_20[4];
+};
+struct set_token_mandatory_policy_reply
+{
+    struct reply_header __header;
+};
+
+struct set_token_audit_policy_request
+{
+    struct request_header __header;
+    obj_handle_t    handle;
+    struct token_audit_policy policy;
+    char __pad_43[5];
+};
+struct set_token_audit_policy_reply
+{
+    struct reply_header __header;
+};
+
+struct set_token_origin_request
+{
+    struct request_header __header;
+    obj_handle_t    handle;
+    struct luid     origin;
+};
+struct set_token_origin_reply
+{
+    struct reply_header __header;
+};
+
+struct get_token_audit_policy_request
+{
+    struct request_header __header;
+    obj_handle_t    handle;
+};
+struct get_token_audit_policy_reply
+{
+    struct reply_header __header;
+    struct token_audit_policy policy;
+    char __pad_35[5];
+};
+
+struct get_token_origin_request
+{
+    struct request_header __header;
+    obj_handle_t    handle;
+};
+struct get_token_origin_reply
+{
+    struct reply_header __header;
+    struct luid     origin;
+};
+
 struct set_security_object_request
 {
     struct request_header __header;
@@ -5540,16 +5634,15 @@ struct get_token_info_request
 struct get_token_info_reply
 {
     struct reply_header __header;
-    struct luid    token_id;
-    struct luid    modified_id;
+    struct token_identity identity;
     unsigned int   session_id;
+    unsigned int   mandatory_policy;
     int            primary;
     int            impersonation_level;
     int            elevation_type;
     int            is_elevated;
     int            group_count;
     int            privilege_count;
-    char __pad_52[4];
 };
 
 
@@ -6351,6 +6444,13 @@ struct alpc_create_port_reply
 };
 
 
+struct alpc_security_qos
+{
+    int impersonation_level;
+    int tracking_mode;
+    int effective_only;
+};
+
 
 struct alpc_message_info
 {
@@ -6363,13 +6463,14 @@ struct alpc_message_info
     data_size_t size;
     unsigned int sequence;
     unsigned int callback_id;
-    unsigned int context_valid;
+    unsigned int attributes_valid;
 };
 
 
 struct alpc_send_receive_request
 {
     struct request_header __header;
+    unsigned int receive_attributes;
     obj_handle_t handle;
     unsigned int flags;
     unsigned int message_id;
@@ -6377,6 +6478,7 @@ struct alpc_send_receive_request
     int receive;
     int wow64;
     int no_wait;
+    char __pad_44[4];
     client_ptr_t message_context;
     /* VARARG(message,bytes); */
 };
@@ -6394,9 +6496,9 @@ struct alpc_send_receive_reply
 struct alpc_get_message_result_request
 {
     struct request_header __header;
+    unsigned int receive_attributes;
     obj_handle_t handle;
     unsigned int wait_status;
-    char __pad_20[4];
 };
 struct alpc_get_message_result_reply
 {
@@ -6433,7 +6535,9 @@ struct alpc_connect_port_reply
 struct alpc_get_connect_result_request
 {
     struct request_header __header;
+    unsigned int receive_attributes;
     obj_handle_t handle;
+    char __pad_20[4];
 };
 struct alpc_get_connect_result_reply
 {
@@ -6491,6 +6595,21 @@ struct alpc_disconnect_port_request
     obj_handle_t handle;
 };
 struct alpc_disconnect_port_reply
+{
+    struct reply_header __header;
+};
+
+
+struct alpc_impersonate_client_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int message_present;
+    unsigned int message_id;
+    unsigned int callback_id;
+    char __pad_28[4];
+};
+struct alpc_impersonate_client_reply
 {
     struct reply_header __header;
 };
@@ -6696,6 +6815,74 @@ struct complete_wnf_subscription_reply
     unsigned int change_stamp;
     unsigned int events;
     /* VARARG(data,bytes); */
+};
+
+
+struct adjust_token_groups_request
+{
+    struct request_header __header;
+    obj_handle_t  handle;
+    int           reset;
+    int           get_modified_state;
+    unsigned int  group_count;
+    unsigned int  previous_length;
+    unsigned int  groups_offset;
+    unsigned int  group_entry_size;
+    /* VARARG(groups,bytes); */
+};
+struct adjust_token_groups_reply
+{
+    struct reply_header __header;
+    unsigned int  len;
+    unsigned int  group_count;
+    unsigned int  sid_len;
+    /* VARARG(groups,bytes); */
+    char __pad_20[4];
+};
+
+
+struct delete_wnf_state_data_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+    unsigned int session_id;
+    int explicit_scope;
+};
+struct delete_wnf_state_data_reply
+{
+    struct reply_header __header;
+};
+
+
+struct alpc_query_information_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct alpc_query_information_reply
+{
+    struct reply_header __header;
+    unsigned int flags;
+    unsigned int sequence;
+    client_ptr_t context;
+};
+
+
+struct notify_change_session_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    timeout_t timestamp;
+    unsigned int sequence;
+    unsigned int event;
+    unsigned int new_state;
+    unsigned int previous_state;
+    /* VARARG(payload,bytes); */
+};
+struct notify_change_session_reply
+{
+    struct reply_header __header;
 };
 
 
@@ -6935,6 +7122,13 @@ enum request
     REQ_get_token_groups,
     REQ_get_token_default_dacl,
     REQ_set_token_default_dacl,
+    REQ_set_token_session_id,
+    REQ_set_token_session_reference,
+    REQ_set_token_mandatory_policy,
+    REQ_set_token_audit_policy,
+    REQ_set_token_origin,
+    REQ_get_token_audit_policy,
+    REQ_get_token_origin,
     REQ_set_security_object,
     REQ_get_security_object,
     REQ_get_system_handles,
@@ -7021,6 +7215,7 @@ enum request
     REQ_alpc_accept_connect_port,
     REQ_alpc_open_sender_process,
     REQ_alpc_disconnect_port,
+    REQ_alpc_impersonate_client,
     REQ_set_default_hard_error_port,
     REQ_set_process_exception_port,
     REQ_get_process_critical_state,
@@ -7035,6 +7230,10 @@ enum request
     REQ_set_wnf_process_event,
     REQ_query_wnf_state_info,
     REQ_complete_wnf_subscription,
+    REQ_adjust_token_groups,
+    REQ_delete_wnf_state_data,
+    REQ_alpc_query_information,
+    REQ_notify_change_session,
     REQ_NB_REQUESTS
 };
 
@@ -7276,6 +7475,13 @@ union generic_request
     struct get_token_groups_request get_token_groups_request;
     struct get_token_default_dacl_request get_token_default_dacl_request;
     struct set_token_default_dacl_request set_token_default_dacl_request;
+    struct set_token_session_id_request set_token_session_id_request;
+    struct set_token_session_reference_request set_token_session_reference_request;
+    struct set_token_mandatory_policy_request set_token_mandatory_policy_request;
+    struct set_token_audit_policy_request set_token_audit_policy_request;
+    struct set_token_origin_request set_token_origin_request;
+    struct get_token_audit_policy_request get_token_audit_policy_request;
+    struct get_token_origin_request get_token_origin_request;
     struct set_security_object_request set_security_object_request;
     struct get_security_object_request get_security_object_request;
     struct get_system_handles_request get_system_handles_request;
@@ -7362,6 +7568,7 @@ union generic_request
     struct alpc_accept_connect_port_request alpc_accept_connect_port_request;
     struct alpc_open_sender_process_request alpc_open_sender_process_request;
     struct alpc_disconnect_port_request alpc_disconnect_port_request;
+    struct alpc_impersonate_client_request alpc_impersonate_client_request;
     struct set_default_hard_error_port_request set_default_hard_error_port_request;
     struct set_process_exception_port_request set_process_exception_port_request;
     struct get_process_critical_state_request get_process_critical_state_request;
@@ -7376,6 +7583,10 @@ union generic_request
     struct set_wnf_process_event_request set_wnf_process_event_request;
     struct query_wnf_state_info_request query_wnf_state_info_request;
     struct complete_wnf_subscription_request complete_wnf_subscription_request;
+    struct adjust_token_groups_request adjust_token_groups_request;
+    struct delete_wnf_state_data_request delete_wnf_state_data_request;
+    struct alpc_query_information_request alpc_query_information_request;
+    struct notify_change_session_request notify_change_session_request;
 };
 union generic_reply
 {
@@ -7615,6 +7826,13 @@ union generic_reply
     struct get_token_groups_reply get_token_groups_reply;
     struct get_token_default_dacl_reply get_token_default_dacl_reply;
     struct set_token_default_dacl_reply set_token_default_dacl_reply;
+    struct set_token_session_id_reply set_token_session_id_reply;
+    struct set_token_session_reference_reply set_token_session_reference_reply;
+    struct set_token_mandatory_policy_reply set_token_mandatory_policy_reply;
+    struct set_token_audit_policy_reply set_token_audit_policy_reply;
+    struct set_token_origin_reply set_token_origin_reply;
+    struct get_token_audit_policy_reply get_token_audit_policy_reply;
+    struct get_token_origin_reply get_token_origin_reply;
     struct set_security_object_reply set_security_object_reply;
     struct get_security_object_reply get_security_object_reply;
     struct get_system_handles_reply get_system_handles_reply;
@@ -7701,6 +7919,7 @@ union generic_reply
     struct alpc_accept_connect_port_reply alpc_accept_connect_port_reply;
     struct alpc_open_sender_process_reply alpc_open_sender_process_reply;
     struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
+    struct alpc_impersonate_client_reply alpc_impersonate_client_reply;
     struct set_default_hard_error_port_reply set_default_hard_error_port_reply;
     struct set_process_exception_port_reply set_process_exception_port_reply;
     struct get_process_critical_state_reply get_process_critical_state_reply;
@@ -7715,8 +7934,12 @@ union generic_reply
     struct set_wnf_process_event_reply set_wnf_process_event_reply;
     struct query_wnf_state_info_reply query_wnf_state_info_reply;
     struct complete_wnf_subscription_reply complete_wnf_subscription_reply;
+    struct adjust_token_groups_reply adjust_token_groups_reply;
+    struct delete_wnf_state_data_reply delete_wnf_state_data_reply;
+    struct alpc_query_information_reply alpc_query_information_reply;
+    struct notify_change_session_reply notify_change_session_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 987
+#define SERVER_PROTOCOL_VERSION 998
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

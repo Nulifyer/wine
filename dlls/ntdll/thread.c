@@ -429,6 +429,18 @@ NTSTATUS WINAPI RtlSetThreadErrorMode( DWORD mode, LPDWORD oldmode )
 
 
 /***********************************************************************
+ *              RtlSetThreadSubProcessTag  (NTDLL.@)
+ */
+PVOID WINAPI RtlSetThreadSubProcessTag( PVOID tag )
+{
+    PVOID previous = NtCurrentTeb()->SubProcessTag;
+
+    NtCurrentTeb()->SubProcessTag = tag;
+    return previous;
+}
+
+
+/***********************************************************************
  *              RtlGetThreadErrorMode  (NTDLL.@)
  */
 DWORD WINAPI RtlGetThreadErrorMode( void )

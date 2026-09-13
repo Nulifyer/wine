@@ -50,6 +50,8 @@ static PVOID     (WINAPI *pRtlAddVectoredExceptionHandler)(ULONG first, PVECTORE
 static ULONG     (WINAPI *pRtlRemoveVectoredExceptionHandler)(PVOID handler);
 static PVOID     (WINAPI *pRtlAddVectoredContinueHandler)(ULONG first, PVECTORED_EXCEPTION_HANDLER func);
 static ULONG     (WINAPI *pRtlRemoveVectoredContinueHandler)(PVOID handler);
+static LONG      (WINAPI *pRtlUnhandledExceptionFilter)(EXCEPTION_POINTERS *eptr);
+static LONG      (WINAPI *pRtlUnhandledExceptionFilter2)(EXCEPTION_POINTERS *eptr, const char *prefix);
 static void *    (WINAPI *pRtlPcToFileHeader)(PVOID pc, PVOID *address);
 static void      (WINAPI *pRtlGetCallersAddress)(void**,void**);
 static NTSTATUS  (WINAPI *pNtReadVirtualMemory)(HANDLE, const void*, void*, SIZE_T, SIZE_T*);
@@ -12869,6 +12871,42 @@ static void test_RtlAddVectoredExceptionHandler(void)
     pRtlRemoveVectoredExceptionHandler( vh2 );
 }
 
+static void test_RtlUnhandledExceptionFilter(void)
+{
+    EXCEPTION_RECORD record = {0};
+    CONTEXT context = {0};
+    EXCEPTION_POINTERS eptr = {&record, &context};
+    LONG ret;
+
+    if (!pRtlUnhandledExceptionFilter)
+    {
+        win_skip( "RtlUnhandledExceptionFilter is not available.\n" );
+        return;
+    }
+
+    record.ExceptionCode = STATUS_ACCESS_VIOLATION;
+    ret = pRtlUnhandledExceptionFilter( &eptr );
+    ok( ret == EXCEPTION_CONTINUE_SEARCH, "got %ld.\n", ret );
+
+    record.ExceptionCode = STATUS_POSSIBLE_DEADLOCK;
+    ret = pRtlUnhandledExceptionFilter( &eptr );
+    ok( ret == EXCEPTION_CONTINUE_EXECUTION, "got %ld.\n", ret );
+
+    if (!pRtlUnhandledExceptionFilter2)
+    {
+        win_skip( "RtlUnhandledExceptionFilter2 is not available.\n" );
+        return;
+    }
+
+    record.ExceptionCode = STATUS_ACCESS_VIOLATION;
+    ret = pRtlUnhandledExceptionFilter2( &eptr, "test" );
+    ok( ret == EXCEPTION_CONTINUE_SEARCH, "got %ld.\n", ret );
+
+    record.ExceptionCode = STATUS_POSSIBLE_DEADLOCK;
+    ret = pRtlUnhandledExceptionFilter2( &eptr, "test" );
+    ok( ret == EXCEPTION_CONTINUE_EXECUTION, "got %ld.\n", ret );
+}
+
 START_TEST(exception)
 {
     HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
@@ -12901,6 +12939,8 @@ START_TEST(exception)
     X(RtlRemoveVectoredExceptionHandler);
     X(RtlAddVectoredContinueHandler);
     X(RtlRemoveVectoredContinueHandler);
+    X(RtlUnhandledExceptionFilter);
+    X(RtlUnhandledExceptionFilter2);
     X(NtQueryInformationThread);
     X(NtSuspendProcess);
     X(NtResumeProcess);
@@ -13188,5 +13228,6 @@ START_TEST(exception)
     test_backtrace();
     test_context_exception_request();
     test_RtlAddVectoredExceptionHandler();
+    test_RtlUnhandledExceptionFilter();
     VirtualFree(code_mem, 0, MEM_RELEASE);
 }

@@ -399,11 +399,29 @@ static void dump_apc_result( const char *prefix, const union apc_result *result 
     fputc( '}', stderr );
 }
 
+static void dump_token_identity( const char *prefix, const struct token_identity *identity )
+{
+    fprintf( stderr, "%s{token=%08x.%08x,authentication=%08x.%08x,modified=%08x.%08x}", prefix,
+             identity->token_id.high_part, identity->token_id.low_part,
+             identity->authentication_id.high_part, identity->authentication_id.low_part,
+             identity->modified_id.high_part, identity->modified_id.low_part );
+}
+
+static void dump_token_audit_policy( const char *prefix, const struct token_audit_policy *policy )
+{
+    unsigned int i;
+
+    fprintf( stderr, "%s{", prefix );
+    for (i = 0; i < ARRAY_SIZE( policy->per_user_policy ); i++)
+        fprintf( stderr, "%s%02x", i ? " " : "", policy->per_user_policy[i] );
+    fputc( '}', stderr );
+}
+
 static void dump_alpc_message_info( const char *prefix, const struct alpc_message_info *info )
 {
     fprintf( stderr, "%s{id=%08x,type=%08x,pid=%04x,tid=%04x,size=%u,sequence=%u,callback=%08x,valid=%08x",
              prefix, info->id, info->type, info->pid, info->tid, info->size, info->sequence,
-             info->callback_id, info->context_valid );
+             info->callback_id, info->attributes_valid );
     dump_uint64( ",port_context=", &info->port_context );
     dump_uint64( ",message_context=", &info->message_context );
     fputc( '}', stderr );
@@ -1197,6 +1215,9 @@ static void dump_inline_acl( const char *prefix, const struct acl *acl, data_siz
             case SYSTEM_AUDIT_ACE_TYPE:           fprintf( stderr, "SYSTEM_AUDIT" ); break;
             case SYSTEM_ALARM_ACE_TYPE:           fprintf( stderr, "SYSTEM_ALARM" ); break;
             case SYSTEM_MANDATORY_LABEL_ACE_TYPE: fprintf( stderr, "SYSTEM_MANDATORY_LABEL" ); break;
+            case SYSTEM_PROCESS_TRUST_LABEL_ACE_TYPE:
+                fprintf( stderr, "SYSTEM_PROCESS_TRUST_LABEL" );
+                break;
             default:
                 fprintf( stderr, "%02x", ace->type );
                 sid = NULL;

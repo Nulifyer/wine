@@ -46,4 +46,36 @@ START_TEST(boot_status)
 
     status = RtlGetSystemBootStatus( 17, NULL, sizeof(value), &length );
     ok( status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status );
+
+    value = 1;
+    length = 0xdddddddd;
+    status = RtlSetSystemBootStatus( 4, &value, sizeof(value), &length );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    ok( length == sizeof(value), "got return length %lu\n", length );
+
+    value = 0xcccccccc;
+    length = 0xdddddddd;
+    status = RtlGetSystemBootStatus( 4, &value, sizeof(value), &length );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    ok( value == 1, "got boot-good value %#lx\n", value );
+    ok( length == sizeof(value), "got return length %lu\n", length );
+
+    value = 1;
+    status = RtlSetSystemBootStatus( 9, &value, sizeof(value), NULL );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+
+    value = 0xcccccccc;
+    status = RtlGetSystemBootStatus( 9, &value, sizeof(value), NULL );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    ok( value == 1, "got boot-checkpoint value %#lx\n", value );
+
+    value = 1;
+    status = RtlSetSystemBootStatus( 19, &value, sizeof(value), NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status );
+
+    status = RtlSetSystemBootStatus( 4, &value, sizeof(value) - 1, NULL );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "got status %#lx\n", status );
+
+    status = RtlSetSystemBootStatus( 4, NULL, sizeof(value), NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status );
 }
