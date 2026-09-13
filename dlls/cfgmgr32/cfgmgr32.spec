@@ -2,7 +2,7 @@
 @ stub CMP_GetServerSideDeviceInstallFlags
 @ stub CMP_Init_Detection
 @ stub CMP_RegisterServiceNotification
-@ stub CMP_Register_Notification
+@ stdcall CMP_Register_Notification(ptr ptr ptr ptr ptr)
 @ stub CMP_Report_LogOn
 @ stdcall CMP_WaitNoPendingInstallEvents(long)
 @ stub CMP_WaitServicesAvailable

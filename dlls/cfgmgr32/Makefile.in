@@ -1,8 +1,9 @@
 MODULE    = cfgmgr32.dll
 IMPORTLIB = cfgmgr32
-IMPORTS   = advapi32 rpcrt4 sechost
+IMPORTS   = advapi32 rpcrt4
 
 SOURCES = \
 	cfgmgr32.c \
 	devobject.c \
-	notification.c
+	notification.c \
+	plugplay.idl
