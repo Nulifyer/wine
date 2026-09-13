@@ -521,6 +521,39 @@ static DWORD CALLBACK devnotify_service_callback(HANDLE handle, DWORD flags, DEV
     return 0;
 }
 
+typedef HDEVNOTIFY (WINAPI *wine_register_device_notification)(HANDLE, DEV_BROADCAST_HDR *,
+                                                               device_notify_callback);
+
+static HDEVNOTIFY register_device_notification( HANDLE handle, DEV_BROADCAST_HDR *filter, DWORD flags,
+                                                device_notify_callback callback )
+{
+    struct
+    {
+        device_notify_callback callback;
+        HANDLE handle;
+    } window_recipient;
+    wine_register_device_notification wine_register;
+    HMODULE module = GetModuleHandleW( L"sechost.dll" );
+
+    wine_register = (wine_register_device_notification)GetProcAddress(
+        module, "__wine_I_ScRegisterDeviceNotification" );
+    if (wine_register) return wine_register( handle, filter, callback );
+
+    /* Native Sechost uses its third argument for recipient flags, while Wine
+     * Sechost historically uses it for the notification callback. Native
+     * User32 translates window recipients to an internal callback record and
+     * marks them with recipient type 2; service recipients keep type 1. */
+    if (!(flags & 3))
+    {
+        window_recipient.callback = callback;
+        window_recipient.handle = handle;
+        handle = &window_recipient;
+        flags = (flags & ~1) | 2;
+    }
+    return I_ScRegisterDeviceNotification( handle, filter,
+                                           (device_notify_callback)(ULONG_PTR)flags );
+}
+
 /***********************************************************************
  *		RegisterDeviceNotificationA (USER32.@)
  *
@@ -563,7 +596,7 @@ HDEVNOTIFY WINAPI RegisterDeviceNotificationW( HANDLE handle, void *filter, DWOR
     if (!header)
     {
         DEV_BROADCAST_HDR dummy = {0};
-        return I_ScRegisterDeviceNotification( handle, &dummy, callback );
+        return register_device_notification( handle, &dummy, flags, callback );
     }
     if (header->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE)
     {
@@ -574,10 +607,10 @@ HDEVNOTIFY WINAPI RegisterDeviceNotificationW( HANDLE handle, void *filter, DWOR
         else
             iface.dbcc_size = offsetof( DEV_BROADCAST_DEVICEINTERFACE_W, dbcc_name );
 
-        return I_ScRegisterDeviceNotification( handle, (DEV_BROADCAST_HDR *)&iface, callback );
+        return register_device_notification( handle, (DEV_BROADCAST_HDR *)&iface, flags, callback );
     }
     if (header->dbch_devicetype == DBT_DEVTYP_HANDLE)
-        return I_ScRegisterDeviceNotification( handle, header, callback );
+        return register_device_notification( handle, header, flags, callback );
 
     FIXME( "type %#lx not implemented\n", header->dbch_devicetype );
     SetLastError( ERROR_INVALID_DATA );

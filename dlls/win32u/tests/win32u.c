@@ -25,6 +25,7 @@
 #include "ntuser.h"
 
 #define MAX_ATOM_LEN  255
+#define DESKTOP_ALL_ACCESS 0x01ff
 
 #define check_member_( file, line, val, exp, fmt, member )                                         \
     ok_(file, line)( (val).member == (exp).member, "got " #member " " fmt "\n", (val).member )
@@ -63,6 +64,22 @@ static void flush_events(void)
         }
         diff = time - GetTickCount();
     }
+}
+
+static void test_NtUserRemoteConnect(void)
+{
+    BYTE connect_info[64] = {0};
+    BYTE output[64] = {0};
+    NTSTATUS status;
+
+    if (!winetest_platform_is_wine)
+    {
+        win_skip( "local remote-display handoff is Wine-specific\n" );
+        return;
+    }
+
+    status = NtUserRemoteConnect( connect_info, 10, output );
+    ok( status == STATUS_SUCCESS, "NtUserRemoteConnect returned %#lx\n", status );
 }
 
 static void test_NtUserEnumDisplayDevices(void)
@@ -112,6 +129,28 @@ static void test_NtUserCloseWindowStation(void)
     ret = NtUserCloseWindowStation( 0 );
     ok( !ret && GetLastError() == ERROR_INVALID_HANDLE,
         "NtUserCloseWindowStation returned %x %lu\n", ret, GetLastError() );
+}
+
+static void test_rootless_user_object_names(void)
+{
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING name;
+    HWINSTA winstation;
+    HDESK desktop;
+
+    RtlInitUnicodeString( &name, L"WineRootlessTest" );
+    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE | OBJ_OPENIF, NULL, NULL );
+    winstation = NtUserCreateWindowStation( &attr, WINSTA_ALL_ACCESS, 0, 0, 0, 0, 0 );
+    ok( !!winstation, "NtUserCreateWindowStation failed for a relative rootless name, error %lu.\n",
+        GetLastError() );
+    if (winstation) NtUserCloseWindowStation( winstation );
+
+    RtlInitUnicodeString( &name, L"WineRootlessTest" );
+    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE | OBJ_OPENIF, NULL, NULL );
+    desktop = NtUserCreateDesktopEx( &attr, NULL, NULL, 0, DESKTOP_ALL_ACCESS, 0 );
+    ok( !!desktop, "NtUserCreateDesktopEx failed for a relative rootless name, error %lu.\n",
+        GetLastError() );
+    if (desktop) NtUserCloseDesktop( desktop );
 }
 
 static void test_window_props(void)
@@ -3062,6 +3101,12 @@ START_TEST(win32u)
     GetDesktopWindow();
 
     argc = winetest_get_mainargs( &argv );
+    if (argc > 2 && !strcmp( argv[2], "NtUserRemoteConnect" ))
+    {
+        test_NtUserRemoteConnect();
+        return;
+    }
+
     if (argc > 3 && !strcmp( argv[2], "ipcmsg" ))
     {
         test_inter_process_child( LongToHandle( strtol( argv[3], NULL, 16 )));
@@ -3108,6 +3153,8 @@ START_TEST(win32u)
     test_wndproc_hook();
 
     test_NtUserCloseWindowStation();
+    test_NtUserRemoteConnect();
+    test_rootless_user_object_names();
     test_NtUserDisplayConfigGetDeviceInfo();
     test_NtUserQueryWindow();
     test_RegisterClipboardFormat();

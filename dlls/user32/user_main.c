@@ -210,6 +210,19 @@ static BOOL process_attach(void)
     return TRUE;
 }
 
+/***********************************************************************
+ *           CtxInitUser32   (USER32.@)
+ */
+BOOL WINAPI CtxInitUser32(void)
+{
+    /* USER32's Wine process attach has already installed the callback table,
+     * initialized window procedures and loaded system parameters. Native
+     * winsrv uses this private entry point to request that same initialization
+     * in a console-session process. */
+    TRACE( "USER32 process initialization already complete\n" );
+    return TRUE;
+}
+
 
 /**********************************************************************
  *           thread_detach

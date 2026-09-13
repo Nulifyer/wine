@@ -3426,6 +3426,14 @@ NTSTATUS WINAPI wow64_NtUserHiliteMenuItem( UINT *args )
     return NtUserHiliteMenuItem( hwnd, handle, item, hilite );
 }
 
+NTSTATUS WINAPI wow64_NtUserInitialize( UINT *args )
+{
+    HANDLE power_request_event = get_handle( &args );
+    HANDLE media_request_event = get_handle( &args );
+
+    return NtUserInitialize( power_request_event, media_request_event );
+}
+
 NTSTATUS WINAPI wow64_NtUserInitializeClientPfnArrays( UINT *args )
 {
     const ntuser_client_func_ptr *procsA = get_ptr( &args );
@@ -5297,6 +5305,13 @@ NTSTATUS WINAPI wow64_NtUserUpdateLayeredWindow( UINT *args )
 
     return NtUserUpdateLayeredWindow( hwnd, hdc_dst, pts_dst, size, hdc_src, pts_src,
                                       key, blend, flags, dirty );
+}
+
+NTSTATUS WINAPI wow64_NtUserUpdatePerUserSystemParameters( UINT *args )
+{
+    DWORD flags = get_ulong( &args );
+
+    return NtUserUpdatePerUserSystemParameters( flags );
 }
 
 NTSTATUS WINAPI wow64_NtUserValidateRect( UINT *args )

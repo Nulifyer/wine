@@ -813,6 +813,7 @@ W32KAPI BOOL    WINAPI NtUserDrawIconEx( HDC hdc, INT x0, INT y0, HICON icon, IN
                                          INT height, UINT istep, HBRUSH hbr, UINT flags );
 W32KAPI BOOL    WINAPI NtUserDrawMenuBar( HWND hwnd );
 W32KAPI DWORD   WINAPI NtUserDrawMenuBarTemp( HWND hwnd, HDC hdc, RECT *rect, HMENU handle, HFONT font );
+W32KAPI NTSTATUS WINAPI NtUserDwmLockScreenUpdates( BOOL lock );
 W32KAPI BOOL    WINAPI NtUserEmptyClipboard(void);
 W32KAPI BOOL    WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointer( BOOL );
@@ -860,6 +861,7 @@ W32KAPI HDC     WINAPI NtUserGetDCEx( HWND hwnd, HRGN clip_rgn, DWORD flags );
 W32KAPI LONG    WINAPI NtUserGetDisplayConfigBufferSizes( UINT32 flags, UINT32 *num_path_info,
                                                           UINT32 *num_mode_info );
 W32KAPI UINT    WINAPI NtUserGetDoubleClickTime(void);
+W32KAPI ULONG   WINAPI NtUserGetActiveProcessesDpis(void);
 W32KAPI BOOL    WINAPI NtUserGetDpiForMonitor( HMONITOR monitor, UINT type, UINT *x, UINT *y );
 W32KAPI HWND    WINAPI NtUserGetForegroundWindow(void);
 W32KAPI BOOL    WINAPI NtUserGetGUIThreadInfo( DWORD id, GUITHREADINFO *info );
@@ -914,6 +916,8 @@ W32KAPI BOOL    WINAPI NtUserGetWindowPlacement( HWND hwnd, WINDOWPLACEMENT *pla
 W32KAPI int     WINAPI NtUserGetWindowRgnEx( HWND hwnd, HRGN hrgn, UINT unk );
 W32KAPI BOOL    WINAPI NtUserHideCaret( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserHiliteMenuItem( HWND hwnd, HMENU handle, UINT item, UINT hilite );
+W32KAPI NTSTATUS WINAPI NtUserInitialize( HANDLE power_request_event, HANDLE media_request_event );
+W32KAPI NTSTATUS WINAPI NtUserRemoteConnect( void *connect_info, ULONG operation, void *output );
 W32KAPI NTSTATUS WINAPI NtUserInitializeClientPfnArrays( const ntuser_client_func_ptr *client_procsA,
                                                          const ntuser_client_func_ptr *client_procsW,
                                                          const ntuser_client_func_ptr *client_workers, HINSTANCE user_module );
@@ -960,6 +964,7 @@ W32KAPI UINT    WINAPI NtUserRealizePalette( HDC hdc );
 W32KAPI BOOL    WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT flags );
 W32KAPI ATOM    WINAPI NtUserRegisterClassExWOW( const WNDCLASSEXW *wc, UNICODE_STRING *name, UNICODE_STRING *version,
                                                  struct client_menu_name *menu_name, DWORD fnid, DWORD flags, DWORD *wow );
+W32KAPI BOOL    WINAPI NtUserRegisterDManipHook(void);
 W32KAPI BOOL    WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk );
 W32KAPI BOOL    WINAPI NtUserRegisterRawInputDevices( const RAWINPUTDEVICE *devices, UINT device_count, UINT size );
 W32KAPI BOOL    WINAPI NtUserRegisterTouchPadCapable( BOOL capable );
@@ -1058,6 +1063,7 @@ W32KAPI BOOL    WINAPI NtUserUpdateInputContext( HIMC handle, UINT attr, UINT_PT
 W32KAPI BOOL    WINAPI NtUserUpdateLayeredWindow( HWND hwnd, HDC hdc_dst, const POINT *pts_dst, const SIZE *size,
                                                   HDC hdc_src, const POINT *pts_src, COLORREF key,
                                                   const BLENDFUNCTION *blend, DWORD flags, const RECT *dirty );
+W32KAPI BOOL    WINAPI NtUserUpdatePerUserSystemParameters( DWORD flags );
 W32KAPI BOOL    WINAPI NtUserValidateRect( HWND hwnd, const RECT *rect );
 W32KAPI BOOL    WINAPI NtUserValidateRgn( HWND hwnd, HRGN hrgn );
 W32KAPI WORD    WINAPI NtUserVkKeyScanEx( WCHAR chr, HKL layout );

@@ -255,6 +255,15 @@ BOOL WINAPI SystemParametersInfoW( UINT action, UINT val, void *ptr, UINT winini
 
 
 /***********************************************************************
+ *             UpdatePerUserSystemParameters (USER32.@)
+ */
+BOOL WINAPI UpdatePerUserSystemParameters( DWORD flags )
+{
+    return NtUserUpdatePerUserSystemParameters( flags );
+}
+
+
+/***********************************************************************
  *		SystemParametersInfoA (USER32.@)
  */
 BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,

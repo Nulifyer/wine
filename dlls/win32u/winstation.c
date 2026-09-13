@@ -72,11 +72,70 @@ static pthread_mutex_t session_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct list session_blocks = LIST_INIT(session_blocks);
 const session_shm_t *shared_session;
 
+static HANDLE get_winstations_dir_handle(void);
+
+static BOOL object_name_needs_implicit_root( const OBJECT_ATTRIBUTES *attr )
+{
+    return !attr->RootDirectory && attr->ObjectName && attr->ObjectName->Length &&
+           attr->ObjectName->Buffer[0] != '\\';
+}
+
+static OBJECT_ATTRIBUTES *resolve_winstation_attributes( OBJECT_ATTRIBUTES *attr,
+                                                         OBJECT_ATTRIBUTES *resolved,
+                                                         HANDLE *implicit_root )
+{
+    *implicit_root = 0;
+    if (!object_name_needs_implicit_root( attr )) return attr;
+    if (!(*implicit_root = get_winstations_dir_handle())) return attr;
+
+    *resolved = *attr;
+    resolved->RootDirectory = *implicit_root;
+    return resolved;
+}
+
+static OBJECT_ATTRIBUTES *resolve_desktop_attributes( OBJECT_ATTRIBUTES *attr,
+                                                      OBJECT_ATTRIBUTES *resolved )
+{
+    HANDLE winstation;
+
+    if (!object_name_needs_implicit_root( attr )) return attr;
+    if (!(winstation = NtUserGetProcessWindowStation())) return attr;
+
+    *resolved = *attr;
+    resolved->RootDirectory = winstation;
+    return resolved;
+}
+
 static struct session_thread_data *get_session_thread_data(void)
 {
     struct user_thread_info *thread_info = get_user_thread_info();
     if (!thread_info->session_data) thread_info->session_data = calloc(1, sizeof(*thread_info->session_data));
     return thread_info->session_data;
+}
+
+/***********************************************************************
+ *           NtUserInitialize   (win32u.@)
+ */
+NTSTATUS WINAPI NtUserInitialize( HANDLE power_request_event, HANDLE media_request_event )
+{
+    /* Native win32k retains these CSRSS-created events for its power and media
+     * request threads. Wine has no kernel-side USER subsystem to attach here. */
+    TRACE( "power request event %p, media request event %p\n",
+           power_request_event, media_request_event );
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           NtUserRemoteConnect   (win32u.@)
+ */
+NTSTATUS WINAPI NtUserRemoteConnect( void *connect_info, ULONG operation, void *output )
+{
+    /* Native win32k configures the kernel remote-display path here. Wine's
+     * desktop is already connected to its user driver and has no equivalent
+     * kernel renderer to configure. Keep the three-argument syscall boundary
+     * for genuine winsrv and acknowledge the completed local connection. */
+    TRACE( "connect info %p, operation %u, output %p\n", connect_info, operation, output );
+    return STATUS_SUCCESS;
 }
 
 void shared_object_acquire_seqlock( const shared_object_t *object, UINT64 *seq )
@@ -363,7 +422,8 @@ BOOL is_service_process(void)
 HWINSTA WINAPI NtUserCreateWindowStation( OBJECT_ATTRIBUTES *attr, ACCESS_MASK access, ULONG arg3,
                                           ULONG arg4, ULONG arg5, ULONG arg6, ULONG arg7 )
 {
-    HANDLE ret;
+    OBJECT_ATTRIBUTES resolved;
+    HANDLE implicit_root, ret = 0;
     NTSTATUS status;
     data_size_t len;
     struct object_attributes *objattr;
@@ -373,10 +433,11 @@ HWINSTA WINAPI NtUserCreateWindowStation( OBJECT_ATTRIBUTES *attr, ACCESS_MASK a
         RtlSetLastWin32Error( ERROR_FILENAME_EXCED_RANGE );
         return 0;
     }
+    attr = resolve_winstation_attributes( attr, &resolved, &implicit_root );
     if ((status = wine_server_alloc_object_attributes( attr, &objattr, &len )))
     {
         RtlSetLastWin32Error( RtlNtStatusToDosError(status) );
-        return 0;
+        goto done;
     }
 
     SERVER_START_REQ( create_winstation )
@@ -389,6 +450,8 @@ HWINSTA WINAPI NtUserCreateWindowStation( OBJECT_ATTRIBUTES *attr, ACCESS_MASK a
     }
     SERVER_END_REQ;
     free( objattr );
+done:
+    if (implicit_root) NtClose( implicit_root );
     return ret;
 }
 
@@ -397,8 +460,11 @@ HWINSTA WINAPI NtUserCreateWindowStation( OBJECT_ATTRIBUTES *attr, ACCESS_MASK a
  */
 HWINSTA WINAPI NtUserOpenWindowStation( OBJECT_ATTRIBUTES *attr, ACCESS_MASK access )
 {
+    OBJECT_ATTRIBUTES resolved;
+    HANDLE implicit_root;
     HANDLE ret = 0;
 
+    attr = resolve_winstation_attributes( attr, &resolved, &implicit_root );
     SERVER_START_REQ( open_winstation )
     {
         req->access     = access;
@@ -408,6 +474,7 @@ HWINSTA WINAPI NtUserOpenWindowStation( OBJECT_ATTRIBUTES *attr, ACCESS_MASK acc
         if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
+    if (implicit_root) NtClose( implicit_root );
     return ret;
 }
 
@@ -467,6 +534,7 @@ HDESK WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *dev
                                     DEVMODEW *devmode, DWORD flags, ACCESS_MASK access,
                                     ULONG heap_size )
 {
+    OBJECT_ATTRIBUTES resolved;
     WCHAR buffer[MAX_PATH];
     HANDLE ret;
     NTSTATUS status;
@@ -483,6 +551,7 @@ HDESK WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *dev
         RtlSetLastWin32Error( ERROR_FILENAME_EXCED_RANGE );
         return 0;
     }
+    attr = resolve_desktop_attributes( attr, &resolved );
     if ((status = wine_server_alloc_object_attributes( attr, &objattr, &len )))
     {
         RtlSetLastWin32Error( RtlNtStatusToDosError(status) );
@@ -517,6 +586,7 @@ HDESK WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *dev
  */
 HDESK WINAPI NtUserOpenDesktop( OBJECT_ATTRIBUTES *attr, DWORD flags, ACCESS_MASK access )
 {
+    OBJECT_ATTRIBUTES resolved;
     HANDLE ret = 0;
 
     access |= DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS;
@@ -527,6 +597,7 @@ HDESK WINAPI NtUserOpenDesktop( OBJECT_ATTRIBUTES *attr, DWORD flags, ACCESS_MAS
         return 0;
     }
 
+    attr = resolve_desktop_attributes( attr, &resolved );
     SERVER_START_REQ( open_desktop )
     {
         req->winsta     = wine_server_obj_handle( attr->RootDirectory );
@@ -826,10 +897,11 @@ HWND get_desktop_window(void)
     if (!thread_info->top_window)
     {
         static const WCHAR appnameW[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s',
-            '\\','s','y','s','t','e','m','3','2','\\','e','x','p','l','o','r','e','r','.','e','x','e',0};
+            '\\','s','y','s','t','e','m','3','2','\\','w','i','n','e','-','d','e','s','k','t','o','p','-',
+            'h','o','s','t','.','e','x','e',0};
         static const WCHAR cmdlineW[] = {'"','C',':','\\','w','i','n','d','o','w','s','\\',
-            's','y','s','t','e','m','3','2','\\','e','x','p','l','o','r','e','r','.','e','x','e','"',
-            ' ','/','d','e','s','k','t','o','p',0};
+            's','y','s','t','e','m','3','2','\\','w','i','n','e','-','d','e','s','k','t','o','p','-',
+            'h','o','s','t','.','e','x','e','"',' ','/','d','e','s','k','t','o','p',0};
         static const WCHAR system_dir[] = {'C',':','\\','w','i','n','d','o','w','s','\\',
             's','y','s','t','e','m','3','2','\\',0};
         RTL_USER_PROCESS_PARAMETERS params = { sizeof(params), sizeof(params) };
@@ -920,6 +992,7 @@ HWND get_desktop_window(void)
 
 static HANDLE get_winstations_dir_handle(void)
 {
+    const ACCESS_MASK access = DIRECTORY_CREATE_OBJECT | DIRECTORY_TRAVERSE;
     char bufferA[64];
     WCHAR buffer[64];
     UNICODE_STRING str;
@@ -931,9 +1004,15 @@ static HANDLE get_winstations_dir_handle(void)
     str.Buffer = buffer;
     str.MaximumLength = asciiz_to_unicode( buffer, bufferA );
     str.Length = str.MaximumLength - sizeof(WCHAR);
-    InitializeObjectAttributes( &attr, &str, 0, 0, NULL );
-    status = NtOpenDirectoryObject( &dir, DIRECTORY_CREATE_OBJECT | DIRECTORY_TRAVERSE, &attr );
-    return status ? 0 : dir;
+    InitializeObjectAttributes( &attr, &str, OBJ_CASE_INSENSITIVE | OBJ_OPENIF, 0, NULL );
+    status = NtOpenDirectoryObject( &dir, access, &attr );
+
+    /* Native win32k owns this directory.  A native session manager replaces
+     * Wine's provisional session namespace, so create the win32k-owned child
+     * lazily once the native \Sessions\N\Windows parent exists. */
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND)
+        status = NtCreateDirectoryObject( &dir, access, &attr );
+    return NT_SUCCESS(status) ? dir : 0;
 }
 
 /***********************************************************************

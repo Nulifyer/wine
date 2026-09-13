@@ -4873,6 +4873,34 @@ ULONG WINAPI NtUserGetSystemDpiForProcess( HANDLE process )
 }
 
 /***********************************************************************
+ *           NtUserGetActiveProcessesDpis   (win32u.@)
+ *
+ * Windows reports a bit for every 24-DPI plateau in use, beginning with
+ * bit 1 for 96 DPI. Wine has one system DPI rather than per-process display
+ * configurations, while DPI-unaware processes always contribute 96 DPI.
+ */
+ULONG WINAPI NtUserGetActiveProcessesDpis(void)
+{
+    UINT dpi = system_dpi;
+    ULONG mask = 1 << 1;
+
+    if (dpi >= USER_DEFAULT_SCREEN_DPI && dpi <= USER_DEFAULT_SCREEN_DPI + 15 * 24 &&
+        !((dpi - USER_DEFAULT_SCREEN_DPI) % 24))
+        mask |= 1u << (1 + (dpi - USER_DEFAULT_SCREEN_DPI) / 24);
+
+    return mask;
+}
+
+/***********************************************************************
+ *           NtUserDwmLockScreenUpdates   (win32u.@)
+ */
+NTSTATUS WINAPI NtUserDwmLockScreenUpdates( BOOL lock )
+{
+    FIXME( "stub: lock %u\n", lock );
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
  *           NtUserGetDpiForMonitor   (win32u.@)
  */
 BOOL WINAPI NtUserGetDpiForMonitor( HMONITOR monitor, UINT type, UINT *x, UINT *y )
@@ -6151,6 +6179,18 @@ BOOL WINAPI NtUserSystemParametersInfoForDpi( UINT action, UINT val, PVOID ptr, 
         break;
     }
     return ret;
+}
+
+/***********************************************************************
+ *             NtUserUpdatePerUserSystemParameters (win32u.@)
+ */
+BOOL WINAPI NtUserUpdatePerUserSystemParameters( DWORD flags )
+{
+    TRACE( "flags %#x\n", flags );
+
+    /* Wine initializes the active user's parameter registry view in
+     * sysparams_init() and reloads individual values lazily. */
+    return TRUE;
 }
 
 /***********************************************************************

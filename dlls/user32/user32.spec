@@ -204,7 +204,7 @@
 2708 stub -noname BroadcastThemeChangeEvent  # NtUserBroadcastThemeChangeEvent
 2709 stub -noname EnableWindowGDIScaledDpiMessage  # NtUserEnableWindowGDIScaledDpiMessage
 2710 stub -noname IsWindowGDIScaledDpiMessageEnabled  # NtUserIsWindowGDIScaledDpiMessageEnabled
-2711 stub -noname GetActiveProcessesDpis  # NtUserGetActiveProcessesDpis
+2711 stdcall -noname GetActiveProcessesDpis() NtUserGetActiveProcessesDpis
 2712 stub @
 2713 stub @
 2714 stub @
@@ -345,7 +345,7 @@
 @ stdcall CreateWindowStationA(str long long ptr)
 @ stdcall CreateWindowStationW(wstr long long ptr)
 # @ stub CsrBroadcastSystemMessageExW
-# @ stub CtxInitUser32
+@ stdcall CtxInitUser32()
 @ stdcall DdeAbandonTransaction(long long long)
 @ stdcall DdeAccessData(long ptr)
 @ stdcall DdeAddData(long ptr long long)
@@ -447,7 +447,7 @@
 # @ stub DwmGetRemoteSessionOcclusionState
 # @ stub DwmKernelShutdown
 # @ stub DwmKernelStartup
-# @ stub DwmLockScreenUpdates
+@ stdcall DwmLockScreenUpdates(long) NtUserDwmLockScreenUpdates
 # @ stub DwmValidateWindow
 @ stdcall EditWndProc(long long long long) EditWndProcA
 @ stdcall EmptyClipboard() NtUserEmptyClipboard
@@ -947,7 +947,7 @@
 @ stdcall RealGetWindowClassW(long ptr long)
 # @ stub ReasonCodeNeedsBugID
 # @ stub ReasonCodeNeedsComment
-# @ stub RecordShutdownReason
+@ stdcall RecordShutdownReason(ptr)
 @ stdcall RedrawWindow(long ptr long long) NtUserRedrawWindow
 # @ stub RegisterBSDRWindow
 @ stdcall RegisterClassA(ptr)
@@ -956,7 +956,7 @@
 @ stdcall RegisterClassW(ptr)
 @ stdcall RegisterClipboardFormatA(str)
 @ stdcall RegisterClipboardFormatW(wstr)
-# @ stub RegisterDManipHook
+@ stdcall RegisterDManipHook() NtUserRegisterDManipHook
 @ stdcall RegisterDeviceNotificationA(long ptr long)
 @ stdcall RegisterDeviceNotificationW(long ptr long)
 # @ stub RegisterErrorReportingDialog
@@ -1189,7 +1189,7 @@
 # @ stub UpdateDefaultDesktopThumbnail
 @ stdcall UpdateLayeredWindow(long long ptr ptr long ptr long ptr long)
 @ stdcall UpdateLayeredWindowIndirect(long ptr)
-@ stub UpdatePerUserSystemParameters
+@ stdcall UpdatePerUserSystemParameters(long)
 @ stdcall UpdateWindow(long)
 # @ stub UpdateWindowInputSinkHints
 @ stdcall User32InitializeImmEntryTable(ptr)

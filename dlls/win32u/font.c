@@ -6789,6 +6789,16 @@ UINT font_init(void)
 }
 
 /***********************************************************************
+ *           NtGdiAddInitialFonts    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiAddInitialFonts(void)
+{
+    /* Wine loads the process font table from gdi_init(), before a USER client
+     * can issue this session-server initialization call. */
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
  *           NtGdiAddFontResourceW    (win32u.@)
  */
 INT WINAPI NtGdiAddFontResourceW( const WCHAR *str, ULONG size, ULONG files, DWORD flags,

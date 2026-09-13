@@ -136,7 +136,7 @@
 @ stub -syscall NtGdiAddEmbFontToDC
 @ stdcall -syscall NtGdiAddFontMemResourceEx(ptr long ptr long ptr)
 @ stdcall -syscall NtGdiAddFontResourceW(wstr long long long long ptr)
-@ stub -syscall NtGdiAddInitialFonts
+@ stdcall -syscall NtGdiAddInitialFonts()
 @ stub -syscall NtGdiAddRemoteFontToDC
 @ stub -syscall NtGdiAddRemoteMMInstanceToDC
 @ stdcall -syscall NtGdiAlphaBlend(long long long long long long long long long long long ptr)
@@ -928,7 +928,7 @@
 @ stub -syscall NtUserDwmGetRemoteSessionOcclusionState
 @ stub -syscall NtUserDwmKernelShutdown
 @ stub -syscall NtUserDwmKernelStartup
-@ stub -syscall NtUserDwmLockScreenUpdates
+@ stdcall -syscall NtUserDwmLockScreenUpdates(long)
 @ stub -syscall NtUserDwmValidateWindow
 @ stub -syscall NtUserDwmWindowNotificationsEnabled
 @ stdcall -syscall NtUserEmptyClipboard()
@@ -971,7 +971,7 @@
 @ stub -syscall NtUserForceWindowToDpiForTest
 @ stub -syscall NtUserFrostCrashedWindow
 @ stub -syscall NtUserFunctionalizeDisplayConfig
-@ stub -syscall NtUserGetActiveProcessesDpis
+@ stdcall -syscall NtUserGetActiveProcessesDpis()
 @ stub -syscall NtUserGetAltTabInfo
 @ stdcall -syscall NtUserGetAncestor(long long)
 @ stub -syscall NtUserGetAppImeLevel
@@ -1144,7 +1144,7 @@
 @ stub -syscall NtUserInitTask
 @ stub -syscall NtUserInitThreadCoreMessagingIocp
 @ stdcall -syscall NtUserInitThreadCoreMessagingIocp2(long ptr)
-@ stub -syscall NtUserInitialize
+@ stdcall -syscall NtUserInitialize(long long)
 @ stdcall -syscall NtUserInitializeClientPfnArrays(ptr ptr ptr ptr)
 @ stub -syscall NtUserInitializeGenericHidInjection
 @ stub -syscall NtUserInitializeInputDeviceInjection
@@ -1260,7 +1260,7 @@
 @ stub -syscall NtUserRegisterBSDRWindow
 @ stdcall -syscall NtUserRegisterClassExWOW(ptr ptr ptr ptr long long long)
 @ stub -syscall NtUserRegisterCloakedNotification
-@ stub -syscall NtUserRegisterDManipHook
+@ stdcall -syscall NtUserRegisterDManipHook()
 @ stub -syscall NtUserRegisterEdgy
 @ stub -syscall NtUserRegisterErrorReportingDialog
 @ stub -syscall NtUserRegisterForCustomDockTargets
@@ -1290,7 +1290,7 @@
 @ stdcall -syscall NtUserReleaseCapture()
 @ stdcall -syscall NtUserReleaseDC(long long)
 @ stub -syscall NtUserReleaseDwmHitTestWaiters
-@ stub -syscall NtUserRemoteConnect
+@ stdcall -syscall NtUserRemoteConnect(ptr long ptr)
 @ stub -syscall NtUserRemoteConnectState
 @ stub -syscall NtUserRemoteConsoleShadowStop
 @ stub -syscall NtUserRemoteDisconnect
@@ -1512,7 +1512,7 @@
 @ stub -syscall NtUserUpdateInstance
 @ stdcall -syscall NtUserUpdateLayeredWindow(long long ptr ptr long ptr long ptr long ptr)
 @ stub -syscall NtUserUpdatePerUserImmEnabling
-@ stub -syscall NtUserUpdatePerUserSystemParameters
+@ stdcall -syscall NtUserUpdatePerUserSystemParameters(long)
 @ stub -syscall NtUserUpdateWindow
 @ stub -syscall NtUserUpdateWindowInputSinkHints
 @ stub -syscall NtUserUpdateWindowTrackingInfo

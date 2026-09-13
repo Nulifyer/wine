@@ -10,6 +10,7 @@ SOURCES = \
 	clipboard.c \
 	combo.c \
 	coremessaging.c \
+	ctx.c \
 	cursoricon.c \
 	dce.c \
 	dde.c \

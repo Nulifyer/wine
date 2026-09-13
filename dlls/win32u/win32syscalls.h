@@ -930,7 +930,7 @@
     SYSCALL_ENTRY( 0x139e, NtUserDwmGetRemoteSessionOcclusionState, 0 ) \
     SYSCALL_ENTRY( 0x139f, NtUserDwmKernelShutdown, 0 ) \
     SYSCALL_ENTRY( 0x13a0, NtUserDwmKernelStartup, 0 ) \
-    SYSCALL_ENTRY( 0x13a1, NtUserDwmLockScreenUpdates, 0 ) \
+    SYSCALL_ENTRY( 0x13a1, NtUserDwmLockScreenUpdates, 4 ) \
     SYSCALL_ENTRY( 0x13a2, NtUserDwmValidateWindow, 0 ) \
     SYSCALL_ENTRY( 0x13a3, NtUserDwmWindowNotificationsEnabled, 0 ) \
     SYSCALL_ENTRY( 0x13a4, NtUserEmptyClipboard, 0 ) \
@@ -1146,7 +1146,7 @@
     SYSCALL_ENTRY( 0x1476, NtUserInitTask, 0 ) \
     SYSCALL_ENTRY( 0x1477, NtUserInitThreadCoreMessagingIocp, 0 ) \
     SYSCALL_ENTRY( 0x1478, NtUserInitThreadCoreMessagingIocp2, 8 ) \
-    SYSCALL_ENTRY( 0x1479, NtUserInitialize, 0 ) \
+    SYSCALL_ENTRY( 0x1479, NtUserInitialize, 8 ) \
     SYSCALL_ENTRY( 0x147a, NtUserInitializeClientPfnArrays, 16 ) \
     SYSCALL_ENTRY( 0x147b, NtUserInitializeGenericHidInjection, 0 ) \
     SYSCALL_ENTRY( 0x147c, NtUserInitializeInputDeviceInjection, 0 ) \
@@ -1292,7 +1292,7 @@
     SYSCALL_ENTRY( 0x1508, NtUserReleaseCapture, 0 ) \
     SYSCALL_ENTRY( 0x1509, NtUserReleaseDC, 8 ) \
     SYSCALL_ENTRY( 0x150a, NtUserReleaseDwmHitTestWaiters, 0 ) \
-    SYSCALL_ENTRY( 0x150b, NtUserRemoteConnect, 0 ) \
+    SYSCALL_ENTRY( 0x150b, NtUserRemoteConnect, 12 ) \
     SYSCALL_ENTRY( 0x150c, NtUserRemoteConnectState, 0 ) \
     SYSCALL_ENTRY( 0x150d, NtUserRemoteConsoleShadowStop, 0 ) \
     SYSCALL_ENTRY( 0x150e, NtUserRemoteDisconnect, 0 ) \
@@ -1514,7 +1514,7 @@
     SYSCALL_ENTRY( 0x15e6, NtUserUpdateInstance, 0 ) \
     SYSCALL_ENTRY( 0x15e7, NtUserUpdateLayeredWindow, 40 ) \
     SYSCALL_ENTRY( 0x15e8, NtUserUpdatePerUserImmEnabling, 0 ) \
-    SYSCALL_ENTRY( 0x15e9, NtUserUpdatePerUserSystemParameters, 0 ) \
+    SYSCALL_ENTRY( 0x15e9, NtUserUpdatePerUserSystemParameters, 4 ) \
     SYSCALL_ENTRY( 0x15ea, NtUserUpdateWindow, 0 ) \
     SYSCALL_ENTRY( 0x15eb, NtUserUpdateWindowInputSinkHints, 0 ) \
     SYSCALL_ENTRY( 0x15ec, NtUserUpdateWindowTrackingInfo, 0 ) \
@@ -2472,7 +2472,7 @@
     SYSCALL_ENTRY( 0x139e, NtUserDwmGetRemoteSessionOcclusionState, 0 ) \
     SYSCALL_ENTRY( 0x139f, NtUserDwmKernelShutdown, 0 ) \
     SYSCALL_ENTRY( 0x13a0, NtUserDwmKernelStartup, 0 ) \
-    SYSCALL_ENTRY( 0x13a1, NtUserDwmLockScreenUpdates, 0 ) \
+    SYSCALL_ENTRY( 0x13a1, NtUserDwmLockScreenUpdates, 8 ) \
     SYSCALL_ENTRY( 0x13a2, NtUserDwmValidateWindow, 0 ) \
     SYSCALL_ENTRY( 0x13a3, NtUserDwmWindowNotificationsEnabled, 0 ) \
     SYSCALL_ENTRY( 0x13a4, NtUserEmptyClipboard, 0 ) \
@@ -2688,7 +2688,7 @@
     SYSCALL_ENTRY( 0x1476, NtUserInitTask, 0 ) \
     SYSCALL_ENTRY( 0x1477, NtUserInitThreadCoreMessagingIocp, 0 ) \
     SYSCALL_ENTRY( 0x1478, NtUserInitThreadCoreMessagingIocp2, 16 ) \
-    SYSCALL_ENTRY( 0x1479, NtUserInitialize, 0 ) \
+    SYSCALL_ENTRY( 0x1479, NtUserInitialize, 16 ) \
     SYSCALL_ENTRY( 0x147a, NtUserInitializeClientPfnArrays, 32 ) \
     SYSCALL_ENTRY( 0x147b, NtUserInitializeGenericHidInjection, 0 ) \
     SYSCALL_ENTRY( 0x147c, NtUserInitializeInputDeviceInjection, 0 ) \
@@ -2834,7 +2834,7 @@
     SYSCALL_ENTRY( 0x1508, NtUserReleaseCapture, 0 ) \
     SYSCALL_ENTRY( 0x1509, NtUserReleaseDC, 16 ) \
     SYSCALL_ENTRY( 0x150a, NtUserReleaseDwmHitTestWaiters, 0 ) \
-    SYSCALL_ENTRY( 0x150b, NtUserRemoteConnect, 0 ) \
+    SYSCALL_ENTRY( 0x150b, NtUserRemoteConnect, 24 ) \
     SYSCALL_ENTRY( 0x150c, NtUserRemoteConnectState, 0 ) \
     SYSCALL_ENTRY( 0x150d, NtUserRemoteConsoleShadowStop, 0 ) \
     SYSCALL_ENTRY( 0x150e, NtUserRemoteDisconnect, 0 ) \
@@ -3056,7 +3056,7 @@
     SYSCALL_ENTRY( 0x15e6, NtUserUpdateInstance, 0 ) \
     SYSCALL_ENTRY( 0x15e7, NtUserUpdateLayeredWindow, 80 ) \
     SYSCALL_ENTRY( 0x15e8, NtUserUpdatePerUserImmEnabling, 0 ) \
-    SYSCALL_ENTRY( 0x15e9, NtUserUpdatePerUserSystemParameters, 0 ) \
+    SYSCALL_ENTRY( 0x15e9, NtUserUpdatePerUserSystemParameters, 8 ) \
     SYSCALL_ENTRY( 0x15ea, NtUserUpdateWindow, 0 ) \
     SYSCALL_ENTRY( 0x15eb, NtUserUpdateWindowInputSinkHints, 0 ) \
     SYSCALL_ENTRY( 0x15ec, NtUserUpdateWindowTrackingInfo, 0 ) \
@@ -3220,7 +3220,6 @@
     SYSCALL_STUB( NtFlipObjectSetContent ) \
     SYSCALL_STUB( NtFlipObjectSetMaximumBackchannelQueueDepth ) \
     SYSCALL_STUB( NtGdiAddEmbFontToDC ) \
-    SYSCALL_STUB( NtGdiAddInitialFonts ) \
     SYSCALL_STUB( NtGdiAddRemoteFontToDC ) \
     SYSCALL_STUB( NtGdiAddRemoteMMInstanceToDC ) \
     SYSCALL_STUB( NtGdiAnyLinkedFonts ) \
@@ -3750,7 +3749,6 @@
     SYSCALL_STUB( NtUserDwmGetRemoteSessionOcclusionState ) \
     SYSCALL_STUB( NtUserDwmKernelShutdown ) \
     SYSCALL_STUB( NtUserDwmKernelStartup ) \
-    SYSCALL_STUB( NtUserDwmLockScreenUpdates ) \
     SYSCALL_STUB( NtUserDwmValidateWindow ) \
     SYSCALL_STUB( NtUserDwmWindowNotificationsEnabled ) \
     SYSCALL_STUB( NtUserEnableChildWindowDpiMessage ) \
@@ -3775,7 +3773,6 @@
     SYSCALL_STUB( NtUserForceWindowToDpiForTest ) \
     SYSCALL_STUB( NtUserFrostCrashedWindow ) \
     SYSCALL_STUB( NtUserFunctionalizeDisplayConfig ) \
-    SYSCALL_STUB( NtUserGetActiveProcessesDpis ) \
     SYSCALL_STUB( NtUserGetAltTabInfo ) \
     SYSCALL_STUB( NtUserGetAppImeLevel ) \
     SYSCALL_STUB( NtUserGetAutoRotationState ) \
@@ -3875,7 +3872,6 @@
     SYSCALL_STUB( NtUserInitAnsiOem ) \
     SYSCALL_STUB( NtUserInitTask ) \
     SYSCALL_STUB( NtUserInitThreadCoreMessagingIocp ) \
-    SYSCALL_STUB( NtUserInitialize ) \
     SYSCALL_STUB( NtUserInitializeGenericHidInjection ) \
     SYSCALL_STUB( NtUserInitializeInputDeviceInjection ) \
     SYSCALL_STUB( NtUserInitializePointerDeviceInjection ) \
@@ -3952,7 +3948,6 @@
     SYSCALL_STUB( NtUserRedrawTitle ) \
     SYSCALL_STUB( NtUserRegisterBSDRWindow ) \
     SYSCALL_STUB( NtUserRegisterCloakedNotification ) \
-    SYSCALL_STUB( NtUserRegisterDManipHook ) \
     SYSCALL_STUB( NtUserRegisterEdgy ) \
     SYSCALL_STUB( NtUserRegisterErrorReportingDialog ) \
     SYSCALL_STUB( NtUserRegisterForCustomDockTargets ) \
@@ -3976,7 +3971,6 @@
     SYSCALL_STUB( NtUserRegisterUserHungAppHandlers ) \
     SYSCALL_STUB( NtUserRegisterWindowArrangementCallout ) \
     SYSCALL_STUB( NtUserReleaseDwmHitTestWaiters ) \
-    SYSCALL_STUB( NtUserRemoteConnect ) \
     SYSCALL_STUB( NtUserRemoteConnectState ) \
     SYSCALL_STUB( NtUserRemoteConsoleShadowStop ) \
     SYSCALL_STUB( NtUserRemoteDisconnect ) \
@@ -4117,7 +4111,6 @@
     SYSCALL_STUB( NtUserUpdateDefaultDesktopThumbnail ) \
     SYSCALL_STUB( NtUserUpdateInstance ) \
     SYSCALL_STUB( NtUserUpdatePerUserImmEnabling ) \
-    SYSCALL_STUB( NtUserUpdatePerUserSystemParameters ) \
     SYSCALL_STUB( NtUserUpdateWindow ) \
     SYSCALL_STUB( NtUserUpdateWindowInputSinkHints ) \
     SYSCALL_STUB( NtUserUpdateWindowTrackingInfo ) \

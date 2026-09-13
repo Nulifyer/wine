@@ -35,6 +35,7 @@ static BOOL (WINAPI *pSetProcessDPIAware)(void);
 static BOOL (WINAPI *pSetProcessDpiAwarenessContext)(DPI_AWARENESS_CONTEXT);
 static BOOL (WINAPI *pGetProcessDpiAwarenessInternal)(HANDLE,DPI_AWARENESS*);
 static BOOL (WINAPI *pSetProcessDpiAwarenessInternal)(DPI_AWARENESS);
+static ULONG (WINAPI *pGetActiveProcessesDpis)(void);
 static UINT (WINAPI *pGetDpiForSystem)(void);
 static UINT (WINAPI *pGetDpiForWindow)(HWND);
 static BOOL (WINAPI *pGetDpiForMonitorInternal)(HMONITOR,UINT,UINT*,UINT*);
@@ -4697,6 +4698,13 @@ START_TEST(sysparams)
     hdll = GetModuleHandleA("user32.dll");
     pIsProcessDPIAware = (void*)GetProcAddress(hdll, "IsProcessDPIAware");
     pSetProcessDPIAware = (void*)GetProcAddress(hdll, "SetProcessDPIAware");
+    pGetActiveProcessesDpis = (void*)GetProcAddress(hdll, (const char *)MAKEINTRESOURCEA(2711));
+    if (pGetActiveProcessesDpis)
+    {
+        ULONG active_dpis = pGetActiveProcessesDpis();
+        ok(active_dpis & (1 << 1), "96 DPI is not active, mask %#lx\n", active_dpis);
+    }
+    else win_skip("GetActiveProcessesDpis is not available\n");
     pGetDpiForSystem = (void*)GetProcAddress(hdll, "GetDpiForSystem");
     pGetDpiForWindow = (void*)GetProcAddress(hdll, "GetDpiForWindow");
     pGetDpiForMonitorInternal = (void*)GetProcAddress(hdll, "GetDpiForMonitorInternal");

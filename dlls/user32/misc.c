@@ -550,6 +550,19 @@ BOOL WINAPI GetPointerFrameInfoHistory( UINT32 id, UINT32 *entries, UINT32 *poin
     return NtUserGetPointerInfoList( id, PT_POINTER, 0, 0, sizeof(*info), entries, pointers, info );
 }
 
+/***********************************************************************
+ *           RecordShutdownReason   (USER32.@)
+ *
+ * Records shutdown-event-tracker telemetry on Windows.  Wine has no
+ * corresponding system event log, and the native function's observable
+ * return value is FALSE even after attempting to record the event.
+ */
+BOOL WINAPI RecordShutdownReason( const void *reason )
+{
+    TRACE( "reason %p\n", reason );
+    return FALSE;
+}
+
 LRESULT WINAPI ImeWndProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
     if (!imm_ime_wnd_proc) return DefWindowProcA(hwnd, msg, wParam, lParam);

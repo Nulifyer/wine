@@ -118,6 +118,11 @@ NTSTATUS WINAPI wow64_NtGdiAddFontResourceW( UINT *args )
     return NtGdiAddFontResourceW( str, size, files, flags, tid, dv );
 }
 
+NTSTATUS WINAPI wow64_NtGdiAddInitialFonts( UINT *args )
+{
+    return NtGdiAddInitialFonts();
+}
+
 NTSTATUS WINAPI wow64_NtGdiAlphaBlend( UINT *args )
 {
     HDC hdc_dst = get_handle( &args );

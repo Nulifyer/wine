@@ -929,6 +929,14 @@ DWORD WINAPI GdiSetBatchLimit( DWORD limit )
     return 1; /* FIXME */
 }
 
+/***********************************************************************
+ *           GdiSupportsFontChangeEvent   (GDI32.@)
+ */
+BOOL WINAPI GdiSupportsFontChangeEvent(void)
+{
+    return TRUE;
+}
+
 /* Solid colors to enumerate */
 static const COLORREF solid_colors[] =
 {

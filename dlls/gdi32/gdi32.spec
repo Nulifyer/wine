@@ -203,7 +203,7 @@
 # @ stub GdiAddFontResourceW
 # @ stub GdiAddGlsBounds
 # @ stub GdiAddGlsRecord
-# @ stub GdiAddInitialFonts
+@ stdcall GdiAddInitialFonts() NtGdiAddInitialFonts
 @ stdcall GdiAlphaBlend(long long long long long long long long long long long)
 # @ stub GdiArtificialDecrementDriver
 @ stub GdiAssociateObject
@@ -314,7 +314,7 @@
 @ stub GdiSetServerAttr
 # @ stub GdiStartDocEMF
 # @ stub GdiStartPageEMF
-# @ stub GdiSupportsFontChangeEvent
+@ stdcall GdiSupportsFontChangeEvent()
 @ stdcall GdiSwapBuffers(long) NtGdiSwapBuffers
 # @ stub GdiTrackHCreate
 # @ stub GdiTrackHDelete

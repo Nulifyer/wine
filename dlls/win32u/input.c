@@ -1786,6 +1786,15 @@ BOOL WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk )
 }
 
 /***********************************************************************
+ *           NtUserRegisterDManipHook (win32u.@)
+ */
+BOOL WINAPI NtUserRegisterDManipHook(void)
+{
+    FIXME( "stub\n" );
+    return TRUE;
+}
+
+/***********************************************************************
  *	     NtUserUnregisterHotKey    (win32u.@)
  */
 BOOL WINAPI NtUserUnregisterHotKey( HWND hwnd, INT id )

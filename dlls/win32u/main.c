@@ -68,6 +68,11 @@ INT SYSCALL_API NtGdiAddFontResourceW( const WCHAR *str, ULONG size, ULONG files
     SYSCALL_FUNC( NtGdiAddFontResourceW );
 }
 
+NTSTATUS SYSCALL_API NtGdiAddInitialFonts(void)
+{
+    SYSCALL_FUNC( NtGdiAddInitialFonts );
+}
+
 BOOL SYSCALL_API NtGdiAlphaBlend( HDC hdcDst, int xDst, int yDst, int widthDst, int heightDst,
                                   HDC hdcSrc, int xSrc, int ySrc, int widthSrc, int heightSrc,
                                   DWORD blend_func, HANDLE xform )
@@ -1449,6 +1454,11 @@ DWORD SYSCALL_API NtUserDrawMenuBarTemp( HWND hwnd, HDC hdc, RECT *rect, HMENU h
     SYSCALL_FUNC( NtUserDrawMenuBarTemp );
 }
 
+NTSTATUS SYSCALL_API NtUserDwmLockScreenUpdates( BOOL lock )
+{
+    SYSCALL_FUNC( NtUserDwmLockScreenUpdates );
+}
+
 BOOL SYSCALL_API NtUserEmptyClipboard(void)
 {
     SYSCALL_FUNC( NtUserEmptyClipboard );
@@ -1903,6 +1913,11 @@ BOOL SYSCALL_API NtUserHiliteMenuItem( HWND hwnd, HMENU handle, UINT item, UINT 
     SYSCALL_FUNC( NtUserHiliteMenuItem );
 }
 
+NTSTATUS SYSCALL_API NtUserInitialize( HANDLE power_request_event, HANDLE media_request_event )
+{
+    SYSCALL_FUNC( NtUserInitialize );
+}
+
 NTSTATUS SYSCALL_API NtUserInitializeClientPfnArrays( const ntuser_client_func_ptr *client_procsA,
                                                       const ntuser_client_func_ptr *client_procsW,
                                                       const ntuser_client_func_ptr *client_workers, HINSTANCE user_module )
@@ -2108,6 +2123,11 @@ ATOM SYSCALL_API NtUserRegisterClassExWOW( const WNDCLASSEXW *wc, UNICODE_STRING
                                            struct client_menu_name *menu_name, DWORD fnid, DWORD flags, DWORD *wow )
 {
     SYSCALL_FUNC( NtUserRegisterClassExWOW );
+}
+
+BOOL SYSCALL_API NtUserRegisterDManipHook(void)
+{
+    SYSCALL_FUNC( NtUserRegisterDManipHook );
 }
 
 BOOL SYSCALL_API NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk )
@@ -2470,6 +2490,11 @@ BOOL SYSCALL_API NtUserSystemParametersInfo( UINT action, UINT val, void *ptr, U
 BOOL SYSCALL_API NtUserSystemParametersInfoForDpi( UINT action, UINT val, PVOID ptr, UINT winini, UINT dpi )
 {
     SYSCALL_FUNC( NtUserSystemParametersInfoForDpi );
+}
+
+BOOL SYSCALL_API NtUserUpdatePerUserSystemParameters( DWORD flags )
+{
+    SYSCALL_FUNC( NtUserUpdatePerUserSystemParameters );
 }
 
 BOOL SYSCALL_API NtUserThunkedMenuInfo( HMENU menu, const MENUINFO *info )
