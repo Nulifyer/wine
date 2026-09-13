@@ -46,6 +46,32 @@ static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
     return wine_dbgstr_longlong( timeout->QuadPart );
 }
 
+/******************************************************************
+ *              NtCreateIRTimer (NTDLL.@)
+ *
+ * IR timers use a restricted Timer2 object on Windows. Wine's timer
+ * server provides the same one-shot notification behavior needed by the
+ * user-mode contract; the extra parameter identifies the internal client.
+ */
+NTSTATUS WINAPI NtCreateIRTimer( HANDLE *handle, const void *extra, ACCESS_MASK access )
+{
+    TRACE( "handle %p, extra %p, access %#lx\n", handle, extra, access );
+
+    if (!extra) return STATUS_INVALID_PARAMETER_2;
+    return NtCreateTimer( handle, access, NULL, NotificationTimer );
+}
+
+/******************************************************************
+ *              NtSetIRTimer (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSetIRTimer( HANDLE handle, const LARGE_INTEGER *when )
+{
+    TRACE( "handle %p, timeout %s\n", handle, debugstr_timeout( when ) );
+
+    if (!when) return NtCancelTimer( handle, NULL );
+    return NtSetTimer( handle, when, NULL, NULL, FALSE, 0, NULL );
+}
+
 /**************************************************************************
  *           NtOpenSession   (NTDLL.@)
  *

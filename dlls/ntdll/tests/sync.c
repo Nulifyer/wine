@@ -31,6 +31,7 @@ static NTSTATUS (WINAPI *pNtAlertMultipleThreadByThreadId)( HANDLE *, ULONG, voi
 static NTSTATUS (WINAPI *pNtAlertThreadByThreadId)( HANDLE );
 static NTSTATUS (WINAPI *pNtClose)( HANDLE );
 static NTSTATUS (WINAPI *pNtCreateEvent) ( PHANDLE, ACCESS_MASK, const OBJECT_ATTRIBUTES *, EVENT_TYPE, BOOLEAN);
+static NTSTATUS (WINAPI *pNtCreateIRTimer)( HANDLE *, const void *, ACCESS_MASK );
 static NTSTATUS (WINAPI *pNtCreateKeyedEvent)( HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES *, ULONG );
 static NTSTATUS (WINAPI *pNtCreateMutant)( HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES *, BOOLEAN );
 static NTSTATUS (WINAPI *pNtCreateSemaphore)( HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES *, LONG, LONG );
@@ -48,6 +49,7 @@ static NTSTATUS (WINAPI *pNtReleaseSemaphore)( HANDLE, ULONG, ULONG * );
 static NTSTATUS (WINAPI *pNtResetEvent)( HANDLE, LONG * );
 static NTSTATUS (WINAPI *pNtSetEvent)( HANDLE, LONG * );
 static NTSTATUS (WINAPI *pNtSetEventBoostPriority)( HANDLE );
+static NTSTATUS (WINAPI *pNtSetIRTimer)( HANDLE, const LARGE_INTEGER * );
 static NTSTATUS (WINAPI *pNtWaitForAlertByThreadId)( void *, const LARGE_INTEGER * );
 static NTSTATUS (WINAPI *pNtWaitForKeyedEvent)( HANDLE, const void *, BOOLEAN, const LARGE_INTEGER * );
 static BOOLEAN  (WINAPI *pRtlAcquireResourceExclusive)( RTL_RWLOCK *, BOOLEAN );
@@ -169,6 +171,49 @@ static void test_event(void)
         "NtQueryEventBoostPriority failed, expected 1, got %ld\n", info.EventState );
 
     pNtClose(event);
+}
+
+static void test_ir_timer(void)
+{
+    ULONG extra_parameter = 2;
+    LARGE_INTEGER due_time;
+    HANDLE timer;
+    NTSTATUS status;
+    DWORD wait;
+
+    if (!pNtCreateIRTimer || !pNtSetIRTimer)
+    {
+        win_skip( "IR timer functions are not available\n" );
+        return;
+    }
+
+    status = pNtCreateIRTimer( &timer, NULL, TIMER_ALL_ACCESS );
+    ok( status == STATUS_INVALID_PARAMETER_2, "got status %#lx\n", status );
+
+    status = pNtCreateIRTimer( &timer, &extra_parameter, TIMER_ALL_ACCESS );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    if (status) return;
+
+    wait = WaitForSingleObject( timer, 0 );
+    ok( wait == WAIT_TIMEOUT, "got wait result %#lx\n", wait );
+
+    due_time.QuadPart = -500000;
+    status = pNtSetIRTimer( timer, &due_time );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    wait = WaitForSingleObject( timer, 1000 );
+    ok( wait == WAIT_OBJECT_0, "got wait result %#lx\n", wait );
+    wait = WaitForSingleObject( timer, 0 );
+    ok( wait == WAIT_OBJECT_0, "got wait result %#lx\n", wait );
+
+    due_time.QuadPart = -500000;
+    status = pNtSetIRTimer( timer, &due_time );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    status = pNtSetIRTimer( timer, NULL );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    wait = WaitForSingleObject( timer, 100 );
+    ok( wait == WAIT_TIMEOUT, "got wait result %#lx\n", wait );
+
+    pNtClose( timer );
 }
 
 static const WCHAR keyed_nameW[] = L"\\BaseNamedObjects\\WineTestEvent";
@@ -1493,6 +1538,7 @@ START_TEST(sync)
     pNtAlertThreadByThreadId        = (void *)GetProcAddress(module, "NtAlertThreadByThreadId");
     pNtClose                        = (void *)GetProcAddress(module, "NtClose");
     pNtCreateEvent                  = (void *)GetProcAddress(module, "NtCreateEvent");
+    pNtCreateIRTimer                = (void *)GetProcAddress(module, "NtCreateIRTimer");
     pNtCreateKeyedEvent             = (void *)GetProcAddress(module, "NtCreateKeyedEvent");
     pNtCreateMutant                 = (void *)GetProcAddress(module, "NtCreateMutant");
     pNtCreateSemaphore              = (void *)GetProcAddress(module, "NtCreateSemaphore");
@@ -1510,6 +1556,7 @@ START_TEST(sync)
     pNtResetEvent                   = (void *)GetProcAddress(module, "NtResetEvent");
     pNtSetEvent                     = (void *)GetProcAddress(module, "NtSetEvent");
     pNtSetEventBoostPriority        = (void *)GetProcAddress(module, "NtSetEventBoostPriority");
+    pNtSetIRTimer                   = (void *)GetProcAddress(module, "NtSetIRTimer");
     pNtWaitForAlertByThreadId       = (void *)GetProcAddress(module, "NtWaitForAlertByThreadId");
     pNtWaitForKeyedEvent            = (void *)GetProcAddress(module, "NtWaitForKeyedEvent");
     pRtlAcquireResourceExclusive    = (void *)GetProcAddress(module, "RtlAcquireResourceExclusive");
@@ -1529,6 +1576,7 @@ START_TEST(sync)
 
     test_wait_on_address();
     test_event();
+    test_ir_timer();
     test_mutant();
     test_semaphore();
     test_keyed_events();
