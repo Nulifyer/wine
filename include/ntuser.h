@@ -818,6 +818,7 @@ W32KAPI BOOL    WINAPI NtUserEmptyClipboard(void);
 W32KAPI BOOL    WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointer( BOOL );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointerForThread(void);
+W32KAPI BOOL    WINAPI NtUserEnableMouseInputForCursorSuppression( BOOL enable );
 W32KAPI BOOL    WINAPI NtUserEnableScrollBar( HWND hwnd, UINT bar, UINT flags );
 W32KAPI BOOL    WINAPI NtUserEnableWindow( HWND hwnd, BOOL enable );
 W32KAPI BOOL    WINAPI NtUserEnableWindowResizeOptimization( UINT flags, UINT value, UINT timeout );

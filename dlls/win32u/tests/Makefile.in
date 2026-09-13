@@ -2,6 +2,7 @@ TESTDLL   = win32u.dll
 IMPORTS   = imm32 user32 gdi32 dwmapi setupapi opengl32 d3d9 dxgi d3d10 d3d11 d3d12 win32u
 
 SOURCES = \
+	cursor_suppression.c \
 	d3dkmt.c \
 	device_removal.c \
 	win32u.c

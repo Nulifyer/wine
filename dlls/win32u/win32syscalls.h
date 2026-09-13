@@ -941,7 +941,7 @@
     SYSCALL_ENTRY( 0x13a9, NtUserEnableMouseInPointer, 4 ) \
     SYSCALL_ENTRY( 0x13aa, NtUserEnableMouseInPointerForThread, 0 ) \
     SYSCALL_ENTRY( 0x13ab, NtUserEnableMouseInPointerForWindow, 0 ) \
-    SYSCALL_ENTRY( 0x13ac, NtUserEnableMouseInputForCursorSuppression, 0 ) \
+    SYSCALL_ENTRY( 0x13ac, NtUserEnableMouseInputForCursorSuppression, 4 ) \
     SYSCALL_ENTRY( 0x13ad, NtUserEnableNonClientDpiScaling, 0 ) \
     SYSCALL_ENTRY( 0x13ae, NtUserEnablePerMonitorMenuScaling, 0 ) \
     SYSCALL_ENTRY( 0x13af, NtUserEnableResizeLayoutSynchronization, 0 ) \
@@ -2483,7 +2483,7 @@
     SYSCALL_ENTRY( 0x13a9, NtUserEnableMouseInPointer, 8 ) \
     SYSCALL_ENTRY( 0x13aa, NtUserEnableMouseInPointerForThread, 0 ) \
     SYSCALL_ENTRY( 0x13ab, NtUserEnableMouseInPointerForWindow, 0 ) \
-    SYSCALL_ENTRY( 0x13ac, NtUserEnableMouseInputForCursorSuppression, 0 ) \
+    SYSCALL_ENTRY( 0x13ac, NtUserEnableMouseInputForCursorSuppression, 8 ) \
     SYSCALL_ENTRY( 0x13ad, NtUserEnableNonClientDpiScaling, 0 ) \
     SYSCALL_ENTRY( 0x13ae, NtUserEnablePerMonitorMenuScaling, 0 ) \
     SYSCALL_ENTRY( 0x13af, NtUserEnableResizeLayoutSynchronization, 0 ) \
@@ -3754,7 +3754,6 @@
     SYSCALL_STUB( NtUserEnableIAMAccess ) \
     SYSCALL_STUB( NtUserEnableModernAppWindowKeyboardIntercept ) \
     SYSCALL_STUB( NtUserEnableMouseInPointerForWindow ) \
-    SYSCALL_STUB( NtUserEnableMouseInputForCursorSuppression ) \
     SYSCALL_STUB( NtUserEnableNonClientDpiScaling ) \
     SYSCALL_STUB( NtUserEnablePerMonitorMenuScaling ) \
     SYSCALL_STUB( NtUserEnableResizeLayoutSynchronization ) \

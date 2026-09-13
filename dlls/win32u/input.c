@@ -2918,6 +2918,22 @@ BOOL WINAPI NtUserEnableMouseInPointerForThread( void )
 }
 
 /**********************************************************************
+ *       NtUserEnableMouseInputForCursorSuppression    (win32u.@)
+ */
+BOOL WINAPI NtUserEnableMouseInputForCursorSuppression( BOOL enable )
+{
+    TRACE( "enable %u\n", enable );
+
+    if (enable != FALSE && enable != TRUE)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/**********************************************************************
  *       NtUserIsMouseInPointerEnabled    (win32u.@)
  */
 BOOL WINAPI NtUserIsMouseInPointerEnabled(void)

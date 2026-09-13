@@ -30,7 +30,7 @@
 2516 stub -noname DelegateCapturePointers  # NtUserDelegateCapturePointers
 2517 stub -noname GetTouchValidationStatus  # NtUserGetTouchValidationStatus
 2518 stub @
-2519 stub -noname EnableMouseInputForCursorSuppression  # NtUserEnableMouseInputForCursorSuppression
+2519 stdcall -noname EnableMouseInputForCursorSuppression(long) NtUserEnableMouseInputForCursorSuppression
 2520 stub -noname IsMouseInputEnabled  # NtUserIsMouseInputEnabled
 2521 stub GetProcessUIContextInformation  # NtUserGetProcessUIContextInformation
 2522 stdcall -noname SetBrokeredForeground(long) NtUserSetBrokeredForeground
