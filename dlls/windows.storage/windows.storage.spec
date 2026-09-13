@@ -204,11 +204,11 @@
 @ stdcall SHAssocEnumHandlers(wstr long ptr)
 @ stdcall SHAssocEnumHandlersForProtocolByApplication(wstr ptr ptr)
 @ stdcall SHBindToFolderIDListParent(ptr ptr ptr ptr ptr)
-@ stub SHBindToFolderIDListParentEx
+@ stdcall SHBindToFolderIDListParentEx(ptr ptr ptr ptr ptr ptr) shell32.SHBindToFolderIDListParentEx
 @ stdcall SHBindToObject(ptr ptr ptr ptr ptr)
 @ stdcall SHBindToParent(ptr ptr ptr ptr)
 @ stdcall SHChangeNotify(long long ptr ptr)
-@ stub SHChangeNotifyRegisterThread
+@ stdcall SHChangeNotifyRegisterThread(long) shell32.SHChangeNotifyRegisterThread
 @ stdcall SHCoCreateInstanceWorker(wstr ptr ptr ptr ptr)
 @ stub SHCreateAssocHandler
 @ stdcall SHCreateAssociationRegistration(ptr ptr)

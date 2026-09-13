@@ -47,10 +47,27 @@ extern HRESULT WINAPI Ole32DllGetClassObject(REFCLSID rclsid, REFIID riid, void 
  * Number of times CoInitialize is called. It is decreased every time CoUninitialize is called. When it hits 0, the COM libraries are freed
  */
 static LONG com_lockcount;
+static LONG cleanup_flags;
 
 static LONG com_server_process_refcount;
 
 extern HRESULT WINAPI RoGetApartmentIdentifier(UINT64 *identifier);
+
+/***********************************************************************
+ *           SetCleanupFlag    (combase.@)
+ */
+void WINAPI SetCleanupFlag(DWORD flags)
+{
+    InterlockedOr(&cleanup_flags, flags);
+}
+
+/***********************************************************************
+ *           ClearCleanupFlag    (combase.@)
+ */
+void WINAPI ClearCleanupFlag(DWORD flags)
+{
+    InterlockedAnd(&cleanup_flags, ~flags);
+}
 
 struct comclassredirect_data
 {

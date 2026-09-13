@@ -1,63 +1,63 @@
-@ stub ObjectStublessClient3
-@ stub ObjectStublessClient4
-@ stub ObjectStublessClient5
-@ stub ObjectStublessClient6
-@ stub ObjectStublessClient7
-@ stub ObjectStublessClient8
-@ stub ObjectStublessClient9
-@ stub ObjectStublessClient10
-@ stub ObjectStublessClient11
-@ stub ObjectStublessClient12
-@ stub ObjectStublessClient13
-@ stub ObjectStublessClient14
-@ stub ObjectStublessClient15
-@ stub ObjectStublessClient16
-@ stub ObjectStublessClient17
-@ stub ObjectStublessClient18
-@ stub ObjectStublessClient19
-@ stub ObjectStublessClient20
-@ stub ObjectStublessClient21
-@ stub ObjectStublessClient22
-@ stub ObjectStublessClient23
-@ stub ObjectStublessClient24
-@ stub ObjectStublessClient25
-@ stub ObjectStublessClient26
-@ stub ObjectStublessClient27
-@ stub ObjectStublessClient28
-@ stub ObjectStublessClient29
-@ stub ObjectStublessClient30
-@ stub ObjectStublessClient31
-@ stub ObjectStublessClient32
-@ stub NdrProxyForwardingFunction3
-@ stub NdrProxyForwardingFunction4
-@ stub NdrProxyForwardingFunction5
-@ stub NdrProxyForwardingFunction6
-@ stub NdrProxyForwardingFunction7
-@ stub NdrProxyForwardingFunction8
-@ stub NdrProxyForwardingFunction9
-@ stub NdrProxyForwardingFunction10
-@ stub NdrProxyForwardingFunction11
-@ stub NdrProxyForwardingFunction12
-@ stub NdrProxyForwardingFunction13
-@ stub NdrProxyForwardingFunction14
-@ stub NdrProxyForwardingFunction15
-@ stub NdrProxyForwardingFunction16
-@ stub NdrProxyForwardingFunction17
-@ stub NdrProxyForwardingFunction18
-@ stub NdrProxyForwardingFunction19
-@ stub NdrProxyForwardingFunction20
-@ stub NdrProxyForwardingFunction21
-@ stub NdrProxyForwardingFunction22
-@ stub NdrProxyForwardingFunction23
-@ stub NdrProxyForwardingFunction24
-@ stub NdrProxyForwardingFunction25
-@ stub NdrProxyForwardingFunction26
-@ stub NdrProxyForwardingFunction27
-@ stub NdrProxyForwardingFunction28
-@ stub NdrProxyForwardingFunction29
-@ stub NdrProxyForwardingFunction30
-@ stub NdrProxyForwardingFunction31
-@ stub NdrProxyForwardingFunction32
+@ extern ObjectStublessClient3 rpcrt4.__wine_ObjectStublessClient3
+@ extern ObjectStublessClient4 rpcrt4.__wine_ObjectStublessClient4
+@ extern ObjectStublessClient5 rpcrt4.__wine_ObjectStublessClient5
+@ extern ObjectStublessClient6 rpcrt4.__wine_ObjectStublessClient6
+@ extern ObjectStublessClient7 rpcrt4.__wine_ObjectStublessClient7
+@ extern ObjectStublessClient8 rpcrt4.__wine_ObjectStublessClient8
+@ extern ObjectStublessClient9 rpcrt4.__wine_ObjectStublessClient9
+@ extern ObjectStublessClient10 rpcrt4.__wine_ObjectStublessClient10
+@ extern ObjectStublessClient11 rpcrt4.__wine_ObjectStublessClient11
+@ extern ObjectStublessClient12 rpcrt4.__wine_ObjectStublessClient12
+@ extern ObjectStublessClient13 rpcrt4.__wine_ObjectStublessClient13
+@ extern ObjectStublessClient14 rpcrt4.__wine_ObjectStublessClient14
+@ extern ObjectStublessClient15 rpcrt4.__wine_ObjectStublessClient15
+@ extern ObjectStublessClient16 rpcrt4.__wine_ObjectStublessClient16
+@ extern ObjectStublessClient17 rpcrt4.__wine_ObjectStublessClient17
+@ extern ObjectStublessClient18 rpcrt4.__wine_ObjectStublessClient18
+@ extern ObjectStublessClient19 rpcrt4.__wine_ObjectStublessClient19
+@ extern ObjectStublessClient20 rpcrt4.__wine_ObjectStublessClient20
+@ extern ObjectStublessClient21 rpcrt4.__wine_ObjectStublessClient21
+@ extern ObjectStublessClient22 rpcrt4.__wine_ObjectStublessClient22
+@ extern ObjectStublessClient23 rpcrt4.__wine_ObjectStublessClient23
+@ extern ObjectStublessClient24 rpcrt4.__wine_ObjectStublessClient24
+@ extern ObjectStublessClient25 rpcrt4.__wine_ObjectStublessClient25
+@ extern ObjectStublessClient26 rpcrt4.__wine_ObjectStublessClient26
+@ extern ObjectStublessClient27 rpcrt4.__wine_ObjectStublessClient27
+@ extern ObjectStublessClient28 rpcrt4.__wine_ObjectStublessClient28
+@ extern ObjectStublessClient29 rpcrt4.__wine_ObjectStublessClient29
+@ extern ObjectStublessClient30 rpcrt4.__wine_ObjectStublessClient30
+@ extern ObjectStublessClient31 rpcrt4.__wine_ObjectStublessClient31
+@ extern ObjectStublessClient32 rpcrt4.__wine_ObjectStublessClient32
+@ extern NdrProxyForwardingFunction3 rpcrt4.__wine_NdrProxyForwardingFunction3
+@ extern NdrProxyForwardingFunction4 rpcrt4.__wine_NdrProxyForwardingFunction4
+@ extern NdrProxyForwardingFunction5 rpcrt4.__wine_NdrProxyForwardingFunction5
+@ extern NdrProxyForwardingFunction6 rpcrt4.__wine_NdrProxyForwardingFunction6
+@ extern NdrProxyForwardingFunction7 rpcrt4.__wine_NdrProxyForwardingFunction7
+@ extern NdrProxyForwardingFunction8 rpcrt4.__wine_NdrProxyForwardingFunction8
+@ extern NdrProxyForwardingFunction9 rpcrt4.__wine_NdrProxyForwardingFunction9
+@ extern NdrProxyForwardingFunction10 rpcrt4.__wine_NdrProxyForwardingFunction10
+@ extern NdrProxyForwardingFunction11 rpcrt4.__wine_NdrProxyForwardingFunction11
+@ extern NdrProxyForwardingFunction12 rpcrt4.__wine_NdrProxyForwardingFunction12
+@ extern NdrProxyForwardingFunction13 rpcrt4.__wine_NdrProxyForwardingFunction13
+@ extern NdrProxyForwardingFunction14 rpcrt4.__wine_NdrProxyForwardingFunction14
+@ extern NdrProxyForwardingFunction15 rpcrt4.__wine_NdrProxyForwardingFunction15
+@ extern NdrProxyForwardingFunction16 rpcrt4.__wine_NdrProxyForwardingFunction16
+@ extern NdrProxyForwardingFunction17 rpcrt4.__wine_NdrProxyForwardingFunction17
+@ extern NdrProxyForwardingFunction18 rpcrt4.__wine_NdrProxyForwardingFunction18
+@ extern NdrProxyForwardingFunction19 rpcrt4.__wine_NdrProxyForwardingFunction19
+@ extern NdrProxyForwardingFunction20 rpcrt4.__wine_NdrProxyForwardingFunction20
+@ extern NdrProxyForwardingFunction21 rpcrt4.__wine_NdrProxyForwardingFunction21
+@ extern NdrProxyForwardingFunction22 rpcrt4.__wine_NdrProxyForwardingFunction22
+@ extern NdrProxyForwardingFunction23 rpcrt4.__wine_NdrProxyForwardingFunction23
+@ extern NdrProxyForwardingFunction24 rpcrt4.__wine_NdrProxyForwardingFunction24
+@ extern NdrProxyForwardingFunction25 rpcrt4.__wine_NdrProxyForwardingFunction25
+@ extern NdrProxyForwardingFunction26 rpcrt4.__wine_NdrProxyForwardingFunction26
+@ extern NdrProxyForwardingFunction27 rpcrt4.__wine_NdrProxyForwardingFunction27
+@ extern NdrProxyForwardingFunction28 rpcrt4.__wine_NdrProxyForwardingFunction28
+@ extern NdrProxyForwardingFunction29 rpcrt4.__wine_NdrProxyForwardingFunction29
+@ extern NdrProxyForwardingFunction30 rpcrt4.__wine_NdrProxyForwardingFunction30
+@ extern NdrProxyForwardingFunction31 rpcrt4.__wine_NdrProxyForwardingFunction31
+@ extern NdrProxyForwardingFunction32 rpcrt4.__wine_NdrProxyForwardingFunction32
 @ stub NdrOleInitializeExtension
 @ stdcall RoFailFastWithErrorContextInternal2(long long ptr)
 @ stub RoFailFastWithErrorContextInternal
@@ -70,9 +70,9 @@
 @ stdcall CLSIDFromProgID(wstr ptr)
 @ stdcall CLSIDFromProgIDEx(wstr ptr)
 @ stdcall CLSIDFromString(wstr ptr)
-@ stub CleanupOleStateInAllTls
+@ stdcall CleanupOleStateInAllTls()
 @ stdcall CleanupTlsOleState(ptr)
-@ stub ClearCleanupFlag
+@ stdcall ClearCleanupFlag(long)
 @ stdcall CoAddRefServerProcess()
 @ stub CoAllowUnmarshalerCLSID
 @ stub CoCancelCall
@@ -319,7 +319,7 @@
 @ stub RoTransformErrorW
 @ stdcall RoUninitialize()
 @ stub RoUnregisterForApartmentShutdown
-@ stub SetCleanupFlag
+@ stdcall SetCleanupFlag(long)
 @ stdcall SetErrorInfo(long ptr)
 @ stdcall SetRestrictedErrorInfo(ptr)
 @ stdcall StringFromCLSID(ptr ptr)

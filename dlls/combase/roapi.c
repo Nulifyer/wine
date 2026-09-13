@@ -971,6 +971,19 @@ HRESULT WINAPI RoGetErrorReportingFlags(UINT32 *flags)
 
 
 /***********************************************************************
+ *      CleanupOleStateInAllTls (combase.@)
+ *
+ * Native combase uses this entry point to walk its private process-wide
+ * TLS table and release an OLE-owned object embedded in each record.  Wine
+ * has neither that private table nor the separate OLE object; its complete
+ * COM TLS record is released on thread detach instead.
+ */
+void WINAPI CleanupOleStateInAllTls(void)
+{
+    TRACE("()\n");
+}
+
+/***********************************************************************
  *      CleanupTlsOleState (combase.@)
  */
 void WINAPI CleanupTlsOleState(void *unknown)
