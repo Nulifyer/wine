@@ -162,7 +162,7 @@ static void remove_state( struct wnf_state *state )
 {
     struct wnf_subscription *sub;
     list_remove( &state->entry );
-    list_remove( &state->process_entry );
+    if (state->creator) list_remove( &state->process_entry );
     state->creator = NULL;
     LIST_FOR_EACH_ENTRY( sub, &state->subscriptions, struct wnf_subscription, state_entry )
     {
@@ -246,7 +246,7 @@ DECL_HANDLER(create_wnf_state_name)
     struct wnf_state *state;
     if (req->maximum_size > 4096 || req->data_scope > 4 || req->data_scope == 3)
     { set_error( STATUS_INVALID_PARAMETER ); return; }
-    if (req->name_lifetime != 3 || req->persist_data)
+    if ((req->name_lifetime != 2 && req->name_lifetime != 3) || req->persist_data)
     { set_error( STATUS_NOT_IMPLEMENTED ); return; }
     if (!get_req_object_attributes( &params )) return;
     if (params.root) release_object( params.root );
@@ -254,6 +254,7 @@ DECL_HANDLER(create_wnf_state_name)
     if (next_unique >= ((unsigned __int64)1 << 53))
     { set_error( STATUS_INSUFFICIENT_RESOURCES ); return; }
     if (!(state = alloc_object( &wnf_ops ))) return;
+    list_init( &state->process_entry );
     list_init( &state->subscriptions );
     state->name = 0;
     state->data = NULL;
@@ -264,14 +265,16 @@ DECL_HANDLER(create_wnf_state_name)
     { release_object( state ); return; }
     state->maximum = req->maximum_size;
     state->session = current->process->session_id;
-    state->creator = current->process;
+    state->creator = req->name_lifetime == 3 ? current->process : NULL;
     state->has_type = req->has_type;
     state->well_known = 0;
     state->type_low = req->type_low;
     state->type_high = req->type_high;
-    state->name = WNF_NAME_KEY ^ (1 | 3 << 4 | req->data_scope << 6 | next_unique++ << 11);
+    state->name = WNF_NAME_KEY ^
+                  (1 | (unsigned __int64)req->name_lifetime << 4 |
+                   (unsigned __int64)req->data_scope << 6 | next_unique++ << 11);
     list_add_tail( &states, &state->entry );
-    list_add_tail( &state->creator->wnf_states, &state->process_entry );
+    if (state->creator) list_add_tail( &state->creator->wnf_states, &state->process_entry );
     reply->state_name = state->name;
 }
 DECL_HANDLER(delete_wnf_state_name)
@@ -279,7 +282,7 @@ DECL_HANDLER(delete_wnf_state_name)
     struct wnf_state *state = find_state( req->state_name, 0, 0 );
     unsigned int access = DELETE;
     if (!state) return;
-    if (state->creator != current->process) { set_error( STATUS_ACCESS_DENIED ); return; }
+    if (state->creator && state->creator != current->process) { set_error( STATUS_ACCESS_DENIED ); return; }
     if (check_object_access( NULL, &state->obj, &access )) remove_state( state );
 }
 DECL_HANDLER(query_wnf_state_data)

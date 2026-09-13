@@ -118,35 +118,43 @@ START_TEST(wnf)
     if (pNtCreateWnfStateName && pNtDeleteWnfStateData && pNtDeleteWnfStateName &&
         pNtUpdateWnfStateData)
     {
+        static const ULONG lifetimes[] = {2, 3};
         SECURITY_DESCRIPTOR sd;
-        ULONGLONG temporary = 0;
         ULONG value = 0x12345678, queried = 0, query_size, old_stamp;
+        unsigned int i;
 
         InitializeSecurityDescriptor( &sd, SECURITY_DESCRIPTOR_REVISION );
         SetSecurityDescriptorDacl( &sd, TRUE, NULL, FALSE );
-        status = pNtCreateWnfStateName( &temporary, 3, 0, FALSE, &type, sizeof(value), &sd );
-        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
-        if (!status)
+        for (i = 0; i < ARRAY_SIZE(lifetimes); i++)
         {
-            status = pNtUpdateWnfStateData( &temporary, &value, sizeof(value), &type, NULL, 0, FALSE );
-            ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
-            query_size = sizeof(queried);
-            old_stamp = 0;
-            status = pNtQueryWnfStateData( &temporary, &type, NULL, &old_stamp, &queried, &query_size );
-            ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
-            ok( queried == value, "expected %#lx, got %#lx\n", value, queried );
+            ULONGLONG state = 0;
 
-            status = pNtDeleteWnfStateData( &temporary, NULL );
-            ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
-            query_size = sizeof(queried);
-            stamp = 0;
-            status = pNtQueryWnfStateData( &temporary, &type, NULL, &stamp, &queried, &query_size );
-            ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
-            ok( !query_size, "expected no state data, got %lu bytes\n", query_size );
-            ok( stamp == old_stamp + 1, "expected change stamp %lu, got %lu\n", old_stamp + 1, stamp );
+            status = pNtCreateWnfStateName( &state, lifetimes[i], 0, FALSE, &type,
+                                            sizeof(value), &sd );
+            ok( status == STATUS_SUCCESS, "lifetime %lu: expected STATUS_SUCCESS, got %#lx\n",
+                lifetimes[i], status );
+            if (!status)
+            {
+                status = pNtUpdateWnfStateData( &state, &value, sizeof(value), &type, NULL, 0, FALSE );
+                ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                query_size = sizeof(queried);
+                old_stamp = 0;
+                status = pNtQueryWnfStateData( &state, &type, NULL, &old_stamp, &queried, &query_size );
+                ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                ok( queried == value, "expected %#lx, got %#lx\n", value, queried );
 
-            status = pNtDeleteWnfStateName( &temporary );
-            ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                status = pNtDeleteWnfStateData( &state, NULL );
+                ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                query_size = sizeof(queried);
+                stamp = 0;
+                status = pNtQueryWnfStateData( &state, &type, NULL, &stamp, &queried, &query_size );
+                ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                ok( !query_size, "expected no state data, got %lu bytes\n", query_size );
+                ok( stamp == old_stamp + 1, "expected change stamp %lu, got %lu\n", old_stamp + 1, stamp );
+
+                status = pNtDeleteWnfStateName( &state );
+                ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+            }
         }
     }
     else win_skip( "WNF state-data deletion functions are unavailable\n" );
@@ -172,6 +180,18 @@ START_TEST(wnf)
         }
     }
     else win_skip( "RtlAllocateWnfSerializationGroup is unavailable\n" );
+
+    subscription = (void *)0xdeadbeef;
+    status = pRtlSubscribeWnfStateChangeNotification( &subscription, name, 0, callback,
+                                                      NULL, NULL, 0, 1 );
+    ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+    ok( subscription && subscription != (void *)0xdeadbeef,
+        "expected a new subscription, got %p\n", subscription );
+    if (!status)
+    {
+        status = pRtlUnsubscribeWnfStateChangeNotification( subscription );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+    }
 
     status = pRtlPublishWnfStateData( name, NULL, NULL, 0, NULL );
     ok( status == STATUS_ACCESS_DENIED, "expected STATUS_ACCESS_DENIED, got %#lx\n", status );

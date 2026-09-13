@@ -172,7 +172,11 @@ static NTSTATUS start_dispatcher(void)
 NTSTATUS WINAPI RtlPublishWnfStateData( ULONGLONG state, const GUID *type, const void *data,
                                         ULONG length, const void *explicit_scope )
 {
-    return NtUpdateWnfStateData( &state, data, length, type, explicit_scope, 0, FALSE );
+    NTSTATUS status = NtUpdateWnfStateData( &state, data, length, type, explicit_scope, 0, FALSE );
+
+    TRACE( "%#I64x, %s, %p, %lu, %p: %#lx\n", state, debugstr_guid(type), data, length,
+           explicit_scope, status );
+    return status;
 }
 NTSTATUS WINAPI RtlQueryWnfStateData( ULONG *stamp, ULONGLONG state, PWNF_USER_CALLBACK callback,
                                       void *context, const GUID *type )
@@ -201,8 +205,12 @@ NTSTATUS WINAPI RtlSubscribeWnfStateChangeNotification( void **subscription, ULO
     struct rtl_wnf_subscription *sub;
     BOOL created = FALSE;
     NTSTATUS status;
+
+    TRACE( "%p, %#I64x, %lu, %p, %p, %s, %lu, %#lx\n", subscription, state, stamp,
+           callback, context, debugstr_guid(type), group, flags );
     if (!subscription || !callback) return STATUS_INVALID_PARAMETER;
-    if (type || flags) return STATUS_NOT_IMPLEMENTED;
+    if (type) return STATUS_NOT_IMPLEMENTED;
+    UNREFERENCED_PARAMETER(flags);
     if (!(sub = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*sub) ))) return STATUS_NO_MEMORY;
     sub->callback = callback;
     sub->context = context;
@@ -233,10 +241,12 @@ NTSTATUS WINAPI RtlSubscribeWnfStateChangeNotification( void **subscription, ULO
     list_add_tail( &name->subscriptions, &sub->entry );
     *subscription = sub;
     RtlLeaveCriticalSection( &lock );
+    TRACE( "created subscription %p\n", sub );
     return STATUS_SUCCESS;
 failed:
     RtlLeaveCriticalSection( &lock );
     RtlFreeHeap( GetProcessHeap(), 0, sub );
+    TRACE( "failed with %#lx\n", status );
     return status;
 }
 NTSTATUS WINAPI RtlUnsubscribeWnfStateChangeNotification( void *subscription )
