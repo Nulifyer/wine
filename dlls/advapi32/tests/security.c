@@ -2102,6 +2102,18 @@ static void test_CreateWellKnownSid(void)
     /* a domain sid usually have three subauthorities but we test that CreateWellKnownSid doesn't check it */
     AllocateAndInitializeSid(&ident, 6, SECURITY_NT_NON_UNIQUE, 12, 23, 34, 45, 56, 0, 0, &domainsid);
 
+    {
+        char sid_buffer[SECURITY_MAX_SID_SIZE];
+        DWORD cb = sizeof(sid_buffer);
+
+        ret = CreateWellKnownSid(WinAccountDefaultSystemManagedSid, domainsid, sid_buffer, &cb);
+        ok(ret, "Couldn't create default system managed account SID, error %lu\n", GetLastError());
+        ok(*GetSidSubAuthorityCount(sid_buffer) == 7, "Unexpected subauthority count %u\n",
+           *GetSidSubAuthorityCount(sid_buffer));
+        ok(*GetSidSubAuthority(sid_buffer, 6) == DOMAIN_USER_RID_DEFAULT_ACCOUNT,
+           "Expected default account RID, got %lu\n", *GetSidSubAuthority(sid_buffer, 6));
+    }
+
     for (i = 0; i < ARRAY_SIZE(well_known_sid_values); i++)
     {
         const struct well_known_sid_value *value = &well_known_sid_values[i];

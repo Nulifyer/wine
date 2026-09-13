@@ -22,6 +22,7 @@
 #include "windows.h"
 #include "winsvc.h"
 #include "lsass.h"
+#include "lsapolicylookup.h"
 #include "lsass_private.h"
 
 #include "wine/debug.h"
@@ -30,6 +31,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 
 static WCHAR samssW[] = L"SamSs";
 static HANDLE exit_event;
+static HANDLE rpc_ready_event;
 static SERVICE_STATUS_HANDLE service_handle;
 
 void* __RPC_USER MIDL_user_allocate( SIZE_T size )
@@ -72,15 +74,24 @@ static RPC_STATUS rpc_initialize( void )
 {
     unsigned short protseq[] = LSASS_PROTSEQ;
     unsigned short endpoint[] = LSASS_ENDPOINT;
+    unsigned short policy_endpoint[] = LSA_POLICY_LOOKUP_ENDPOINT;
     RPC_STATUS status;
 
     status = RpcServerRegisterIf( lsass_v1_0_s_ifspec, NULL, NULL );
     if (status != RPC_S_OK) return status;
 
+    status = RpcServerRegisterIf( lsapolicylookup_v1_0_s_ifspec, NULL, NULL );
+    if (status != RPC_S_OK) goto failed_lsass_interface;
+
     status = RpcServerUseProtseqEpW( protseq, RPC_C_PROTSEQ_MAX_REQS_DEFAULT, endpoint, NULL );
-    if (status == RPC_S_OK) status = RpcServerListen( 1, RPC_C_LISTEN_MAX_CALLS_DEFAULT, TRUE );
+    if (status == RPC_S_OK)
+        status = RpcServerUseProtseqEpW( protseq, RPC_C_PROTSEQ_MAX_REQS_DEFAULT, policy_endpoint, NULL );
+    if (status == RPC_S_OK)
+        status = RpcServerListen( 1, RPC_C_LISTEN_MAX_CALLS_DEFAULT, TRUE );
     if (status == RPC_S_OK) return RPC_S_OK;
 
+    RpcServerUnregisterIf( lsapolicylookup_v1_0_s_ifspec, NULL, FALSE );
+failed_lsass_interface:
     RpcServerUnregisterIf( lsass_v1_0_s_ifspec, NULL, FALSE );
     return status;
 }
@@ -117,18 +128,8 @@ static DWORD WINAPI service_handler( DWORD ctrl, DWORD event_type, LPVOID event_
 static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
 {
     SERVICE_STATUS status;
-    RPC_STATUS ret;
 
     TRACE( "starting service\n" );
-
-    if ((ret = rpc_initialize()))
-    {
-        WARN( "Failed to initialize rpc interfaces, status %ld.\n", ret );
-        return;
-    }
-    load_auth_packages();
-
-    exit_event = CreateEventW( NULL, TRUE, FALSE, NULL );
 
     service_handle = RegisterServiceCtrlHandlerExW( samssW, service_handler, NULL );
     if (!service_handle) return;
@@ -150,14 +151,42 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
     TRACE( "service stopped\n" );
 }
 
-int __cdecl wmain( int argc, WCHAR *argv[] )
+int WINAPI wWinMain( HINSTANCE instance, HINSTANCE prev_instance, WCHAR *cmdline, int show )
 {
     static const SERVICE_TABLE_ENTRYW service_table[] =
     {
         { samssW, ServiceMain },
         { NULL, NULL }
     };
+    RPC_STATUS ret;
+    BOOL dispatcher_result;
+    DWORD dispatcher_error;
 
-    StartServiceCtrlDispatcherW( service_table );
+    TRACE( "starting process\n" );
+    if (!(exit_event = CreateEventW( NULL, TRUE, FALSE, NULL )))
+    {
+        WARN( "Failed to create process exit event, error %lu.\n", GetLastError() );
+        return 0;
+    }
+    if ((ret = rpc_initialize()))
+    {
+        WARN( "Failed to initialize rpc interfaces, status %ld.\n", ret );
+        return 0;
+    }
+    load_auth_packages();
+
+    rpc_ready_event = CreateEventW( NULL, TRUE, FALSE, L"LSA_RPC_SERVER_ACTIVE" );
+    if (!rpc_ready_event || !SetEvent( rpc_ready_event ))
+        WARN( "Failed to publish LSA RPC readiness, error %lu.\n", GetLastError() );
+
+    TRACE( "waiting for service dispatcher\n" );
+    dispatcher_result = StartServiceCtrlDispatcherW( service_table );
+    dispatcher_error = GetLastError();
+    TRACE( "service dispatcher returned %u, error %lu\n", dispatcher_result, dispatcher_error );
+
+    /* Native services.exe does not connect to Wine's SCM dispatcher, but this
+     * process also owns the local LSA RPC endpoints.  Keep those endpoints
+     * alive until an actual Wine service stop signals the shared exit event. */
+    if (!dispatcher_result) WaitForSingleObject( exit_event, INFINITE );
     return 0;
 }

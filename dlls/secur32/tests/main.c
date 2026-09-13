@@ -27,6 +27,8 @@
 #include <winbase.h>
 #include <sspi.h>
 #include <ntsecapi.h>
+#include <rpc.h>
+#include <rpcdce.h>
 
 #include "wine/test.h"
 
@@ -119,6 +121,10 @@ static void testEnumerateSecurityPackages(void)
 
     ok(pkg_info != NULL, 
             "pkg_info should not be NULL after EnumerateSecurityPackages\n");
+
+    ok(pkg_info[0].wRPCID == RPC_C_AUTHN_GSS_NEGOTIATE,
+            "expected Negotiate to be the first package, got %s (RPC ID %u)\n",
+            pkg_info[0].Name, pkg_info[0].wRPCID);
     
     trace("Number of packages: %ld\n", num_packages);
     for(i = 0; i < num_packages; ++i){

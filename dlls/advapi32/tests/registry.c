@@ -56,6 +56,7 @@ static NTSTATUS (WINAPI * pRtlFreeUnicodeString)(PUNICODE_STRING);
 static NTSTATUS (WINAPI * pRtlInitUnicodeString)(PUNICODE_STRING,PCWSTR);
 static LONG (WINAPI *pRegDeleteKeyValueA)(HKEY,LPCSTR,LPCSTR);
 static LONG (WINAPI *pRegSetKeyValueW)(HKEY,LPCWSTR,LPCWSTR,DWORD,const void*,DWORD);
+static LONG (WINAPI *pRegDisablePredefinedCacheEx)(void);
 static LONG (WINAPI *pRegLoadMUIStringA)(HKEY,LPCSTR,LPSTR,DWORD,LPDWORD,DWORD,LPCSTR);
 static LONG (WINAPI *pRegLoadMUIStringW)(HKEY,LPCWSTR,LPWSTR,DWORD,LPDWORD,DWORD,LPCWSTR);
 static DWORD (WINAPI *pEnumDynamicTimeZoneInformation)(const DWORD,
@@ -99,6 +100,7 @@ static void InitFunctionPtrs(void)
     ADVAPI32_GET_PROC(RegDeleteKeyExA);
     ADVAPI32_GET_PROC(RegDeleteKeyValueA);
     ADVAPI32_GET_PROC(RegSetKeyValueW);
+    ADVAPI32_GET_PROC(RegDisablePredefinedCacheEx);
     ADVAPI32_GET_PROC(RegLoadMUIStringA);
     ADVAPI32_GET_PROC(RegLoadMUIStringW);
     ADVAPI32_GET_PROC(EnumDynamicTimeZoneInformation);
@@ -1906,7 +1908,12 @@ static void test_reg_query_info(void)
 {
     HKEY subkey;
     HKEY subsubkey;
+    HKEY padded_class_key;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING key_name, key_class;
+    static WCHAR padded_class[] = {'1','2','3','4','5','6','7','8',0,0,0,0};
     LONG ret;
+    NTSTATUS status;
     char classbuffer[32];
     WCHAR classbufferW[32];
     char expectbuffer[32];
@@ -2137,6 +2144,26 @@ static void test_reg_query_info(void)
     ok(!memcmp(classbufferW, expectbufferW, sizeof(classbufferW)),
        "classbufferW = %s, expected %s\n",
        wine_dbgstr_wn(classbufferW, ARRAY_SIZE(classbufferW)), wine_dbgstr_w(expectbufferW));
+
+    RtlInitUnicodeString(&key_name, L"padded_class");
+    key_class.Buffer = padded_class;
+    key_class.Length = sizeof(padded_class);
+    key_class.MaximumLength = sizeof(padded_class);
+    InitializeObjectAttributes(&attr, &key_name, OBJ_CASE_INSENSITIVE, subkey, NULL);
+    status = NtCreateKey((HANDLE *)&padded_class_key, KEY_ALL_ACCESS, &attr, 0, &key_class, 0, NULL);
+    ok(status == STATUS_SUCCESS, "NtCreateKey returned %#lx\n", status);
+    if (!status)
+    {
+        memset(classbuffer, 0x55, sizeof(classbuffer));
+        classlen = 9;
+        ret = RegQueryInfoKeyA(padded_class_key, classbuffer, &classlen, NULL, NULL, NULL,
+                               NULL, NULL, NULL, NULL, NULL, NULL);
+        ok(ret == ERROR_SUCCESS, "ret = %ld\n", ret);
+        ok(classlen == 8, "classlen = %lu\n", classlen);
+        ok(!strcmp(classbuffer, "12345678"), "classbuffer = %s\n", debugstr_a(classbuffer));
+        RegDeleteKeyA(padded_class_key, "");
+        RegCloseKey(padded_class_key);
+    }
 
     RegDeleteKeyA(subsubkey, "");
     RegCloseKey(subsubkey);
@@ -5201,4 +5228,9 @@ START_TEST(registry)
     delete_key( hkey_main );
 
     test_regconnectregistry();
+
+    if (pRegDisablePredefinedCacheEx)
+        ok(!pRegDisablePredefinedCacheEx(), "RegDisablePredefinedCacheEx failed.\n");
+    else
+        win_skip("RegDisablePredefinedCacheEx is not available.\n");
 }

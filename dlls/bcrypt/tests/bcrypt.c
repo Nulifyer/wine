@@ -465,6 +465,52 @@ static void test_hashes(void)
         test_hash(tests+i);
 }
 
+static void test_aes_cmac(void)
+{
+    static const UCHAR key[] =
+        {0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c};
+    static const UCHAR input[] =
+        {0x6b,0xc1,0xbe,0xe2,0x2e,0x40,0x9f,0x96,0xe9,0x3d,0x7e,0x11,0x73,0x93,0x17,0x2a};
+    static const UCHAR expected[] =
+        {0x07,0x0a,0x16,0xb4,0x6b,0x4d,0x41,0x44,0xf7,0x9b,0xdd,0x9d,0xd0,0x4a,0x28,0x7c};
+    BCRYPT_ALG_HANDLE alg;
+    BCRYPT_HASH_HANDLE hash;
+    UCHAR output[sizeof(expected)];
+    NTSTATUS status;
+
+    status = BCryptOpenAlgorithmProvider( &alg, BCRYPT_AES_CMAC_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0 );
+    ok( status == STATUS_SUCCESS, "BCryptOpenAlgorithmProvider returned %#lx\n", status );
+    if (status) return;
+
+    test_object_length( alg );
+    test_hash_length( alg, sizeof(expected) );
+    test_hash_block_length( alg, 16 );
+
+    status = BCryptCreateHash( alg, &hash, NULL, 0, (UCHAR *)key, sizeof(key), 0 );
+    ok( status == STATUS_SUCCESS, "BCryptCreateHash returned %#lx\n", status );
+    if (!status)
+    {
+        status = BCryptHashData( hash, (UCHAR *)input, sizeof(input), 0 );
+        ok( status == STATUS_SUCCESS, "BCryptHashData returned %#lx\n", status );
+        status = BCryptFinishHash( hash, output, sizeof(output), 0 );
+        ok( status == STATUS_SUCCESS, "BCryptFinishHash returned %#lx\n", status );
+        ok( !memcmp( output, expected, sizeof(expected) ), "unexpected AES-CMAC result\n" );
+        status = BCryptDestroyHash( hash );
+        ok( status == STATUS_SUCCESS, "BCryptDestroyHash returned %#lx\n", status );
+    }
+
+    if (pBCryptHash)
+    {
+        status = pBCryptHash( alg, (UCHAR *)key, sizeof(key), (UCHAR *)input, sizeof(input),
+                              output, sizeof(output) );
+        ok( status == STATUS_SUCCESS, "BCryptHash returned %#lx\n", status );
+        ok( !memcmp( output, expected, sizeof(expected) ), "unexpected one-shot AES-CMAC result\n" );
+    }
+
+    status = BCryptCloseAlgorithmProvider( alg, 0 );
+    ok( status == STATUS_SUCCESS, "BCryptCloseAlgorithmProvider returned %#lx\n", status );
+}
+
 static void test_BcryptHash(void)
 {
     static const char expected[] =
@@ -745,10 +791,19 @@ static void test_aes(void)
 
 static void test_3des(void)
 {
+    static const UCHAR secret[] =
+        {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,
+         0x0c,0x0d,0x0e,0x0f,0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17};
+    static const UCHAR iv[] = {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07};
+    static const UCHAR plaintext[] =
+        {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f};
+    static const UCHAR expected[] =
+        {0x89,0x4b,0xc3,0x08,0x54,0x26,0xa4,0x41,0xf2,0x7f,0x73,0xae,0x26,0xab,0xbf,0x74};
     BCRYPT_KEY_LENGTHS_STRUCT key_lengths;
     BCRYPT_ALG_HANDLE alg;
-    ULONG size, len;
-    UCHAR mode[64];
+    BCRYPT_KEY_HANDLE key;
+    ULONG size, len, object_len;
+    UCHAR *object, mode[64], ivbuf[sizeof(iv)], encrypted[sizeof(plaintext)], decrypted[sizeof(plaintext)];
     NTSTATUS ret;
 
     alg = NULL;
@@ -761,6 +816,7 @@ static void test_3des(void)
     ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
     ok(len, "expected non-zero len\n");
     ok(size == sizeof(len), "got %lu\n", size);
+    object_len = len;
 
     len = size = 0;
     ret = BCryptGetProperty(alg, BCRYPT_BLOCK_LENGTH, (UCHAR *)&len, sizeof(len), &size, 0);
@@ -799,6 +855,36 @@ static void test_3des(void)
     ok(ret == STATUS_NOT_SUPPORTED, "got %#lx\n", ret);
 
     test_alg_name(alg, L"3DES");
+
+    object = calloc(1, object_len);
+    key = (BCRYPT_KEY_HANDLE)0xdeadbeef;
+    ret = BCryptGenerateSymmetricKey(alg, &key, object, object_len, (UCHAR *)secret, 16, 0);
+    ok(ret == STATUS_INVALID_PARAMETER, "got %#lx\n", ret);
+    ok(key == (BCRYPT_KEY_HANDLE)0xdeadbeef, "got unexpected key %p\n", key);
+
+    ret = BCryptGenerateSymmetricKey(alg, &key, object, object_len, (UCHAR *)secret, sizeof(secret), 0);
+    ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
+    ok(key != NULL && key != (BCRYPT_KEY_HANDLE)0xdeadbeef, "got unexpected key %p\n", key);
+
+    memcpy(ivbuf, iv, sizeof(iv));
+    len = 0;
+    ret = BCryptEncrypt(key, (UCHAR *)plaintext, sizeof(plaintext), NULL, ivbuf, sizeof(ivbuf), encrypted,
+                        sizeof(encrypted), &len, 0);
+    ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
+    ok(len == sizeof(encrypted), "got %lu\n", len);
+    ok(!memcmp(encrypted, expected, sizeof(expected)), "unexpected 3DES-CBC ciphertext\n");
+
+    memcpy(ivbuf, iv, sizeof(iv));
+    len = 0;
+    ret = BCryptDecrypt(key, encrypted, sizeof(encrypted), NULL, ivbuf, sizeof(ivbuf), decrypted,
+                        sizeof(decrypted), &len, 0);
+    ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
+    ok(len == sizeof(decrypted), "got %lu\n", len);
+    ok(!memcmp(decrypted, plaintext, sizeof(plaintext)), "unexpected 3DES-CBC plaintext\n");
+
+    ret = BCryptDestroyKey(key);
+    ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
+    free(object);
 
     ret = BCryptCloseAlgorithmProvider(alg, 0);
     ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
@@ -5632,6 +5718,7 @@ START_TEST(bcrypt)
     test_BCryptGenRandom();
     test_BCryptGetFipsAlgorithmMode();
     test_hashes();
+    test_aes_cmac();
     test_BcryptHash();
     test_BcryptDeriveKeyPBKDF2();
     test_rng();

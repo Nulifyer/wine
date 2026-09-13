@@ -208,7 +208,7 @@ void test_provider_init(void)
     ok(*(void **)((BYTE *)instance + sizeof(*instance) + sizeof(UINT64)) == &counter2,
             "Got unexpected counter value %p.\n", *(void **)(instance + 1));
 
-    /*Counter defined as BYREF error if modified with SetValue functions*/
+    /* Counter defined as BYREF errors if modified with value functions. */
     ret = PerfSetULongCounterValue(prov, instance, 1, 666L);
     ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
     ret = PerfSetULongCounterValue(prov, instance, 2, 900000L);
@@ -216,6 +216,10 @@ void test_provider_init(void)
     ret = PerfSetULongLongCounterValue(prov, instance, 1, 666L);
     ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
     ret = PerfSetULongLongCounterValue(prov, instance, 2, 900000L);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
+    ret = PerfIncrementULongCounterValue(prov, instance, 1, 1);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
+    ret = PerfDecrementULongLongCounterValue(prov, instance, 2, 1);
     ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
 
     ret = PerfSetULongCounterValue(prov, instance, 0, 42L);
@@ -272,6 +276,30 @@ void test_provider_init(void)
     ret = PerfSetULongLongCounterValue(prov, instance, 0, 42);
     ok(ret == ERROR_NOT_FOUND, "Got unexpected ret %lu.\n", ret);
 
+    ret = PerfIncrementULongCounterValue(NULL, instance, 1, 1);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
+    ret = PerfIncrementULongCounterValue(prov, NULL, 1, 1);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
+    ret = PerfIncrementULongCounterValue(prov, instance, 0, 1);
+    ok(ret == ERROR_NOT_FOUND, "Got unexpected ret %lu.\n", ret);
+    ret = PerfIncrementULongLongCounterValue(prov, instance, 1, 1);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
+    ret = PerfDecrementULongLongCounterValue(prov, instance, 1, 1);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
+
+    ret = PerfIncrementULongCounterValue(prov, instance, 1, 10);
+    ok(!ret, "Got unexpected ret %lu.\n", ret);
+    ok(*(ULONG *)(instance + 1) == 65, "Got unexpected counter value %lu.\n",
+       *(ULONG *)(instance + 1));
+    ret = PerfDecrementULongCounterValue(prov, instance, 1, 66);
+    ok(!ret, "Got unexpected ret %lu.\n", ret);
+    ok(*(ULONG *)(instance + 1) == ~0u, "Got unexpected counter value %lu.\n",
+       *(ULONG *)(instance + 1));
+    ret = PerfIncrementULongCounterValue(prov, instance, 1, 1);
+    ok(!ret, "Got unexpected ret %lu.\n", ret);
+    ok(*(ULONG *)(instance + 1) == 0, "Got unexpected counter value %lu.\n",
+       *(ULONG *)(instance + 1));
+
     ret = PerfSetCounterRefValue(prov, instance, 1, &counter1);
     ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
     ret = PerfSetCounterRefValue(prov, instance, 2, &counter2);
@@ -308,6 +336,25 @@ void test_provider_init(void)
     ret = PerfSetULongLongCounterValue(prov, instance, 0, 42);
     ok(ret == ERROR_NOT_FOUND, "Got unexpected ret %lu.\n", ret);
 
+    ret = PerfIncrementULongCounterValue(prov, instance, 1, 1);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
+    ret = PerfIncrementULongLongCounterValue(prov, instance, 0, 1);
+    ok(ret == ERROR_NOT_FOUND, "Got unexpected ret %lu.\n", ret);
+    ret = PerfIncrementULongLongCounterValue(prov, instance, 1, 1000);
+    ok(!ret, "Got unexpected ret %lu.\n", ret);
+    ok(*(ULONGLONG *)(instance + 1) == 901000, "Got unexpected counter value %I64u.\n",
+       *(ULONGLONG *)(instance + 1));
+    ret = PerfDecrementULongLongCounterValue(prov, instance, 1, 901001);
+    ok(!ret, "Got unexpected ret %lu.\n", ret);
+    ok(*(ULONGLONG *)(instance + 1) == ~(ULONGLONG)0, "Got unexpected counter value %I64u.\n",
+       *(ULONGLONG *)(instance + 1));
+    ret = PerfIncrementULongLongCounterValue(prov, instance, 1, 1);
+    ok(!ret, "Got unexpected ret %lu.\n", ret);
+    ok(*(ULONGLONG *)(instance + 1) == 0, "Got unexpected counter value %I64u.\n",
+       *(ULONGLONG *)(instance + 1));
+    ret = PerfSetULongLongCounterValue(prov, instance, 1, 900000L);
+    ok(!ret, "Got unexpected ret %lu.\n", ret);
+
     ok(*(ULONGLONG *)(instance + 1) == 900000L, "Got unexpected counter value %I64u.\n",
        *(ULONGLONG *)(instance + 1));
     ok(*(ULONGLONG *)((BYTE *)instance + sizeof(*instance) + sizeof(UINT64)) == 666L,
@@ -317,6 +364,8 @@ void test_provider_init(void)
     ret = PerfSetULongCounterValue(prov, instance, 1, 666L);
     ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
     ret = PerfSetULongCounterValue(prov, instance, 2, 900000L);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
+    ret = PerfDecrementULongCounterValue(prov, instance, 1, 1);
     ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
 
     ret = PerfDeleteInstance(prov, instance);

@@ -39,6 +39,23 @@ static char random_buf[sizeof(SYSTEM_INTERRUPT_INFORMATION) * MAX_CPUS];
 static ULONG random_len;
 static ULONG random_pos;
 
+/******************************************************************************
+ *     SystemFunction029   (cryptbase.@)
+ *
+ * Retrieves the current RPC client's 16-byte session key. Windows asks the
+ * kernel server transport for the key when one is available, and falls back to
+ * this well-known local-session key when it is not. Wine has no Srv2 kernel
+ * transport, so only the fallback path is meaningful here.
+ */
+NTSTATUS WINAPI SystemFunction029( void *context, BYTE *session_key )
+{
+    static const BYTE local_session_key[16] = "SystemLibraryDTC";
+
+    TRACE( "(%p, %p): returning local-session fallback key\n", context, session_key );
+    memcpy( session_key, local_session_key, sizeof(local_session_key) );
+    return STATUS_LOCAL_USER_SESSION_KEY;
+}
+
 /* FIXME: assumes interrupt information provides sufficient randomness */
 static BOOL fill_random_buffer(void)
 {

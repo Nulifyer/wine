@@ -20,6 +20,9 @@
 
 #define SRM_MAX_MESSAGE 0x200
 #define SRM_PAYLOAD_LIMIT 0x1d4
+#define RM_COMMAND_SET_AUDIT_POLICY 1
+#define RM_COMMAND_CREATE_LOGON_SESSION 2
+#define RM_COMMAND_UPDATE_GLOBAL_SACL 5
 
 struct srm_message
 {
@@ -190,7 +193,8 @@ static void test_lsa_handshake(void)
     SIZE_T size;
     NTSTATUS status, command_status;
     DWORD wait;
-    ULONG command = 1;
+    ULONG command = RM_COMMAND_SET_AUDIT_POLICY;
+    LUID logon_id = {0x411, 0};
 
     init_port_attributes( &attributes );
     InitializeObjectAttributes( &object_attributes, &name, OBJ_CASE_INSENSITIVE, NULL, NULL );
@@ -258,8 +262,68 @@ static void test_lsa_handshake(void)
     ok( message.header.DataLength == sizeof(command_status), "reply has %u data bytes\n",
         message.header.DataLength );
     memcpy( &command_status, message.data, sizeof(command_status) );
-    ok( command_status == STATUS_NOT_IMPLEMENTED, "command status is %#lx\n", command_status );
+    ok( command_status == STATUS_SUCCESS, "audit-policy command status is %#lx\n", command_status );
     check_default_audit_policy();
+
+    memset( &message, 0, sizeof(message) );
+    command = RM_COMMAND_CREATE_LOGON_SESSION;
+    message.header.DataLength = 2 * sizeof(command) + sizeof(logon_id);
+    message.header.TotalLength = sizeof(message.header) + message.header.DataLength;
+    memcpy( message.data, &command, sizeof(command) );
+    memcpy( message.data + sizeof(command), &logon_id, sizeof(logon_id) );
+    size = sizeof(message);
+    status = NtAlpcSendWaitReceivePort( context.port, ALPC_MSGFLG_SYNC_REQUEST,
+                                        &message.header, NULL, &message.header, &size, NULL, NULL );
+    ok( !status, "create-logon-session request returned %#lx\n", status );
+    ok( message.header.DataLength == sizeof(command_status),
+        "create-logon-session reply has %u data bytes\n", message.header.DataLength );
+    memcpy( &command_status, message.data, sizeof(command_status) );
+    ok( command_status == STATUS_SUCCESS, "create-logon-session status is %#lx\n",
+        command_status );
+
+    memset( &message, 0, sizeof(message) );
+    message.header.DataLength = sizeof(command);
+    message.header.TotalLength = sizeof(message.header) + message.header.DataLength;
+    memcpy( message.data, &command, sizeof(command) );
+    size = sizeof(message);
+    status = NtAlpcSendWaitReceivePort( context.port, ALPC_MSGFLG_SYNC_REQUEST,
+                                        &message.header, NULL, &message.header, &size, NULL, NULL );
+    ok( !status, "short create-logon-session request returned %#lx\n", status );
+    ok( message.header.DataLength == sizeof(command_status),
+        "short create-logon-session reply has %u data bytes\n", message.header.DataLength );
+    memcpy( &command_status, message.data, sizeof(command_status) );
+    ok( command_status == STATUS_INFO_LENGTH_MISMATCH,
+        "short create-logon-session status is %#lx\n", command_status );
+
+    memset( &message, 0, sizeof(message) );
+    command = RM_COMMAND_UPDATE_GLOBAL_SACL;
+    message.header.DataLength = sizeof(command);
+    message.header.TotalLength = sizeof(message.header) + message.header.DataLength;
+    memcpy( message.data, &command, sizeof(command) );
+    size = sizeof(message);
+    status = NtAlpcSendWaitReceivePort( context.port, ALPC_MSGFLG_SYNC_REQUEST,
+                                        &message.header, NULL, &message.header, &size, NULL, NULL );
+    ok( !status, "global-SACL command request returned %#lx\n", status );
+    ok( message.header.DataLength == sizeof(command_status), "global-SACL reply has %u data bytes\n",
+        message.header.DataLength );
+    memcpy( &command_status, message.data, sizeof(command_status) );
+    ok( command_status == STATUS_OBJECT_NAME_NOT_FOUND, "global-SACL command status is %#lx\n",
+        command_status );
+
+    memset( &message, 0, sizeof(message) );
+    command = ~0u;
+    message.header.DataLength = sizeof(command);
+    message.header.TotalLength = sizeof(message.header) + message.header.DataLength;
+    memcpy( message.data, &command, sizeof(command) );
+    size = sizeof(message);
+    status = NtAlpcSendWaitReceivePort( context.port, ALPC_MSGFLG_SYNC_REQUEST,
+                                        &message.header, NULL, &message.header, &size, NULL, NULL );
+    ok( !status, "unknown command request returned %#lx\n", status );
+    ok( message.header.DataLength == sizeof(command_status), "unknown reply has %u data bytes\n",
+        message.header.DataLength );
+    memcpy( &command_status, message.data, sizeof(command_status) );
+    ok( command_status == STATUS_NOT_IMPLEMENTED, "unknown command status is %#lx\n",
+        command_status );
 
     NtClose( context.port );
     NtClose( reverse_port );

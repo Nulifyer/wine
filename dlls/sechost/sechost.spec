@@ -109,6 +109,7 @@
 @ stub I_ScPnPGetServiceName
 @ stub I_ScQueryServiceConfig
 @ stdcall I_ScRegisterDeviceNotification(ptr ptr long)
+@ stdcall __wine_I_ScRegisterDeviceNotification(ptr ptr ptr)
 @ stub I_ScRegisterPreshutdownRestart
 @ stub I_ScReparseServiceDatabase
 @ stub I_ScRpcBindA

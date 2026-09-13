@@ -19,8 +19,10 @@
 #include <stdarg.h>
 #include <stdlib.h>
 
+#include "ntstatus.h"
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "rpc.h"
 #include "sspi.h"
 #include "wincred.h"
@@ -28,6 +30,407 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(sspicli);
+
+static void *query_token_info( HANDLE token, TOKEN_INFORMATION_CLASS class )
+{
+    void *buffer;
+    ULONG size = 0;
+    NTSTATUS status;
+
+    status = NtQueryInformationToken( token, class, NULL, 0, &size );
+    if (status != STATUS_BUFFER_TOO_SMALL)
+    {
+        SetLastError( RtlNtStatusToDosError( status ));
+        return NULL;
+    }
+    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, size )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return NULL;
+    }
+    if ((status = NtQueryInformationToken( token, class, buffer, size, &size )))
+    {
+        HeapFree( GetProcessHeap(), 0, buffer );
+        SetLastError( RtlNtStatusToDosError( status ));
+        return NULL;
+    }
+    return buffer;
+}
+
+static NTSTATUS create_supported_well_known_sid( WELL_KNOWN_SID_TYPE type, SID *sid )
+{
+    static const SID_IDENTIFIER_AUTHORITY world_authority = { SECURITY_WORLD_SID_AUTHORITY };
+    static const SID_IDENTIFIER_AUTHORITY local_authority = { SECURITY_LOCAL_SID_AUTHORITY };
+    static const SID_IDENTIFIER_AUTHORITY nt_authority = { SECURITY_NT_AUTHORITY };
+    const SID_IDENTIFIER_AUTHORITY *authority;
+    DWORD subauthorities[2];
+    BYTE count;
+    NTSTATUS status;
+
+    switch (type)
+    {
+    case WinWorldSid:
+        authority = &world_authority;
+        count = 1;
+        subauthorities[0] = SECURITY_WORLD_RID;
+        break;
+    case WinLocalSid:
+        authority = &local_authority;
+        count = 1;
+        subauthorities[0] = SECURITY_LOCAL_RID;
+        break;
+    case WinNetworkSid:
+        authority = &nt_authority;
+        count = 1;
+        subauthorities[0] = SECURITY_NETWORK_RID;
+        break;
+    case WinServiceSid:
+        authority = &nt_authority;
+        count = 1;
+        subauthorities[0] = SECURITY_SERVICE_RID;
+        break;
+    case WinAuthenticatedUserSid:
+        authority = &nt_authority;
+        count = 1;
+        subauthorities[0] = SECURITY_AUTHENTICATED_USER_RID;
+        break;
+    case WinLocalServiceSid:
+        authority = &nt_authority;
+        count = 1;
+        subauthorities[0] = SECURITY_LOCAL_SERVICE_RID;
+        break;
+    case WinNetworkServiceSid:
+        authority = &nt_authority;
+        count = 1;
+        subauthorities[0] = SECURITY_NETWORK_SERVICE_RID;
+        break;
+    case WinBuiltinUsersSid:
+        authority = &nt_authority;
+        count = 2;
+        subauthorities[0] = SECURITY_BUILTIN_DOMAIN_RID;
+        subauthorities[1] = DOMAIN_ALIAS_RID_USERS;
+        break;
+    default:
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    status = RtlInitializeSid( sid, (SID_IDENTIFIER_AUTHORITY *)authority, count );
+    if (status) return status;
+    while (count--) *RtlSubAuthoritySid( sid, count ) = subauthorities[count];
+    return STATUS_SUCCESS;
+}
+
+static BOOL clone_system_token_with_groups( HANDLE source_token, const TOKEN_GROUPS *extra_groups,
+                                            HANDLE *token )
+{
+    TOKEN_DEFAULT_DACL *default_dacl = NULL;
+    TOKEN_PRIMARY_GROUP *primary_group = NULL;
+    TOKEN_PRIVILEGES *privileges = NULL;
+    TOKEN_STATISTICS *statistics = NULL;
+    TOKEN_GROUPS *source_groups = NULL, *combined_groups = NULL;
+    TOKEN_OWNER *owner = NULL;
+    TOKEN_SOURCE source = {{0}};
+    TOKEN_USER *user = NULL;
+    OBJECT_ATTRIBUTES attributes;
+    ULONG extra_count = extra_groups ? extra_groups->GroupCount : 0;
+    ULONG source_count, count, i;
+    SIZE_T size;
+    NTSTATUS status;
+    BOOL ret = FALSE;
+
+    *token = NULL;
+    if (!(default_dacl = query_token_info( source_token, TokenDefaultDacl )) ||
+        !(primary_group = query_token_info( source_token, TokenPrimaryGroup )) ||
+        !(privileges = query_token_info( source_token, TokenPrivileges )) ||
+        !(statistics = query_token_info( source_token, TokenStatistics )) ||
+        !(source_groups = query_token_info( source_token, TokenGroups )) ||
+        !(owner = query_token_info( source_token, TokenOwner )) ||
+        !(user = query_token_info( source_token, TokenUser )))
+        goto done;
+
+    source_count = source_groups->GroupCount;
+    if (extra_count > MAXDWORD - source_count)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        goto done;
+    }
+    count = source_count + extra_count;
+    if (count > (MAXDWORD - FIELD_OFFSET( TOKEN_GROUPS, Groups )) / sizeof(*combined_groups->Groups))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        goto done;
+    }
+    size = FIELD_OFFSET( TOKEN_GROUPS, Groups ) + count * sizeof(*combined_groups->Groups);
+    if (!(combined_groups = HeapAlloc( GetProcessHeap(), 0, size )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        goto done;
+    }
+    combined_groups->GroupCount = count;
+    for (i = 0; i < source_count; ++i) combined_groups->Groups[i] = source_groups->Groups[i];
+    for (i = 0; i < extra_count; ++i)
+        combined_groups->Groups[source_count + i] = extra_groups->Groups[i];
+
+    memcpy( source.SourceName, "SspiCli", sizeof("SspiCli") - 1 );
+    NtAllocateLocallyUniqueId( &source.SourceIdentifier );
+    InitializeObjectAttributes( &attributes, NULL, 0, NULL, NULL );
+    status = NtCreateToken( token, MAXIMUM_ALLOWED, &attributes, TokenPrimary,
+                            &statistics->AuthenticationId, &statistics->ExpirationTime,
+                            user, combined_groups, privileges, owner, primary_group,
+                            default_dacl, &source );
+    if (status)
+        SetLastError( RtlNtStatusToDosError( status ));
+    else
+        ret = TRUE;
+
+done:
+    HeapFree( GetProcessHeap(), 0, user );
+    HeapFree( GetProcessHeap(), 0, owner );
+    HeapFree( GetProcessHeap(), 0, combined_groups );
+    HeapFree( GetProcessHeap(), 0, source_groups );
+    HeapFree( GetProcessHeap(), 0, statistics );
+    HeapFree( GetProcessHeap(), 0, privileges );
+    HeapFree( GetProcessHeap(), 0, primary_group );
+    HeapFree( GetProcessHeap(), 0, default_dacl );
+    return ret;
+}
+
+static BOOL create_service_token( WELL_KNOWN_SID_TYPE user_type, DWORD authentication_id,
+                                  const TOKEN_GROUPS *extra_groups, HANDLE *token )
+{
+    static const WELL_KNOWN_SID_TYPE group_types[] =
+    {
+        WinWorldSid,
+        WinLocalSid,
+        WinAuthenticatedUserSid,
+        WinBuiltinUsersSid,
+        WinServiceSid,
+        WinNetworkSid,
+    };
+    union sid_buffer
+    {
+        SID sid;
+        BYTE bytes[SECURITY_MAX_SID_SIZE];
+    } user_buffer, group_buffers[ARRAY_SIZE(group_types)];
+    struct token_privileges
+    {
+        DWORD PrivilegeCount;
+        LUID_AND_ATTRIBUTES Privileges[4];
+    } privileges;
+    TOKEN_DEFAULT_DACL default_dacl = {NULL};
+    TOKEN_PRIMARY_GROUP primary_group;
+    TOKEN_GROUPS *combined_groups = NULL;
+    TOKEN_OWNER owner;
+    TOKEN_SOURCE source = {{0}};
+    TOKEN_USER user;
+    OBJECT_ATTRIBUTES attributes;
+    LARGE_INTEGER expiration;
+    LUID auth_id = {authentication_id, 0};
+    ULONG base_count = user_type == WinNetworkServiceSid ? ARRAY_SIZE(group_types) :
+                                                          ARRAY_SIZE(group_types) - 1;
+    ULONG extra_count = extra_groups ? extra_groups->GroupCount : 0;
+    ULONG count, i, size;
+    NTSTATUS status;
+
+    *token = NULL;
+    if (extra_count > MAXDWORD - base_count ||
+        base_count + extra_count >
+        (MAXDWORD - FIELD_OFFSET( TOKEN_GROUPS, Groups )) / sizeof(*combined_groups->Groups))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    status = create_supported_well_known_sid( user_type, &user_buffer.sid );
+    if (status)
+    {
+        SetLastError( RtlNtStatusToDosError( status ));
+        return FALSE;
+    }
+    count = base_count + extra_count;
+    size = FIELD_OFFSET( TOKEN_GROUPS, Groups ) + count * sizeof(*combined_groups->Groups);
+    if (!(combined_groups = HeapAlloc( GetProcessHeap(), 0, size )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return FALSE;
+    }
+    combined_groups->GroupCount = count;
+    for (i = 0; i < base_count; ++i)
+    {
+        status = create_supported_well_known_sid( group_types[i], &group_buffers[i].sid );
+        if (status)
+        {
+            SetLastError( RtlNtStatusToDosError( status ));
+            goto done;
+        }
+        combined_groups->Groups[i].Sid = &group_buffers[i].sid;
+        combined_groups->Groups[i].Attributes = SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT |
+                                                SE_GROUP_ENABLED;
+    }
+    for (i = 0; i < extra_count; ++i)
+        combined_groups->Groups[base_count + i] = extra_groups->Groups[i];
+
+    privileges.PrivilegeCount = ARRAY_SIZE(privileges.Privileges);
+    privileges.Privileges[0].Luid.LowPart = SE_CHANGE_NOTIFY_PRIVILEGE;
+    privileges.Privileges[0].Luid.HighPart = 0;
+    privileges.Privileges[1].Luid.LowPart = SE_IMPERSONATE_PRIVILEGE;
+    privileges.Privileges[1].Luid.HighPart = 0;
+    privileges.Privileges[2].Luid.LowPart = SE_CREATE_GLOBAL_PRIVILEGE;
+    privileges.Privileges[2].Luid.HighPart = 0;
+    privileges.Privileges[3].Luid.LowPart = SE_AUDIT_PRIVILEGE;
+    privileges.Privileges[3].Luid.HighPart = 0;
+    for (i = 0; i < privileges.PrivilegeCount; ++i)
+        privileges.Privileges[i].Attributes = SE_PRIVILEGE_ENABLED;
+
+    user.User.Sid = &user_buffer.sid;
+    user.User.Attributes = 0;
+    owner.Owner = &user_buffer.sid;
+    primary_group.PrimaryGroup = &group_buffers[3].sid; /* BUILTIN\\Users */
+    memcpy( source.SourceName, "SspiCli", sizeof("SspiCli") - 1 );
+    NtAllocateLocallyUniqueId( &source.SourceIdentifier );
+    expiration.QuadPart = 0x7fffffffffffffff;
+    InitializeObjectAttributes( &attributes, NULL, 0, NULL, NULL );
+    status = NtCreateToken( token, MAXIMUM_ALLOWED, &attributes, TokenPrimary, &auth_id,
+                            &expiration, &user, combined_groups,
+                            (TOKEN_PRIVILEGES *)&privileges, &owner, &primary_group,
+                            &default_dacl, &source );
+    if (status)
+    {
+        SetLastError( RtlNtStatusToDosError( status ));
+        goto done;
+    }
+
+    TRACE( "created service token %p for SID type %u, authentication id %#lx:%#lx\n",
+           *token, user_type, auth_id.HighPart, auth_id.LowPart );
+
+    HeapFree( GetProcessHeap(), 0, combined_groups );
+    return TRUE;
+
+done:
+    HeapFree( GetProcessHeap(), 0, combined_groups );
+    return FALSE;
+}
+
+static BOOL copy_logon_sid( HANDLE token, const TOKEN_GROUPS *groups, SID **logon_sid )
+{
+    TOKEN_USER *user = NULL;
+    const SID *sid = NULL;
+    DWORD i, size;
+    NTSTATUS status;
+    BOOL ret = FALSE;
+
+    if (!logon_sid) return TRUE;
+    *logon_sid = NULL;
+
+    if (groups)
+    {
+        for (i = 0; i < groups->GroupCount; ++i)
+        {
+            if ((groups->Groups[i].Attributes & SE_GROUP_LOGON_ID) == SE_GROUP_LOGON_ID)
+            {
+                sid = groups->Groups[i].Sid;
+                break;
+            }
+        }
+    }
+
+    if (!sid)
+    {
+        if (!(user = query_token_info( token, TokenUser ))) goto done;
+        sid = user->User.Sid;
+    }
+
+    if (!RtlValidSid( (SID *)sid ))
+    {
+        SetLastError( ERROR_INVALID_SID );
+        goto done;
+    }
+    size = RtlLengthSid( (SID *)sid );
+    if (!(*logon_sid = LocalAlloc( LMEM_FIXED, size ))) goto done;
+    if ((status = RtlCopySid( size, *logon_sid, (SID *)sid )))
+    {
+        LocalFree( *logon_sid );
+        *logon_sid = NULL;
+        SetLastError( RtlNtStatusToDosError( status ));
+        goto done;
+    }
+    ret = TRUE;
+
+done:
+    HeapFree( GetProcessHeap(), 0, user );
+    return ret;
+}
+
+/***********************************************************************
+ *              LogonUserExExW (SSPICLI.@)
+ *
+ * Native services.exe uses this entry point to obtain the primary token
+ * for service hosts. Construct the supported service identities directly on
+ * the Wine token boundary instead of entering the native LSA/ALPC path.
+ */
+BOOL WINAPI LogonUserExExW( const WCHAR *username, const WCHAR *domain, const WCHAR *password,
+                            DWORD logon_type, DWORD provider, TOKEN_GROUPS *groups,
+                            HANDLE *token, SID **logon_sid, void **profile_buffer,
+                            DWORD *profile_length, QUOTA_LIMITS *quota_limits )
+{
+    HANDLE process_token, result_token;
+    NTSTATUS status;
+    BOOL ret;
+
+    FIXME( "username %s, domain %s, password %p, type %lu, provider %lu, groups %p, "
+           "token %p, logon sid %p, profile %p, profile length %p, quotas %p semi-stub\n",
+           debugstr_w(username), debugstr_w(domain), password, logon_type, provider, groups,
+           token, logon_sid, profile_buffer, profile_length, quota_limits );
+
+    if (token) *token = NULL;
+    if (logon_sid) *logon_sid = NULL;
+    if (profile_buffer) *profile_buffer = NULL;
+    if (profile_length) *profile_length = 0;
+    if (quota_limits) memset( quota_limits, 0, sizeof(*quota_limits) );
+
+    if (!username)
+    {
+        SetLastError( ERROR_LOGON_FAILURE );
+        return FALSE;
+    }
+
+    if (!lstrcmpiW( username, L"LocalSystem" ) || !lstrcmpiW( username, L"SYSTEM" ))
+    {
+        status = NtOpenProcessToken( GetCurrentProcess(), TOKEN_QUERY, &process_token );
+        if (status)
+        {
+            SetLastError( RtlNtStatusToDosError( status ));
+            return FALSE;
+        }
+        ret = clone_system_token_with_groups( process_token, groups, &result_token );
+        NtClose( process_token );
+    }
+    else if (!lstrcmpiW( username, L"LocalService" ))
+        ret = create_service_token( WinLocalServiceSid, 0x3e5, groups, &result_token );
+    else if (!lstrcmpiW( username, L"NetworkService" ))
+        ret = create_service_token( WinNetworkServiceSid, 0x3e4, groups, &result_token );
+    else
+    {
+        SetLastError( ERROR_LOGON_FAILURE );
+        return FALSE;
+    }
+    if (!ret)
+    {
+        TRACE( "service-token creation for %s failed with error %lu\n",
+               debugstr_w(username), GetLastError() );
+        return FALSE;
+    }
+
+    if (!copy_logon_sid( result_token, groups, logon_sid ))
+    {
+        NtClose( result_token );
+        return FALSE;
+    }
+
+    if (token) *token = result_token;
+    else NtClose( result_token );
+    return TRUE;
+}
 
 struct auth_identity_marshalled
 {

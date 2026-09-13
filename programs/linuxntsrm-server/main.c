@@ -20,6 +20,9 @@
 #define LSA_CONNECT_RETRY_COUNT 2400
 #define LSA_CONNECT_RETRY_100NS 500000
 #define POLICY_INIT_TIMEOUT_SECONDS 120
+#define RM_COMMAND_SET_AUDIT_POLICY 1
+#define RM_COMMAND_CREATE_LOGON_SESSION 2
+#define RM_COMMAND_UPDATE_GLOBAL_SACL 5
 
 struct srm_message
 {
@@ -122,6 +125,35 @@ static NTSTATUS receive_message( HANDLE port, struct srm_message *message, SIZE_
     }
 }
 
+static NTSTATUS dispatch_lsa_command( const struct srm_message *request )
+{
+    ULONG command = *(const ULONG *)request->data;
+
+    switch (command)
+    {
+    case RM_COMMAND_SET_AUDIT_POLICY:
+        /* The LinuxNT SRM does not yet emit kernel audit events, but it owns
+         * this policy boundary.  Accept the policy already retained by LSAADT
+         * so genuine LSASS can complete its user-mode policy initialization. */
+        return STATUS_SUCCESS;
+    case RM_COMMAND_CREATE_LOGON_SESSION:
+        /* LSASS uses an eight-byte command envelope followed by the payload. */
+        if (request->header.DataLength != 2 * sizeof(command) + sizeof(LUID))
+            return STATUS_INFO_LENGTH_MISMATCH;
+        /* Genuine LSASRV has already created and indexed its user-mode logon record
+         * before asking the kernel SRM to register the LUID. Wine's token server owns
+         * the host-side token state, so acknowledge that kernel boundary without
+         * duplicating LSASRV's session database. */
+        return STATUS_SUCCESS;
+    case RM_COMMAND_UPDATE_GLOBAL_SACL:
+        /* No kernel global SACL exists yet.  LSAADT treats this status as a
+         * successful removal while retaining responsibility for policy data. */
+        return STATUS_OBJECT_NAME_NOT_FOUND;
+    default:
+        return STATUS_NOT_IMPLEMENTED;
+    }
+}
+
 static NTSTATUS serve_lsa_commands( HANDLE command_port )
 {
     struct srm_message request;
@@ -137,10 +169,10 @@ static NTSTATUS serve_lsa_commands( HANDLE command_port )
             request.header.DataLength < sizeof(ULONG))
             continue;
 
-        /* Each command is enabled only after its Windows contract is mapped.
-         * Returning an explicit status preserves the genuine LSA caller's
-         * error path while the lower LinuxNT implementation is filled in. */
-        status = send_status_reply( command_port, &request.header, STATUS_NOT_IMPLEMENTED );
+        /* Each command is enabled only after its reached Windows contract is
+         * mapped.  Unknown commands preserve the genuine LSA error path. */
+        status = send_status_reply( command_port, &request.header,
+                                    dispatch_lsa_command( &request ) );
         if (status) return status;
     }
 }

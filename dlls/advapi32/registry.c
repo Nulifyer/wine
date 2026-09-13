@@ -199,109 +199,6 @@ LSTATUS WINAPI RegEnumKeyA( HKEY hkey, DWORD index, LPSTR name, DWORD name_len )
 
 
 /******************************************************************************
- * RegQueryMultipleValuesA   [ADVAPI32.@]
- *
- * Retrieves the type and data for a list of value names associated with a key.
- *
- * PARAMS
- *  hKey       [I] Handle to an open key.
- *  val_list   [O] Array of VALENT structures that describes the entries.
- *  num_vals   [I] Number of elements in val_list.
- *  lpValueBuf [O] Pointer to a buffer that receives the data for each value.
- *  ldwTotsize [I/O] Size of lpValueBuf.
- *
- * RETURNS
- *  Success: ERROR_SUCCESS. ldwTotsize contains num bytes copied.
- *  Failure: nonzero error code from Winerror.h ldwTotsize contains num needed
- *           bytes.
- */
-LSTATUS WINAPI RegQueryMultipleValuesA( HKEY hkey, PVALENTA val_list, DWORD num_vals,
-                                        LPSTR lpValueBuf, LPDWORD ldwTotsize )
-{
-    unsigned int i;
-    DWORD maxBytes = *ldwTotsize;
-    LSTATUS status;
-    LPSTR bufptr = lpValueBuf;
-    *ldwTotsize = 0;
-
-    TRACE("(%p,%p,%ld,%p,%p=%ld)\n", hkey, val_list, num_vals, lpValueBuf, ldwTotsize, *ldwTotsize);
-
-    for(i=0; i < num_vals; ++i)
-    {
-
-        val_list[i].ve_valuelen=0;
-        status = RegQueryValueExA(hkey, val_list[i].ve_valuename, NULL, NULL, NULL, &val_list[i].ve_valuelen);
-        if(status != ERROR_SUCCESS)
-        {
-            return status;
-        }
-
-        if(lpValueBuf != NULL && *ldwTotsize + val_list[i].ve_valuelen <= maxBytes)
-        {
-            status = RegQueryValueExA(hkey, val_list[i].ve_valuename, NULL, &val_list[i].ve_type,
-                                      (LPBYTE)bufptr, &val_list[i].ve_valuelen);
-            if(status != ERROR_SUCCESS)
-            {
-                return status;
-            }
-
-            val_list[i].ve_valueptr = (DWORD_PTR)bufptr;
-
-            bufptr += val_list[i].ve_valuelen;
-        }
-
-        *ldwTotsize += val_list[i].ve_valuelen;
-    }
-    return lpValueBuf != NULL && *ldwTotsize <= maxBytes ? ERROR_SUCCESS : ERROR_MORE_DATA;
-}
-
-
-/******************************************************************************
- * RegQueryMultipleValuesW   [ADVAPI32.@]
- *
- * See RegQueryMultipleValuesA.
- */
-LSTATUS WINAPI RegQueryMultipleValuesW( HKEY hkey, PVALENTW val_list, DWORD num_vals,
-                                        LPWSTR lpValueBuf, LPDWORD ldwTotsize )
-{
-    unsigned int i;
-    DWORD maxBytes = *ldwTotsize;
-    LSTATUS status;
-    LPSTR bufptr = (LPSTR)lpValueBuf;
-    *ldwTotsize = 0;
-
-    TRACE("(%p,%p,%ld,%p,%p=%ld)\n", hkey, val_list, num_vals, lpValueBuf, ldwTotsize, *ldwTotsize);
-
-    for(i=0; i < num_vals; ++i)
-    {
-        val_list[i].ve_valuelen=0;
-        status = RegQueryValueExW(hkey, val_list[i].ve_valuename, NULL, NULL, NULL, &val_list[i].ve_valuelen);
-        if(status != ERROR_SUCCESS)
-        {
-            return status;
-        }
-
-        if(lpValueBuf != NULL && *ldwTotsize + val_list[i].ve_valuelen <= maxBytes)
-        {
-            status = RegQueryValueExW(hkey, val_list[i].ve_valuename, NULL, &val_list[i].ve_type,
-                                      (LPBYTE)bufptr, &val_list[i].ve_valuelen);
-            if(status != ERROR_SUCCESS)
-            {
-                return status;
-            }
-
-            val_list[i].ve_valueptr = (DWORD_PTR)bufptr;
-
-            bufptr += val_list[i].ve_valuelen;
-        }
-
-        *ldwTotsize += val_list[i].ve_valuelen;
-    }
-    return lpValueBuf != NULL && *ldwTotsize <= maxBytes ? ERROR_SUCCESS : ERROR_MORE_DATA;
-}
-
-
-/******************************************************************************
  * RegQueryReflectionKey   [ADVAPI32.@]
  */
 LONG WINAPI RegQueryReflectionKey( HKEY hkey, BOOL *is_reflection_disabled )
@@ -646,6 +543,17 @@ LSTATUS WINAPI RegConnectRegistryA( LPCSTR machine, HKEY hkey, PHKEY reskey )
 LSTATUS WINAPI RegDisablePredefinedCache(void)
 {
     return RtlNtStatusToDosError( DisablePredefinedHandleTableInternal( HKEY_CURRENT_USER ));
+}
+
+
+/******************************************************************************
+ * RegDisablePredefinedCacheEx [ADVAPI32.@]
+ *
+ * Disables caching for all predefined registry handles in the process.
+ */
+LSTATUS WINAPI RegDisablePredefinedCacheEx(void)
+{
+    return RtlNtStatusToDosError( DisablePredefinedHandleTableInternal( NULL ));
 }
 
 

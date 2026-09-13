@@ -132,6 +132,7 @@ WINADVAPI LSTATUS   WINAPI RegDeleteValueA(HKEY,LPCSTR);
 WINADVAPI LSTATUS   WINAPI RegDeleteValueW(HKEY,LPCWSTR);
 #define                    RegDeleteValue WINELIB_NAME_AW(RegDeleteValue)
 WINADVAPI LSTATUS   WINAPI RegDisablePredefinedCache(void);
+WINADVAPI LSTATUS   WINAPI RegDisablePredefinedCacheEx(void);
 WINADVAPI LSTATUS   WINAPI RegEnumKeyA(HKEY,DWORD,LPSTR,DWORD);
 WINADVAPI LSTATUS   WINAPI RegEnumKeyW(HKEY,DWORD,LPWSTR,DWORD);
 #define                    RegEnumKey WINELIB_NAME_AW(RegEnumKey)

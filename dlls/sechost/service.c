@@ -2206,6 +2206,20 @@ HDEVNOTIFY WINAPI I_ScRegisterDeviceNotification( HANDLE handle, DEV_BROADCAST_H
 }
 
 /******************************************************************************
+ *     __wine_I_ScRegisterDeviceNotification   (sechost.@)
+ *
+ * Wine's User32 and Sechost share a callback ABI here that is intentionally
+ * different from the Windows-private I_ScRegisterDeviceNotification ABI.
+ * Export a named probe so User32 can select that ABI without mistaking a
+ * native Sechost provider for its Wine peer.
+ */
+HDEVNOTIFY WINAPI __wine_I_ScRegisterDeviceNotification( HANDLE handle, DEV_BROADCAST_HDR *filter,
+                                                         device_notify_callback callback )
+{
+    return I_ScRegisterDeviceNotification( handle, filter, callback );
+}
+
+/******************************************************************************
  *     I_ScUnregisterDeviceNotification   (sechost.@)
  */
 BOOL WINAPI I_ScUnregisterDeviceNotification( HDEVNOTIFY handle )

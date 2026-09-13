@@ -4,7 +4,7 @@
 @ stdcall SystemFunction004(ptr ptr ptr)
 @ stdcall SystemFunction005(ptr ptr ptr)
 @ stub SystemFunction028
-@ stub SystemFunction029
+@ stdcall SystemFunction029(ptr ptr)
 @ stub SystemFunction034
 @ stdcall SystemFunction036(ptr long)
 @ stdcall SystemFunction040(ptr long long)

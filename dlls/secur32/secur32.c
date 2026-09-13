@@ -30,6 +30,7 @@
 #include "sspi.h"
 #include "secext.h"
 #include "ntsecapi.h"
+#include "rpcdce.h"
 #include "thunks.h"
 #include "lmcons.h"
 
@@ -92,6 +93,9 @@ static CRITICAL_SECTION_DEBUG cs_debug =
 static CRITICAL_SECTION cs = { &cs_debug, -1, 0, 0, 0, 0 };
 static SecurePackageTable *packageTable = NULL;
 static SecureProviderTable *providerTable = NULL;
+static INIT_ONCE provider_init_once = INIT_ONCE_STATIC_INIT;
+static DWORD provider_init_thread;
+static BOOL providers_initialized;
 
 static SecurityFunctionTableA securityFunctionTableA = {
     SECURITY_SUPPORT_PROVIDER_INTERFACE_VERSION,
@@ -418,10 +422,16 @@ void SECUR32_addPackages(SecureProvider *provider, ULONG toAdd,
 
         if (!(package = malloc(sizeof(*package)))) continue;
 
-        list_add_tail(&packageTable->table, &package->entry);
-
         package->provider = provider;
         _copyPackageInfo(&package->infoW, infoA ? &infoA[i] : NULL, infoW ? &infoW[i] : NULL);
+
+        /* Windows exposes Negotiate before the connection-oriented packages
+         * supplied by Schannel.  RPCSS depends on that ordering while it
+         * constructs the initial client authentication service array. */
+        if (package->infoW.wRPCID == RPC_C_AUTHN_GSS_NEGOTIATE)
+            list_add_head(&packageTable->table, &package->entry);
+        else
+            list_add_tail(&packageTable->table, &package->entry);
     }
     packageTable->numPackages += toAdd;
 
@@ -490,12 +500,13 @@ static void _tryLoadProvider(PWSTR moduleName)
         WARN("failed to load %s\n", debugstr_w(moduleName));
 }
 
-static void SECUR32_initializeProviders(void)
+static BOOL CALLBACK SECUR32_initializeProviders_once(INIT_ONCE *once, void *param, void **context)
 {
     HKEY key;
     LSTATUS apiRet;
 
     TRACE("\n");
+    InterlockedExchange( (LONG *)&provider_init_thread, GetCurrentThreadId() );
     /* First load built-in providers */
     SECUR32_initSchannelSP();
     /* Load SSP/AP packages (Kerberos and others) */
@@ -533,6 +544,20 @@ static void SECUR32_initializeProviders(void)
         }
         RegCloseKey(key);
     }
+    providers_initialized = TRUE;
+    InterlockedExchange( (LONG *)&provider_init_thread, 0 );
+    return TRUE;
+}
+
+static void SECUR32_initializeProviders(void)
+{
+    /* A provider may query an already registered package while its own package
+     * table is being enumerated. Avoid recursively entering InitOnce on the
+     * initializer thread; built-in packages are installed before registry
+     * providers are loaded. Other threads must still wait for initialization. */
+    if (InterlockedCompareExchange( (LONG *)&provider_init_thread, 0, 0 ) == GetCurrentThreadId())
+        return;
+    InitOnceExecuteOnce(&provider_init_once, SECUR32_initializeProviders_once, NULL, NULL);
 }
 
 SecurePackage *SECUR32_findPackageW(PCWSTR packageName)
@@ -540,6 +565,7 @@ SecurePackage *SECUR32_findPackageW(PCWSTR packageName)
     SecurePackage *ret = NULL;
     BOOL matched = FALSE;
 
+    SECUR32_initializeProviders();
     if (packageTable && packageName)
     {
         LIST_FOR_EACH_ENTRY(ret, &packageTable->table, SecurePackage, entry)
@@ -585,6 +611,7 @@ SecurePackage *SECUR32_findPackageA(PCSTR packageName)
 {
     SecurePackage *ret;
 
+    SECUR32_initializeProviders();
     if (packageTable && packageName)
     {
         UNICODE_STRING package;
@@ -661,6 +688,7 @@ SECURITY_STATUS WINAPI EnumerateSecurityPackagesW(PULONG pcPackages,
 
     /* windows just crashes if pcPackages or ppPackageInfo is NULL, so will I */
     *pcPackages = 0;
+    SECUR32_initializeProviders();
     EnterCriticalSection(&cs);
     if (packageTable)
     {
@@ -1203,11 +1231,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hinstDLL);
-        SECUR32_initializeProviders();
         break;
     case DLL_PROCESS_DETACH:
         if (reserved) break;
-        SECUR32_freeProviders();
+        if (providers_initialized) SECUR32_freeProviders();
     }
 
     return TRUE;

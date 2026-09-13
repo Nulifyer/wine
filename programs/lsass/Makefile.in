@@ -1,10 +1,12 @@
 MODULE    = lsass.exe
 IMPORTS   = advapi32 rpcrt4
 
-EXTRADLLFLAGS = -mconsole -municode
+EXTRADLLFLAGS = -mwindows -municode
 
 SOURCES = \
 	lsass.c \
 	lsass.idl \
+	lsapolicylookup.idl \
 	main.c \
-	negotiate.c
+	negotiate.c \
+	policy_lookup.c

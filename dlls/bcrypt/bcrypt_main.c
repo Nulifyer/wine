@@ -80,6 +80,7 @@ enum alg_id
     ALG_ID_RC4,
 
     /* hash */
+    ALG_ID_AES_CMAC,
     ALG_ID_SHA256,
     ALG_ID_SHA384,
     ALG_ID_SHA512,
@@ -131,6 +132,8 @@ struct hash
     SYMCRYPT_HASH_STATE        state;
     SYMCRYPT_HMAC_EXPANDED_KEY hmac;
     SYMCRYPT_HMAC_STATE        hmac_state;
+    SYMCRYPT_AES_CMAC_EXPANDED_KEY aes_cmac;
+    SYMCRYPT_AES_CMAC_STATE        aes_cmac_state;
 };
 
 enum chain_mode
@@ -168,6 +171,11 @@ struct aes_key
     SYMCRYPT_AES_EXPANDED_KEY handle;
 };
 
+struct des3_key
+{
+    SYMCRYPT_3DES_EXPANDED_KEY handle;
+};
+
 struct gcm_key
 {
     SYMCRYPT_GCM_EXPANDED_KEY handle;
@@ -196,6 +204,7 @@ struct symmetric_key
     union
     {
         struct aes_key  aes;
+        struct des3_key des3;
         struct gcm_key  gcm;
         struct hkdf_key hkdf;
     };
@@ -385,6 +394,7 @@ builtin_algorithms[] =
     { BCRYPT_AES_ALGORITHM,        BCRYPT_CIPHER_INTERFACE,              654,    0,    0 },
     { BCRYPT_AES_GMAC_ALGORITHM,   BCRYPT_CIPHER_INTERFACE,              654,    0,    0, 0, CHAIN_MODE_GCM },
     { BCRYPT_RC4_ALGORITHM,        BCRYPT_CIPHER_INTERFACE,              654,    0,    0 },
+    { BCRYPT_AES_CMAC_ALGORITHM,   BCRYPT_HASH_INTERFACE,                654,   16,   16 },
     { BCRYPT_SHA256_ALGORITHM,     BCRYPT_HASH_INTERFACE,                286,   32,   64 },
     { BCRYPT_SHA384_ALGORITHM,     BCRYPT_HASH_INTERFACE,                382,   48,  128 },
     { BCRYPT_SHA512_ALGORITHM,     BCRYPT_HASH_INTERFACE,                382,   64,  128 },
@@ -495,7 +505,7 @@ static const struct algorithm pseudo_algorithms[] =
     {{ MAGIC_ALG }, ALG_ID_SHA512, 0, BCRYPT_ALG_HANDLE_HMAC_FLAG },
     {{ MAGIC_ALG }, ALG_ID_RSA },
     {{ MAGIC_ALG }, ALG_ID_ECDSA },
-    {{ 0 }}, /* AES_CMAC */
+    {{ MAGIC_ALG }, ALG_ID_AES_CMAC },
     {{ MAGIC_ALG }, ALG_ID_AES_GMAC, CHAIN_MODE_GCM },
     {{ MAGIC_ALG }, ALG_ID_MD2, 0, BCRYPT_ALG_HANDLE_HMAC_FLAG },
     {{ MAGIC_ALG }, ALG_ID_MD4, 0, BCRYPT_ALG_HANDLE_HMAC_FLAG },
@@ -1376,7 +1386,9 @@ NTSTATUS WINAPI BCryptGetProperty( BCRYPT_HANDLE handle, const WCHAR *prop, UCHA
 
 static void prepare_hash( struct hash *hash )
 {
-    if (hash->flags & HASH_FLAG_HMAC)
+    if (hash->alg_id == ALG_ID_AES_CMAC)
+        SymCryptAesCmacInit( &hash->aes_cmac_state, &hash->aes_cmac );
+    else if (hash->flags & HASH_FLAG_HMAC)
     {
         SymCryptHmacExpandKey( hash->desc, &hash->hmac, hash->secret, hash->secret_len );
         SymCryptHmacInit( &hash->hmac_state, &hash->hmac );
@@ -1405,11 +1417,17 @@ static NTSTATUS create_hash( const struct algorithm *alg, UCHAR *secret, ULONG s
                              struct hash **ret_hash )
 {
     struct hash *hash;
-    const SYMCRYPT_HASH *desc = get_hash_from_alg( alg->id );
+    const SYMCRYPT_HASH *desc = NULL;
 
-    if (secret && !(alg->flags & BCRYPT_ALG_HANDLE_HMAC_FLAG)) return STATUS_INVALID_PARAMETER;
+    if (alg->id != ALG_ID_AES_CMAC) desc = get_hash_from_alg( alg->id );
+    if (alg->id == ALG_ID_AES_CMAC)
+    {
+        if (!secret || (secret_len != 16 && secret_len != 24 && secret_len != 32))
+            return STATUS_INVALID_PARAMETER;
+    }
+    else if (secret && !(alg->flags & BCRYPT_ALG_HANDLE_HMAC_FLAG)) return STATUS_INVALID_PARAMETER;
 
-    if (!desc) return STATUS_NOT_IMPLEMENTED;
+    if (alg->id != ALG_ID_AES_CMAC && !desc) return STATUS_NOT_IMPLEMENTED;
     if (!(hash = calloc( 1, sizeof(*hash) ))) return STATUS_NO_MEMORY;
     hash->hdr.magic = MAGIC_HASH;
     hash->alg_id    = alg->id;
@@ -1426,6 +1444,14 @@ static NTSTATUS create_hash( const struct algorithm *alg, UCHAR *secret, ULONG s
     }
     memcpy( hash->secret, secret, secret_len );
     hash->secret_len = secret_len;
+
+    if (alg->id == ALG_ID_AES_CMAC &&
+        SymCryptAesCmacExpandKey( &hash->aes_cmac, hash->secret, hash->secret_len ))
+    {
+        free( hash->secret );
+        free( hash );
+        return STATUS_INVALID_PARAMETER;
+    }
 
     prepare_hash( hash );
     *ret_hash = hash;
@@ -1479,7 +1505,13 @@ NTSTATUS WINAPI BCryptDuplicateHash( BCRYPT_HASH_HANDLE handle, BCRYPT_HASH_HAND
     }
     memcpy( hash_copy->secret, hash_orig->secret, hash_orig->secret_len );
 
-    if (hash_orig->flags & HASH_FLAG_HMAC)
+    if (hash_orig->alg_id == ALG_ID_AES_CMAC)
+    {
+        SymCryptAesCmacKeyCopy( &hash_orig->aes_cmac, &hash_copy->aes_cmac );
+        SymCryptAesCmacStateCopy( &hash_orig->aes_cmac_state, &hash_copy->aes_cmac,
+                                  &hash_copy->aes_cmac_state );
+    }
+    else if (hash_orig->flags & HASH_FLAG_HMAC)
     {
         SymCryptHmacKeyCopy( &hash_orig->hmac, &hash_copy->hmac );
         SymCryptHmacStateCopy( &hash_orig->hmac_state, &hash_orig->hmac, &hash_copy->hmac_state );
@@ -1513,7 +1545,9 @@ NTSTATUS WINAPI BCryptDestroyHash( BCRYPT_HASH_HANDLE handle )
 
 static void hash_data( struct hash *hash, UCHAR *input, ULONG size )
 {
-    if (hash->flags & HASH_FLAG_HMAC)
+    if (hash->alg_id == ALG_ID_AES_CMAC)
+        SymCryptAesCmacAppend( &hash->aes_cmac_state, input, size );
+    else if (hash->flags & HASH_FLAG_HMAC)
         SymCryptHmacAppend( &hash->hmac_state, input, size );
     else
         SymCryptHashAppend( hash->desc, &hash->state, input, size );
@@ -1533,7 +1567,9 @@ NTSTATUS WINAPI BCryptHashData( BCRYPT_HASH_HANDLE handle, UCHAR *input, ULONG s
 
 static void finish_hash( struct hash *hash, UCHAR *output )
 {
-    if (hash->flags & HASH_FLAG_HMAC)
+    if (hash->alg_id == ALG_ID_AES_CMAC)
+        SymCryptAesCmacResult( &hash->aes_cmac_state, output );
+    else if (hash->flags & HASH_FLAG_HMAC)
         SymCryptHmacResult( &hash->hmac_state, output );
     else
         SymCryptHashResult( hash->desc, &hash->state, output, hash->len );
@@ -1562,7 +1598,9 @@ static NTSTATUS hash_single( const struct algorithm *alg, UCHAR *secret, ULONG s
 
     if ((status = create_hash( alg, secret, secret_len, 0, &hash ))) return status;
 
-    if (hash->flags & HASH_FLAG_HMAC)
+    if (hash->alg_id == ALG_ID_AES_CMAC)
+        SymCryptAesCmac( &hash->aes_cmac, input, input_len, output );
+    else if (hash->flags & HASH_FLAG_HMAC)
         SymCryptHmac( &hash->hmac, input, input_len, output );
     else
         SymCryptHash( hash->desc, input, input_len, output, hash->len );
@@ -1661,6 +1699,23 @@ static NTSTATUS alloc_aes_key( struct key *key, enum chain_mode mode, ULONG bloc
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS alloc_3des_key( struct key *key, enum chain_mode mode, const UCHAR *secret, ULONG secret_len )
+{
+    key->s.mode       = mode;
+    key->s.block_size = BLOCK_LENGTH_3DES;
+
+    if (!(key->s.secret = malloc( secret_len ))) return STATUS_NO_MEMORY;
+    memcpy( key->s.secret, secret, secret_len );
+    key->s.secret_len = secret_len;
+
+    InitializeCriticalSection( &key->s.cs );
+
+    if (mode != CHAIN_MODE_CBC) return STATUS_NOT_SUPPORTED;
+    if (SymCrypt3DesExpandKey( &key->s.des3.handle, secret, secret_len )) return STATUS_INVALID_PARAMETER;
+
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS alloc_key( enum alg_id alg_id, ULONG flags, struct key **ret_key )
 {
     struct key *key;
@@ -1715,6 +1770,19 @@ static NTSTATUS generate_symmetric_key( const struct algorithm *alg, const UCHAR
 
     switch (alg->id)
     {
+    case ALG_ID_3DES:
+        if (secret_len != key_lengths.dwMinLength / 8)
+        {
+            _aligned_free( key );
+            return STATUS_INVALID_PARAMETER;
+        }
+        if ((status = alloc_3des_key( key, alg->chain_mode, secret, secret_len )))
+        {
+            destroy_key( key );
+            return status;
+        }
+        break;
+
     case ALG_ID_AES:
     case ALG_ID_AES_GMAC:
         if ((status = validate_len_aes( &key_lengths, secret_len, &secret_len )) ||
@@ -1772,8 +1840,9 @@ NTSTATUS WINAPI BCryptGenerateSymmetricKey( BCRYPT_ALG_HANDLE handle, BCRYPT_KEY
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS decrypt_aes_ecb( const struct key *key, const UCHAR *input, ULONG input_len, UCHAR *output,
-                                 ULONG output_len, ULONG *ret_len, ULONG flags )
+static NTSTATUS decrypt_block_ecb( const struct key *key, PCSYMCRYPT_BLOCKCIPHER cipher, const void *expanded_key,
+                                   const UCHAR *input, ULONG input_len, UCHAR *output, ULONG output_len,
+                                   ULONG *ret_len, ULONG flags )
 {
     ULONG offset = input_len, block_size = key->s.block_size;
     UCHAR buf[BLOCK_LENGTH_AES];
@@ -1789,11 +1858,11 @@ static NTSTATUS decrypt_aes_ecb( const struct key *key, const UCHAR *input, ULON
     }
     else if (output_len < *ret_len) return STATUS_BUFFER_TOO_SMALL;
 
-    SymCryptEcbDecrypt( SymCryptAesBlockCipher, &key->s.aes.handle, input, output, offset );
+    SymCryptEcbDecrypt( cipher, expanded_key, input, output, offset );
 
     if (flags & BCRYPT_BLOCK_PADDING)
     {
-        SymCryptEcbDecrypt( SymCryptAesBlockCipher, &key->s.aes.handle, input + offset, buf, block_size );
+        SymCryptEcbDecrypt( cipher, expanded_key, input + offset, buf, block_size );
 
         if (buf[block_size - 1] <= block_size)
         {
@@ -1834,8 +1903,9 @@ static NTSTATUS decrypt_aes_gcm( struct key *key, const UCHAR *input, ULONG inpu
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS decrypt_aes_vector( struct key *key, const UCHAR *input, ULONG input_len, UCHAR *iv, UCHAR *output,
-                                    ULONG output_len, ULONG *ret_len, ULONG flags )
+static NTSTATUS decrypt_block_vector( struct key *key, PCSYMCRYPT_BLOCKCIPHER cipher, const void *expanded_key,
+                                      const UCHAR *input, ULONG input_len, UCHAR *iv, UCHAR *output,
+                                      ULONG output_len, ULONG *ret_len, ULONG flags )
 {
     UCHAR buf[BLOCK_LENGTH_AES], *out;
     const UCHAR *in;
@@ -1861,9 +1931,9 @@ static NTSTATUS decrypt_aes_vector( struct key *key, const UCHAR *input, ULONG i
     while (bytes_left >= block_size)
     {
         if (key->s.mode == CHAIN_MODE_CFB)
-            SymCryptCfbDecrypt( SymCryptAesBlockCipher, 1, &key->s.aes.handle, key->s.vector, in, out, block_size );
+            SymCryptCfbDecrypt( cipher, 1, expanded_key, key->s.vector, in, out, block_size );
         else
-            SymCryptCbcDecrypt( SymCryptAesBlockCipher, &key->s.aes.handle, key->s.vector, in, out, block_size );
+            SymCryptCbcDecrypt( cipher, expanded_key, key->s.vector, in, out, block_size );
 
         bytes_left -= block_size;
         in += block_size;
@@ -1873,9 +1943,9 @@ static NTSTATUS decrypt_aes_vector( struct key *key, const UCHAR *input, ULONG i
     if (flags & BCRYPT_BLOCK_PADDING)
     {
         if (key->s.mode == CHAIN_MODE_CFB)
-            SymCryptCfbDecrypt( SymCryptAesBlockCipher, 1, &key->s.aes.handle, key->s.vector, in, buf, block_size );
+            SymCryptCfbDecrypt( cipher, 1, expanded_key, key->s.vector, in, buf, block_size );
         else
-            SymCryptCbcDecrypt( SymCryptAesBlockCipher, &key->s.aes.handle, key->s.vector, in, buf, block_size );
+            SymCryptCbcDecrypt( cipher, expanded_key, key->s.vector, in, buf, block_size );
 
         if (buf[block_size - 1] <= block_size)
         {
@@ -1903,19 +1973,26 @@ static NTSTATUS decrypt_symmetric( struct key *key, const UCHAR *input, ULONG in
 
     switch (key->alg_id)
     {
+    case ALG_ID_3DES:
+        if (iv && iv_len != key->s.block_size) return STATUS_INVALID_PARAMETER;
+        return decrypt_block_vector( key, SymCrypt3DesBlockCipher, &key->s.des3.handle, input, input_len, iv,
+                                     output, output_len, ret_len, flags );
+
     case ALG_ID_AES:
     case ALG_ID_AES_GMAC:
         switch (key->s.mode)
         {
         case CHAIN_MODE_ECB:
-            return decrypt_aes_ecb( key, input, input_len, output, output_len, ret_len, flags );
+            return decrypt_block_ecb( key, SymCryptAesBlockCipher, &key->s.aes.handle, input, input_len, output,
+                                      output_len, ret_len, flags );
 
         case CHAIN_MODE_GCM:
             return decrypt_aes_gcm( key, input, input_len, info, output, output_len, ret_len );
 
         default:
             if (iv && iv_len != key->s.block_size) return STATUS_INVALID_PARAMETER;
-            return decrypt_aes_vector( key, input, input_len, iv, output, output_len, ret_len, flags );
+            return decrypt_block_vector( key, SymCryptAesBlockCipher, &key->s.aes.handle, input, input_len, iv,
+                                         output, output_len, ret_len, flags );
         }
     default:
         FIXME( "unhandled algorithm %u\n", key->alg_id );
@@ -2048,7 +2125,7 @@ static NTSTATUS unwrap_aes( const UCHAR *secret, ULONG secret_len, const UCHAR *
             b[4] ^= t >> 24;
 
             memcpy( b + 8, r, 8 );
-            decrypt_aes_ecb( key, b, 16, b, 16, &len, 0 );
+            decrypt_block_ecb( key, SymCryptAesBlockCipher, &key->s.aes.handle, b, 16, b, 16, &len, 0 );
             memcpy( a, b, 8 );
             memcpy( r, b + 8, 8 );
             r -= 8;
@@ -2140,8 +2217,9 @@ NTSTATUS WINAPI BCryptImportKey( BCRYPT_ALG_HANDLE handle, BCRYPT_KEY_HANDLE dec
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS encrypt_aes_ecb( const struct key *key, const UCHAR *input, ULONG input_len, UCHAR *output,
-                                 ULONG output_len, ULONG *ret_len, ULONG flags )
+static NTSTATUS encrypt_block_ecb( const struct key *key, PCSYMCRYPT_BLOCKCIPHER cipher, const void *expanded_key,
+                                   const UCHAR *input, ULONG input_len, UCHAR *output, ULONG output_len,
+                                   ULONG *ret_len, ULONG flags )
 {
     ULONG bytes_left, offset, block_size = key->s.block_size;
     UCHAR buf[BLOCK_LENGTH_AES];
@@ -2155,14 +2233,14 @@ static NTSTATUS encrypt_aes_ecb( const struct key *key, const UCHAR *input, ULON
     bytes_left = input_len % block_size;
     offset = input_len - bytes_left;
 
-    SymCryptEcbEncrypt( SymCryptAesBlockCipher, &key->s.aes.handle, input, output, offset );
+    SymCryptEcbEncrypt( cipher, expanded_key, input, output, offset );
 
     if (flags & BCRYPT_BLOCK_PADDING)
     {
         memcpy( buf, input + offset, bytes_left );
         memset( buf + bytes_left, block_size - bytes_left, block_size - bytes_left );
 
-        SymCryptEcbEncrypt( SymCryptAesBlockCipher, &key->s.aes.handle, buf, output + offset, block_size );
+        SymCryptEcbEncrypt( cipher, expanded_key, buf, output + offset, block_size );
     }
 
     return STATUS_SUCCESS;
@@ -2190,8 +2268,9 @@ static NTSTATUS encrypt_aes_gcm( struct key *key, const UCHAR *input, ULONG inpu
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS encrypt_aes_vector( struct key *key, const UCHAR *input, ULONG input_len, UCHAR *iv, UCHAR *output,
-                                    ULONG output_len, ULONG *ret_len, ULONG flags )
+static NTSTATUS encrypt_block_vector( struct key *key, PCSYMCRYPT_BLOCKCIPHER cipher, const void *expanded_key,
+                                      const UCHAR *input, ULONG input_len, UCHAR *iv, UCHAR *output,
+                                      ULONG output_len, ULONG *ret_len, ULONG flags )
 {
     ULONG bytes_left = input_len, block_size = key->s.block_size;
     UCHAR buf[BLOCK_LENGTH_AES], *out;
@@ -2212,9 +2291,9 @@ static NTSTATUS encrypt_aes_vector( struct key *key, const UCHAR *input, ULONG i
     while (bytes_left >= block_size)
     {
         if (key->s.mode == CHAIN_MODE_CFB)
-            SymCryptCfbEncrypt( SymCryptAesBlockCipher, 1, &key->s.aes.handle, key->s.vector, in, out, block_size );
+            SymCryptCfbEncrypt( cipher, 1, expanded_key, key->s.vector, in, out, block_size );
         else
-            SymCryptCbcEncrypt( SymCryptAesBlockCipher, &key->s.aes.handle, key->s.vector, in, out, block_size );
+            SymCryptCbcEncrypt( cipher, expanded_key, key->s.vector, in, out, block_size );
 
         bytes_left -= block_size;
         in += block_size;
@@ -2227,9 +2306,9 @@ static NTSTATUS encrypt_aes_vector( struct key *key, const UCHAR *input, ULONG i
         memset( buf + bytes_left, block_size - bytes_left, block_size - bytes_left );
 
         if (key->s.mode == CHAIN_MODE_CFB)
-            SymCryptCfbEncrypt( SymCryptAesBlockCipher, 1, &key->s.aes.handle, key->s.vector, buf, out, block_size );
+            SymCryptCfbEncrypt( cipher, 1, expanded_key, key->s.vector, buf, out, block_size );
         else
-            SymCryptCbcEncrypt( SymCryptAesBlockCipher, &key->s.aes.handle, key->s.vector, buf, out, block_size );
+            SymCryptCbcEncrypt( cipher, expanded_key, key->s.vector, buf, out, block_size );
     }
 
     if (iv) memcpy( iv, key->s.vector, block_size );
@@ -2249,19 +2328,26 @@ static NTSTATUS encrypt_symmetric( struct key *key, const UCHAR *input, ULONG in
 
     switch (key->alg_id)
     {
+    case ALG_ID_3DES:
+        if (iv && iv_len != key->s.block_size) return STATUS_INVALID_PARAMETER;
+        return encrypt_block_vector( key, SymCrypt3DesBlockCipher, &key->s.des3.handle, input, input_len, iv,
+                                     output, output_len, ret_len, flags );
+
     case ALG_ID_AES:
     case ALG_ID_AES_GMAC:
         switch (key->s.mode)
         {
         case CHAIN_MODE_ECB:
-            return encrypt_aes_ecb( key, input, input_len, output, output_len, ret_len, flags );
+            return encrypt_block_ecb( key, SymCryptAesBlockCipher, &key->s.aes.handle, input, input_len, output,
+                                      output_len, ret_len, flags );
 
         case CHAIN_MODE_GCM:
             return encrypt_aes_gcm( key, input, input_len, info, output, output_len, ret_len );
 
         default:
             if (iv && iv_len != key->s.block_size) return STATUS_INVALID_PARAMETER;
-            return encrypt_aes_vector( key, input, input_len, iv, output, output_len, ret_len, flags );
+            return encrypt_block_vector( key, SymCryptAesBlockCipher, &key->s.aes.handle, input, input_len, iv,
+                                         output, output_len, ret_len, flags );
         }
     default:
         FIXME( "unhandled algorithm %u\n", key->alg_id );
@@ -2382,7 +2468,7 @@ static NTSTATUS wrap_aes( const UCHAR *secret, ULONG secret_len, const UCHAR *pl
         {
             memcpy( b, a, 8 );
             memcpy( b + 8, r, 8 );
-            encrypt_aes_ecb( key, b, 16, b, 16, &len, 0 );
+            encrypt_block_ecb( key, SymCryptAesBlockCipher, &key->s.aes.handle, b, 16, b, 16, &len, 0 );
             memcpy( a, b, 8 );
             t = n * j + i;
             a[7] ^= t;

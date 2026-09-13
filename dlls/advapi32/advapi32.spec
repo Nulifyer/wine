@@ -556,14 +556,14 @@
 @ stdcall PerfAddCounters(long ptr long)
 @ stdcall PerfCloseQueryHandle(long)
 @ stdcall -import PerfCreateInstance(long ptr wstr long)
-# @ stub PerfDecrementULongCounterValue
-# @ stub PerfDecrementULongLongCounterValue
+@ stdcall -import PerfDecrementULongCounterValue(long ptr long long)
+@ stdcall -import PerfDecrementULongLongCounterValue(long ptr long int64)
 # @ stub PerfDeleteCounters
 @ stdcall -import PerfDeleteInstance(long ptr)
 # @ stub PerfEnumerateCounterSet
 # @ stub PerfEnumerateCounterSetInstances
-# @ stub PerfIncrementULongCounterValue
-# @ stub PerfIncrementULongLongCounterValue
+@ stdcall -import PerfIncrementULongCounterValue(long ptr long long)
+@ stdcall -import PerfIncrementULongLongCounterValue(long ptr long int64)
 @ stdcall PerfOpenQueryHandle(wstr ptr)
 @ stdcall PerfQueryCounterData(long ptr long ptr)
 # @ stub PerfQueryCounterInfo
@@ -637,7 +637,7 @@
 @ stdcall -import RegDeleteValueA(long str)
 @ stdcall -import RegDeleteValueW(long wstr)
 @ stdcall RegDisablePredefinedCache()
-# @ stub RegDisablePredefinedCacheEx
+@ stdcall RegDisablePredefinedCacheEx()
 @ stdcall RegDisableReflectionKey(ptr)
 @ stdcall RegEnableReflectionKey(ptr)
 @ stdcall RegEnumKeyA(long long ptr long)
@@ -668,8 +668,8 @@
 @ stdcall RegOverridePredefKey(long long)
 @ stdcall -import RegQueryInfoKeyA(long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall -import RegQueryInfoKeyW(long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
-@ stdcall RegQueryMultipleValuesA(long ptr long ptr ptr)
-@ stdcall RegQueryMultipleValuesW(long ptr long ptr ptr)
+@ stdcall -import RegQueryMultipleValuesA(long ptr long ptr ptr)
+@ stdcall -import RegQueryMultipleValuesW(long ptr long ptr ptr)
 @ stdcall RegQueryReflectionKey(long ptr)
 @ stdcall RegQueryValueA(long str ptr ptr)
 @ stdcall -import RegQueryValueExA(long str ptr ptr ptr ptr)
@@ -805,7 +805,7 @@
 @ stdcall SystemFunction026(ptr ptr ptr) cryptsp.SystemFunction026
 @ stdcall SystemFunction027(ptr ptr ptr) cryptsp.SystemFunction027
 @ stub SystemFunction028
-@ stub SystemFunction029
+@ stdcall SystemFunction029(ptr ptr) cryptbase.SystemFunction029
 @ stdcall SystemFunction030(ptr ptr) cryptsp.SystemFunction030
 @ stdcall SystemFunction031(ptr ptr) cryptsp.SystemFunction031
 @ stdcall SystemFunction032(ptr ptr) cryptsp.SystemFunction032

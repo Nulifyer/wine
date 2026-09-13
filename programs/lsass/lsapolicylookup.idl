@@ -1,0 +1,217 @@
+/*
+ * LSA local policy lookup RPC interface
+ *
+ * Copyright 2026
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ */
+
+#pragma makedep server
+
+import "wtypes.idl";
+
+cpp_quote("#include <winternl.h>")
+cpp_quote("#define LSA_POLICY_LOOKUP_PROTSEQ {'n','c','a','l','r','p','c',0}")
+cpp_quote("#define LSA_POLICY_LOOKUP_ENDPOINT {'l','s','a','p','o','l','i','c','y','l','o','o','k','u','p',0}")
+
+[
+    uuid(fb8a0729-2d04-4658-be93-27b4ad553fac),
+    version(1.0)
+]
+interface lsapolicylookup
+{
+    cpp_quote("#if 0")
+    typedef LONG NTSTATUS;
+    cpp_quote("#endif")
+
+    typedef [handle, string] const WCHAR *LSA_POLICY_LOOKUP_SERVER_NAME;
+    typedef [context_handle] void *LSA_POLICY_LOOKUP_HANDLE;
+
+    typedef struct
+    {
+        USHORT Length;
+        USHORT MaximumLength;
+        [unique, size_is(MaximumLength / 2), length_is(Length / 2)] WCHAR *Buffer;
+    } LSA_POLICY_LOOKUP_UNICODE_STRING;
+
+    /* This is the wire form used by the local-policy client.  The pointer
+     * members are normally NULL for local opens; keep their native layout so
+     * that the fixed part is ABI-compatible with LSA_OBJECT_ATTRIBUTES. */
+    typedef struct
+    {
+        ULONG Length;
+        [unique] BYTE *RootDirectory;
+        [unique] LSA_POLICY_LOOKUP_UNICODE_STRING *ObjectName;
+        ULONG Attributes;
+        [unique] BYTE *SecurityDescriptor;
+        [unique] BYTE *SecurityQualityOfService;
+    } LSA_POLICY_LOOKUP_OBJECT_ATTRIBUTES;
+
+    typedef enum
+    {
+        LsaPolicyLookupAccountDomainInformation = 5,
+        LsaPolicyLookupDnsDomainInformation = 12
+    } LSA_POLICY_LOOKUP_DOMAIN_INFO_CLASS;
+
+    typedef struct
+    {
+        LSA_POLICY_LOOKUP_UNICODE_STRING DomainName;
+        [unique] SID *DomainSid;
+    } LSA_POLICY_LOOKUP_ACCOUNT_DOMAIN_INFO;
+
+    typedef struct
+    {
+        LSA_POLICY_LOOKUP_UNICODE_STRING Name;
+        LSA_POLICY_LOOKUP_UNICODE_STRING DnsDomainName;
+        LSA_POLICY_LOOKUP_UNICODE_STRING DnsForestName;
+        GUID DomainGuid;
+        [unique] SID *Sid;
+    } LSA_POLICY_LOOKUP_DNS_DOMAIN_INFO;
+
+    typedef enum
+    {
+        LsaPolicyLookupSidTypeUser = 1,
+        LsaPolicyLookupSidTypeGroup,
+        LsaPolicyLookupSidTypeDomain,
+        LsaPolicyLookupSidTypeAlias,
+        LsaPolicyLookupSidTypeWellKnownGroup,
+        LsaPolicyLookupSidTypeDeletedAccount,
+        LsaPolicyLookupSidTypeInvalid,
+        LsaPolicyLookupSidTypeUnknown,
+        LsaPolicyLookupSidTypeComputer,
+        LsaPolicyLookupSidTypeLabel
+    } LSA_POLICY_LOOKUP_SID_NAME_USE;
+
+    typedef struct
+    {
+        LSA_POLICY_LOOKUP_UNICODE_STRING Name;
+        [unique] SID *Sid;
+    } LSA_POLICY_LOOKUP_TRUST_INFORMATION;
+
+    typedef struct
+    {
+        ULONG Entries;
+        [unique, size_is(Entries)] LSA_POLICY_LOOKUP_TRUST_INFORMATION *Domains;
+        ULONG MaxEntries;
+    } LSA_POLICY_LOOKUP_REFERENCED_DOMAIN_LIST;
+
+    typedef struct
+    {
+        LSA_POLICY_LOOKUP_SID_NAME_USE Use;
+        [unique] SID *Sid;
+        LONG DomainIndex;
+        ULONG Flags;
+    } LSA_POLICY_LOOKUP_TRANSLATED_SID_EX2;
+
+    typedef struct
+    {
+        [range(0, 1000)] ULONG Entries;
+        [unique, size_is(Entries)] LSA_POLICY_LOOKUP_TRANSLATED_SID_EX2 *Sids;
+    } LSA_POLICY_LOOKUP_TRANSLATED_SIDS_EX2;
+
+    typedef [switch_type(LSA_POLICY_LOOKUP_DOMAIN_INFO_CLASS)] union
+    {
+        [case(LsaPolicyLookupAccountDomainInformation)]
+            LSA_POLICY_LOOKUP_ACCOUNT_DOMAIN_INFO AccountDomainInformation;
+        [case(LsaPolicyLookupDnsDomainInformation)]
+            LSA_POLICY_LOOKUP_DNS_DOMAIN_INFO DnsDomainInformation;
+    } LSA_POLICY_LOOKUP_DOMAIN_INFO;
+
+    typedef enum
+    {
+        LsaSidNameMappingOperation_Add,
+        LsaSidNameMappingOperation_Remove,
+        LsaSidNameMappingOperation_AddMultiple
+    } LSA_SID_NAME_MAPPING_OPERATION_TYPE;
+
+    typedef struct
+    {
+        LSA_POLICY_LOOKUP_UNICODE_STRING DomainName;
+        LSA_POLICY_LOOKUP_UNICODE_STRING AccountName;
+        [ref] SID *Sid;
+        ULONG Flags;
+    } LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT;
+
+    typedef struct
+    {
+        LSA_POLICY_LOOKUP_UNICODE_STRING DomainName;
+        LSA_POLICY_LOOKUP_UNICODE_STRING AccountName;
+    } LSA_SID_NAME_MAPPING_OPERATION_REMOVE_INPUT;
+
+    typedef struct
+    {
+        [range(1, 0x1000)] ULONG Count;
+        [ref, size_is(Count)] LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT *Mappings;
+    } LSA_SID_NAME_MAPPING_OPERATION_ADD_MULTIPLE_INPUT;
+
+    typedef [switch_type(LSA_SID_NAME_MAPPING_OPERATION_TYPE)] union
+    {
+        [case(LsaSidNameMappingOperation_Add)]
+            LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT AddInput;
+        [case(LsaSidNameMappingOperation_Remove)]
+            LSA_SID_NAME_MAPPING_OPERATION_REMOVE_INPUT RemoveInput;
+        [case(LsaSidNameMappingOperation_AddMultiple)]
+            LSA_SID_NAME_MAPPING_OPERATION_ADD_MULTIPLE_INPUT AddMultipleInput;
+    } LSA_SID_NAME_MAPPING_OPERATION_INPUT;
+
+    typedef enum
+    {
+        LsaSidNameMappingOperation_Success,
+        LsaSidNameMappingOperation_NonMappingError,
+        LsaSidNameMappingOperation_NameCollision,
+        LsaSidNameMappingOperation_SidCollision,
+        LsaSidNameMappingOperation_DomainNotFound,
+        LsaSidNameMappingOperation_DomainSidPrefixMismatch,
+        LsaSidNameMappingOperation_MappingNotFound
+    } LSA_SID_NAME_MAPPING_OPERATION_ERROR;
+
+    typedef struct
+    {
+        LSA_SID_NAME_MAPPING_OPERATION_ERROR ErrorCode;
+    } LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT;
+
+    typedef [switch_type(LSA_SID_NAME_MAPPING_OPERATION_TYPE)] union
+    {
+        [case(LsaSidNameMappingOperation_Add)]
+            LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT AddOutput;
+        [case(LsaSidNameMappingOperation_Remove)]
+            LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT RemoveOutput;
+        [case(LsaSidNameMappingOperation_AddMultiple)]
+            LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT AddMultipleOutput;
+    } LSA_SID_NAME_MAPPING_OPERATION_OUTPUT;
+
+    NTSTATUS policy_lookup_open(
+        [in, unique] LSA_POLICY_LOOKUP_SERVER_NAME server_name,
+        [in] LSA_POLICY_LOOKUP_OBJECT_ATTRIBUTES *attributes,
+        [in] ULONG access,
+        [out] LSA_POLICY_LOOKUP_HANDLE *handle);
+
+    NTSTATUS policy_lookup_close(
+        [in, out] LSA_POLICY_LOOKUP_HANDLE *handle);
+
+    NTSTATUS policy_lookup_translate_sids(void);
+    NTSTATUS policy_lookup_translate_names(
+        [in] LSA_POLICY_LOOKUP_HANDLE handle,
+        [in, range(0, 1000)] ULONG count,
+        [in, size_is(count)] LSA_POLICY_LOOKUP_UNICODE_STRING *names,
+        [out] LSA_POLICY_LOOKUP_REFERENCED_DOMAIN_LIST **referenced_domains,
+        [in, out] LSA_POLICY_LOOKUP_TRANSLATED_SIDS_EX2 *translated_sids,
+        [in, out] ULONG *mapped_count,
+        [in] ULONG lookup_options,
+        [in] ULONG client_revision);
+    NTSTATUS policy_lookup_manage_cache(
+        [in, unique] LSA_POLICY_LOOKUP_SERVER_NAME server_name,
+        [in] LSA_SID_NAME_MAPPING_OPERATION_TYPE operation_type,
+        [in, switch_is(operation_type)] LSA_SID_NAME_MAPPING_OPERATION_INPUT *operation_input,
+        [out, switch_is(operation_type)] LSA_SID_NAME_MAPPING_OPERATION_OUTPUT **operation_output);
+
+    NTSTATUS policy_lookup_get_domain_info(
+        [in] LSA_POLICY_LOOKUP_HANDLE handle,
+        [in] LSA_POLICY_LOOKUP_DOMAIN_INFO_CLASS info_class,
+        [out, switch_is(info_class)] LSA_POLICY_LOOKUP_DOMAIN_INFO **domain_info);
+
+    NTSTATUS policy_lookup_user_account_type(void);
+}
