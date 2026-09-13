@@ -360,7 +360,7 @@
     SYSCALL_ENTRY( 0x1164, NtGdiDdDDISetHwProtectionTeardownRecovery, 0 ) \
     SYSCALL_ENTRY( 0x1165, NtGdiDdDDISetMemoryBudgetTarget, 0 ) \
     SYSCALL_ENTRY( 0x1166, NtGdiDdDDISetMonitorColorSpaceTransform, 0 ) \
-    SYSCALL_ENTRY( 0x1167, NtGdiDdDDISetProcessDeviceRemovalSupport, 0 ) \
+    SYSCALL_ENTRY( 0x1167, NtGdiDdDDISetProcessDeviceRemovalSupport, 4 ) \
     SYSCALL_ENTRY( 0x1168, NtGdiDdDDISetProcessSchedulingPriorityBand, 0 ) \
     SYSCALL_ENTRY( 0x1169, NtGdiDdDDISetProcessSchedulingPriorityClass, 0 ) \
     SYSCALL_ENTRY( 0x116a, NtGdiDdDDISetQueuedLimit, 4 ) \
@@ -1902,7 +1902,7 @@
     SYSCALL_ENTRY( 0x1164, NtGdiDdDDISetHwProtectionTeardownRecovery, 0 ) \
     SYSCALL_ENTRY( 0x1165, NtGdiDdDDISetMemoryBudgetTarget, 0 ) \
     SYSCALL_ENTRY( 0x1166, NtGdiDdDDISetMonitorColorSpaceTransform, 0 ) \
-    SYSCALL_ENTRY( 0x1167, NtGdiDdDDISetProcessDeviceRemovalSupport, 0 ) \
+    SYSCALL_ENTRY( 0x1167, NtGdiDdDDISetProcessDeviceRemovalSupport, 8 ) \
     SYSCALL_ENTRY( 0x1168, NtGdiDdDDISetProcessSchedulingPriorityBand, 0 ) \
     SYSCALL_ENTRY( 0x1169, NtGdiDdDDISetProcessSchedulingPriorityClass, 0 ) \
     SYSCALL_ENTRY( 0x116a, NtGdiDdDDISetQueuedLimit, 8 ) \
@@ -3372,7 +3372,6 @@
     SYSCALL_STUB( NtGdiDdDDISetHwProtectionTeardownRecovery ) \
     SYSCALL_STUB( NtGdiDdDDISetMemoryBudgetTarget ) \
     SYSCALL_STUB( NtGdiDdDDISetMonitorColorSpaceTransform ) \
-    SYSCALL_STUB( NtGdiDdDDISetProcessDeviceRemovalSupport ) \
     SYSCALL_STUB( NtGdiDdDDISetProcessSchedulingPriorityBand ) \
     SYSCALL_STUB( NtGdiDdDDISetProcessSchedulingPriorityClass ) \
     SYSCALL_STUB( NtGdiDdDDISetStablePowerState ) \

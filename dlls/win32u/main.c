@@ -430,6 +430,11 @@ NTSTATUS SYSCALL_API NtGdiDdDDIReleaseKeyedMutex2( D3DKMT_RELEASEKEYEDMUTEX2 *pa
     SYSCALL_FUNC( NtGdiDdDDIReleaseKeyedMutex2 );
 }
 
+NTSTATUS SYSCALL_API NtGdiDdDDISetProcessDeviceRemovalSupport( BOOLEAN *support )
+{
+    SYSCALL_FUNC( NtGdiDdDDISetProcessDeviceRemovalSupport );
+}
+
 NTSTATUS SYSCALL_API NtGdiDdDDISetQueuedLimit( D3DKMT_SETQUEUEDLIMIT *desc )
 {
     SYSCALL_FUNC( NtGdiDdDDISetQueuedLimit );

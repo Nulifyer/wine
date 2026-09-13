@@ -183,6 +183,7 @@ struct d3dkmt_vidpn_source
 
 static pthread_mutex_t d3dkmt_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct list d3dkmt_vidpn_sources = LIST_INIT( d3dkmt_vidpn_sources );   /* VidPN source information list */
+static LONG process_device_removal_support = -1;
 
 static struct d3dkmt_object **objects, **objects_end, **objects_next;
 
@@ -696,6 +697,21 @@ NTSTATUS WINAPI NtGdiDdDDIQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *des
     }
 
     WARN( "Failed to find Vulkan physical device\n" );
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ *           NtGdiDdDDISetProcessDeviceRemovalSupport    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDISetProcessDeviceRemovalSupport( BOOLEAN *support )
+{
+    LONG previous;
+
+    TRACE( "support %p %u\n", support, support ? *support : 0 );
+
+    if (!support) return STATUS_INVALID_PARAMETER;
+    previous = InterlockedCompareExchange( &process_device_removal_support, !!*support, -1 );
+    if (previous != -1) return STATUS_ALREADY_INITIALIZED;
     return STATUS_SUCCESS;
 }
 
