@@ -144,6 +144,54 @@ BOOL WINAPI GetOsManufacturingMode( BOOL *mode )
 }
 
 /***********************************************************************
+ *             GetOsSafeBootMode   (kernelbase.@)
+ */
+BOOL WINAPI GetOsSafeBootMode( DWORD *flags )
+{
+    static UNICODE_STRING key_name = RTL_CONSTANT_STRING(
+        L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\SafeBoot\\Option" );
+    static UNICODE_STRING value_name = RTL_CONSTANT_STRING( L"OptionValue" );
+    BYTE buffer[offsetof(KEY_VALUE_PARTIAL_INFORMATION, Data) + sizeof(DWORD)];
+    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+    OBJECT_ATTRIBUTES attr;
+    NTSTATUS status;
+    HANDLE key;
+    ULONG size;
+
+    InitializeObjectAttributes( &attr, &key_name, OBJ_CASE_INSENSITIVE, 0, NULL );
+    status = NtOpenKey( &key, KEY_QUERY_VALUE, &attr );
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND || status == STATUS_OBJECT_PATH_NOT_FOUND)
+    {
+        *flags = 0;
+        return TRUE;
+    }
+    if (status)
+    {
+        SetLastError( RtlNtStatusToDosError( status ) );
+        return FALSE;
+    }
+
+    status = NtQueryValueKey( key, &value_name, KeyValuePartialInformation,
+                              buffer, sizeof(buffer), &size );
+    NtClose( key );
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND)
+    {
+        *flags = 0;
+        return TRUE;
+    }
+    if (status)
+    {
+        SetLastError( RtlNtStatusToDosError( status ) );
+        return FALSE;
+    }
+
+    *flags = 0;
+    if (info->Type == REG_DWORD && info->DataLength == sizeof(DWORD))
+        memcpy( flags, info->Data, sizeof(*flags) );
+    return TRUE;
+}
+
+/***********************************************************************
  *             DiscardVirtualMemory   (kernelbase.@)
  */
 DWORD WINAPI DECLSPEC_HOTPATCH DiscardVirtualMemory( void *addr, SIZE_T size )
@@ -1286,6 +1334,39 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalReAlloc( HLOCAL handle, SIZE_T size, UINT f
     else SetLastError( ERROR_INVALID_HANDLE );
     RtlUnlockHeap( heap );
 
+    return ret;
+}
+
+
+/***********************************************************************
+ *           LocalSize   (kernelbase.@)
+ */
+SIZE_T WINAPI DECLSPEC_HOTPATCH LocalSize( HLOCAL handle )
+{
+    HANDLE heap = GetProcessHeap();
+    struct mem_entry *mem;
+    SIZE_T ret = 0;
+    void *ptr;
+
+    TRACE_(globalmem)( "handle %p\n", handle );
+
+    RtlLockHeap( heap );
+    if ((ptr = unsafe_ptr_from_HLOCAL( handle )) &&
+        HeapValidate( heap, HEAP_NO_SERIALIZE, ptr ))
+        ret = RtlSizeHeap( heap, HEAP_NO_SERIALIZE, ptr );
+    else if ((mem = unsafe_mem_from_HLOCAL( handle )))
+    {
+        if (!mem->ptr) ret = 0;
+        else ret = RtlSizeHeap( heap, HEAP_NO_SERIALIZE, mem->ptr );
+    }
+    else
+    {
+        WARN_(globalmem)( "invalid handle %p\n", handle );
+        SetLastError( ERROR_INVALID_HANDLE );
+    }
+    RtlUnlockHeap( heap );
+
+    if (ret == ~(SIZE_T)0) return 0;
     return ret;
 }
 

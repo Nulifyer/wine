@@ -36,12 +36,12 @@
 @ stdcall AllocateLocallyUniqueId(ptr)
 @ stdcall AllocateUserPhysicalPages(long ptr ptr)
 @ stdcall AllocateUserPhysicalPagesNuma(long ptr ptr long)
-# @ stub AppContainerDeriveSidFromMoniker
-# @ stub AppContainerFreeMemory
-# @ stub AppContainerLookupDisplayNameMrtReference
-# @ stub AppContainerLookupMoniker
-# @ stub AppContainerRegisterSid
-# @ stub AppContainerUnregisterSid
+@ stdcall AppContainerDeriveSidFromMoniker(wstr ptr)
+@ stdcall AppContainerFreeMemory(ptr)
+@ stdcall AppContainerLookupDisplayNameMrtReference(ptr ptr)
+@ stdcall AppContainerLookupMoniker(ptr ptr)
+@ stdcall AppContainerRegisterSid(ptr wstr wstr)
+@ stdcall AppContainerUnregisterSid(ptr)
 # @ stub AppPolicyGetClrCompat
 # @ stub AppPolicyGetCreateFileAccess
 # @ stub AppPolicyGetLifecycleManagement
@@ -50,7 +50,7 @@
 @ stdcall AppPolicyGetShowDeveloperDiagnostic(ptr ptr)
 @ stdcall AppPolicyGetThreadInitializationType(ptr ptr)
 @ stdcall AppPolicyGetWindowingModel(ptr ptr)
-# @ stub AppXFreeMemory
+@ stdcall AppXFreeMemory(ptr)
 # @ stub AppXGetApplicationData
 # @ stub AppXGetDevelopmentMode
 # @ stub AppXGetOSMaxVersionTested
@@ -67,8 +67,8 @@
 @ stdcall AreAllAccessesGranted(long long)
 @ stdcall AreAnyAccessesGranted(long long)
 @ stdcall AreFileApisANSI()
-# @ stub AreThereVisibleLogoffScriptsInternal
-# @ stub AreThereVisibleShutdownScriptsInternal
+@ stdcall AreThereVisibleLogoffScriptsInternal() gpapi.AreThereVisibleLogoffScriptsInternalWorker
+@ stdcall AreThereVisibleShutdownScriptsInternal() gpapi.AreThereVisibleShutdownScriptsInternalWorker
 @ stdcall AttachConsole(long)
 @ stub BaseCheckAppcompatCache
 # @ stub BaseCheckAppcompatCacheEx
@@ -82,7 +82,7 @@
 @ stdcall BaseGetNamedObjectDirectory(ptr)
 @ stub BaseGetProcessDllPath
 @ stub BaseGetProcessExePath
-@ stub BaseInitAppcompatCacheSupport
+@ stdcall BaseInitAppcompatCacheSupport()
 @ stub BaseInvalidateDllSearchPathCache
 @ stub BaseInvalidateProcessSearchPathCache
 # @ stub BaseIsAppcompatInfrastructureDisabled
@@ -101,7 +101,7 @@
 @ stub BemCreateReference
 @ stub BemFreeContract
 @ stub BemFreeReference
-# @ stub CLOSE_LOCAL_HANDLE_INTERNAL
+@ stdcall CLOSE_LOCAL_HANDLE_INTERNAL(long ptr)
 @ stdcall CallNamedPipeW(wstr ptr long ptr long ptr long)
 @ stdcall CallbackMayRunLong(ptr)
 @ stdcall CancelIo(long)
@@ -160,6 +160,7 @@
 @ stdcall CompareStringEx(wstr long wstr long wstr long ptr ptr long)
 @ stdcall CompareStringOrdinal(wstr long wstr long long)
 @ stdcall CompareStringW(long long wstr long wstr long)
+@ stdcall CommandLineToArgvW(wstr ptr)
 @ stdcall ConnectNamedPipe(long ptr)
 @ stdcall ContinueDebugEvent(long long long)
 @ stdcall ConvertAuxiliaryCounterToPerformanceCounter(int64 ptr ptr)
@@ -295,7 +296,7 @@
 @ stdcall EncodePointer(ptr) ntdll.RtlEncodePointer
 # @ stub EncodeRemotePointer
 @ stdcall EncodeSystemPointer(ptr) ntdll.RtlEncodeSystemPointer
-# @ stub EnterCriticalPolicySectionInternal
+@ stdcall EnterCriticalPolicySectionInternal() gpapi.EnterCriticalPolicySectionInternalWorker
 @ stdcall EnterCriticalSection(ptr) ntdll.RtlEnterCriticalSection
 @ stdcall EnterSynchronizationBarrier(ptr long)
 @ stdcall EnumCalendarInfoExEx(ptr wstr long wstr long long)
@@ -395,15 +396,15 @@
 @ stdcall FlushProcessWriteBuffers() ntdll.NtFlushProcessWriteBuffers
 @ stdcall FlushViewOfFile(ptr long)
 @ stdcall FoldStringW(long wstr long ptr long)
-# @ stub ForceSyncFgPolicyInternal
+@ stdcall ForceSyncFgPolicyInternal() gpapi.ForceSyncFgPolicyInternalWorker
 # @ stub FormatApplicationUserModelId
 @ stdcall FormatMessageA(long ptr long long ptr long ptr)
 @ stdcall FormatMessageW(long ptr long long ptr long ptr)
 @ stdcall FreeConsole()
 @ stdcall FreeEnvironmentStringsA(ptr) FreeEnvironmentStringsW
 @ stdcall FreeEnvironmentStringsW(ptr)
-# @ stub FreeGPOListInternalA
-# @ stub FreeGPOListInternalW
+@ stdcall FreeGPOListInternalA() gpapi.FreeGPOListInternalAWorker
+@ stdcall FreeGPOListInternalW() gpapi.FreeGPOListInternalWWorker
 @ stdcall FreeLibrary(long)
 @ stdcall FreeLibraryAndExitThread(long long)
 @ stdcall FreeLibraryWhenCallbackReturns(ptr ptr) ntdll.TpCallbackUnloadDllOnCompletion
@@ -411,7 +412,7 @@
 @ stdcall FreeSid(ptr)
 @ stdcall FreeUserPhysicalPages(long ptr ptr)
 @ stdcall GenerateConsoleCtrlEvent(long long)
-# @ stub GenerateGPNotificationInternal
+@ stdcall GenerateGPNotificationInternal() gpapi.GenerateGPNotificationInternalWorker
 @ stdcall GetACP()
 @ stdcall GetAcceptLanguagesA(ptr ptr)
 @ stdcall GetAcceptLanguagesW(ptr ptr)
@@ -427,8 +428,8 @@
 @ stdcall GetApplicationRestartSettings(long ptr ptr ptr)
 # @ stub GetApplicationUserModelId
 # @ stub GetApplicationUserModelIdFromToken
-# @ stub GetAppliedGPOListInternalA
-# @ stub GetAppliedGPOListInternalW
+@ stdcall GetAppliedGPOListInternalA() gpapi.GetAppliedGPOListInternalAWorker
+@ stdcall GetAppliedGPOListInternalW() gpapi.GetAppliedGPOListInternalWWorker
 @ stub GetCPFileNameFromRegistry
 @ stub GetCPHashNode
 @ stdcall GetCPInfo(long ptr)
@@ -568,8 +569,8 @@
 @ stdcall GetFinalPathNameByHandleW(long ptr long long)
 @ stdcall GetFullPathNameA(str long ptr ptr)
 @ stdcall GetFullPathNameW(wstr long ptr ptr)
-# @ stub GetGPOListInternalA
-# @ stub GetGPOListInternalW
+@ stdcall GetGPOListInternalA() gpapi.GetGPOListInternalAWorker
+@ stdcall GetGPOListInternalW() gpapi.GetGPOListInternalWWorker
 @ stdcall GetGeoInfoW(long long ptr long long)
 @ stdcall GetGeoInfoEx(ptr long ptr long)
 @ stdcall GetHandleInformation(long ptr)
@@ -615,7 +616,7 @@
 @ stdcall GetNamedPipeHandleStateW(long ptr ptr ptr ptr ptr long)
 @ stdcall GetNamedPipeInfo(long ptr ptr ptr ptr)
 @ stdcall GetNativeSystemInfo(ptr)
-# @ stub GetNextFgPolicyRefreshInfoInternal
+@ stdcall GetNextFgPolicyRefreshInfoInternal() gpapi.GetNextFgPolicyRefreshInfoInternalWorker
 @ stdcall GetNumaHighestNodeNumber(ptr)
 @ stdcall GetNumaNodeProcessorMaskEx(long ptr)
 @ stdcall GetNumaProximityNodeEx(long ptr)
@@ -625,7 +626,7 @@
 @ stdcall GetNumberOfConsoleMouseButtons(ptr)
 @ stdcall GetOEMCP()
 @ stdcall GetOsManufacturingMode(ptr)
-# @ stub GetOsSafeBootMode
+@ stdcall GetOsSafeBootMode(ptr)
 @ stdcall GetOverlappedResult(long ptr ptr long)
 @ stdcall GetOverlappedResultEx(long ptr ptr long long)
 # @ stub GetPackageApplicationContext
@@ -659,7 +660,7 @@
 @ stdcall GetPerformanceInfo(ptr long)
 @ stdcall GetPersistedRegistryLocationW(wstr wstr ptr long ptr)
 @ stdcall GetPhysicallyInstalledSystemMemory(ptr)
-# @ stub GetPreviousFgPolicyRefreshInfoInternal
+@ stdcall GetPreviousFgPolicyRefreshInfoInternal() gpapi.GetPreviousFgPolicyRefreshInfoInternalWorker
 @ stdcall GetPriorityClass(long)
 @ stdcall GetPrivateObjectSecurity(ptr long ptr long ptr)
 @ stdcall GetProcAddress(long str)
@@ -817,7 +818,7 @@
 @ stdcall GlobalFree(long)
 @ stdcall GlobalMemoryStatusEx(ptr)
 # @ stub GuardCheckLongJumpTarget
-# @ stub HasPolicyForegroundProcessingCompletedInternal
+@ stdcall HasPolicyForegroundProcessingCompletedInternal() gpapi.HasPolicyForegroundProcessingCompletedInternalWorker
 @ stdcall HashData(ptr long ptr long)
 @ stdcall HeapAlloc(long long long) ntdll.RtlAllocateHeap
 @ stdcall HeapCompact(long long)
@@ -908,7 +909,7 @@
 @ stdcall IsDebuggerPresent()
 # @ stub IsDeveloperModeEnabled
 # @ stub IsDeveloperModePolicyApplied
-# @ stub IsEnclaveTypeSupported
+@ stdcall IsEnclaveTypeSupported(long)
 # @ stub IsGlobalizationUserSettingsKeyRedirected
 @ stdcall IsInternetESCEnabled()
 @ stdcall IsNLSDefinedString(long long ptr wstr long)
@@ -919,7 +920,7 @@
 @ stdcall IsUserCetAvailableInEnvironment(long)
 # @ stub IsSideloadingEnabled
 # @ stub IsSideloadingPolicyApplied
-# @ stub IsSyncForegroundPolicyRefresh
+@ stdcall IsSyncForegroundPolicyRefresh() gpapi.IsSyncForegroundPolicyRefreshWorker
 @ stdcall IsThreadAFiber()
 @ stdcall IsThreadpoolTimerSet(ptr) ntdll.TpIsTimerSet
 # @ stub IsTimeZoneRedirectionEnabled
@@ -968,7 +969,7 @@
 @ stdcall LCMapStringA(long long str long ptr long)
 @ stdcall LCMapStringEx(wstr long wstr long ptr long ptr ptr long)
 @ stdcall LCMapStringW(long long wstr long ptr long)
-# @ stub LeaveCriticalPolicySectionInternal
+@ stdcall LeaveCriticalPolicySectionInternal() gpapi.LeaveCriticalPolicySectionInternalWorker
 @ stdcall LeaveCriticalSection(ptr) ntdll.RtlLeaveCriticalSection
 @ stdcall LeaveCriticalSectionWhenCallbackReturns(ptr ptr) ntdll.TpCallbackLeaveCriticalSectionOnCompletion
 @ stdcall LoadAppInitDlls()
@@ -988,6 +989,7 @@
 @ stdcall LocalFree(long)
 @ stdcall LocalLock(long)
 @ stdcall LocalReAlloc(long long long)
+@ stdcall LocalSize(long)
 @ stdcall LocalUnlock(long)
 @ stdcall LocaleNameToLCID(wstr long)
 @ stdcall -arch=i386,x86_64 LocateXStateFeature(ptr long ptr)
@@ -998,7 +1000,7 @@
 @ stub MakeAbsoluteSD2
 @ stdcall MakeSelfRelativeSD(ptr ptr ptr)
 @ stdcall MapGenericMask(ptr ptr)
-# @ stub MapPredefinedHandleInternal
+@ stdcall MapPredefinedHandleInternal(long ptr ptr ptr)
 @ stdcall MapUserPhysicalPages(ptr long ptr)
 @ stdcall MapViewOfFile(long long long long long)
 @ stdcall MapViewOfFile3(long long ptr int64 long long long ptr long)
@@ -1197,11 +1199,11 @@
 @ stdcall PeekConsoleInputW(ptr ptr long ptr)
 @ stdcall PeekNamedPipe(long ptr long ptr ptr ptr)
 @ stdcall PerfCreateInstance(long ptr wstr long)
-# @ stub PerfDecrementULongCounterValue
-# @ stub PerfDecrementULongLongCounterValue
+@ stdcall PerfDecrementULongCounterValue(long ptr long long)
+@ stdcall PerfDecrementULongLongCounterValue(long ptr long int64)
 @ stdcall PerfDeleteInstance(long ptr)
-# @ stub PerfIncrementULongCounterValue
-# @ stub PerfIncrementULongLongCounterValue
+@ stdcall PerfIncrementULongCounterValue(long ptr long long)
+@ stdcall PerfIncrementULongLongCounterValue(long ptr long int64)
 # @ stub PerfQueryInstance
 @ stdcall PerfSetCounterRefValue(long ptr long ptr)
 @ stdcall PerfSetCounterSetInfo(long ptr long)
@@ -1307,8 +1309,8 @@
 # @ stub ReadStateAtomValue
 # @ stub ReadStateContainerValue
 # @ stub ReclaimVirtualMemory
-# @ stub RefreshPolicyExInternal
-# @ stub RefreshPolicyInternal
+@ stdcall RefreshPolicyExInternal() gpapi.RefreshPolicyExInternalWorker
+@ stdcall RefreshPolicyInternal() gpapi.RefreshPolicyInternalWorker
 @ stdcall RegCloseKey(long)
 @ stdcall RegCopyTreeW(long wstr long)
 @ stdcall RegCreateKeyExA(long str long ptr long long ptr ptr ptr)
@@ -1325,7 +1327,7 @@
 @ stdcall RegDeleteTreeW(long wstr)
 @ stdcall RegDeleteValueA(long str)
 @ stdcall RegDeleteValueW(long wstr)
-# @ stub RegDisablePredefinedCacheEx
+@ stdcall RegDisablePredefinedCacheEx()
 @ stdcall RegEnumKeyExA(long long ptr ptr ptr ptr ptr ptr)
 @ stdcall RegEnumKeyExW(long long ptr ptr ptr ptr ptr ptr)
 @ stdcall RegEnumValueA(long long ptr ptr ptr ptr ptr ptr)
@@ -1338,10 +1340,10 @@
 # @ stub RegKrnGetAppKeyLoaded
 # @ stub RegKrnGetClassesEnumTableAddressInternal
 # @ stub RegKrnGetHKEY_ClassesRootAddress
-# @ stub RegKrnGetTermsrvRegistryExtensionFlags
+@ stdcall RegKrnGetTermsrvRegistryExtensionFlags()
 # @ stub RegKrnResetAppKeyLoaded
 # @ stub RegKrnSetDllHasThreadStateGlobal
-# @ stub RegKrnSetTermsrvRegistryExtensionFlags
+@ stdcall RegKrnSetTermsrvRegistryExtensionFlags(long)
 @ stdcall RegLoadAppKeyA(str ptr long long long)
 @ stdcall RegLoadAppKeyW(wstr ptr long long long)
 @ stdcall RegLoadKeyA(long str str)
@@ -1352,11 +1354,13 @@
 @ stdcall RegOpenCurrentUser(long ptr)
 @ stdcall RegOpenKeyExA(long str long long ptr)
 # @ stub RegOpenKeyExInternalA
-# @ stub RegOpenKeyExInternalW
+@ stdcall RegOpenKeyExInternalW(long wstr long long ptr ptr)
 @ stdcall RegOpenKeyExW(long wstr long long ptr)
 @ stdcall RegOpenUserClassesRoot(ptr long long ptr)
 @ stdcall RegQueryInfoKeyA(long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RegQueryInfoKeyW(long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
+@ stdcall RegQueryMultipleValuesA(long ptr long ptr ptr)
+@ stdcall RegQueryMultipleValuesW(long ptr long ptr ptr)
 @ stdcall RegQueryValueExA(long str ptr ptr ptr ptr)
 @ stdcall RegQueryValueExW(long wstr ptr ptr ptr ptr)
 @ stdcall RegRestoreKeyA(long str long)
@@ -1371,7 +1375,7 @@
 @ stdcall RegUnLoadKeyA(long str)
 @ stdcall RegUnLoadKeyW(long wstr)
 # @ stub RegisterBadMemoryNotification
-# @ stub RegisterGPNotificationInternal
+@ stdcall RegisterGPNotificationInternal() gpapi.RegisterGPNotificationInternalWorker
 # @ stub RegisterStateChangeNotification
 # @ stub RegisterStateLock
 @ stdcall RegisterTraceGuidsW(ptr ptr ptr long ptr wstr wstr ptr) ntdll.EtwRegisterTraceGuidsW
@@ -1404,7 +1408,7 @@
 @ stdcall RestoreLastError(long) ntdll.RtlRestoreLastWin32Error
 @ stdcall ResumeThread(long)
 @ stdcall RevertToSelf()
-# @ stub RsopLoggingEnabledInternal
+@ stdcall RsopLoggingEnabledInternal() gpapi.RsopLoggingEnabledInternalWorker
 @ stdcall SHCoCreateInstance(wstr ptr ptr ptr ptr)
 @ stdcall SHExpandEnvironmentStringsA(str ptr long) ExpandEnvironmentStringsA
 @ stdcall SHExpandEnvironmentStringsW(wstr ptr long) ExpandEnvironmentStringsW
@@ -1445,8 +1449,8 @@
 @ stdcall SetAclInformation(ptr ptr long long)
 @ stdcall SetCachedSigningLevel(ptr long long long)
 @ stdcall SetCalendarInfoW(long long long wstr)
-# @ stub SetClientDynamicTimeZoneInformation
-# @ stub SetClientTimeZoneInformation
+@ stdcall SetClientDynamicTimeZoneInformation(ptr)
+@ stdcall SetClientTimeZoneInformation(ptr)
 @ stdcall SetCommBreak(long)
 @ stdcall SetCommConfig(long ptr long)
 @ stdcall SetCommMask(long long)
@@ -1678,7 +1682,7 @@
 @ stdcall UnmapViewOfFile2(long ptr long)
 @ stdcall UnmapViewOfFileEx(ptr long)
 # @ stub UnregisterBadMemoryNotification
-# @ stub UnregisterGPNotificationInternal
+@ stdcall UnregisterGPNotificationInternal() gpapi.UnregisterGPNotificationInternalWorker
 # @ stub UnregisterStateChangeNotification
 # @ stub UnregisterStateLock
 @ stdcall UnregisterTraceGuids(int64) ntdll.EtwUnregisterTraceGuids
@@ -1744,11 +1748,11 @@
 @ stdcall VirtualQueryEx(long ptr ptr long)
 @ stdcall VirtualUnlock(ptr long)
 @ stdcall WTSGetServiceSessionId()
-# @ stub WTSIsServerContainer
+@ stdcall WTSIsServerContainer()
 @ stdcall WaitCommEvent(long ptr ptr)
 @ stdcall WaitForDebugEvent(ptr long)
 @ stdcall WaitForDebugEventEx(ptr long)
-# @ stub WaitForMachinePolicyForegroundProcessingInternal
+@ stdcall WaitForMachinePolicyForegroundProcessingInternal() gpapi.WaitForMachinePolicyForegroundProcessingInternalWorker
 @ stdcall WaitForMultipleObjects(long ptr long long)
 @ stdcall WaitForMultipleObjectsEx(long ptr long long long)
 @ stdcall WaitForSingleObject(long long)
@@ -1757,7 +1761,7 @@
 @ stdcall WaitForThreadpoolTimerCallbacks(ptr long) ntdll.TpWaitForTimer
 @ stdcall WaitForThreadpoolWaitCallbacks(ptr long) ntdll.TpWaitForWait
 @ stdcall WaitForThreadpoolWorkCallbacks(ptr long) ntdll.TpWaitForWork
-# @ stub WaitForUserPolicyForegroundProcessingInternal
+@ stdcall WaitForUserPolicyForegroundProcessingInternal() gpapi.WaitForUserPolicyForegroundProcessingInternalWorker
 @ stdcall WaitNamedPipeW(wstr long)
 @ stdcall WaitOnAddress(ptr ptr long long)
 @ stdcall WakeAllConditionVariable(ptr) ntdll.RtlWakeAllConditionVariable
@@ -1806,15 +1810,15 @@
 # @ stub _OpenMuiStringCache
 @ stdcall -arch=!i386 -private __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
 @ cdecl -arch=!i386 -norelay __chkstk() ntdll.__chkstk
-# @ stub __dllonexit3
+@ cdecl __dllonexit3(ptr ptr)
 @ stub __misaligned_access
 # @ stub __wgetmainargs
 # @ stub _amsg_exit
 # @ stub _c_exit
 # @ stub _cexit
 # @ stub _exit
-# @ stub _initterm
-# @ stub _initterm_e
+@ cdecl _initterm(ptr ptr)
+@ cdecl _initterm_e(ptr ptr)
 # @ stub _invalid_parameter
 @ stdcall -arch=x86_64 -private _local_unwind(ptr ptr) ntdll._local_unwind
 # @ stub _onexit

@@ -45,6 +45,8 @@ static LPVOID (WINAPI *pMapViewOfFileFromApp)(HANDLE, ULONG, ULONG64, SIZE_T);
 static BOOL (WINAPI *pUnmapViewOfFile2)(HANDLE, void *, ULONG);
 static HRESULT (WINAPI *pGetMachineTypeAttributes)(USHORT, MACHINE_ATTRIBUTES *);
 static BOOL (WINAPI *pIsWow64Process2)(HANDLE, USHORT *, USHORT *);
+static DWORD (WINAPI *pWTSGetServiceSessionId)(void);
+static BOOL (WINAPI *pWTSIsServerContainer)(void);
 
 static void test_CompareObjectHandles(void)
 {
@@ -669,6 +671,56 @@ static void test_GetMachineTypeAttributes(void)
     }
 }
 
+static void test_windows_light_process(void)
+{
+    STARTUPINFOEXW startup = {{0}};
+    PROCESS_INFORMATION info;
+    SIZE_T size = 0;
+    DWORD protection = 2; /* PROTECTION_LEVEL_WINDOWS_LIGHT */
+    WCHAR command[] = L"C:\\windows\\system32\\cmd.exe /c exit 0";
+    BOOL ret;
+
+    startup.StartupInfo.cb = sizeof(startup);
+    InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+    startup.lpAttributeList = HeapAlloc(GetProcessHeap(), 0, size);
+    ok(!!startup.lpAttributeList, "Failed to allocate attribute list.\n");
+    if (!startup.lpAttributeList) return;
+
+    ret = InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &size);
+    ok(ret, "InitializeProcThreadAttributeList failed, error %lu.\n", GetLastError());
+    ret = UpdateProcThreadAttribute(startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PROTECTION_LEVEL,
+                                    &protection, sizeof(protection), NULL, NULL);
+    ok(ret, "UpdateProcThreadAttribute failed, error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = CreateProcessW(NULL, command, NULL, NULL, FALSE,
+                         CREATE_PROTECTED_PROCESS | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
+                         NULL, NULL, &startup.StartupInfo, &info);
+    ok(ret || GetLastError() != ERROR_NOT_SUPPORTED,
+       "PROTECTION_LEVEL_WINDOWS_LIGHT was rejected as unsupported.\n");
+    if (ret)
+    {
+        TerminateProcess(info.hProcess, 0);
+        CloseHandle(info.hThread);
+        CloseHandle(info.hProcess);
+    }
+
+    DeleteProcThreadAttributeList(startup.lpAttributeList);
+    HeapFree(GetProcessHeap(), 0, startup.lpAttributeList);
+}
+
+static void test_WTSIsServerContainer(void)
+{
+    if (!pWTSGetServiceSessionId || !pWTSIsServerContainer)
+    {
+        win_skip("WTS service session functions are not available.\n");
+        return;
+    }
+
+    ok(pWTSIsServerContainer() == !!pWTSGetServiceSessionId(),
+       "WTSIsServerContainer result does not match the service session id.\n");
+}
+
 static void init_funcs(void)
 {
     HMODULE hmod = GetModuleHandleA("kernelbase.dll");
@@ -686,6 +738,8 @@ static void init_funcs(void)
     X(VirtualAllocFromApp);
     X(VirtualProtectFromApp);
     X(UnmapViewOfFile2);
+    X(WTSGetServiceSessionId);
+    X(WTSIsServerContainer);
 
     hmod = GetModuleHandleA("ntdll.dll");
 
@@ -708,4 +762,6 @@ START_TEST(process)
     test_MapViewOfFileFromApp();
     test_QueryProcessCycleTime();
     test_GetMachineTypeAttributes();
+    test_windows_light_process();
+    test_WTSIsServerContainer();
 }

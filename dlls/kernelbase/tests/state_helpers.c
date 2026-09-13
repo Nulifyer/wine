@@ -16,6 +16,26 @@
 
 static LSTATUS (WINAPI *get_value)(HKEY, const WCHAR *, HKEY, const WCHAR *, const WCHAR *,
                                    DWORD, DWORD *, void *, DWORD, DWORD *);
+static LSTATUS (WINAPI *open_key_internal)(HKEY, const WCHAR *, DWORD, REGSAM, PHKEY, void *);
+
+static void test_open_key_internal(void)
+{
+    HKEY key = NULL;
+    LSTATUS status;
+
+    open_key_internal = (void *)GetProcAddress(GetModuleHandleA("kernelbase.dll"),
+                                               "RegOpenKeyExInternalW");
+    if (!open_key_internal)
+    {
+        win_skip("RegOpenKeyExInternalW is not available.\n");
+        return;
+    }
+
+    status = open_key_internal(HKEY_CURRENT_USER, L"Software", 0, KEY_READ, &key, NULL);
+    ok(status == ERROR_SUCCESS, "RegOpenKeyExInternalW returned %ld.\n", status);
+    ok(!!key, "RegOpenKeyExInternalW returned a null key.\n");
+    if (key) RegCloseKey(key);
+}
 
 START_TEST(state_helpers)
 {
@@ -27,6 +47,8 @@ START_TEST(state_helpers)
     WCHAR buffer[32];
     DWORD size, type;
     LSTATUS status;
+
+    test_open_key_internal();
 
     get_value = (void *)GetProcAddress(GetModuleHandleA("kernelbase.dll"),
                                        "GetRegistryValueWithFallbackW");

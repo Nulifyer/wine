@@ -179,11 +179,11 @@
 # @ stub BaseGenerateAppCompatData
 @ stdcall -import BaseGetNamedObjectDirectory(ptr)
 @ stub BaseInitAppcompatCache
-@ stub BaseInitAppcompatCacheSupport
+@ stdcall -import BaseInitAppcompatCacheSupport()
 # @ stub BaseIsAppcompatInfrastructureDisabled
 @ stub BaseProcessInitPostImport
 # @ stub BaseQueryModuleData
-# @ stub BaseSetLastNTError
+@ stdcall BaseSetLastNTError(long)
 @ stdcall -fastcall BaseThreadInitThunk(long ptr ptr)
 @ stub BaseUpdateAppcompatCache
 # @ stub BaseVerifyUnicodeString
@@ -1009,6 +1009,7 @@
 @ stdcall -import IsDBCSLeadByte(long)
 @ stdcall -import IsDBCSLeadByteEx(long long)
 @ stdcall -import IsDebuggerPresent()
+@ stdcall -import IsEnclaveTypeSupported(long)
 @ stub -i386 IsLSCallback
 @ stdcall -import IsNLSDefinedString(long long ptr wstr long)
 @ stdcall -import IsNormalizedString(long wstr long)
@@ -1552,6 +1553,8 @@
 @ stdcall -import TerminateProcess(long long)
 @ stdcall -import TerminateThread(long long)
 @ stdcall TermsrvAppInstallMode()
+@ stdcall TermsrvDeleteKey(long)
+@ stdcall TermsrvOpenUserClasses(long ptr)
 @ stdcall Thread32First(long ptr)
 @ stdcall Thread32Next(long ptr)
 @ stdcall -i386 -private ThunkConnect32(ptr str str str ptr ptr) krnl386.exe16.ThunkConnect32

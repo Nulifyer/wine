@@ -219,6 +219,30 @@ BOOL WINAPI TermsrvAppInstallMode(void)
 }
 
 /***********************************************************************
+ *           TermsrvDeleteKey       (KERNEL32.@)
+ *
+ * Windows dispatches this to an optional terminal-services registry
+ * extension and otherwise returns without doing anything.  Wine has no
+ * corresponding extension to notify.
+ */
+void WINAPI TermsrvDeleteKey( HANDLE key )
+{
+    TRACE("(%p)\n", key);
+}
+
+/***********************************************************************
+ *           TermsrvOpenUserClasses       (KERNEL32.@)
+ *
+ * Return the result of Windows' no-extension path.  The caller owns and
+ * initializes the output slot when no terminal-services hook is installed.
+ */
+LONG WINAPI TermsrvOpenUserClasses( DWORD access, HANDLE *key )
+{
+    TRACE("(%#lx, %p)\n", access, key);
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
  *           SetTermsrvAppInstallMode       (KERNEL32.@)
  *
  * This function is said to switch between the INSTALL (TRUE) or

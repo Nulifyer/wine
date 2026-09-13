@@ -676,6 +676,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         case 0: /* PROTECTION_LEVEL_WINTCB_LIGHT */
             protection = 0x61;
             break;
+        case 2: /* PROTECTION_LEVEL_WINDOWS_LIGHT */
+            protection = 0x51;
+            break;
         case 4: /* PROTECTION_LEVEL_LSA_LIGHT */
             protection = 0x41;
             break;
@@ -1094,6 +1097,19 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsProcessorFeaturePresent ( DWORD feature )
 
 
 /***********************************************************************
+ *           IsEnclaveTypeSupported   (kernelbase.@)
+ *
+ * Wine has no enclave execution backend, so none of the Windows enclave
+ * types can be supported.
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH IsEnclaveTypeSupported( DWORD enclave_type )
+{
+    UNREFERENCED_PARAMETER(enclave_type);
+    return FALSE;
+}
+
+
+/***********************************************************************
  *           IsUserCetAvailableInEnvironment   (kernelbase.@)
  *
  * Wine does not currently provide user-mode CET shadow stacks. Windows
@@ -1228,6 +1244,15 @@ BOOL WINAPI DECLSPEC_HOTPATCH ProcessIdToSessionId( DWORD pid, DWORD *id )
 DWORD WINAPI WTSGetServiceSessionId(void)
 {
     return RtlGetCurrentServiceSessionId();
+}
+
+
+/***********************************************************************
+ *           WTSIsServerContainer   (kernelbase.@)
+ */
+BOOL WINAPI WTSIsServerContainer(void)
+{
+    return !!RtlGetCurrentServiceSessionId();
 }
 
 
@@ -1421,6 +1446,19 @@ BOOL WINAPI BaseFlushAppcompatCache(void)
 {
     FIXME( "stub\n" );
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+
+/**********************************************************************
+ *           BaseInitAppcompatCacheSupport   (kernelbase.@)
+ *
+ * Native KernelBase returns FALSE when its optional appcompat worker is
+ * unavailable. Wine has no kernel appcompat cache to initialize.
+ */
+BOOL WINAPI BaseInitAppcompatCacheSupport(void)
+{
+    FIXME( "stub\n" );
     return FALSE;
 }
 

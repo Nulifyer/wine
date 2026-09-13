@@ -7377,6 +7377,33 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetThreadPreferredUILanguages( DWORD flags, PCZZWS
 
 
 /***********************************************************************
+ *      SetClientDynamicTimeZoneInformation   (kernelbase.@)
+ *
+ * The Windows implementation forwards the converted timezone through
+ * CsrClientCallServer.  Wine does not implement that private CSR API; accept
+ * the notification while continuing to source timezone data from the host.
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetClientDynamicTimeZoneInformation(
+    const DYNAMIC_TIME_ZONE_INFORMATION *info )
+{
+    TRACE( "%p\n", info );
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *      SetClientTimeZoneInformation   (kernelbase.@)
+ *
+ * See SetClientDynamicTimeZoneInformation above.
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetClientTimeZoneInformation( const TIME_ZONE_INFORMATION *info )
+{
+    TRACE( "%p\n", info );
+    return TRUE;
+}
+
+
+/***********************************************************************
  *	SetTimeZoneInformation   (kernelbase.@)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH SetTimeZoneInformation( const TIME_ZONE_INFORMATION *info )

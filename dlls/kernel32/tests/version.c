@@ -167,6 +167,12 @@ static void test_GetVersionEx(void)
     ret = GetVersionExA((OSVERSIONINFOA *)&infoExA);
     ok(ret, "GetVersionExA failed.\n");
 
+    if (infoExA.dwPlatformId == VER_PLATFORM_WIN32_NT &&
+        (infoExA.dwMajorVersion > 5 ||
+         (infoExA.dwMajorVersion == 5 && infoExA.dwMinorVersion >= 1)))
+        ok(infoExA.wSuiteMask & VER_SUITE_TERMINAL,
+           "Expected VER_SUITE_TERMINAL, got suite mask %#x.\n", infoExA.wSuiteMask);
+
     if (!infoExA.wServicePackMajor && !infoExA.wServicePackMinor)
         ok(!infoExA.szCSDVersion[0], "got '%s'\n", infoExA.szCSDVersion);
 }

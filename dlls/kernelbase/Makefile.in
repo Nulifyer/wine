@@ -10,6 +10,7 @@ x86_64_EXTRADLLFLAGS = -Wl,--image-base,0x174000000
 SOURCES = \
 	console.c \
 	debug.c \
+	exit.c \
 	file.c \
 	kernelbase.rc \
 	loader.c \

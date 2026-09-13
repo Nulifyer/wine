@@ -80,6 +80,191 @@ INT WINAPI MulDiv( INT a, INT b, INT c )
     return ret;
 }
 
+/*************************************************************************
+ * CommandLineToArgvW            [KERNELBASE.@]
+ *
+ * Keep this implementation in KernelBase instead of forwarding to SHCore.
+ * The command-line API set is hosted by KernelBase, and native SHCore imports
+ * that contract; forwarding it back to SHCore creates a circular forwarder.
+ */
+WCHAR **WINAPI CommandLineToArgvW( const WCHAR *cmdline, int *numargs )
+{
+    int qcount, bcount;
+    const WCHAR *s;
+    WCHAR **argv;
+    DWORD argc;
+    WCHAR *d;
+
+    if (!numargs)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return NULL;
+    }
+
+    if (*cmdline == 0)
+    {
+        DWORD len, deslen = MAX_PATH, size;
+
+        size = sizeof(WCHAR *) * 2 + deslen * sizeof(WCHAR);
+        for (;;)
+        {
+            if (!(argv = LocalAlloc( LMEM_FIXED, size ))) return NULL;
+            len = GetModuleFileNameW( 0, (WCHAR *)(argv + 2), deslen );
+            if (!len)
+            {
+                LocalFree( argv );
+                return NULL;
+            }
+            if (len < deslen) break;
+            deslen *= 2;
+            size = sizeof(WCHAR *) * 2 + deslen * sizeof(WCHAR);
+            LocalFree( argv );
+        }
+        argv[0] = (WCHAR *)(argv + 2);
+        argv[1] = NULL;
+        *numargs = 1;
+        return argv;
+    }
+
+    argc = 1;
+    s = cmdline;
+    if (*s == '"')
+    {
+        s++;
+        while (*s)
+            if (*s++ == '"') break;
+    }
+    else
+    {
+        while (*s && *s != ' ' && *s != '\t') s++;
+    }
+    while (*s == ' ' || *s == '\t') s++;
+    if (*s) argc++;
+
+    qcount = bcount = 0;
+    while (*s)
+    {
+        if ((*s == ' ' || *s == '\t') && qcount == 0)
+        {
+            while (*s == ' ' || *s == '\t') s++;
+            if (*s) argc++;
+            bcount = 0;
+        }
+        else if (*s == '\\')
+        {
+            bcount++;
+            s++;
+        }
+        else if (*s == '"')
+        {
+            if ((bcount & 1) == 0) qcount++;
+            s++;
+            bcount = 0;
+            while (*s == '"')
+            {
+                qcount++;
+                s++;
+            }
+            qcount %= 3;
+            if (qcount == 2) qcount = 0;
+        }
+        else
+        {
+            bcount = 0;
+            s++;
+        }
+    }
+
+    argv = LocalAlloc( LMEM_FIXED, (argc + 1) * sizeof(WCHAR *)
+                       + (lstrlenW( cmdline ) + 1) * sizeof(WCHAR) );
+    if (!argv) return NULL;
+
+    argv[0] = d = lstrcpyW( (WCHAR *)(argv + argc + 1), cmdline );
+    argc = 1;
+    if (*d == '"')
+    {
+        s = d + 1;
+        while (*s)
+        {
+            if (*s == '"')
+            {
+                s++;
+                break;
+            }
+            *d++ = *s++;
+        }
+    }
+    else
+    {
+        while (*d && *d != ' ' && *d != '\t') d++;
+        s = d;
+        if (*s) s++;
+    }
+    *d++ = 0;
+    while (*s == ' ' || *s == '\t') s++;
+    if (!*s)
+    {
+        argv[argc] = NULL;
+        *numargs = argc;
+        return argv;
+    }
+
+    argv[argc++] = d;
+    qcount = bcount = 0;
+    while (*s)
+    {
+        if ((*s == ' ' || *s == '\t') && qcount == 0)
+        {
+            *d++ = 0;
+            bcount = 0;
+            do
+            {
+                s++;
+            } while (*s == ' ' || *s == '\t');
+            if (*s) argv[argc++] = d;
+        }
+        else if (*s == '\\')
+        {
+            *d++ = *s++;
+            bcount++;
+        }
+        else if (*s == '"')
+        {
+            if ((bcount & 1) == 0)
+            {
+                d -= bcount / 2;
+                qcount++;
+            }
+            else
+            {
+                d = d - bcount / 2 - 1;
+                *d++ = '"';
+            }
+            s++;
+            bcount = 0;
+            while (*s == '"')
+            {
+                if (++qcount == 3)
+                {
+                    *d++ = '"';
+                    qcount = 0;
+                }
+                s++;
+            }
+            if (qcount == 2) qcount = 0;
+        }
+        else
+        {
+            *d++ = *s++;
+            bcount = 0;
+        }
+    }
+    *d = 0;
+    argv[argc] = NULL;
+    *numargs = argc;
+    return argv;
+}
+
 /***********************************************************************
  *          AppPolicyGetMediaFoundationCodecLoading (KERNELBASE.@)
  */
@@ -392,6 +577,100 @@ ULONG WINAPI PerfSetULongLongCounterValue(HANDLE provider, PERF_COUNTERSET_INSTA
     *(ULONGLONG*)((BYTE *)(instance + 1) + counter->Offset) = value;
 
     return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           PerfIncrementULongCounterValue   (KERNELBASE.@)
+ */
+ULONG WINAPI PerfIncrementULongCounterValue(HANDLE provider, PERF_COUNTERSET_INSTANCE *instance,
+                                             ULONG counterid, ULONG value)
+{
+    struct perf_provider *prov = perf_provider_from_handle( provider );
+    PERF_COUNTER_INFO *counter;
+
+    TRACE( "provider %p, instance %p, counterid %lu, value %lu.\n",
+           provider, instance, counterid, value );
+
+    if (!prov || !instance) return ERROR_INVALID_PARAMETER;
+
+    counter = get_performance_counter_info(instance, counterid);
+    if (!counter) return ERROR_NOT_FOUND;
+    if (counter->Attrib & PERF_ATTRIB_BY_REFERENCE) return ERROR_INVALID_PARAMETER;
+    if (counter->Type & PERF_SIZE_LARGE) return ERROR_INVALID_PARAMETER;
+
+    InterlockedExchangeAdd( (LONG volatile *)((BYTE *)(instance + 1) + counter->Offset), (LONG)value );
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *           PerfIncrementULongLongCounterValue   (KERNELBASE.@)
+ */
+ULONG WINAPI PerfIncrementULongLongCounterValue(HANDLE provider, PERF_COUNTERSET_INSTANCE *instance,
+                                                 ULONG counterid, ULONGLONG value)
+{
+    struct perf_provider *prov = perf_provider_from_handle( provider );
+    PERF_COUNTER_INFO *counter;
+
+    TRACE( "provider %p, instance %p, counterid %lu, value %I64u.\n",
+           provider, instance, counterid, value );
+
+    if (!prov || !instance) return ERROR_INVALID_PARAMETER;
+
+    counter = get_performance_counter_info(instance, counterid);
+    if (!counter) return ERROR_NOT_FOUND;
+    if (counter->Attrib & PERF_ATTRIB_BY_REFERENCE) return ERROR_INVALID_PARAMETER;
+    if (!(counter->Type & PERF_SIZE_LARGE)) return ERROR_INVALID_PARAMETER;
+
+    InterlockedExchangeAdd64( (LONGLONG volatile *)((BYTE *)(instance + 1) + counter->Offset),
+                              (LONGLONG)value );
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *           PerfDecrementULongCounterValue   (KERNELBASE.@)
+ */
+ULONG WINAPI PerfDecrementULongCounterValue(HANDLE provider, PERF_COUNTERSET_INSTANCE *instance,
+                                             ULONG counterid, ULONG value)
+{
+    struct perf_provider *prov = perf_provider_from_handle( provider );
+    PERF_COUNTER_INFO *counter;
+
+    TRACE( "provider %p, instance %p, counterid %lu, value %lu.\n",
+           provider, instance, counterid, value );
+
+    if (!prov || !instance) return ERROR_INVALID_PARAMETER;
+
+    counter = get_performance_counter_info(instance, counterid);
+    if (!counter) return ERROR_NOT_FOUND;
+    if (counter->Attrib & PERF_ATTRIB_BY_REFERENCE) return ERROR_INVALID_PARAMETER;
+    if (counter->Type & PERF_SIZE_LARGE) return ERROR_INVALID_PARAMETER;
+
+    InterlockedExchangeAdd( (LONG volatile *)((BYTE *)(instance + 1) + counter->Offset), (LONG)(0 - value) );
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *           PerfDecrementULongLongCounterValue   (KERNELBASE.@)
+ */
+ULONG WINAPI PerfDecrementULongLongCounterValue(HANDLE provider, PERF_COUNTERSET_INSTANCE *instance,
+                                                 ULONG counterid, ULONGLONG value)
+{
+    struct perf_provider *prov = perf_provider_from_handle( provider );
+    PERF_COUNTER_INFO *counter;
+
+    TRACE( "provider %p, instance %p, counterid %lu, value %I64u.\n",
+           provider, instance, counterid, value );
+
+    if (!prov || !instance) return ERROR_INVALID_PARAMETER;
+
+    counter = get_performance_counter_info(instance, counterid);
+    if (!counter) return ERROR_NOT_FOUND;
+    if (counter->Attrib & PERF_ATTRIB_BY_REFERENCE) return ERROR_INVALID_PARAMETER;
+    if (!(counter->Type & PERF_SIZE_LARGE)) return ERROR_INVALID_PARAMETER;
+
+    InterlockedExchangeAdd64( (LONGLONG volatile *)((BYTE *)(instance + 1) + counter->Offset),
+                              (LONGLONG)(0 - value) );
+    return ERROR_SUCCESS;
 }
 
 /***********************************************************************

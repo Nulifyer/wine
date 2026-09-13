@@ -230,7 +230,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetExitCodeThread( HANDLE thread, LPDWORD exit_cod
  */
 DWORD WINAPI kernelbase_GetLastError(void)
 {
-    return NtCurrentTeb()->LastErrorValue;
+    DWORD error = NtCurrentTeb()->LastErrorValue;
+
+    TRACE("linuxnt: GetLastError caller %p -> %lu\n", __builtin_return_address(0), error);
+    return error;
 }
 
 
@@ -1378,8 +1381,12 @@ PTP_TIMER WINAPI DECLSPEC_HOTPATCH CreateThreadpoolTimer( PTP_TIMER_CALLBACK cal
                                                           TP_CALLBACK_ENVIRON *environment )
 {
     TP_TIMER *timer;
+    NTSTATUS status;
 
-    if (!set_ntstatus( TpAllocTimer( &timer, callback, userdata, environment ))) return NULL;
+    status = TpAllocTimer( &timer, callback, userdata, environment );
+    if (!set_ntstatus( status )) timer = NULL;
+    TRACE( "linuxnt: caller=%p callback=%p userdata=%p environment=%p ret=%p status=%#lx error=%lu\n",
+           __builtin_return_address( 0 ), callback, userdata, environment, timer, status, GetLastError() );
     return timer;
 }
 
@@ -1404,8 +1411,12 @@ PTP_WORK WINAPI DECLSPEC_HOTPATCH CreateThreadpoolWork( PTP_WORK_CALLBACK callba
                                                         TP_CALLBACK_ENVIRON *environment )
 {
     TP_WORK *work;
+    NTSTATUS status;
 
-    if (!set_ntstatus( TpAllocWork( &work, callback, userdata, environment ))) return NULL;
+    status = TpAllocWork( &work, callback, userdata, environment );
+    if (!set_ntstatus( status )) work = NULL;
+    TRACE( "linuxnt: caller=%p callback=%p userdata=%p environment=%p ret=%p status=%#lx error=%lu\n",
+           __builtin_return_address( 0 ), callback, userdata, environment, work, status, GetLastError() );
     return work;
 }
 

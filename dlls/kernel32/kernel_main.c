@@ -37,6 +37,17 @@ WINE_DEFAULT_DEBUG_CHANNEL(process);
 static STARTUPINFOA startup_infoA;
 
 /***********************************************************************
+ *           BaseSetLastNTError   (KERNEL32.@)
+ */
+DWORD WINAPI BaseSetLastNTError( NTSTATUS status )
+{
+    DWORD error = RtlNtStatusToDosError( status );
+
+    RtlSetLastWin32Error( error );
+    return error;
+}
+
+/***********************************************************************
  *           set_entry_point
  */
 #ifdef __i386__

@@ -19,6 +19,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -567,10 +568,15 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateEventW( SECURITY_ATTRIBUTES *sa, BOOL manu
                                               BOOL initial_state, LPCWSTR name )
 {
     DWORD flags = 0;
+    HANDLE ret;
 
     if (manual_reset) flags |= CREATE_EVENT_MANUAL_RESET;
     if (initial_state) flags |= CREATE_EVENT_INITIAL_SET;
-    return CreateEventExW( sa, name, flags, EVENT_ALL_ACCESS );
+    ret = CreateEventExW( sa, name, flags, EVENT_ALL_ACCESS );
+    TRACE( "linuxnt: caller=%p sa=%p manual=%u initial=%u name=%s ret=%p error=%lu\n",
+           __builtin_return_address( 0 ), sa, manual_reset, initial_state, debugstr_w(name), ret,
+           GetLastError() );
+    return ret;
 }
 
 
@@ -1007,7 +1013,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH DeleteTimerQueueTimer( HANDLE queue, HANDLE timer,
  */
 BOOL WINAPI DECLSPEC_HOTPATCH InitializeCriticalSectionAndSpinCount( CRITICAL_SECTION *crit, DWORD count )
 {
-    return !RtlInitializeCriticalSectionAndSpinCount( crit, count );
+    BOOL ret = !RtlInitializeCriticalSectionAndSpinCount( crit, count );
+
+    TRACE( "caller=%p result=%u\n", __builtin_return_address( 0 ), ret );
+    return ret;
 }
 
 /***********************************************************************

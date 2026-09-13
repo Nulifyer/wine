@@ -28,7 +28,9 @@
 #include "winerror.h"
 #include "winternl.h"
 #include "winioctl.h"
+#include "winreg.h"
 #include "ddk/ntddk.h"
+#include "bcrypt.h"
 
 #include "kernelbase.h"
 #include "wine/debug.h"
@@ -126,6 +128,7 @@ static const WELLKNOWNRID WellKnownRids[] =
     { WinAccountAdministratorSid,    DOMAIN_USER_RID_ADMIN },
     { WinAccountGuestSid,            DOMAIN_USER_RID_GUEST },
     { WinAccountKrbtgtSid,           DOMAIN_USER_RID_KRBTGT },
+    { WinAccountDefaultSystemManagedSid, DOMAIN_USER_RID_DEFAULT_ACCOUNT },
     { WinAccountDomainAdminsSid,     DOMAIN_GROUP_RID_ADMINS },
     { WinAccountDomainUsersSid,      DOMAIN_GROUP_RID_USERS },
     { WinAccountDomainGuestsSid,     DOMAIN_GROUP_RID_GUESTS },
@@ -213,6 +216,256 @@ BOOL WINAPI AllocateAndInitializeSid( PSID_IDENTIFIER_AUTHORITY auth, BYTE count
 {
     return set_ntstatus( RtlAllocateAndInitializeSid( auth, count, auth0, auth1, auth2, auth3,
                                                       auth4, auth5, auth6, auth7, sid ));
+}
+
+typedef NTSTATUS (WINAPI *bcrypt_open_algorithm_provider_fn)(BCRYPT_ALG_HANDLE *, LPCWSTR,
+                                                              LPCWSTR, ULONG);
+typedef NTSTATUS (WINAPI *bcrypt_close_algorithm_provider_fn)(BCRYPT_ALG_HANDLE, ULONG);
+typedef NTSTATUS (WINAPI *bcrypt_get_property_fn)(BCRYPT_HANDLE, LPCWSTR, PUCHAR, ULONG,
+                                                   ULONG *, ULONG);
+typedef NTSTATUS (WINAPI *bcrypt_create_hash_fn)(BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE *,
+                                                  PUCHAR, ULONG, PUCHAR, ULONG, ULONG);
+typedef NTSTATUS (WINAPI *bcrypt_hash_data_fn)(BCRYPT_HASH_HANDLE, PUCHAR, ULONG, ULONG);
+typedef NTSTATUS (WINAPI *bcrypt_finish_hash_fn)(BCRYPT_HASH_HANDLE, PUCHAR, ULONG, ULONG);
+typedef NTSTATUS (WINAPI *bcrypt_destroy_hash_fn)(BCRYPT_HASH_HANDLE);
+
+/******************************************************************************
+ * AppContainerDeriveSidFromMoniker   (kernelbase.@)
+ */
+HRESULT WINAPI AppContainerDeriveSidFromMoniker( const WCHAR *moniker, PSID *sid )
+{
+    static const SID_IDENTIFIER_AUTHORITY authority = { SECURITY_APP_PACKAGE_AUTHORITY };
+    bcrypt_open_algorithm_provider_fn bcrypt_open_algorithm_provider;
+    bcrypt_close_algorithm_provider_fn bcrypt_close_algorithm_provider;
+    bcrypt_get_property_fn bcrypt_get_property;
+    bcrypt_create_hash_fn bcrypt_create_hash;
+    bcrypt_hash_data_fn bcrypt_hash_data;
+    bcrypt_finish_hash_fn bcrypt_finish_hash;
+    bcrypt_destroy_hash_fn bcrypt_destroy_hash;
+    BCRYPT_ALG_HANDLE algorithm = NULL;
+    BCRYPT_HASH_HANDLE hash = NULL;
+    UNICODE_STRING source, lower = {0};
+    ULONG object_len, result_len;
+    BYTE digest[32], *object = NULL;
+    DWORD subauth[7];
+    HMODULE module;
+    NTSTATUS status;
+    SIZE_T len;
+    HRESULT hr;
+
+    if (!moniker || !sid) return E_INVALIDARG;
+
+    len = wcslen( moniker );
+    if (!len || len > 0xffff) return E_INVALIDARG;
+
+    RtlInitUnicodeString( &source, moniker );
+    if ((status = RtlDowncaseUnicodeString( &lower, &source, TRUE )))
+        return HRESULT_FROM_NT( status );
+
+    if (!(module = LoadLibraryW( L"bcrypt.dll" )))
+    {
+        hr = HRESULT_FROM_WIN32( GetLastError() );
+        goto done;
+    }
+
+#define LOAD_BCRYPT_PROC(name, export) \
+    do { \
+        bcrypt_##name = (void *)GetProcAddress( module, export ); \
+        if (!bcrypt_##name) { hr = HRESULT_FROM_WIN32( ERROR_PROC_NOT_FOUND ); goto done; } \
+    } while (0)
+
+    LOAD_BCRYPT_PROC(open_algorithm_provider, "BCryptOpenAlgorithmProvider");
+    LOAD_BCRYPT_PROC(close_algorithm_provider, "BCryptCloseAlgorithmProvider");
+    LOAD_BCRYPT_PROC(get_property, "BCryptGetProperty");
+    LOAD_BCRYPT_PROC(create_hash, "BCryptCreateHash");
+    LOAD_BCRYPT_PROC(hash_data, "BCryptHashData");
+    LOAD_BCRYPT_PROC(finish_hash, "BCryptFinishHash");
+    LOAD_BCRYPT_PROC(destroy_hash, "BCryptDestroyHash");
+
+#undef LOAD_BCRYPT_PROC
+
+    if ((status = bcrypt_open_algorithm_provider( &algorithm, BCRYPT_SHA256_ALGORITHM, NULL, 0 )))
+    {
+        hr = HRESULT_FROM_NT( status );
+        goto done;
+    }
+
+    if ((status = bcrypt_get_property( algorithm, BCRYPT_OBJECT_LENGTH, (BYTE *)&object_len,
+                                        sizeof(object_len), &result_len, 0 )))
+    {
+        hr = HRESULT_FROM_NT( status );
+        goto done;
+    }
+
+    if (!(object = RtlAllocateHeap( GetProcessHeap(), 0, object_len )))
+    {
+        hr = E_OUTOFMEMORY;
+        goto done;
+    }
+
+    if ((status = bcrypt_create_hash( algorithm, &hash, object, object_len, NULL, 0, 0 )) ||
+        (status = bcrypt_hash_data( hash, (BYTE *)lower.Buffer, lower.Length, 0 )) ||
+        (status = bcrypt_finish_hash( hash, digest, sizeof(digest), 0 )))
+    {
+        hr = HRESULT_FROM_NT( status );
+        goto done;
+    }
+
+    memcpy( subauth, digest, sizeof(subauth) );
+    status = RtlAllocateAndInitializeSid( (SID_IDENTIFIER_AUTHORITY *)&authority, 8,
+                                         SECURITY_APP_PACKAGE_BASE_RID,
+                                         subauth[0], subauth[1], subauth[2], subauth[3],
+                                         subauth[4], subauth[5], subauth[6], sid );
+    hr = status ? HRESULT_FROM_NT( status ) : S_OK;
+
+done:
+    if (hash) bcrypt_destroy_hash( hash );
+    if (algorithm) bcrypt_close_algorithm_provider( algorithm, 0 );
+    if (object) RtlFreeHeap( GetProcessHeap(), 0, object );
+    if (module) FreeLibrary( module );
+    RtlFreeUnicodeString( &lower );
+    return hr;
+}
+
+static const WCHAR appcontainer_mappings_path[] =
+    L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppContainer\\Mappings";
+
+static HRESULT appcontainer_sid_key_path( PSID sid, WCHAR *key_path, unsigned int key_path_count )
+{
+    UNICODE_STRING sid_string = {0};
+    unsigned int len;
+    NTSTATUS status;
+
+    if ((status = RtlConvertSidToUnicodeString( &sid_string, sid, TRUE )))
+        return HRESULT_FROM_NT( status );
+
+    len = sid_string.Length / sizeof(WCHAR);
+    if (ARRAY_SIZE(appcontainer_mappings_path) + len >= key_path_count)
+    {
+        RtlFreeUnicodeString( &sid_string );
+        return E_INVALIDARG;
+    }
+
+    memcpy( key_path, appcontainer_mappings_path, sizeof(appcontainer_mappings_path) - sizeof(WCHAR) );
+    key_path[ARRAY_SIZE(appcontainer_mappings_path) - 1] = '\\';
+    memcpy( key_path + ARRAY_SIZE(appcontainer_mappings_path), sid_string.Buffer, sid_string.Length );
+    key_path[ARRAY_SIZE(appcontainer_mappings_path) + len] = 0;
+    RtlFreeUnicodeString( &sid_string );
+    return S_OK;
+}
+
+static HRESULT appcontainer_lookup_string( PSID sid, const WCHAR *value, WCHAR **result )
+{
+    WCHAR key_path[ARRAY_SIZE(appcontainer_mappings_path) + 185];
+    DWORD size, type;
+    WCHAR *buffer;
+    LSTATUS ret;
+    HRESULT hr;
+
+    if (!sid || !result) return E_INVALIDARG;
+    if (FAILED(hr = appcontainer_sid_key_path( sid, key_path, ARRAY_SIZE(key_path) ))) return hr;
+
+    size = 0;
+    ret = RegGetValueW( HKEY_CURRENT_USER, key_path, value, RRF_RT_REG_SZ,
+                        &type, NULL, &size );
+    if (ret) return HRESULT_FROM_WIN32( ret );
+
+    if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return E_OUTOFMEMORY;
+    ret = RegGetValueW( HKEY_CURRENT_USER, key_path, value, RRF_RT_REG_SZ,
+                        &type, buffer, &size );
+    if (ret)
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, buffer );
+        return HRESULT_FROM_WIN32( ret );
+    }
+
+    *result = buffer;
+    return S_OK;
+}
+
+/******************************************************************************
+ * AppContainerLookupMoniker   (kernelbase.@)
+ */
+HRESULT WINAPI AppContainerLookupMoniker( PSID sid, WCHAR **moniker )
+{
+    return appcontainer_lookup_string( sid, L"Moniker", moniker );
+}
+
+/******************************************************************************
+ * AppContainerLookupDisplayNameMrtReference   (kernelbase.@)
+ */
+HRESULT WINAPI AppContainerLookupDisplayNameMrtReference( PSID sid, WCHAR **display_name )
+{
+    return appcontainer_lookup_string( sid, L"DisplayName", display_name );
+}
+
+/******************************************************************************
+ * AppContainerRegisterSid   (kernelbase.@)
+ */
+HRESULT WINAPI AppContainerRegisterSid( PSID sid, const WCHAR *moniker, const WCHAR *display_name )
+{
+    WCHAR key_path[ARRAY_SIZE(appcontainer_mappings_path) + 185];
+    DWORD disposition;
+    HRESULT hr;
+    LSTATUS ret;
+    HKEY key;
+
+    if (!sid || !moniker || !display_name || !moniker[0] || !display_name[0]) return E_INVALIDARG;
+    if (FAILED(hr = appcontainer_sid_key_path( sid, key_path, ARRAY_SIZE(key_path) ))) return hr;
+
+    ret = RegCreateKeyExW( HKEY_CURRENT_USER, key_path, 0, NULL, 0, KEY_SET_VALUE,
+                           NULL, &key, &disposition );
+    if (ret) return HRESULT_FROM_WIN32( ret );
+    if (disposition == REG_OPENED_EXISTING_KEY)
+    {
+        RegCloseKey( key );
+        return HRESULT_FROM_WIN32( ERROR_ALREADY_EXISTS );
+    }
+
+    ret = RegSetValueExW( key, L"Moniker", 0, REG_SZ, (const BYTE *)moniker,
+                          (wcslen(moniker) + 1) * sizeof(WCHAR) );
+    if (!ret)
+        ret = RegSetValueExW( key, L"DisplayName", 0, REG_SZ, (const BYTE *)display_name,
+                              (wcslen(display_name) + 1) * sizeof(WCHAR) );
+    RegCloseKey( key );
+    if (ret)
+    {
+        RegDeleteKeyExW( HKEY_CURRENT_USER, key_path, 0, 0 );
+        return HRESULT_FROM_WIN32( ret );
+    }
+    return S_OK;
+}
+
+/******************************************************************************
+ * AppContainerUnregisterSid   (kernelbase.@)
+ */
+HRESULT WINAPI AppContainerUnregisterSid( PSID sid )
+{
+    WCHAR key_path[ARRAY_SIZE(appcontainer_mappings_path) + 185];
+    HRESULT hr;
+    LSTATUS ret;
+
+    if (!sid) return E_INVALIDARG;
+    if (FAILED(hr = appcontainer_sid_key_path( sid, key_path, ARRAY_SIZE(key_path) ))) return hr;
+
+    ret = RegDeleteKeyExW( HKEY_CURRENT_USER, key_path, 0, 0 );
+    return ret ? HRESULT_FROM_WIN32( ret ) : S_OK;
+}
+
+/******************************************************************************
+ * AppContainerFreeMemory   (kernelbase.@)
+ */
+void WINAPI AppContainerFreeMemory( void *memory )
+{
+    if (memory) RtlFreeHeap( GetProcessHeap(), 0, memory );
+}
+
+/******************************************************************************
+ * AppXFreeMemory   (kernelbase.@)
+ */
+void WINAPI AppXFreeMemory( void *memory )
+{
+    AppContainerFreeMemory( memory );
 }
 
 /***********************************************************************

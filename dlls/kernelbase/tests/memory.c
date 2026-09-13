@@ -29,6 +29,10 @@
 
 static UINT WINAPI (WINAPI *pEnumSystemFirmwareTables)(DWORD provider, void *buffer, DWORD size);
 static BOOL WINAPI (*pGetOsManufacturingMode)(BOOL *mode);
+static BOOL WINAPI (*pGetOsSafeBootMode)(DWORD *flags);
+static HLOCAL (WINAPI *pLocalAlloc)(UINT flags, SIZE_T size);
+static HLOCAL (WINAPI *pLocalFree)(HLOCAL handle);
+static SIZE_T (WINAPI *pLocalSize)(HLOCAL handle);
 
 static void test_enum_system_firmware_tables(void)
 {
@@ -76,6 +80,45 @@ static void test_os_manufacturing_mode(void)
     ok(GetLastError() == 0xdeadbeef, "Expected last error to be preserved, got %lu.\n", GetLastError());
 }
 
+static void test_os_safe_boot_mode(void)
+{
+    DWORD flags = 0xdeadbeef;
+    BOOL ret;
+
+    if (!pGetOsSafeBootMode)
+    {
+        win_skip("GetOsSafeBootMode is not available.\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = pGetOsSafeBootMode(&flags);
+    ok(ret, "GetOsSafeBootMode failed, error %lu.\n", GetLastError());
+    ok(flags != 0xdeadbeef, "Expected safe boot flags to be initialized.\n");
+    ok(GetLastError() == 0xdeadbeef, "Expected last error to be preserved, got %lu.\n", GetLastError());
+}
+
+static void test_local_size(void)
+{
+    static const SIZE_T allocation_size = 123;
+    HLOCAL mem;
+    SIZE_T size;
+
+    if (!pLocalAlloc || !pLocalFree || !pLocalSize)
+    {
+        win_skip("KernelBase local-memory functions are not available.\n");
+        return;
+    }
+
+    mem = pLocalAlloc(LMEM_FIXED, allocation_size);
+    ok(!!mem, "LocalAlloc failed, error %lu.\n", GetLastError());
+    if (!mem) return;
+
+    size = pLocalSize(mem);
+    ok(size >= allocation_size, "LocalSize returned %Iu.\n", size);
+    ok(!pLocalFree(mem), "LocalFree failed, error %lu.\n", GetLastError());
+}
+
 START_TEST(memory)
 {
     HMODULE hmod;
@@ -83,7 +126,13 @@ START_TEST(memory)
     hmod = LoadLibraryA("kernelbase.dll");
     pEnumSystemFirmwareTables = (void *)GetProcAddress(hmod, "EnumSystemFirmwareTables");
     pGetOsManufacturingMode = (void *)GetProcAddress(hmod, "GetOsManufacturingMode");
+    pGetOsSafeBootMode = (void *)GetProcAddress(hmod, "GetOsSafeBootMode");
+    pLocalAlloc = (void *)GetProcAddress(hmod, "LocalAlloc");
+    pLocalFree = (void *)GetProcAddress(hmod, "LocalFree");
+    pLocalSize = (void *)GetProcAddress(hmod, "LocalSize");
 
     test_enum_system_firmware_tables();
     test_os_manufacturing_mode();
+    test_os_safe_boot_mode();
+    test_local_size();
 }

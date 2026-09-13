@@ -25,12 +25,159 @@
 #include <winbase.h>
 #include <winerror.h>
 #include <winternl.h>
+#include <winreg.h>
 
 #include "wine/test.h"
 
 static BOOL (WINAPI *pDeriveCapabilitySidsFromName)(const WCHAR *, PSID **, DWORD *, PSID **, DWORD *);
+static HRESULT (WINAPI *pAppContainerDeriveSidFromMoniker)(const WCHAR *, PSID *);
+static HRESULT (WINAPI *pAppContainerLookupMoniker)(PSID, WCHAR **);
+static HRESULT (WINAPI *pAppContainerLookupDisplayNameMrtReference)(PSID, WCHAR **);
+static HRESULT (WINAPI *pAppContainerRegisterSid)(PSID, const WCHAR *, const WCHAR *);
+static HRESULT (WINAPI *pAppContainerUnregisterSid)(PSID);
+static void (WINAPI *pAppContainerFreeMemory)(void *);
 
 static NTSTATUS (WINAPI *pRtlDeriveCapabilitySidsFromName)(UNICODE_STRING *, PSID, PSID);
+
+static void test_AppContainerDeriveSidFromMoniker(void)
+{
+    static const DWORD expected[] =
+    {
+        SECURITY_APP_PACKAGE_BASE_RID, 1980125950, 1037672881, 421768107,
+        1949737198, 2922275827u, 507320043, 1582245000
+    };
+    static const SID_IDENTIFIER_AUTHORITY authority = { SECURITY_APP_PACKAGE_AUTHORITY };
+    PSID sid, mixed_case_sid;
+    SID *sid_header;
+    HRESULT hr;
+    unsigned int i;
+
+    if (!pAppContainerDeriveSidFromMoniker)
+    {
+        win_skip("AppContainerDeriveSidFromMoniker is not available.\n");
+        return;
+    }
+
+    hr = pAppContainerDeriveSidFromMoniker(NULL, &sid);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    hr = pAppContainerDeriveSidFromMoniker(L"test", NULL);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    hr = pAppContainerDeriveSidFromMoniker(L"", &sid);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    sid = NULL;
+    hr = pAppContainerDeriveSidFromMoniker(L"test", &sid);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(!!sid, "expected a SID.\n");
+    if (sid)
+    {
+        sid_header = sid;
+        ok(sid_header->Revision == SID_REVISION, "got revision %u.\n", sid_header->Revision);
+        ok(sid_header->SubAuthorityCount == ARRAY_SIZE(expected), "got count %u.\n",
+           sid_header->SubAuthorityCount);
+        ok(!memcmp(&sid_header->IdentifierAuthority, &authority, sizeof(authority)),
+           "got unexpected authority.\n");
+        for (i = 0; i < ARRAY_SIZE(expected); ++i)
+            ok(sid_header->SubAuthority[i] == expected[i], "subauthority %u: got %lu.\n",
+               i, sid_header->SubAuthority[i]);
+    }
+
+    mixed_case_sid = NULL;
+    hr = pAppContainerDeriveSidFromMoniker(L"TeSt", &mixed_case_sid);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(!!mixed_case_sid, "expected a SID.\n");
+    if (sid && mixed_case_sid)
+        ok(EqualSid(sid, mixed_case_sid), "moniker hashing was not case-insensitive.\n");
+
+    if (sid) FreeSid(sid);
+    if (mixed_case_sid) FreeSid(mixed_case_sid);
+}
+
+static void test_AppContainerLookupMoniker(void)
+{
+    static const WCHAR key_path[] =
+        L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppContainer\\Mappings\\"
+        L"S-1-15-2-1980125950-1037672881-421768107-1949737198-2922275827-507320043-1582245000";
+    static const WCHAR value[] = L"Wine.KernelBase.AppContainer.Test";
+    static const WCHAR display_value[] = L"@{Wine.KernelBase.AppContainer?ms-resource://DisplayName}";
+    WCHAR *moniker = (WCHAR *)0xdeadbeef;
+    PSID sid = NULL;
+    HRESULT hr;
+
+    if (!pAppContainerLookupMoniker || !pAppContainerFreeMemory ||
+        !pAppContainerLookupDisplayNameMrtReference || !pAppContainerDeriveSidFromMoniker ||
+        !pAppContainerRegisterSid || !pAppContainerUnregisterSid)
+    {
+        win_skip("AppContainer lookup functions are not available.\n");
+        return;
+    }
+
+    hr = pAppContainerLookupMoniker(NULL, &moniker);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    hr = pAppContainerLookupMoniker((PSID)0xdeadbeef, NULL);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    hr = pAppContainerLookupDisplayNameMrtReference(NULL, &moniker);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    hr = pAppContainerRegisterSid(NULL, value, display_value);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    hr = pAppContainerUnregisterSid(NULL);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    hr = pAppContainerDeriveSidFromMoniker(L"test", &sid);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    if (FAILED(hr)) return;
+
+    hr = pAppContainerRegisterSid(sid, NULL, display_value);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    hr = pAppContainerRegisterSid(sid, L"", display_value);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    hr = pAppContainerRegisterSid(sid, value, NULL);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    hr = pAppContainerRegisterSid(sid, value, L"");
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    RegDeleteKeyW(HKEY_CURRENT_USER, key_path);
+    moniker = (WCHAR *)0xdeadbeef;
+    hr = pAppContainerLookupMoniker(sid, &moniker);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got hr %#lx.\n", hr);
+    ok(moniker == (WCHAR *)0xdeadbeef, "output changed to %p.\n", moniker);
+
+    hr = pAppContainerRegisterSid(sid, value, display_value);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    hr = pAppContainerRegisterSid(sid, value, display_value);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS), "got hr %#lx.\n", hr);
+
+    moniker = NULL;
+    hr = pAppContainerLookupMoniker(sid, &moniker);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(!!moniker, "expected a moniker.\n");
+    if (moniker)
+    {
+        ok(!wcscmp(moniker, value), "got %s.\n", wine_dbgstr_w(moniker));
+        pAppContainerFreeMemory(moniker);
+    }
+
+    moniker = NULL;
+    hr = pAppContainerLookupDisplayNameMrtReference(sid, &moniker);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(!!moniker, "expected a display name.\n");
+    if (moniker)
+    {
+        ok(!wcscmp(moniker, display_value), "got %s.\n", wine_dbgstr_w(moniker));
+        pAppContainerFreeMemory(moniker);
+    }
+
+    hr = pAppContainerUnregisterSid(sid);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+
+    moniker = (WCHAR *)0xdeadbeef;
+    hr = pAppContainerLookupMoniker(sid, &moniker);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got hr %#lx.\n", hr);
+    ok(moniker == (WCHAR *)0xdeadbeef, "output changed to %p.\n", moniker);
+
+    FreeSid(sid);
+}
 
 static void test_DeriveCapabilitySidsFromName(void)
 {
@@ -91,9 +238,19 @@ START_TEST(security)
 
     hmod = LoadLibraryA("kernelbase.dll");
     pDeriveCapabilitySidsFromName = (void *)GetProcAddress(hmod, "DeriveCapabilitySidsFromName");
+    pAppContainerDeriveSidFromMoniker = (void *)GetProcAddress(hmod,
+                                                               "AppContainerDeriveSidFromMoniker");
+    pAppContainerLookupMoniker = (void *)GetProcAddress(hmod, "AppContainerLookupMoniker");
+    pAppContainerLookupDisplayNameMrtReference = (void *)GetProcAddress(hmod,
+                                                      "AppContainerLookupDisplayNameMrtReference");
+    pAppContainerRegisterSid = (void *)GetProcAddress(hmod, "AppContainerRegisterSid");
+    pAppContainerUnregisterSid = (void *)GetProcAddress(hmod, "AppContainerUnregisterSid");
+    pAppContainerFreeMemory = (void *)GetProcAddress(hmod, "AppContainerFreeMemory");
 
     hmod = LoadLibraryA("ntdll.dll");
     pRtlDeriveCapabilitySidsFromName = (void *)GetProcAddress(hmod, "RtlDeriveCapabilitySidsFromName");
 
     test_DeriveCapabilitySidsFromName();
+    test_AppContainerDeriveSidFromMoniker();
+    test_AppContainerLookupMoniker();
 }

@@ -1637,6 +1637,8 @@ static void test_apisets(void)
         { "api-ms-win-foo-bar-l1-1-0.dll", FALSE, STATUS_INVALID_PARAMETER },
         { "ext-ms-win-gdi-draw-l1-1-1", TRUE, STATUS_SUCCESS, TRUE, TRUE },
         { "ext-ms-win-gdi-draw-l1-1-1.dll", TRUE, STATUS_INVALID_PARAMETER },
+        { "ext-ms-win-samsrv-accountstore-l1-1-1", TRUE, STATUS_SUCCESS, TRUE, TRUE },
+        { "ext-ms-win-security-lsaadt-l1-1-0", TRUE, STATUS_SUCCESS, TRUE, TRUE },
         { "api-ms-win-deprecated-apis-advapi-l1-1-0", FALSE, STATUS_SUCCESS, FALSE, TRUE },
         { "foo", FALSE, STATUS_INVALID_PARAMETER },
         { "foo.dll", FALSE, STATUS_INVALID_PARAMETER },

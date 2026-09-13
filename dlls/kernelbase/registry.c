@@ -111,6 +111,91 @@ LSTATUS WINAPI GetPersistedRegistryLocationW(const WCHAR *base, const WCHAR *sub
     return ERROR_SUCCESS;
 }
 
+/***********************************************************************
+ * RegQueryMultipleValuesA (kernelbase.@)
+ */
+LSTATUS WINAPI RegQueryMultipleValuesA( HKEY hkey, PVALENTA values, DWORD count,
+                                        char *buffer, DWORD *size )
+{
+    DWORD capacity = *size, total = 0;
+    unsigned int i;
+    LSTATUS status;
+
+    TRACE("(%p,%p,%lu,%p,%p=%lu)\n", hkey, values, count, buffer, size, *size);
+
+    for (i = 0; i < count; ++i)
+    {
+        values[i].ve_valuelen = 0;
+        status = RegQueryValueExA( hkey, values[i].ve_valuename, NULL, NULL, NULL,
+                                   &values[i].ve_valuelen );
+        if (status)
+        {
+            *size = total;
+            return status;
+        }
+
+        if (buffer && total + values[i].ve_valuelen <= capacity)
+        {
+            status = RegQueryValueExA( hkey, values[i].ve_valuename, NULL,
+                                       &values[i].ve_type, (BYTE *)buffer + total,
+                                       &values[i].ve_valuelen );
+            if (status)
+            {
+                *size = total;
+                return status;
+            }
+            values[i].ve_valueptr = (DWORD_PTR)(buffer + total);
+        }
+        total += values[i].ve_valuelen;
+    }
+
+    *size = total;
+    return buffer && total <= capacity ? ERROR_SUCCESS : ERROR_MORE_DATA;
+}
+
+/***********************************************************************
+ * RegQueryMultipleValuesW (kernelbase.@)
+ */
+LSTATUS WINAPI RegQueryMultipleValuesW( HKEY hkey, PVALENTW values, DWORD count,
+                                        WCHAR *buffer, DWORD *size )
+{
+    DWORD capacity = *size, total = 0;
+    BYTE *bytes = (BYTE *)buffer;
+    unsigned int i;
+    LSTATUS status;
+
+    TRACE("(%p,%p,%lu,%p,%p=%lu)\n", hkey, values, count, buffer, size, *size);
+
+    for (i = 0; i < count; ++i)
+    {
+        values[i].ve_valuelen = 0;
+        status = RegQueryValueExW( hkey, values[i].ve_valuename, NULL, NULL, NULL,
+                                   &values[i].ve_valuelen );
+        if (status)
+        {
+            *size = total;
+            return status;
+        }
+
+        if (buffer && total + values[i].ve_valuelen <= capacity)
+        {
+            status = RegQueryValueExW( hkey, values[i].ve_valuename, NULL,
+                                       &values[i].ve_type, bytes + total,
+                                       &values[i].ve_valuelen );
+            if (status)
+            {
+                *size = total;
+                return status;
+            }
+            values[i].ve_valueptr = (DWORD_PTR)(bytes + total);
+        }
+        total += values[i].ve_valuelen;
+    }
+
+    *size = total;
+    return buffer && total <= capacity ? ERROR_SUCCESS : ERROR_MORE_DATA;
+}
+
 static const WCHAR * const root_key_names[] =
 {
     L"\\Registry\\Machine\\Software\\Classes",
@@ -124,6 +209,7 @@ static const WCHAR * const root_key_names[] =
 
 static HKEY special_root_keys[ARRAY_SIZE(root_key_names)];
 static BOOL cache_disabled[ARRAY_SIZE(root_key_names)];
+static DWORD termsrv_registry_extension_flags;
 
 static CRITICAL_SECTION reg_mui_cs;
 static CRITICAL_SECTION_DEBUG reg_mui_cs_debug =
@@ -561,6 +647,82 @@ static inline HKEY get_special_root_hkey( HKEY hkey )
     }
 }
 
+/******************************************************************************
+ * MapPredefinedHandleInternal   (kernelbase.@)
+ *
+ * The mapped handle is used by advapi32 for the registry operation.  The two
+ * cleanup values are passed back to CLOSE_LOCAL_HANDLE_INTERNAL afterwards.
+ * Wine does not need Windows' private predefined-handle cache records, but a
+ * handle opened while caching is disabled must still be closed by the caller.
+ */
+LSTATUS WINAPI MapPredefinedHandleInternal( HKEY hkey, HKEY *mapped, HKEY *close,
+                                            void **cache_entry )
+{
+    HKEY ret;
+    ULONG value = HandleToUlong( hkey );
+    unsigned int index = value - HandleToUlong( HKEY_SPECIAL_ROOT_FIRST );
+
+    *close = NULL;
+    *cache_entry = NULL;
+
+    if (!hkey || hkey == INVALID_HANDLE_VALUE) return ERROR_INVALID_HANDLE;
+
+    if (!(value & 0x80000000))
+    {
+        if (mapped) *mapped = hkey;
+        return ERROR_SUCCESS;
+    }
+
+    switch (value)
+    {
+    case (ULONG)(ULONG_PTR)HKEY_CLASSES_ROOT:
+    case (ULONG)(ULONG_PTR)HKEY_CURRENT_USER:
+    case (ULONG)(ULONG_PTR)HKEY_LOCAL_MACHINE:
+    case (ULONG)(ULONG_PTR)HKEY_USERS:
+    case (ULONG)(ULONG_PTR)HKEY_CURRENT_CONFIG:
+    case (ULONG)(ULONG_PTR)HKEY_DYN_DATA:
+        if (!(ret = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
+        if (mapped) *mapped = ret;
+        if (cache_disabled[index]) *close = ret;
+        return ERROR_SUCCESS;
+
+    case (ULONG)(ULONG_PTR)HKEY_PERFORMANCE_DATA:
+    case (ULONG)(ULONG_PTR)HKEY_PERFORMANCE_TEXT:
+    case (ULONG)(ULONG_PTR)HKEY_PERFORMANCE_NLSTEXT:
+        if (mapped) *mapped = hkey;
+        return ERROR_SUCCESS;
+
+    default:
+        return ERROR_INVALID_HANDLE;
+    }
+}
+
+/******************************************************************************
+ * CLOSE_LOCAL_HANDLE_INTERNAL   (kernelbase.@)
+ */
+void WINAPI CLOSE_LOCAL_HANDLE_INTERNAL( HKEY close, void *cache_entry )
+{
+    if (close) NtClose( close );
+    /* Wine does not return private cache records from the mapper. */
+    (void)cache_entry;
+}
+
+/******************************************************************************
+ * RegKrnGetTermsrvRegistryExtensionFlags   (kernelbase.@)
+ */
+DWORD WINAPI RegKrnGetTermsrvRegistryExtensionFlags( void )
+{
+    return termsrv_registry_extension_flags;
+}
+
+/******************************************************************************
+ * RegKrnSetTermsrvRegistryExtensionFlags   (kernelbase.@)
+ */
+void WINAPI RegKrnSetTermsrvRegistryExtensionFlags( DWORD flags )
+{
+    termsrv_registry_extension_flags = flags;
+}
+
 static BOOL is_perf_key( HKEY key )
 {
     return HandleToUlong(key) == HandleToUlong(HKEY_PERFORMANCE_DATA)
@@ -608,6 +770,17 @@ NTSTATUS WINAPI DisablePredefinedHandleTableInternal( HKEY hkey )
 
     TRACE("(%p)\n", hkey);
 
+    if (!hkey)
+    {
+        for (idx = 0; idx < ARRAY_SIZE(special_root_keys); idx++)
+        {
+            cache_disabled[idx] = TRUE;
+            old_key = InterlockedExchangePointer( (void **)&special_root_keys[idx], NULL );
+            if (old_key) NtClose( old_key );
+        }
+        return STATUS_SUCCESS;
+    }
+
     if ((HandleToUlong(hkey) < HandleToUlong(HKEY_SPECIAL_ROOT_FIRST))
             || (HandleToUlong(hkey) > HandleToUlong(HKEY_SPECIAL_ROOT_LAST)))
         return STATUS_INVALID_HANDLE;
@@ -618,6 +791,15 @@ NTSTATUS WINAPI DisablePredefinedHandleTableInternal( HKEY hkey )
     old_key = InterlockedExchangePointer( (void **)&special_root_keys[idx], NULL );
     if (old_key) NtClose( old_key );
     return STATUS_SUCCESS;
+}
+
+
+/******************************************************************************
+ * RegDisablePredefinedCacheEx   (kernelbase.@)
+ */
+LSTATUS WINAPI RegDisablePredefinedCacheEx(void)
+{
+    return RtlNtStatusToDosError( DisablePredefinedHandleTableInternal( NULL ));
 }
 
 
@@ -736,6 +918,20 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD o
 
     RtlInitUnicodeString( &nameW, name );
     return RtlNtStatusToDosError( open_key( retkey, hkey, &nameW, options, access, FALSE ) );
+}
+
+
+/******************************************************************************
+ * RegOpenKeyExInternalW   (kernelbase.@)
+ *
+ * Internal form of RegOpenKeyExW used by Windows system libraries.  The
+ * additional argument carries private registry state which is not needed by
+ * the public registry implementation.
+ */
+LSTATUS WINAPI RegOpenKeyExInternalW( HKEY hkey, LPCWSTR name, DWORD options, REGSAM access,
+                                      PHKEY retkey, void *context )
+{
+    return RegOpenKeyExW( hkey, name, options, access, retkey );
 }
 
 
@@ -1139,6 +1335,9 @@ LSTATUS WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDW
 
     if (class || class_len)
     {
+        const WCHAR *classW;
+        DWORD classW_len;
+
         /* retry with a dynamically allocated buffer */
         while (status == STATUS_BUFFER_OVERFLOW)
         {
@@ -1151,11 +1350,14 @@ LSTATUS WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDW
 
         if (status) goto done;
 
+        classW = (WCHAR *)(buf_ptr + info->ClassOffset);
+        classW_len = wcsnlen( classW, info->ClassLength / sizeof(WCHAR) );
+
         if (class && class_len && *class_len)
         {
             DWORD len = *class_len;
             RtlUnicodeToMultiByteN( class, len, class_len,
-                                    (WCHAR *)(buf_ptr + info->ClassOffset), info->ClassLength );
+                                    classW, classW_len * sizeof(WCHAR) );
             if (*class_len == len)
             {
                 status = STATUS_BUFFER_OVERFLOW;
@@ -1164,8 +1366,7 @@ LSTATUS WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDW
             class[*class_len] = 0;
         }
         else if (class_len)
-            RtlUnicodeToMultiByteSize( class_len,
-                                       (WCHAR *)(buf_ptr + info->ClassOffset), info->ClassLength );
+            RtlUnicodeToMultiByteSize( class_len, classW, classW_len * sizeof(WCHAR) );
     }
     else status = STATUS_SUCCESS;
 
@@ -1997,6 +2198,22 @@ LSTATUS WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
     {
         REGSAM samDesired = KEY_QUERY_VALUE;
 
+        /* RegGetValue accepts a rooted-looking subkey relative to a predefined
+         * root.  System components use this form (for example, HKLM with
+         * "\\SYSTEM\\..."); passing it unchanged to NtOpenKey makes the object
+         * manager reject the otherwise valid relative lookup. */
+        switch (HandleToUlong( hKey ))
+        {
+        case (LONG)(LONG_PTR)HKEY_CLASSES_ROOT:
+        case (LONG)(LONG_PTR)HKEY_CURRENT_USER:
+        case (LONG)(LONG_PTR)HKEY_LOCAL_MACHINE:
+        case (LONG)(LONG_PTR)HKEY_USERS:
+        case (LONG)(LONG_PTR)HKEY_CURRENT_CONFIG:
+        case (LONG)(LONG_PTR)HKEY_DYN_DATA:
+            while (*pszSubKey == '\\') pszSubKey++;
+            break;
+        }
+
         if (dwFlags & RRF_WOW64_MASK)
             samDesired |= (dwFlags & RRF_SUBKEY_WOW6432KEY) ? KEY_WOW64_32KEY : KEY_WOW64_64KEY;
 
@@ -2697,7 +2914,8 @@ LSTATUS WINAPI RegSetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInfo,
     if ((SecurityInfo & OWNER_SECURITY_INFORMATION) ||
         (SecurityInfo & GROUP_SECURITY_INFORMATION) ||
         (SecurityInfo & DACL_SECURITY_INFORMATION) ||
-        (SecurityInfo & SACL_SECURITY_INFORMATION)) {
+        (SecurityInfo & SACL_SECURITY_INFORMATION) ||
+        (SecurityInfo & PROCESS_TRUST_LABEL_SECURITY_INFORMATION)) {
         /* Param OK */
     } else
         return ERROR_INVALID_PARAMETER;
