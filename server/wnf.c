@@ -75,7 +75,7 @@ struct wnf_state
     struct process *creator; /* weak; process_killed removes its names before signaling */
     unsigned __int64 name, type_low, type_high;
     unsigned int maximum, size, stamp, session;
-    int has_type, well_known;
+    int has_type, well_known, deleted;
     void *data;
 };
 struct wnf_subscription
@@ -124,6 +124,7 @@ static struct wnf_state *create_well_known_state( unsigned __int64 name, unsigne
     state->session = session;
     state->has_type = 0;
     state->well_known = 1;
+    state->deleted = 0;
     state->data = NULL;
     list_add_tail( &states, &state->entry );
     return state;
@@ -164,6 +165,7 @@ static void remove_state( struct wnf_state *state )
     list_remove( &state->entry );
     if (state->creator) list_remove( &state->process_entry );
     state->creator = NULL;
+    state->deleted = 1;
     LIST_FOR_EACH_ENTRY( sub, &state->subscriptions, struct wnf_subscription, state_entry )
     {
         sub->pending = sub->events & 16;
@@ -268,6 +270,7 @@ DECL_HANDLER(create_wnf_state_name)
     state->creator = req->name_lifetime == 3 ? current->process : NULL;
     state->has_type = req->has_type;
     state->well_known = 0;
+    state->deleted = 0;
     state->type_low = req->type_low;
     state->type_high = req->type_high;
     state->name = WNF_NAME_KEY ^
@@ -410,12 +413,12 @@ DECL_HANDLER(complete_wnf_subscription)
     }
     sub = ready;
     state = sub->state;
-    if ((sub->pending & 1) && (state->well_known || state->creator) && state->size &&
+    if ((sub->pending & 1) && !state->deleted && state->size &&
         !set_reply_data( state->data, state->size )) return;
     reply->subscription_id = sub->id;
     reply->state_name = state->name;
     reply->events = sub->pending;
-    reply->change_stamp = (state->well_known || state->creator) ? state->stamp : 0;
+    reply->change_stamp = !state->deleted ? state->stamp : 0;
     reply->type_low = state->has_type ? state->type_low : 0;
     reply->type_high = state->has_type ? state->type_high : 0;
     sub->outstanding = sub->pending;

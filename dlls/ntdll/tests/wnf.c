@@ -9,6 +9,9 @@
  */
 
 #include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -53,6 +56,87 @@ static NTSTATUS (WINAPI *pRtlSubscribeWnfStateChangeNotification)( void **, ULON
 static NTSTATUS (WINAPI *pRtlUnsubscribeWnfNotificationWaitForCompletion)( void * );
 static NTSTATUS (WINAPI *pRtlUnsubscribeWnfStateChangeNotification)( void * );
 
+struct cross_process_callback_context
+{
+    HANDLE event;
+    LONG calls;
+    ULONGLONG name;
+    ULONG stamp, size, value;
+    const GUID *type;
+};
+
+static NTSTATUS WINAPI cross_process_callback( ULONGLONG name, ULONG stamp, const GUID *type,
+                                               void *context, const void *data, ULONG size )
+{
+    struct cross_process_callback_context *callback = context;
+
+    callback->name = name;
+    callback->stamp = stamp;
+    callback->type = type;
+    callback->size = size;
+    callback->value = size == sizeof(callback->value) ? *(const ULONG *)data : 0;
+    InterlockedIncrement( &callback->calls );
+    SetEvent( callback->event );
+    return STATUS_SUCCESS;
+}
+
+static void test_cross_process_notification( char **argv, ULONG lifetime )
+{
+    struct cross_process_callback_context callback = {0};
+    STARTUPINFOA startup = { .cb = sizeof(startup) };
+    PROCESS_INFORMATION process = {0};
+    SECURITY_DESCRIPTOR sd;
+    ULONGLONG state = 0;
+    void *subscription = NULL;
+    char command[MAX_PATH * 3];
+    DWORD wait;
+    NTSTATUS status;
+    BOOL ret;
+
+    InitializeSecurityDescriptor( &sd, SECURITY_DESCRIPTOR_REVISION );
+    SetSecurityDescriptorDacl( &sd, TRUE, NULL, FALSE );
+    status = pNtCreateWnfStateName( &state, lifetime, 0, FALSE, NULL, sizeof(callback.value), &sd );
+    ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+    if (status) return;
+
+    callback.event = CreateEventW( NULL, TRUE, FALSE, NULL );
+    ok( !!callback.event, "failed to create callback event, error %lu\n", GetLastError() );
+    if (!callback.event) goto done;
+
+    status = pRtlSubscribeWnfStateChangeNotification( &subscription, state, 0,
+                                                      cross_process_callback, &callback,
+                                                      NULL, 0, 0 );
+    ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+    if (status) goto done;
+
+    sprintf( command, "\"%s\" %s wnf-publisher %I64x", argv[0], argv[1], state );
+    ret = CreateProcessA( NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &process );
+    ok( ret, "failed to create publisher process, error %lu\n", GetLastError() );
+    if (!ret) goto done;
+
+    wait = WaitForSingleObject( callback.event, 5000 );
+    ok( wait == WAIT_OBJECT_0, "expected callback event, wait returned %lu\n", wait );
+    wait_child_process( &process );
+
+    ok( callback.calls == 1, "expected one callback, got %ld\n", callback.calls );
+    ok( callback.name == state, "expected state %#I64x, got %#I64x\n", state, callback.name );
+    ok( callback.stamp == 1, "expected change stamp 1, got %lu\n", callback.stamp );
+    ok( !callback.type, "expected no type, got %p\n", callback.type );
+    ok( callback.size == sizeof(callback.value), "expected %Iu bytes, got %lu\n",
+        sizeof(callback.value), callback.size );
+    ok( callback.value == 2, "expected value 2, got %lu\n", callback.value );
+
+done:
+    if (subscription)
+    {
+        status = pRtlUnsubscribeWnfNotificationWaitForCompletion( subscription );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+    }
+    if (callback.event) CloseHandle( callback.event );
+    status = pNtDeleteWnfStateName( &state );
+    ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+}
+
 static NTSTATUS WINAPI callback( ULONGLONG name, ULONG stamp, const GUID *type, void *context,
                                  const void *data, ULONG size )
 {
@@ -85,6 +169,8 @@ START_TEST(wnf)
     void *subscription;
     ULONG stamp, size;
     NTSTATUS status;
+    char **argv;
+    int argc;
 
     pNtCreateWnfStateName = (void *)GetProcAddress( ntdll, "NtCreateWnfStateName" );
     pNtDeleteWnfStateData = (void *)GetProcAddress( ntdll, "NtDeleteWnfStateData" );
@@ -112,6 +198,17 @@ START_TEST(wnf)
         !pRtlUnsubscribeWnfStateChangeNotification)
     {
         win_skip( "WNF functions are unavailable\n" );
+        return;
+    }
+
+    argc = winetest_get_mainargs( &argv );
+    if (argc > 3 && !strcmp( argv[2], "wnf-publisher" ))
+    {
+        ULONGLONG state = _strtoui64( argv[3], NULL, 16 );
+        ULONG value = 2;
+
+        status = pRtlPublishWnfStateData( state, NULL, &value, sizeof(value), NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
         return;
     }
 
@@ -155,6 +252,13 @@ START_TEST(wnf)
                 status = pNtDeleteWnfStateName( &state );
                 ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
             }
+        }
+
+        for (i = 0; i < ARRAY_SIZE(lifetimes); i++)
+        {
+            winetest_push_context( "cross-process lifetime %lu", lifetimes[i] );
+            test_cross_process_notification( argv, lifetimes[i] );
+            winetest_pop_context();
         }
     }
     else win_skip( "WNF state-data deletion functions are unavailable\n" );

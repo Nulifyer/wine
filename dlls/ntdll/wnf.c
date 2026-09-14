@@ -74,6 +74,7 @@ static void CALLBACK deliver_callbacks( TP_CALLBACK_INSTANCE *instance, void *co
     struct rtl_wnf_name *name = context;
     WNF_DELIVERY_DESCRIPTOR *delivery = &name->delivery.descriptor;
     struct rtl_wnf_subscription *sub, *selected;
+    ULONG value;
     NTSTATUS status;
     RtlEnterCriticalSection( &lock );
     for (;;)
@@ -90,6 +91,15 @@ static void CALLBACK deliver_callbacks( TP_CALLBACK_INSTANCE *instance, void *co
         sub->references++;
         sub->executing_thread = NtCurrentTeb()->ClientId.UniqueThread;
         RtlLeaveCriticalSection( &lock );
+        if (delivery->StateDataSize == sizeof(value))
+        {
+            memcpy( &value, name->delivery.bytes + delivery->StateDataOffset, sizeof(value) );
+            TRACE( "delivering %#I64x stamp %lu value %#lx to %p\n",
+                   name->name, delivery->ChangeStamp, value, sub->callback );
+        }
+        else
+            TRACE( "delivering %#I64x stamp %lu size %lu to %p\n",
+                   name->name, delivery->ChangeStamp, delivery->StateDataSize, sub->callback );
         status = sub->callback( name->name, delivery->ChangeStamp, NULL, sub->context,
                                 name->delivery.bytes + delivery->StateDataOffset,
                                 delivery->StateDataSize );
@@ -172,10 +182,18 @@ static NTSTATUS start_dispatcher(void)
 NTSTATUS WINAPI RtlPublishWnfStateData( ULONGLONG state, const GUID *type, const void *data,
                                         ULONG length, const void *explicit_scope )
 {
+    ULONG value;
     NTSTATUS status = NtUpdateWnfStateData( &state, data, length, type, explicit_scope, 0, FALSE );
 
-    TRACE( "%#I64x, %s, %p, %lu, %p: %#lx\n", state, debugstr_guid(type), data, length,
-           explicit_scope, status );
+    if (data && length == sizeof(value))
+    {
+        memcpy( &value, data, sizeof(value) );
+        TRACE( "%#I64x, %s, value %#lx, %p: %#lx\n", state, debugstr_guid(type), value,
+               explicit_scope, status );
+    }
+    else
+        TRACE( "%#I64x, %s, %p, %lu, %p: %#lx\n", state, debugstr_guid(type), data, length,
+               explicit_scope, status );
     return status;
 }
 NTSTATUS WINAPI RtlQueryWnfStateData( ULONG *stamp, ULONGLONG state, PWNF_USER_CALLBACK callback,
