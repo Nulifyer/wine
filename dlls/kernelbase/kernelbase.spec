@@ -659,6 +659,7 @@
 @ stdcall GetPackagesByPackageFamily(wstr ptr ptr ptr ptr)
 @ stdcall GetPerformanceInfo(ptr long)
 @ stdcall GetPersistedRegistryLocationW(wstr wstr ptr long ptr)
+@ stdcall GetPersistedRegistryValueW(wstr wstr wstr long ptr ptr long ptr)
 @ stdcall GetPhysicallyInstalledSystemMemory(ptr)
 @ stdcall GetPreviousFgPolicyRefreshInfoInternal() gpapi.GetPreviousFgPolicyRefreshInfoInternalWorker
 @ stdcall GetPriorityClass(long)
@@ -1512,6 +1513,10 @@
 @ stdcall SetLocalTime(ptr)
 @ stdcall SetLocaleInfoW(long long wstr)
 @ stdcall SetNamedPipeHandleState(long ptr ptr ptr)
+@ stdcall SetPersistedRegistryBOOL(wstr wstr wstr long)
+@ stdcall SetPersistedRegistryDWORD(wstr wstr wstr long)
+@ stdcall SetPersistedRegistryString(wstr wstr wstr wstr)
+@ stdcall SetPersistedRegistryValue(wstr wstr wstr long ptr long)
 @ stdcall SetPriorityClass(long long)
 @ stdcall SetPrivateObjectSecurity(long ptr ptr ptr long)
 @ stdcall SetPrivateObjectSecurityEx(long ptr ptr long ptr long)

@@ -112,6 +112,82 @@ LSTATUS WINAPI GetPersistedRegistryLocationW(const WCHAR *base, const WCHAR *sub
 }
 
 /***********************************************************************
+ * GetPersistedRegistryValueW (kernelbase.@)
+ *
+ * Wine does not separate persisted registry state, so query the ordinary
+ * machine registry path directly.  This is also the native fallback path.
+ */
+LSTATUS WINAPI GetPersistedRegistryValueW(const WCHAR *base, const WCHAR *subkey,
+                                          const WCHAR *value, DWORD flags, DWORD *type,
+                                          void *data, DWORD data_size, DWORD *returned_size)
+{
+    DWORD size = data_size;
+    LSTATUS status;
+
+    TRACE("%s, %s, %s, %#lx, %p, %p, %lu, %p\n", debugstr_w(base), debugstr_w(subkey),
+          debugstr_w(value), flags, type, data, data_size, returned_size);
+
+    if (!base || !subkey) return ERROR_INVALID_PARAMETER;
+
+    status = RegGetValueW(HKEY_LOCAL_MACHINE, subkey, value, flags, type, data, &size);
+    if (returned_size) *returned_size = size;
+    return status;
+}
+
+/***********************************************************************
+ * SetPersistedRegistryValue (kernelbase.@)
+ */
+LSTATUS WINAPI SetPersistedRegistryValue(const WCHAR *base, const WCHAR *subkey,
+                                         const WCHAR *value, DWORD type,
+                                         const void *data, DWORD data_size)
+{
+    HKEY key;
+    LSTATUS status;
+
+    TRACE("%s, %s, %s, %lu, %p, %lu\n", debugstr_w(base), debugstr_w(subkey),
+          debugstr_w(value), type, data, data_size);
+
+    if (!base || !subkey) return ERROR_INVALID_PARAMETER;
+
+    status = RegCreateKeyExW(HKEY_LOCAL_MACHINE, subkey, 0, NULL, 0, KEY_SET_VALUE,
+                             NULL, &key, NULL);
+    if (status) return status;
+
+    status = RegSetValueExW(key, value, 0, type, data, data_size);
+    RegCloseKey(key);
+    return status;
+}
+
+/***********************************************************************
+ * SetPersistedRegistryBOOL (kernelbase.@)
+ */
+LSTATUS WINAPI SetPersistedRegistryBOOL(const WCHAR *base, const WCHAR *subkey,
+                                        const WCHAR *value, BOOL data)
+{
+    return SetPersistedRegistryValue(base, subkey, value, REG_DWORD, &data, sizeof(data));
+}
+
+/***********************************************************************
+ * SetPersistedRegistryDWORD (kernelbase.@)
+ */
+LSTATUS WINAPI SetPersistedRegistryDWORD(const WCHAR *base, const WCHAR *subkey,
+                                         const WCHAR *value, DWORD data)
+{
+    return SetPersistedRegistryValue(base, subkey, value, REG_DWORD, &data, sizeof(data));
+}
+
+/***********************************************************************
+ * SetPersistedRegistryString (kernelbase.@)
+ */
+LSTATUS WINAPI SetPersistedRegistryString(const WCHAR *base, const WCHAR *subkey,
+                                          const WCHAR *value, const WCHAR *data)
+{
+    if (!data) return ERROR_INVALID_PARAMETER;
+    return SetPersistedRegistryValue(base, subkey, value, REG_SZ, data,
+                                     (lstrlenW(data) + 1) * sizeof(WCHAR));
+}
+
+/***********************************************************************
  * RegQueryMultipleValuesA (kernelbase.@)
  */
 LSTATUS WINAPI RegQueryMultipleValuesA( HKEY hkey, PVALENTA values, DWORD count,
