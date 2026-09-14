@@ -153,6 +153,7 @@ static RPC_STATUS RPCSS_Initialize(void)
     static unsigned short epm_endpoint[] = L"\\pipe\\epmapper";
     static unsigned short epm_protseq_lrpc[] = L"ncalrpc";
     static unsigned short epm_endpoint_lrpc[] = L"epmapper";
+    static unsigned short wine_epm_endpoint_lrpc[] = L"wine_epmapper";
     static unsigned short irpcss_protseq[] = IRPCSS_PROTSEQ;
     static unsigned short irpcss_endpoint[] = IRPCSS_ENDPOINT;
     static const struct protseq_map
@@ -163,6 +164,7 @@ static RPC_STATUS RPCSS_Initialize(void)
     {
         { epm_protseq, epm_endpoint },
         { epm_protseq_lrpc, epm_endpoint_lrpc },
+        { epm_protseq_lrpc, wine_epm_endpoint_lrpc },
         { irot_protseq, irot_endpoint },
         { irpcss_protseq, irpcss_endpoint },
     };

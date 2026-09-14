@@ -79,10 +79,29 @@ static const struct epm_endpoints
     { "ncacn_http", "593" },
 };
 
+static const WCHAR wine_epmapper_pipeW[] = L"\\\\.\\pipe\\lrpc\\wine_epmapper";
+
+static BOOL wait_for_named_pipe(const WCHAR *name, DWORD timeout)
+{
+    ULONGLONG start_time = GetTickCount64();
+
+    do
+    {
+        if (WaitNamedPipeW( name, 100 )) return TRUE;
+        Sleep( 10 );
+    } while (GetTickCount64() - start_time < timeout);
+
+    return FALSE;
+}
+
 static BOOL start_rpcss(void)
 {
+    static LONG standalone_started;
+    WCHAR commandW[] = L"C:\\windows\\system32\\rpcss.exe --standalone";
     SC_HANDLE scm, service;
     SERVICE_STATUS_PROCESS status;
+    STARTUPINFOW startup = { sizeof(startup) };
+    PROCESS_INFORMATION process;
     BOOL ret = FALSE;
 
     TRACE("\n");
@@ -125,6 +144,27 @@ static BOOL start_rpcss(void)
 
     CloseServiceHandle( service );
     CloseServiceHandle( scm );
+
+    if (ret && !wait_for_named_pipe( wine_epmapper_pipeW, 1000 ) &&
+        !InterlockedCompareExchange( &standalone_started, 1, 0 ))
+    {
+        if (CreateProcessW( NULL, commandW, NULL, NULL, FALSE, DETACHED_PROCESS,
+                            NULL, NULL, &startup, &process ))
+        {
+            CloseHandle( process.hThread );
+            CloseHandle( process.hProcess );
+        }
+        else
+        {
+            ERR( "Failed to start standalone RpcSs host adapter, error %lu\n", GetLastError() );
+            InterlockedExchange( &standalone_started, 0 );
+        }
+    }
+    if (ret && !(ret = wait_for_named_pipe( wine_epmapper_pipeW, 5000 )))
+    {
+        WARN( "RpcSs host adapter endpoint mapper is unavailable\n" );
+        InterlockedExchange( &standalone_started, 0 );
+    }
     return ret;
 }
 
@@ -141,6 +181,7 @@ static inline BOOL is_epm_destination_local(RPC_BINDING_HANDLE handle)
 
 static RPC_STATUS get_epm_handle_client(RPC_BINDING_HANDLE handle, RPC_BINDING_HANDLE *epm_handle)
 {
+    static unsigned char wine_epmapper_binding[] = "ncalrpc:[wine_epmapper]";
     RpcBinding *bind = handle;
     const char * pszEndpoint = NULL;
     RPC_STATUS status;
@@ -149,6 +190,9 @@ static RPC_STATUS get_epm_handle_client(RPC_BINDING_HANDLE handle, RPC_BINDING_H
 
     if (bind->server)
         return RPC_S_INVALID_BINDING;
+
+    if (is_epm_destination_local( handle ))
+        return RpcBindingFromStringBindingA( wine_epmapper_binding, epm_handle );
 
     for (i = 0; i < ARRAY_SIZE(epm_endpoints); i++)
         if (!strcmp(bind->Protseq, epm_endpoints[i].protseq))
@@ -178,7 +222,7 @@ static RPC_STATUS get_epm_handle_client(RPC_BINDING_HANDLE handle, RPC_BINDING_H
 
 static RPC_STATUS get_epm_handle_server(RPC_BINDING_HANDLE *epm_handle)
 {
-    unsigned char string_binding[] = "ncalrpc:[epmapper]";
+    unsigned char string_binding[] = "ncalrpc:[wine_epmapper]";
 
     return RpcBindingFromStringBindingA(string_binding, epm_handle);
 }
