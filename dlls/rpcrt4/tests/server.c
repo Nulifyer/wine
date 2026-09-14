@@ -59,6 +59,7 @@ static LONG (WINAPI *pI_RpcOpenClientProcess)(RPC_BINDING_HANDLE, ACCESS_MASK, H
 static LONG (WINAPI *pI_RpcOpenClientThread)(RPC_BINDING_HANDLE, ACCESS_MASK, HANDLE *);
 static RPC_STATUS (WINAPI *pRpcServerInqCallAttributesW)(RPC_BINDING_HANDLE, void *);
 static RPC_STATUS (WINAPI *pRpcServerInqBindingHandle)(RPC_BINDING_HANDLE *);
+static RPC_STATUS (WINAPI *pRpcServerTestCancel)(RPC_BINDING_HANDLE);
 static RPC_STATUS (WINAPI *pRpcSsGetContextBinding)(void *, RPC_BINDING_HANDLE *);
 
 static char *domain_and_user;
@@ -311,6 +312,7 @@ static void InitFunctionPointers(void)
     pI_RpcOpenClientThread = (void *)GetProcAddress(hrpcrt4, "I_RpcOpenClientThread");
     pRpcServerInqCallAttributesW = (void *)GetProcAddress(hrpcrt4, "RpcServerInqCallAttributesW");
     pRpcServerInqBindingHandle = (void *)GetProcAddress(hrpcrt4, "RpcServerInqBindingHandle");
+    pRpcServerTestCancel = (void *)GetProcAddress(hrpcrt4, "RpcServerTestCancel");
     pRpcSsGetContextBinding = (void *)GetProcAddress(hrpcrt4, "RpcSsGetContextBinding");
 
     if (!pNDRSContextMarshall2) old_windows_version = TRUE;
@@ -330,6 +332,20 @@ static void test_server_inq_binding_no_call(void)
     status = pRpcServerInqBindingHandle(&binding);
     ok(status == RPC_S_NO_CALL_ACTIVE, "RpcServerInqBindingHandle returned %ld\n", status);
     ok(binding == (RPC_BINDING_HANDLE)0xdeadbeef, "failure changed binding to %p\n", binding);
+}
+
+static void test_server_cancel_no_call(void)
+{
+    RPC_STATUS status;
+
+    if (!pRpcServerTestCancel)
+    {
+        win_skip("RpcServerTestCancel is unavailable\n");
+        return;
+    }
+
+    status = pRpcServerTestCancel(NULL);
+    ok(status == RPC_S_NO_CALL_ACTIVE, "RpcServerTestCancel returned %ld\n", status);
 }
 
 void __RPC_FAR *__RPC_USER
@@ -1287,6 +1303,16 @@ void __cdecl s_test_I_RpcBindingInqLocalClientPID(unsigned int protseq, RPC_BIND
     HANDLE thread;
     ULONG pid;
     unsigned int is_local;
+
+    if (pRpcServerTestCancel)
+    {
+        status = pRpcServerTestCancel(NULL);
+        ok(status == RPC_S_CALL_IN_PROGRESS, "RpcServerTestCancel(NULL) returned %ld.\n", status);
+        status = pRpcServerTestCancel(binding);
+        ok(status == RPC_S_CALL_IN_PROGRESS, "RpcServerTestCancel(binding) returned %ld.\n", status);
+    }
+    else
+        win_skip("RpcServerTestCancel is unavailable\n");
 
     if (protseq == RPC_PROTSEQ_LRPC && pI_RpcOpenClientProcess)
     {
@@ -2991,6 +3017,7 @@ START_TEST(server)
 
   InitFunctionPointers();
   test_server_inq_binding_no_call();
+  test_server_cancel_no_call();
   set_mixed_interface();
 
   ok(!GetUserNameExA(NameSamCompatible, NULL, &size), "GetUserNameExA\n");

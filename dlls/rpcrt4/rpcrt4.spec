@@ -452,7 +452,7 @@
 @ stdcall RpcServerRegisterIf3(ptr ptr ptr long long long ptr ptr)
 @ stdcall RpcServerRegisterIf(ptr ptr ptr)
 @ stdcall RpcServerRegisterIfEx(ptr ptr ptr long long ptr)
-@ stub RpcServerTestCancel
+@ stdcall RpcServerTestCancel(ptr)
 @ stdcall RpcServerUnregisterIf(ptr ptr long)
 @ stdcall RpcServerUnregisterIfEx(ptr ptr long)
 @ stub RpcServerUseAllProtseqs

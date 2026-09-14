@@ -1932,6 +1932,24 @@ RPC_STATUS WINAPI RpcServerInqBindingHandle(RPC_BINDING_HANDLE *binding)
 }
 
 /***********************************************************************
+ *             RpcServerTestCancel (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerTestCancel(RPC_BINDING_HANDLE client_binding)
+{
+    RpcBinding *binding;
+
+    TRACE("%p\n", client_binding);
+
+    binding = client_binding ? client_binding : RPCRT4_GetThreadCurrentCallHandle();
+    if (!binding) return RPC_S_NO_CALL_ACTIVE;
+    if (!binding->FromConn) return RPC_S_INVALID_BINDING;
+
+    /* The current transports do not receive connection-oriented cancel PDUs,
+     * so a live inbound call cannot have a pending cancellation request. */
+    return RPC_S_CALL_IN_PROGRESS;
+}
+
+/***********************************************************************
  *             I_RpcSystemFunction001 (RPCRT4.@)
  */
 RPC_STATUS WINAPI I_RpcSystemFunction001(ULONG selector, ULONG_PTR value, void *output)
