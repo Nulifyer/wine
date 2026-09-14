@@ -182,9 +182,27 @@ static LONG WINAPI rpc_filter(EXCEPTION_POINTERS *eptr)
     return I_RpcExceptionFilter(eptr->ExceptionRecord->ExceptionCode);
 }
 
+static BOOL wait_for_named_pipe(const WCHAR *name, DWORD timeout)
+{
+    ULONGLONG start_time = GetTickCount64();
+
+    do
+    {
+        if (WaitNamedPipeW( name, 100 )) return TRUE;
+        Sleep( 10 );
+    } while (GetTickCount64() - start_time < timeout);
+
+    return FALSE;
+}
+
 static BOOL start_rpcss(void)
 {
+    static LONG standalone_started;
+    static const WCHAR pipeW[] = L"\\\\.\\pipe\\lrpc\\irpcss";
+    WCHAR commandW[] = L"C:\\windows\\system32\\rpcss.exe --standalone";
     SERVICE_STATUS_PROCESS status;
+    STARTUPINFOW startup = { sizeof(startup) };
+    PROCESS_INFORMATION process;
     SC_HANDLE scm, service;
     BOOL ret = FALSE;
 
@@ -230,6 +248,27 @@ static BOOL start_rpcss(void)
 
     CloseServiceHandle(service);
     CloseServiceHandle(scm);
+
+    if (ret && !wait_for_named_pipe( pipeW, 1000 ) &&
+        !InterlockedCompareExchange( &standalone_started, 1, 0 ))
+    {
+        if (CreateProcessW( NULL, commandW, NULL, NULL, FALSE, DETACHED_PROCESS,
+                            NULL, NULL, &startup, &process ))
+        {
+            CloseHandle( process.hThread );
+            CloseHandle( process.hProcess );
+        }
+        else
+        {
+            ERR( "Failed to start standalone RpcSs host adapter, error %lu\n", GetLastError() );
+            InterlockedExchange( &standalone_started, 0 );
+        }
+    }
+    if (ret && !(ret = wait_for_named_pipe( pipeW, 5000 )))
+    {
+        WARN( "RpcSs host adapter endpoint is unavailable\n" );
+        InterlockedExchange( &standalone_started, 0 );
+    }
     return ret;
 }
 

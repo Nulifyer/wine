@@ -25,6 +25,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnt.h"
+#include "winternl.h"
 #include "winsvc.h"
 #include "irot.h"
 #include "epm.h"
@@ -271,6 +272,40 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
     TRACE( "service stopped\n" );
 }
 
+static int run_standalone(void)
+{
+    HANDLE shutdown_event = NULL;
+    RPC_STATUS ret;
+    NTSTATUS status;
+
+    TRACE( "starting standalone host adapter\n" );
+
+    if ((ret = RPCSS_Initialize()))
+    {
+        WARN( "Failed to initialize standalone rpc interfaces, status %ld.\n", ret );
+        return ret;
+    }
+
+    status = NtSetInformationProcess( GetCurrentProcess(), ProcessWineMakeProcessSystem,
+                                      &shutdown_event, sizeof(shutdown_event) );
+    if (status)
+    {
+        WARN( "Failed to acquire standalone shutdown event, status %#lx.\n", status );
+        RpcMgmtStopServerListening( NULL );
+    }
+    else
+    {
+        WaitForSingleObject( shutdown_event, INFINITE );
+        RpcMgmtStopServerListening( NULL );
+    }
+    RpcServerUnregisterIf( epm_v3_0_s_ifspec, NULL, TRUE );
+    RpcServerUnregisterIf( Irot_v0_2_s_ifspec, NULL, TRUE );
+    RpcServerUnregisterIf( Irpcss_v0_0_s_ifspec, NULL, TRUE );
+    RpcMgmtWaitServerListen();
+    if (shutdown_event) CloseHandle( shutdown_event );
+    return status ? RtlNtStatusToDosError( status ) : 0;
+}
+
 int __cdecl wmain( int argc, WCHAR *argv[] )
 {
     static const SERVICE_TABLE_ENTRYW service_table[] =
@@ -278,6 +313,8 @@ int __cdecl wmain( int argc, WCHAR *argv[] )
         { rpcssW, ServiceMain },
         { NULL, NULL }
     };
+
+    if (argc == 2 && !wcscmp( argv[1], L"--standalone" )) return run_standalone();
 
     StartServiceCtrlDispatcherW( service_table );
     return 0;
