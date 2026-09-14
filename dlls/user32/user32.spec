@@ -446,7 +446,7 @@
 # @ stub DwmGetRemoteSessionOcclusionEvent
 # @ stub DwmGetRemoteSessionOcclusionState
 # @ stub DwmKernelShutdown
-# @ stub DwmKernelStartup
+@ stdcall DwmKernelStartup()
 @ stdcall DwmLockScreenUpdates(long) NtUserDwmLockScreenUpdates
 # @ stub DwmValidateWindow
 @ stdcall EditWndProc(long long long long) EditWndProcA
@@ -972,7 +972,7 @@
 @ stdcall RegisterPowerSettingNotification(long ptr long)
 @ stdcall -import RegisterRawInputDevices(ptr long long) NtUserRegisterRawInputDevices
 @ stdcall RegisterServicesProcess(long)
-# @ stub RegisterSessionPort
+@ stdcall RegisterSessionPort(long)
 @ stdcall RegisterShellHookWindow(long)
 @ stdcall RegisterSuspendResumeNotification(long long)
 @ stdcall RegisterSystemThread(long long)

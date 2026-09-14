@@ -259,6 +259,26 @@ BOOL WINAPI DeregisterShellHookWindow(HWND hWnd)
 
 
 /***********************************************************************
+ *           DwmKernelStartup                        [USER32.@]
+ */
+BOOL WINAPI DwmKernelStartup(void)
+{
+    FIXME("stub\n");
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           RegisterSessionPort                     [USER32.@]
+ */
+BOOL WINAPI RegisterSessionPort(HANDLE port)
+{
+    FIXME("(%p): stub\n", port);
+    return TRUE;
+}
+
+
+/***********************************************************************
  *           RegisterTasklist   			[USER32.@]
  */
 DWORD WINAPI RegisterTasklist (DWORD x)
