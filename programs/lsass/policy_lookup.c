@@ -13,6 +13,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "lmcons.h"
 #include "winternl.h"
 #include "ntsecapi.h"
 #include "ntstatus.h"
@@ -83,11 +84,6 @@ NTSTATUS policy_lookup_close( LSA_POLICY_LOOKUP_HANDLE *handle )
     free( context );
     *handle = NULL;
     return STATUS_SUCCESS;
-}
-
-NTSTATUS policy_lookup_translate_sids( void )
-{
-    return STATUS_NOT_IMPLEMENTED;
 }
 
 static BOOL rpc_string_equal( const WCHAR *buffer, USHORT length, const WCHAR *value )
@@ -225,6 +221,157 @@ static void free_rpc_referenced_domains( LSA_POLICY_LOOKUP_REFERENCED_DOMAIN_LIS
     }
     MIDL_user_free( domains->Domains );
     MIDL_user_free( domains );
+}
+
+static void free_rpc_translated_names( LSA_POLICY_LOOKUP_TRANSLATED_NAMES_EX *translated_names )
+{
+    ULONG i;
+
+    if (!translated_names || !translated_names->Names) return;
+    for (i = 0; i < translated_names->Entries; i++)
+        MIDL_user_free( translated_names->Names[i].Name.Buffer );
+    MIDL_user_free( translated_names->Names );
+    translated_names->Entries = 0;
+    translated_names->Names = NULL;
+}
+
+static SID *copy_rpc_domain_sid( SID *sid, SID_NAME_USE use )
+{
+    BYTE count;
+    SIZE_T size;
+    SID *copy;
+
+    if (!IsValidSid( sid )) return NULL;
+    count = *GetSidSubAuthorityCount( sid );
+    if (use != SidTypeDomain && count) count--;
+    size = offsetof( SID, SubAuthority ) + count * sizeof(DWORD);
+    if (!(copy = MIDL_user_allocate( size ))) return NULL;
+    memcpy( copy, sid, size );
+    copy->SubAuthorityCount = count;
+    return copy;
+}
+
+static BOOL add_rpc_sid_domain( LSA_POLICY_LOOKUP_REFERENCED_DOMAIN_LIST *domains,
+                                const WCHAR *name, SID *sid, SID_NAME_USE use, LONG *index )
+{
+    SID *domain_sid;
+    ULONG i;
+
+    if (!name[0])
+    {
+        *index = -1;
+        return TRUE;
+    }
+    if (!(domain_sid = copy_rpc_domain_sid( sid, use ))) return FALSE;
+    for (i = 0; i < domains->Entries; i++)
+    {
+        if (EqualSid( domains->Domains[i].Sid, domain_sid ))
+        {
+            MIDL_user_free( domain_sid );
+            *index = i;
+            return TRUE;
+        }
+    }
+    if (!copy_rpc_string( &domains->Domains[domains->Entries].Name, name,
+                          wcslen( name ) * sizeof(WCHAR) ))
+    {
+        MIDL_user_free( domain_sid );
+        return FALSE;
+    }
+    domains->Domains[domains->Entries].Sid = domain_sid;
+    *index = domains->Entries++;
+    return TRUE;
+}
+
+NTSTATUS policy_lookup_translate_sids(
+    LSA_POLICY_LOOKUP_HANDLE handle, LSA_POLICY_LOOKUP_SID_ENUM_BUFFER *sid_enum,
+    LSA_POLICY_LOOKUP_REFERENCED_DOMAIN_LIST **referenced_domains,
+    LSA_POLICY_LOOKUP_TRANSLATED_NAMES_EX *translated_names, ULONG *mapped_count,
+    ULONG lookup_options, ULONG client_revision )
+{
+    struct policy_lookup_context *context = handle;
+    LSA_POLICY_LOOKUP_REFERENCED_DOMAIN_LIST *rpc_domains = NULL;
+    NTSTATUS status = STATUS_SUCCESS;
+    ULONG count, i, mapped = 0;
+
+    TRACE( "handle %p, sids %p, domains %p, names %p, mapped %p, options %#lx, "
+           "revision %lu, magic %#lx\n", handle, sid_enum, referenced_domains,
+           translated_names, mapped_count, lookup_options, client_revision,
+           context ? context->magic : 0 );
+
+    if (!context || context->magic != POLICY_LOOKUP_CONTEXT_MAGIC) return STATUS_INVALID_HANDLE;
+    if (!sid_enum || !referenced_domains || !translated_names || !mapped_count ||
+        (sid_enum->Entries && !sid_enum->SidInfo))
+        return STATUS_INVALID_PARAMETER;
+
+    count = sid_enum->Entries;
+    *referenced_domains = NULL;
+    translated_names->Entries = 0;
+    translated_names->Names = NULL;
+    *mapped_count = 0;
+
+    if (!(rpc_domains = MIDL_user_allocate( sizeof(*rpc_domains) )))
+        return STATUS_NO_MEMORY;
+    memset( rpc_domains, 0, sizeof(*rpc_domains) );
+    rpc_domains->MaxEntries = count;
+    if (count)
+    {
+        if (!(rpc_domains->Domains = MIDL_user_allocate( count * sizeof(*rpc_domains->Domains) )))
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        memset( rpc_domains->Domains, 0, count * sizeof(*rpc_domains->Domains) );
+        if (!(translated_names->Names = MIDL_user_allocate( count * sizeof(*translated_names->Names) )))
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        memset( translated_names->Names, 0, count * sizeof(*translated_names->Names) );
+    }
+    translated_names->Entries = count;
+
+    for (i = 0; i < count; i++)
+    {
+        LSA_POLICY_LOOKUP_TRANSLATED_NAME_EX *dst = &translated_names->Names[i];
+        WCHAR account[UNLEN + 1], domain[MAX_COMPUTERNAME_LENGTH + 1];
+        DWORD account_size = ARRAY_SIZE(account), domain_size = ARRAY_SIZE(domain);
+        SID_NAME_USE use;
+        SID *sid = sid_enum->SidInfo[i].Sid;
+
+        dst->Use = LsaPolicyLookupSidTypeUnknown;
+        dst->DomainIndex = -1;
+        if (!sid || !IsValidSid( sid ))
+        {
+            TRACE( "sid[%lu] invalid\n", i );
+            continue;
+        }
+        TRACE( "sid[%lu] revision %u, subauthorities %u\n", i, sid->Revision,
+               sid->SubAuthorityCount );
+        if (!LookupAccountSidW( NULL, sid, account, &account_size, domain, &domain_size, &use ))
+            continue;
+        if (!copy_rpc_string( &dst->Name, account, account_size * sizeof(WCHAR) ) ||
+            !add_rpc_sid_domain( rpc_domains, domain, sid, use, &dst->DomainIndex ))
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        dst->Use = (LSA_POLICY_LOOKUP_SID_NAME_USE)use;
+        mapped++;
+    }
+
+    *mapped_count = mapped;
+    *referenced_domains = rpc_domains;
+    rpc_domains = NULL;
+    if (!mapped && count) status = STATUS_NONE_MAPPED;
+    else if (mapped != count) status = STATUS_SOME_NOT_MAPPED;
+
+done:
+    if (status != STATUS_SUCCESS && status != STATUS_SOME_NOT_MAPPED &&
+        status != STATUS_NONE_MAPPED)
+        free_rpc_translated_names( translated_names );
+    free_rpc_referenced_domains( rpc_domains );
+    return status;
 }
 
 static void free_rpc_translated_sids( LSA_POLICY_LOOKUP_TRANSLATED_SIDS_EX2 *translated_sids )

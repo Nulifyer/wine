@@ -112,6 +112,31 @@ interface lsapolicylookup
         [unique, size_is(Entries)] LSA_POLICY_LOOKUP_TRANSLATED_SID_EX2 *Sids;
     } LSA_POLICY_LOOKUP_TRANSLATED_SIDS_EX2;
 
+    typedef struct
+    {
+        [unique] SID *Sid;
+    } LSA_POLICY_LOOKUP_SID_INFORMATION;
+
+    typedef struct
+    {
+        [range(0, 20480)] ULONG Entries;
+        [unique, size_is(Entries)] LSA_POLICY_LOOKUP_SID_INFORMATION *SidInfo;
+    } LSA_POLICY_LOOKUP_SID_ENUM_BUFFER;
+
+    typedef struct
+    {
+        LSA_POLICY_LOOKUP_SID_NAME_USE Use;
+        LSA_POLICY_LOOKUP_UNICODE_STRING Name;
+        LONG DomainIndex;
+        ULONG Flags;
+    } LSA_POLICY_LOOKUP_TRANSLATED_NAME_EX;
+
+    typedef struct
+    {
+        [range(0, 20480)] ULONG Entries;
+        [unique, size_is(Entries)] LSA_POLICY_LOOKUP_TRANSLATED_NAME_EX *Names;
+    } LSA_POLICY_LOOKUP_TRANSLATED_NAMES_EX;
+
     typedef [switch_type(LSA_POLICY_LOOKUP_DOMAIN_INFO_CLASS)] union
     {
         [case(LsaPolicyLookupAccountDomainInformation)]
@@ -192,7 +217,14 @@ interface lsapolicylookup
     NTSTATUS policy_lookup_close(
         [in, out] LSA_POLICY_LOOKUP_HANDLE *handle);
 
-    NTSTATUS policy_lookup_translate_sids(void);
+    NTSTATUS policy_lookup_translate_sids(
+        [in] LSA_POLICY_LOOKUP_HANDLE handle,
+        [in] LSA_POLICY_LOOKUP_SID_ENUM_BUFFER *sid_enum,
+        [out] LSA_POLICY_LOOKUP_REFERENCED_DOMAIN_LIST **referenced_domains,
+        [in, out] LSA_POLICY_LOOKUP_TRANSLATED_NAMES_EX *translated_names,
+        [in, out] ULONG *mapped_count,
+        [in] ULONG lookup_options,
+        [in] ULONG client_revision);
     NTSTATUS policy_lookup_translate_names(
         [in] LSA_POLICY_LOOKUP_HANDLE handle,
         [in, range(0, 1000)] ULONG count,
