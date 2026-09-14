@@ -138,12 +138,71 @@ static bool winstation_init( struct object *obj, const void *init_data )
     winstation->input_desktop = NULL;
     winstation->clipboard = NULL;
     winstation->atom_table = NULL;
+    winstation->logon_process_id = 0;
+    winstation->logon_ui_process_id = 0;
+    winstation->bsdr_window = NULL;
+    winstation->bsdr_flags = 0;
     winstation->monitors = NULL;
     winstation->monitor_count = 0;
     winstation->monitor_serial = 1;
     list_init( &winstation->desktops );
     list_add_tail( &winstation_list, &winstation->entry );
     return true;
+}
+
+/* Register the process that owns the logon UI for this window station. */
+DECL_HANDLER(register_logon_process)
+{
+    struct winstation *winstation;
+    struct process *process;
+
+    if (!(process = get_process_from_id( req->pid ))) return;
+    if (!(winstation = get_process_winstation( current->process, 0 )))
+    {
+        release_object( process );
+        return;
+    }
+
+    if (process->session_id != current->process->session_id)
+        set_error( STATUS_ACCESS_DENIED );
+    else if (winstation->logon_process_id &&
+             winstation->logon_process_id != current->process->id)
+        set_error( STATUS_ACCESS_DENIED );
+    else if (!winstation->logon_process_id &&
+             !thread_single_check_privilege( current, SeTcbPrivilege ))
+        set_error( STATUS_ACCESS_DENIED );
+    else
+    {
+        if (!winstation->logon_process_id)
+            winstation->logon_process_id = current->process->id;
+        winstation->logon_ui_process_id = process->id;
+    }
+
+    release_object( winstation );
+    release_object( process );
+}
+
+/* Clear logon registrations owned by a process that has exited. */
+void cleanup_process_winstation_state( struct process *process )
+{
+    struct winstation *winstation;
+
+    LIST_FOR_EACH_ENTRY( winstation, &winstation_list, struct winstation, entry )
+    {
+        if (winstation->logon_process_id == process->id)
+        {
+            winstation->logon_process_id = 0;
+            winstation->logon_ui_process_id = 0;
+            winstation->bsdr_window = NULL;
+            winstation->bsdr_flags = 0;
+        }
+        else if (winstation->logon_ui_process_id == process->id)
+        {
+            winstation->logon_ui_process_id = 0;
+            winstation->bsdr_window = NULL;
+            winstation->bsdr_flags = 0;
+        }
+    }
 }
 
 static int winstation_close_handle( struct object *obj, struct process *process, obj_handle_t handle )

@@ -5,6 +5,7 @@ EXTRADLLFLAGS = -Wl,--subsystem,console:5.2
 testdll_IMPORTS = user32
 
 SOURCES = \
+	bsdr.c \
 	broadcast.c \
 	class.c \
 	clipboard.c \

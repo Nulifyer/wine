@@ -33,6 +33,7 @@
 #include "request.h"
 #include "thread.h"
 #include "process.h"
+#include "security.h"
 #include "user.h"
 #include "unicode.h"
 
@@ -2179,6 +2180,11 @@ void free_window_handle( struct window *win )
     if (win == win->desktop->shell_listview) win->desktop->shell_listview = NULL;
     if (win == win->desktop->progman_window) win->desktop->progman_window = NULL;
     if (win == win->desktop->taskman_window) win->desktop->taskman_window = NULL;
+    if (win == win->desktop->winstation->bsdr_window)
+    {
+        win->desktop->winstation->bsdr_window = NULL;
+        win->desktop->winstation->bsdr_flags = 0;
+    }
     free_hotkeys( win->desktop, win->handle );
     cleanup_clipboard_window( win->desktop, win->handle );
     destroy_properties( win );
@@ -3286,6 +3292,45 @@ DECL_HANDLER(set_desktop_shell_windows)
 
 done:
     release_object( desktop );
+}
+
+/* Set or query the blocked-shutdown resolver window for the current window station. */
+DECL_HANDLER(set_winstation_bsdr_window)
+{
+    struct winstation *winstation;
+    struct window *window = NULL;
+
+    if (!(winstation = get_process_winstation( current->process, 0 ))) return;
+
+    reply->window = winstation->bsdr_window ? winstation->bsdr_window->handle : 0;
+    reply->flags = winstation->bsdr_flags;
+    if (!req->set) goto done;
+
+    if (req->window)
+    {
+        if (!(window = get_window( req->window ))) goto done;
+        if (window->desktop->winstation != winstation)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto done;
+        }
+    }
+
+    if (winstation->logon_ui_process_id != current->process->id)
+    {
+        if (winstation->logon_ui_process_id ||
+            !thread_single_check_privilege( current, SeTcbPrivilege ))
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto done;
+        }
+    }
+
+    winstation->bsdr_window = window;
+    winstation->bsdr_flags = window ? req->flags : 0;
+
+done:
+    release_object( winstation );
 }
 
 /* retrieve layered info for a window */

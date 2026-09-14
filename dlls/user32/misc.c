@@ -215,10 +215,25 @@ DWORD WINAPI SetWindowStationUser(DWORD x1,DWORD x2)
 /***********************************************************************
  *		RegisterLogonProcess (USER32.@)
  */
-DWORD WINAPI RegisterLogonProcess(HANDLE hprocess,BOOL x)
+DWORD WINAPI RegisterLogonProcess(DWORD process_id, BOOL secure)
 {
-    FIXME("(%p,%d),stub!\n",hprocess,x);
-    return 1;
+    return NtUserRegisterLogonProcess( process_id, secure );
+}
+
+/***********************************************************************
+ *              QueryBSDRWindow (USER32.@)
+ */
+HWND WINAPI QueryBSDRWindow(void)
+{
+    return NtUserQueryBSDRWindow();
+}
+
+/***********************************************************************
+ *              RegisterBSDRWindow (USER32.@)
+ */
+BOOL WINAPI RegisterBSDRWindow(HWND hwnd, DWORD flags)
+{
+    return NtUserRegisterBSDRWindow( hwnd, flags );
 }
 
 /***********************************************************************

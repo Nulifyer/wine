@@ -961,6 +961,7 @@ W32KAPI BOOL    WINAPI NtUserPrintWindow( HWND hwnd, HDC hdc, UINT flags );
 W32KAPI LONG    WINAPI NtUserQueryDisplayConfig( UINT32 flags, UINT32 *paths_count, DISPLAYCONFIG_PATH_INFO *paths,
                                                  UINT32 *modes_count, DISPLAYCONFIG_MODE_INFO *modes,
                                                  DISPLAYCONFIG_TOPOLOGY_ID *topology_id);
+W32KAPI HWND    WINAPI NtUserQueryBSDRWindow(void);
 W32KAPI UINT_PTR WINAPI NtUserQueryInputContext( HIMC handle, UINT attr );
 W32KAPI HANDLE  WINAPI NtUserQueryWindow( HWND hwnd, WINDOWINFOCLASS cls );
 W32KAPI HWND    WINAPI NtUserRealChildWindowFromPoint( HWND parent, LONG x, LONG y );
@@ -969,7 +970,9 @@ W32KAPI BOOL    WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrg
 W32KAPI ATOM    WINAPI NtUserRegisterClassExWOW( const WNDCLASSEXW *wc, UNICODE_STRING *name, UNICODE_STRING *version,
                                                  struct client_menu_name *menu_name, DWORD fnid, DWORD flags, DWORD *wow );
 W32KAPI BOOL    WINAPI NtUserRegisterDManipHook(void);
+W32KAPI BOOL    WINAPI NtUserRegisterBSDRWindow( HWND hwnd, DWORD flags );
 W32KAPI BOOL    WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk );
+W32KAPI BOOL    WINAPI NtUserRegisterLogonProcess( DWORD process_id, BOOL secure );
 W32KAPI BOOL    WINAPI NtUserRegisterRawInputDevices( const RAWINPUTDEVICE *devices, UINT device_count, UINT size );
 W32KAPI BOOL    WINAPI NtUserRegisterTouchPadCapable( BOOL capable );
 W32KAPI ATOM    WINAPI NtUserRegisterWindowMessage( UNICODE_STRING *name );

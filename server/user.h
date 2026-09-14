@@ -46,6 +46,10 @@ struct winstation
     struct clipboard  *clipboard;          /* clipboard information */
     struct atom_table *atom_table;         /* global atom table */
     struct namespace  *desktop_names;      /* namespace for desktops of this winstation */
+    process_id_t       logon_process_id;   /* process allowed to designate the logon UI */
+    process_id_t       logon_ui_process_id;/* process allowed to register the BSDR window */
+    struct window     *bsdr_window;        /* blocked-shutdown resolver window */
+    unsigned int       bsdr_flags;         /* blocked-shutdown resolver registration flags */
     unsigned int       monitor_count;      /* number of monitors */
     struct monitor_info *monitors;         /* window station monitors */
     unsigned __int64   monitor_serial;     /* winstation monitor update counter */
@@ -209,6 +213,7 @@ extern struct winstation *get_process_winstation( struct process *process, unsig
 extern struct desktop *get_thread_desktop( struct thread *thread, unsigned int access );
 extern void connect_process_winstation( struct process *process, struct unicode_str desktop_name,
                                         struct thread *parent_thread, struct process *parent_process );
+extern void cleanup_process_winstation_state( struct process *process );
 extern void set_process_default_desktop( struct process *process, struct desktop *desktop,
                                          obj_handle_t handle );
 extern void close_process_desktop( struct process *process );

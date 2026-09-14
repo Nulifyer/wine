@@ -1259,7 +1259,7 @@
     SYSCALL_ENTRY( 0x14e7, NtUserRedrawFrameAndHook, 0 ) \
     SYSCALL_ENTRY( 0x14e8, NtUserRedrawTitle, 0 ) \
     SYSCALL_ENTRY( 0x14e9, NtUserRedrawWindow, 16 ) \
-    SYSCALL_ENTRY( 0x14ea, NtUserRegisterBSDRWindow, 0 ) \
+    SYSCALL_ENTRY( 0x14ea, NtUserRegisterBSDRWindow, 8 ) \
     SYSCALL_ENTRY( 0x14eb, NtUserRegisterClassExWOW, 28 ) \
     SYSCALL_ENTRY( 0x14ec, NtUserRegisterCloakedNotification, 0 ) \
     SYSCALL_ENTRY( 0x14ed, NtUserRegisterDManipHook, 0 ) \
@@ -1270,7 +1270,7 @@
     SYSCALL_ENTRY( 0x14f2, NtUserRegisterGhostWindow, 0 ) \
     SYSCALL_ENTRY( 0x14f3, NtUserRegisterHotKey, 16 ) \
     SYSCALL_ENTRY( 0x14f4, NtUserRegisterLPK, 0 ) \
-    SYSCALL_ENTRY( 0x14f5, NtUserRegisterLogonProcess, 0 ) \
+    SYSCALL_ENTRY( 0x14f5, NtUserRegisterLogonProcess, 8 ) \
     SYSCALL_ENTRY( 0x14f6, NtUserRegisterManipulationThread, 0 ) \
     SYSCALL_ENTRY( 0x14f7, NtUserRegisterPointerDeviceNotifications, 0 ) \
     SYSCALL_ENTRY( 0x14f8, NtUserRegisterPointerInputTarget, 0 ) \
@@ -2801,7 +2801,7 @@
     SYSCALL_ENTRY( 0x14e7, NtUserRedrawFrameAndHook, 0 ) \
     SYSCALL_ENTRY( 0x14e8, NtUserRedrawTitle, 0 ) \
     SYSCALL_ENTRY( 0x14e9, NtUserRedrawWindow, 32 ) \
-    SYSCALL_ENTRY( 0x14ea, NtUserRegisterBSDRWindow, 0 ) \
+    SYSCALL_ENTRY( 0x14ea, NtUserRegisterBSDRWindow, 16 ) \
     SYSCALL_ENTRY( 0x14eb, NtUserRegisterClassExWOW, 56 ) \
     SYSCALL_ENTRY( 0x14ec, NtUserRegisterCloakedNotification, 0 ) \
     SYSCALL_ENTRY( 0x14ed, NtUserRegisterDManipHook, 0 ) \
@@ -2812,7 +2812,7 @@
     SYSCALL_ENTRY( 0x14f2, NtUserRegisterGhostWindow, 0 ) \
     SYSCALL_ENTRY( 0x14f3, NtUserRegisterHotKey, 32 ) \
     SYSCALL_ENTRY( 0x14f4, NtUserRegisterLPK, 0 ) \
-    SYSCALL_ENTRY( 0x14f5, NtUserRegisterLogonProcess, 0 ) \
+    SYSCALL_ENTRY( 0x14f5, NtUserRegisterLogonProcess, 16 ) \
     SYSCALL_ENTRY( 0x14f6, NtUserRegisterManipulationThread, 0 ) \
     SYSCALL_ENTRY( 0x14f7, NtUserRegisterPointerDeviceNotifications, 0 ) \
     SYSCALL_ENTRY( 0x14f8, NtUserRegisterPointerInputTarget, 0 ) \
@@ -3931,7 +3931,6 @@
     SYSCALL_STUB( NtUserPromoteMouseInPointer ) \
     SYSCALL_STUB( NtUserPromotePointer ) \
     SYSCALL_STUB( NtUserQueryActivationObject ) \
-    SYSCALL_STUB( NtUserQueryBSDRWindow ) \
     SYSCALL_STUB( NtUserQueryInformationThread ) \
     SYSCALL_STUB( NtUserQuerySendMessage ) \
     SYSCALL_STUB( NtUserRaiseLowerShellWindow ) \
@@ -3941,7 +3940,6 @@
     SYSCALL_STUB( NtUserRedrawFrame ) \
     SYSCALL_STUB( NtUserRedrawFrameAndHook ) \
     SYSCALL_STUB( NtUserRedrawTitle ) \
-    SYSCALL_STUB( NtUserRegisterBSDRWindow ) \
     SYSCALL_STUB( NtUserRegisterCloakedNotification ) \
     SYSCALL_STUB( NtUserRegisterEdgy ) \
     SYSCALL_STUB( NtUserRegisterErrorReportingDialog ) \
@@ -3949,7 +3947,6 @@
     SYSCALL_STUB( NtUserRegisterForTooltipDismissNotification ) \
     SYSCALL_STUB( NtUserRegisterGhostWindow ) \
     SYSCALL_STUB( NtUserRegisterLPK ) \
-    SYSCALL_STUB( NtUserRegisterLogonProcess ) \
     SYSCALL_STUB( NtUserRegisterManipulationThread ) \
     SYSCALL_STUB( NtUserRegisterPointerDeviceNotifications ) \
     SYSCALL_STUB( NtUserRegisterPointerInputTarget ) \

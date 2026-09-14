@@ -916,7 +916,7 @@
 @ stdcall PrivateExtractIconsW(wstr long long long ptr ptr long long)
 # @ stub PrivateRegisterICSProc
 @ stdcall PtInRect(ptr int64)
-# @ stub QueryBSDRWindow
+@ stdcall QueryBSDRWindow()
 @ stdcall QueryDisplayConfig(long ptr ptr ptr ptr ptr) NtUserQueryDisplayConfig
 @ stub QuerySendMessage
 # @ stub RIMAddInputObserver
@@ -949,7 +949,7 @@
 # @ stub ReasonCodeNeedsComment
 @ stdcall RecordShutdownReason(ptr)
 @ stdcall RedrawWindow(long ptr long long) NtUserRedrawWindow
-# @ stub RegisterBSDRWindow
+@ stdcall RegisterBSDRWindow(long long)
 @ stdcall RegisterClassA(ptr)
 @ stdcall RegisterClassExA(ptr)
 @ stdcall RegisterClassExW(ptr)

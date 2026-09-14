@@ -2109,6 +2109,11 @@ LONG SYSCALL_API NtUserQueryDisplayConfig( UINT32 flags, UINT32 *paths_count, DI
     SYSCALL_FUNC( NtUserQueryDisplayConfig );
 }
 
+HWND SYSCALL_API NtUserQueryBSDRWindow(void)
+{
+    SYSCALL_FUNC( NtUserQueryBSDRWindow );
+}
+
 UINT_PTR SYSCALL_API NtUserQueryInputContext( HIMC handle, UINT attr )
 {
     SYSCALL_FUNC( NtUserQueryInputContext );
@@ -2145,9 +2150,19 @@ BOOL SYSCALL_API NtUserRegisterDManipHook(void)
     SYSCALL_FUNC( NtUserRegisterDManipHook );
 }
 
+BOOL SYSCALL_API NtUserRegisterBSDRWindow( HWND hwnd, DWORD flags )
+{
+    SYSCALL_FUNC( NtUserRegisterBSDRWindow );
+}
+
 BOOL SYSCALL_API NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk )
 {
     SYSCALL_FUNC( NtUserRegisterHotKey );
+}
+
+BOOL SYSCALL_API NtUserRegisterLogonProcess( DWORD process_id, BOOL secure )
+{
+    SYSCALL_FUNC( NtUserRegisterLogonProcess );
 }
 
 BOOL SYSCALL_API NtUserRegisterRawInputDevices( const RAWINPUTDEVICE *devices, UINT device_count, UINT device_size )

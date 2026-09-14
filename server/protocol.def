@@ -3557,6 +3557,22 @@ enum caret_state
 #define SET_DESKTOP_PROGMAN_WINDOW  0x02
 #define SET_DESKTOP_TASKMAN_WINDOW  0x04
 
+/* Register the logon UI process for the current window station */
+@REQ(register_logon_process)
+    process_id_t   pid;                 /* id of the logon UI process */
+    int            secure;              /* secure logon registration mode */
+@END
+
+/* Set/query the blocked-shutdown resolver window for the current window station */
+@REQ(set_winstation_bsdr_window)
+    int            set;                 /* whether to replace the registration */
+    user_handle_t  window;              /* blocked-shutdown resolver window */
+    unsigned int   flags;               /* registration flags */
+@REPLY
+    user_handle_t  window;              /* current blocked-shutdown resolver window */
+    unsigned int   flags;               /* current registration flags */
+@END
+
 /* Adjust the privileges held by a token */
 @REQ(adjust_token_privileges)
     obj_handle_t  handle; /* handle to the token */

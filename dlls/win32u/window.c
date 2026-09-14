@@ -6566,6 +6566,59 @@ HWND get_shell_window(void)
 }
 
 /*******************************************************************
+ *           NtUserQueryBSDRWindow (win32u.@)
+ */
+HWND WINAPI NtUserQueryBSDRWindow(void)
+{
+    HWND hwnd = NULL;
+
+    SERVER_START_REQ(set_winstation_bsdr_window)
+    {
+        req->set = FALSE;
+        if (!wine_server_call( req )) hwnd = wine_server_ptr_handle( reply->window );
+    }
+    SERVER_END_REQ;
+    return hwnd;
+}
+
+/*******************************************************************
+ *           NtUserRegisterBSDRWindow (win32u.@)
+ */
+BOOL WINAPI NtUserRegisterBSDRWindow( HWND hwnd, DWORD flags )
+{
+    BOOL ret;
+
+    SERVER_START_REQ(set_winstation_bsdr_window)
+    {
+        req->set = TRUE;
+        req->window = wine_server_user_handle( hwnd );
+        req->flags = flags;
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+
+    if (ret && flags) FIXME( "BSDR notification flags %#x are not supported\n", flags );
+    return ret;
+}
+
+/*******************************************************************
+ *           NtUserRegisterLogonProcess (win32u.@)
+ */
+BOOL WINAPI NtUserRegisterLogonProcess( DWORD process_id, BOOL secure )
+{
+    BOOL ret;
+
+    SERVER_START_REQ(register_logon_process)
+    {
+        req->pid = process_id;
+        req->secure = secure;
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/*******************************************************************
  *           NtUserQueryWindow (win32u.@)
  */
 HANDLE WINAPI NtUserQueryWindow( HWND hwnd, WINDOWINFOCLASS cls )

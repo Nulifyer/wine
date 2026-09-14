@@ -1241,7 +1241,7 @@
 @ stub -syscall NtUserPromoteMouseInPointer
 @ stub -syscall NtUserPromotePointer
 @ stub -syscall NtUserQueryActivationObject
-@ stub -syscall NtUserQueryBSDRWindow
+@ stdcall -syscall NtUserQueryBSDRWindow()
 @ stdcall -syscall NtUserQueryDisplayConfig(long ptr ptr ptr ptr ptr)
 @ stub -syscall NtUserQueryInformationThread
 @ stdcall -syscall NtUserQueryInputContext(long long)
@@ -1257,7 +1257,7 @@
 @ stub -syscall NtUserRedrawFrameAndHook
 @ stub -syscall NtUserRedrawTitle
 @ stdcall -syscall NtUserRedrawWindow(long ptr long long)
-@ stub -syscall NtUserRegisterBSDRWindow
+@ stdcall -syscall NtUserRegisterBSDRWindow(long long)
 @ stdcall -syscall NtUserRegisterClassExWOW(ptr ptr ptr ptr long long long)
 @ stub -syscall NtUserRegisterCloakedNotification
 @ stdcall -syscall NtUserRegisterDManipHook()
@@ -1268,7 +1268,7 @@
 @ stub -syscall NtUserRegisterGhostWindow
 @ stdcall -syscall NtUserRegisterHotKey(long long long long)
 @ stub -syscall NtUserRegisterLPK
-@ stub -syscall NtUserRegisterLogonProcess
+@ stdcall -syscall NtUserRegisterLogonProcess(long long)
 @ stub -syscall NtUserRegisterManipulationThread
 @ stub -syscall NtUserRegisterPointerDeviceNotifications
 @ stub -syscall NtUserRegisterPointerInputTarget
