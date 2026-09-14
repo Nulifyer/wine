@@ -852,6 +852,16 @@ HRESULT WINAPI /* DECLSPEC_HOTPATCH */ WerSetFlags( DWORD flags )
 
 
 /***********************************************************************
+ *         WerSetMaxProcessHoldMilliseconds   (kernelbase.@)
+ */
+HRESULT WINAPI WerSetMaxProcessHoldMilliseconds( DWORD milliseconds )
+{
+    FIXME( "(%lu) stub\n", (unsigned long)milliseconds );
+    return E_NOTIMPL;
+}
+
+
+/***********************************************************************
  *         WerUnregisterCustomMetadata  (kernelbase.@)
  */
 HRESULT WINAPI /* DECLSPEC_HOTPATCH */ WerUnregisterCustomMetadata( const WCHAR *key )

@@ -187,6 +187,7 @@ HRESULT WINAPI WerReportSetParameter(HREPORT, DWORD, PCWSTR, PCWSTR);
 HRESULT WINAPI WerReportSetUIOption(HREPORT, WER_REPORT_UI, PCWSTR);
 HRESULT WINAPI WerReportSubmit(HREPORT, WER_CONSENT, DWORD, PWER_SUBMIT_RESULT);
 HRESULT WINAPI WerSetFlags(DWORD flags);
+HRESULT WINAPI WerSetMaxProcessHoldMilliseconds(DWORD milliseconds);
 HRESULT WINAPI WerUnregisterCustomMetadata(PCWSTR key);
 HRESULT WINAPI WerUnregisterFile(PCWSTR file);
 HRESULT WINAPI WerUnregisterMemoryBlock(void *block);
