@@ -161,6 +161,16 @@ RPCRTAPI void* RPC_ENTRY
 RPCRTAPI RPC_BINDING_HANDLE RPC_ENTRY
   I_RpcGetCurrentCallHandle( void );
 
+#define RPC_P_ADDR_FORMAT_TCP_IPV4 1
+#define RPC_P_ADDR_FORMAT_TCP_IPV6 2
+
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  I_RpcServerInqLocalConnAddress( RPC_BINDING_HANDLE Binding, void *Buffer,
+                                  ULONG *BufferSize, ULONG *AddressFormat );
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  I_RpcServerInqRemoteConnAddress( RPC_BINDING_HANDLE Binding, void *Buffer,
+                                   ULONG *BufferSize, ULONG *AddressFormat );
+
 RPCRTAPI RPC_STATUS RPC_ENTRY
   I_RpcBindingInqClientTokenAttributes( RPC_BINDING_HANDLE Binding,
                                         LUID *TokenId,

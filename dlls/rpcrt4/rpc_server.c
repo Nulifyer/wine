@@ -1863,6 +1863,45 @@ RPC_BINDING_HANDLE WINAPI I_RpcGetCurrentCallHandle(void)
     return RPCRT4_GetThreadCurrentCallHandle();
 }
 
+static RPC_STATUS rpc_server_inq_conn_address(RPC_BINDING_HANDLE client_binding,
+                                               void *buffer, ULONG *buffer_size,
+                                               ULONG *address_format)
+{
+    RpcBinding *binding;
+
+    TRACE("%p %p %p %p\n", client_binding, buffer, buffer_size, address_format);
+
+    binding = client_binding ? client_binding : RPCRT4_GetThreadCurrentCallHandle();
+    if (!binding) return RPC_S_NO_CALL_ACTIVE;
+    if (!binding->FromConn) return RPC_S_INVALID_BINDING;
+
+    /* None of the current connection transports exposes a socket-address
+     * inquiry operation.  Windows reports this as an unsupported transport
+     * query, notably for ncalrpc, rather than raising an unimplemented-export
+     * exception. */
+    return RPC_S_CANNOT_SUPPORT;
+}
+
+/***********************************************************************
+ *             I_RpcServerInqLocalConnAddress (RPCRT4.@)
+ */
+RPC_STATUS WINAPI I_RpcServerInqLocalConnAddress(RPC_BINDING_HANDLE client_binding,
+                                                  void *buffer, ULONG *buffer_size,
+                                                  ULONG *address_format)
+{
+    return rpc_server_inq_conn_address(client_binding, buffer, buffer_size, address_format);
+}
+
+/***********************************************************************
+ *             I_RpcServerInqRemoteConnAddress (RPCRT4.@)
+ */
+RPC_STATUS WINAPI I_RpcServerInqRemoteConnAddress(RPC_BINDING_HANDLE client_binding,
+                                                   void *buffer, ULONG *buffer_size,
+                                                   ULONG *address_format)
+{
+    return rpc_server_inq_conn_address(client_binding, buffer, buffer_size, address_format);
+}
+
 /***********************************************************************
  *             I_RpcGetPortAllocationData (RPCRT4.@)
  */

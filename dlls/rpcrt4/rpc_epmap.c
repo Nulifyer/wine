@@ -244,7 +244,7 @@ static RPC_STATUS epm_register( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bindin
           if (status != RPC_S_OK) break;
 
           if (UuidVector)
-              memcpy(&entries[i * UuidVector->Count].object, &UuidVector->Uuid[j], sizeof(GUID));
+              entries[i * UuidVector->Count + j].object = *UuidVector->Uuid[j];
           else
               memset(&entries[i].object, 0, sizeof(entries[i].object));
           if (Annotation)
@@ -457,7 +457,6 @@ RPC_STATUS WINAPI RpcEpResolveBinding( RPC_BINDING_HANDLE Binding, RPC_IF_HANDLE
   twr_t *tower;
   twr_t *towers[4] = { NULL };
   unsigned32 num_towers = 0, i;
-  GUID uuid = GUID_NULL;
   char *resolved_endpoint = NULL;
 
   TRACE("(%p,%p)\n", Binding, IfSpec);
@@ -487,7 +486,7 @@ RPC_STATUS WINAPI RpcEpResolveBinding( RPC_BINDING_HANDLE Binding, RPC_IF_HANDLE
   {
     __TRY
     {
-      ept_map(handle, &uuid, tower, &entry_handle, ARRAY_SIZE(towers), &num_towers, towers, &status2);
+      ept_map(handle, &bind->ObjectUuid, tower, &entry_handle, ARRAY_SIZE(towers), &num_towers, towers, &status2);
       /* FIXME: translate status2? */
     }
     __EXCEPT(rpc_filter)
@@ -601,14 +600,20 @@ RPC_STATUS WINAPI TowerExplode(
         return EPT_S_NOT_REGISTERED;
 
     status = RpcTransport_ParseTopOfTower(p, tower_size, protseq, address, endpoint);
-    if ((status == RPC_S_OK) && syntax && object)
+    if (status == RPC_S_OK)
     {
-        syntax->SyntaxGUID = syntax_floor->uuid;
-        syntax->SyntaxVersion.MajorVersion = syntax_floor->major_version;
-        syntax->SyntaxVersion.MinorVersion = syntax_floor->minor_version;
-        object->SyntaxGUID = object_floor->uuid;
-        object->SyntaxVersion.MajorVersion = object_floor->major_version;
-        object->SyntaxVersion.MinorVersion = object_floor->minor_version;
+        if (syntax)
+        {
+            syntax->SyntaxGUID = syntax_floor->uuid;
+            syntax->SyntaxVersion.MajorVersion = syntax_floor->major_version;
+            syntax->SyntaxVersion.MinorVersion = syntax_floor->minor_version;
+        }
+        if (object)
+        {
+            object->SyntaxGUID = object_floor->uuid;
+            object->SyntaxVersion.MajorVersion = object_floor->major_version;
+            object->SyntaxVersion.MinorVersion = object_floor->minor_version;
+        }
     }
     return status;
 }

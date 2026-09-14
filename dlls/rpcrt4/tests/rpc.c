@@ -191,6 +191,37 @@ static void test_I_RpcServerAddressChangeFn(void)
     ok( status == RPC_S_OK, "got %lu\n", status );
 }
 
+static void test_I_RpcServerInqConnAddress(void)
+{
+    unsigned char *string_binding;
+    RPC_BINDING_HANDLE binding;
+    ULONG buffer_size = 128, address_format = 0xdeadbeef;
+    unsigned char buffer[128];
+    RPC_STATUS status;
+
+    status = I_RpcServerInqLocalConnAddress(NULL, buffer, &buffer_size, &address_format);
+    ok(status == RPC_S_NO_CALL_ACTIVE, "got %lu\n", status);
+    status = I_RpcServerInqRemoteConnAddress(NULL, buffer, &buffer_size, &address_format);
+    ok(status == RPC_S_NO_CALL_ACTIVE, "got %lu\n", status);
+
+    status = RpcStringBindingComposeA(NULL, (unsigned char *)"ncalrpc", NULL,
+                                      (unsigned char *)"wine_rpc_conn_address", NULL,
+                                      &string_binding);
+    ok(status == RPC_S_OK, "RpcStringBindingComposeA returned %lu\n", status);
+    if (status != RPC_S_OK) return;
+
+    status = RpcBindingFromStringBindingA(string_binding, &binding);
+    ok(status == RPC_S_OK, "RpcBindingFromStringBindingA returned %lu\n", status);
+    RpcStringFreeA(&string_binding);
+    if (status != RPC_S_OK) return;
+
+    status = I_RpcServerInqLocalConnAddress(binding, buffer, &buffer_size, &address_format);
+    ok(status == RPC_S_INVALID_BINDING, "got %lu\n", status);
+    status = I_RpcServerInqRemoteConnAddress(binding, buffer, &buffer_size, &address_format);
+    ok(status == RPC_S_INVALID_BINDING, "got %lu\n", status);
+    RpcBindingFree(&binding);
+}
+
 static void test_UuidFromString(void)
 {
     CHAR strx[100], x;
@@ -474,6 +505,16 @@ static void test_towers(void)
     I_RpcFree(protseq);
     I_RpcFree(endpoint);
     I_RpcFree(address);
+
+    memset(&object, 0xcc, sizeof(object));
+    ret = TowerExplode(tower, &object, NULL, NULL, NULL, NULL);
+    ok(ret == RPC_S_OK, "object-only TowerExplode failed with error %ld\n", ret);
+    ok(!memcmp(&object, &mapi_if_id, sizeof(mapi_if_id)), "object-only id didn't match\n");
+
+    memset(&syntax, 0xcc, sizeof(syntax));
+    ret = TowerExplode(tower, NULL, &syntax, NULL, NULL, NULL);
+    ok(ret == RPC_S_OK, "syntax-only TowerExplode failed with error %ld\n", ret);
+    ok(!memcmp(&syntax, &ndr_syntax, sizeof(ndr_syntax)), "syntax-only id didn't match\n");
 
     ret = TowerExplode(tower, NULL, NULL, NULL, NULL, NULL);
     ok(ret == RPC_S_OK, "TowerExplode failed with error %ld\n", ret);
@@ -1179,6 +1220,9 @@ static void test_RpcServerUseProtseq(void)
 static void test_endpoint_mapper(RPC_CSTR protseq, RPC_CSTR address)
 {
     static unsigned char annotation[] = "Test annotation string.";
+    static UUID object_uuid = {0x12345678, 0x1234, 0x5678, {0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78}};
+    static UUID other_uuid = {0x87654321, 0x4321, 0x8765, {0x09, 0xba, 0xdc, 0xfe, 0x21, 0x43, 0x65, 0x87}};
+    UUID_VECTOR object_vector = {1, {&object_uuid}};
     RPC_STATUS status;
     RPC_BINDING_VECTOR *binding_vector;
     handle_t handle;
@@ -1216,14 +1260,35 @@ static void test_endpoint_mapper(RPC_CSTR protseq, RPC_CSTR address)
     status = RpcBindingReset(handle);
     ok(status == RPC_S_OK, "%s: RpcBindingReset failed with error %lu\n", protseq, status);
 
+    status = RpcEpUnregister(IFoo_v0_0_s_ifspec, binding_vector, NULL);
+    ok(status == RPC_S_OK, "%s: RpcEpUnregister failed with error %lu\n", protseq, status);
+
+    status = RpcEpRegisterA(IFoo_v0_0_s_ifspec, binding_vector, &object_vector, annotation);
+    ok(status == RPC_S_OK, "%s: object RpcEpRegisterA failed with error %lu\n", protseq, status);
+
+    status = RpcBindingSetObject(handle, &object_uuid);
+    ok(status == RPC_S_OK, "%s: RpcBindingSetObject failed with error %lu\n", protseq, status);
+
+    status = RpcEpResolveBinding(handle, IFoo_v0_0_s_ifspec);
+    ok(status == RPC_S_OK, "%s: object RpcEpResolveBinding failed with error %lu\n", protseq, status);
+
+    status = RpcBindingReset(handle);
+    ok(status == RPC_S_OK, "%s: object RpcBindingReset failed with error %lu\n", protseq, status);
+
+    status = RpcBindingSetObject(handle, &other_uuid);
+    ok(status == RPC_S_OK, "%s: other RpcBindingSetObject failed with error %lu\n", protseq, status);
+
+    status = RpcEpResolveBinding(handle, IFoo_v0_0_s_ifspec);
+    ok(status == EPT_S_NOT_REGISTERED, "%s: other RpcEpResolveBinding returned %lu\n", protseq, status);
+
     status = RpcBindingFree(&handle);
     ok(status == RPC_S_OK, "%s: RpcBindingFree failed with error %lu\n", protseq, status);
 
     status = RpcServerUnregisterIf(NULL, NULL, FALSE);
     ok(status == RPC_S_OK, "%s: RpcServerUnregisterIf failed (%lu)\n", protseq, status);
 
-    status = RpcEpUnregister(IFoo_v0_0_s_ifspec, binding_vector, NULL);
-    ok(status == RPC_S_OK, "%s: RpcEpUnregisterA failed with error %lu\n", protseq, status);
+    status = RpcEpUnregister(IFoo_v0_0_s_ifspec, binding_vector, &object_vector);
+    ok(status == RPC_S_OK, "%s: object RpcEpUnregister failed with error %lu\n", protseq, status);
 
     status = RpcBindingVectorFree(&binding_vector);
     ok(status == RPC_S_OK, "%s: RpcBindingVectorFree failed with error %lu\n", protseq, status);
@@ -1366,6 +1431,7 @@ START_TEST( rpc )
     test_I_RpcServerRegisterForwardFunction();
     test_I_RpcGetPortAllocationData();
     test_I_RpcServerAddressChangeFn();
+    test_I_RpcServerInqConnAddress();
     test_RpcStringBindingParseA();
     test_RpcExceptionFilter();
 

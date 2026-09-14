@@ -73,7 +73,8 @@
 @ stub I_RpcServerAllocateIpPort
 @ stdcall I_RpcServerDisableExceptionFilter()
 @ stdcall I_RpcServerInqAddressChangeFn()
-@ stub I_RpcServerInqLocalConnAddress
+@ stdcall I_RpcServerInqLocalConnAddress(ptr ptr ptr ptr)
+@ stdcall I_RpcServerInqRemoteConnAddress(ptr ptr ptr ptr)
 @ stub I_RpcServerInqTransportType
 @ stdcall I_RpcServerRegisterForwardFunction(ptr)
 @ stdcall I_RpcServerSetAddressChangeFn(ptr)
