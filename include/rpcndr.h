@@ -728,6 +728,8 @@ RPCRTAPI void RPC_ENTRY
   NdrServerCallAll( PRPC_MESSAGE pRpcMsg );
 RPCRTAPI void RPC_ENTRY
   NdrAsyncServerCall( PRPC_MESSAGE pRpcMsg );
+RPCRTAPI void RPC_ENTRY
+  Ndr64AsyncServerCallAll( PRPC_MESSAGE pRpcMsg );
 
 RPCRTAPI LONG RPC_ENTRY
   NdrStubCall2( struct IRpcStubBuffer* pThis, struct IRpcChannelBuffer* pChannel, PRPC_MESSAGE pRpcMsg, DWORD * pdwStubPhase );

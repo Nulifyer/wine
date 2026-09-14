@@ -1951,7 +1951,10 @@ RPCRTAPI LONG RPC_ENTRY NdrAsyncStubCall(struct IRpcStubBuffer* pThis,
     return 0;
 }
 
-void RPC_ENTRY NdrAsyncServerCall(PRPC_MESSAGE pRpcMsg)
+static const RPC_SYNTAX_IDENTIFIER ndr_syntax_id =
+    {{0x8a885d04, 0x1ceb, 0x11c9, {0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48, 0x60}}, {2, 0}};
+
+static void ndr_async_server_call(PRPC_MESSAGE pRpcMsg, const MIDL_SYNTAX_INFO *syntax_info)
 {
     PRPC_MESSAGE async_rpc_msg;
     const MIDL_SERVER_INFO *pServerInfo;
@@ -1971,7 +1974,10 @@ void RPC_ENTRY NdrAsyncServerCall(PRPC_MESSAGE pRpcMsg)
     pServerInfo = ((RPC_SERVER_INTERFACE *)pRpcMsg->RpcInterfaceInformation)->InterpreterInfo;
 
     pStubDesc = pServerInfo->pStubDesc;
-    pFormat = pServerInfo->ProcString + pServerInfo->FmtStringOffset[pRpcMsg->ProcNum];
+    if (syntax_info)
+        pFormat = syntax_info->ProcString + syntax_info->FmtStringOffset[pRpcMsg->ProcNum];
+    else
+        pFormat = pServerInfo->ProcString + pServerInfo->FmtStringOffset[pRpcMsg->ProcNum];
     pProcHeader = (const NDR_PROC_HEADER *)&pFormat[0];
 
     TRACE("NDR Version: 0x%lx\n", pStubDesc->Version);
@@ -2142,6 +2148,44 @@ void RPC_ENTRY NdrAsyncServerCall(PRPC_MESSAGE pRpcMsg)
                          pOIFHeader);
 }
 
+void RPC_ENTRY NdrAsyncServerCall(PRPC_MESSAGE pRpcMsg)
+{
+    ndr_async_server_call(pRpcMsg, NULL);
+}
+
+void RPC_ENTRY Ndr64AsyncServerCallAll(PRPC_MESSAGE pRpcMsg)
+{
+    const MIDL_SERVER_INFO *server_info;
+    const MIDL_SYNTAX_INFO *syntax_info = NULL;
+    ULONG_PTR i;
+
+    TRACE("%p\n", pRpcMsg);
+
+    server_info = ((RPC_SERVER_INTERFACE *)pRpcMsg->RpcInterfaceInformation)->InterpreterInfo;
+    for (i = 0; i < server_info->nCount; ++i)
+    {
+        const MIDL_SYNTAX_INFO *candidate = &server_info->pSyntaxInfo[i];
+
+        if (pRpcMsg->TransferSyntax &&
+            !memcmp(pRpcMsg->TransferSyntax, &candidate->TransferSyntax, sizeof(*pRpcMsg->TransferSyntax)))
+        {
+            syntax_info = candidate;
+            break;
+        }
+        if (!pRpcMsg->TransferSyntax &&
+            !memcmp(&candidate->TransferSyntax, &ndr_syntax_id, sizeof(ndr_syntax_id)))
+            syntax_info = candidate;
+    }
+
+    if (!syntax_info)
+    {
+        FIXME("NDR64 transfer syntax is not supported.\n");
+        RpcRaiseException(RPC_X_WRONG_STUB_VERSION);
+    }
+
+    ndr_async_server_call(pRpcMsg, syntax_info);
+}
+
 RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply)
 {
     /* pointer to start of stack where arguments start */
@@ -2250,9 +2294,6 @@ RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply)
 
     return status;
 }
-
-static const RPC_SYNTAX_IDENTIFIER ndr_syntax_id =
-    {{0x8a885d04, 0x1ceb, 0x11c9, {0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48, 0x60}}, {2, 0}};
 
 LONG_PTR CDECL ndr64_client_call( MIDL_STUBLESS_PROXY_INFO *info,
         ULONG proc, void *retval, void **stack_top )
