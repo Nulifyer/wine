@@ -14,5 +14,6 @@ SOURCES = \
 	registry.c \
 	rsrc.rc \
 	security.c \
+	shutdown.c \
 	service.c \
 	service_broadcast.c

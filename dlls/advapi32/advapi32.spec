@@ -93,7 +93,7 @@
 @ stdcall -import ChangeServiceConfig2W(long long ptr)
 @ stdcall -import ChangeServiceConfigA(long long long long str str ptr str str str str)
 @ stdcall -import ChangeServiceConfigW(long long long long wstr wstr ptr wstr wstr wstr wstr)
-# @ stub CheckForHiberboot
+@ stdcall CheckForHiberboot(ptr long)
 @ stdcall -import CheckTokenMembership(long ptr ptr)
 @ stdcall ClearEventLogA (long str)
 @ stdcall ClearEventLogW (long wstr)

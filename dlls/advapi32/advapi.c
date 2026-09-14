@@ -154,6 +154,26 @@ BOOL WINAPI AbortSystemShutdownW( LPWSTR lpMachineName )
 }
 
 /******************************************************************************
+ * CheckForHiberboot [ADVAPI32.@]
+ *
+ * Report whether the current startup resumed from a hiberboot image. Wine has
+ * no hiberboot session state, so every local startup is a cold startup.
+ */
+DWORD WINAPI CheckForHiberboot( BOOLEAN *hiberboot, BOOLEAN refresh )
+{
+    TRACE( "(%p, %u)\n", hiberboot, refresh );
+
+    if (!hiberboot)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return ERROR_INVALID_PARAMETER;
+    }
+
+    *hiberboot = FALSE;
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
  * InitiateSystemShutdownExA [ADVAPI32.@]
  *
  * Initiate a shutdown or optionally restart the computer.
