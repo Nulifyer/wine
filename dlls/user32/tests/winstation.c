@@ -115,7 +115,7 @@ static void test_handles(void)
 {
     HWINSTA w1, w2, w3;
     HDESK d1, d2, d3;
-    HANDLE hthread;
+    HANDLE event, hthread;
     DWORD id, flags, le;
     ATOM atom;
     char buffer[29], default_name[29] = "";
@@ -129,6 +129,15 @@ static void test_handles(void)
 
     w1 = GetProcessWindowStation();
     ok( GetProcessWindowStation() == w1, "GetProcessWindowStation returned different handles\n" );
+
+    event = OpenEventW( SYNCHRONIZE, FALSE, L"WinSta0_DesktopSwitch" );
+    ok( event != NULL, "OpenEventW failed, error %lu\n", GetLastError() );
+    if (event)
+    {
+        ok( WaitForSingleObject( event, 0 ) == WAIT_TIMEOUT, "desktop switch event is signaled\n" );
+        CloseHandle( event );
+    }
+
     ok( !CloseWindowStation(w1), "closing process win station succeeded\n" );
     SetLastError( 0xdeadbeef );
     ok( !CloseHandle(w1), "closing process win station handle succeeded\n" );

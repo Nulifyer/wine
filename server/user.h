@@ -46,6 +46,7 @@ struct winstation
     struct clipboard  *clipboard;          /* clipboard information */
     struct atom_table *atom_table;         /* global atom table */
     struct namespace  *desktop_names;      /* namespace for desktops of this winstation */
+    struct event      *desktop_switch_event; /* input-desktop switch notification */
     process_id_t       logon_process_id;   /* process allowed to designate the logon UI */
     process_id_t       logon_ui_process_id;/* process allowed to register the BSDR window */
     struct window     *bsdr_window;        /* blocked-shutdown resolver window */

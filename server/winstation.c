@@ -132,7 +132,14 @@ static bool winstation_init( struct object *obj, const void *init_data )
     struct winstation *winstation = (struct winstation *)obj;
     const struct winstation_init_data *data = init_data;
 
-    if (!(winstation->desktop_names = create_namespace( 7 ))) return false;
+    winstation->desktop_switch_event = get_session_desktop_switch_event( current->process->session_id );
+    if (!winstation->desktop_switch_event) return false;
+    if (!(winstation->desktop_names = create_namespace( 7 )))
+    {
+        release_object( winstation->desktop_switch_event );
+        winstation->desktop_switch_event = NULL;
+        return false;
+    }
 
     winstation->flags = data->flags;
     winstation->input_desktop = NULL;
@@ -237,6 +244,7 @@ static void winstation_destroy( struct object *obj )
     struct winstation *winstation = (struct winstation *)obj;
 
     list_remove( &winstation->entry );
+    release_object( winstation->desktop_switch_event );
     if (winstation->clipboard) release_object( winstation->clipboard );
     if (winstation->atom_table) release_object( winstation->atom_table );
     free( winstation->desktop_names );
@@ -290,6 +298,9 @@ int set_input_desktop( struct winstation *winstation, struct desktop *new_deskto
         LIST_FOR_EACH_ENTRY( thread, &new_desktop->threads, struct thread, desktop_entry )
             set_rawinput_process( thread->process, 1 );
     }
+
+    set_event( winstation->desktop_switch_event );
+    reset_event( winstation->desktop_switch_event );
 
     return 1;
 }

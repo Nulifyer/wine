@@ -120,6 +120,11 @@ static struct directory *dir_bno_global;
 static struct directory *dir_sessions;
 static struct directory *dir_bnolinks;
 
+static const WCHAR desktop_switch_eventW[] =
+    {'W','i','n','S','t','a','0','_','D','e','s','k','t','o','p','S','w','i','t','c','h'};
+static const struct unicode_str desktop_switch_event_str =
+    {desktop_switch_eventW, sizeof(desktop_switch_eventW)};
+
 
 static struct type_descr *types[] =
 {
@@ -263,6 +268,54 @@ struct object *get_root_directory(void)
     return grab_object( root_directory );
 }
 
+/* return the desktop-switch notification event for a session */
+struct event *get_session_desktop_switch_event( unsigned int session_id )
+{
+    static const WCHAR dir_bnoW[] = {'B','a','s','e','N','a','m','e','d','O','b','j','e','c','t','s'};
+    static const struct unicode_str dir_bno_str = {dir_bnoW, sizeof(dir_bnoW)};
+    struct directory *session_dir, *bno_dir;
+    struct unicode_str id_str;
+    struct object *obj;
+    char id_strA[11];
+    WCHAR *id_strW;
+
+    if (!session_id)
+        bno_dir = (struct directory *)grab_object( dir_bno_global );
+    else
+    {
+        snprintf( id_strA, sizeof(id_strA), "%u", session_id );
+        id_strW = ascii_to_unicode_str( id_strA, &id_str );
+        obj = find_object( dir_sessions->entries, id_str, 0 );
+        free( id_strW );
+        if (!obj) return NULL;
+        if (obj->ops != &directory_ops)
+        {
+            release_object( obj );
+            return NULL;
+        }
+        session_dir = (struct directory *)obj;
+        obj = find_object( session_dir->entries, dir_bno_str, 0 );
+        release_object( session_dir );
+        if (!obj) return NULL;
+        if (obj->ops != &directory_ops)
+        {
+            release_object( obj );
+            return NULL;
+        }
+        bno_dir = (struct directory *)obj;
+    }
+
+    obj = find_object( bno_dir->entries, desktop_switch_event_str, 0 );
+    release_object( bno_dir );
+    if (!obj) return NULL;
+    if (obj->ops->type != &event_type)
+    {
+        release_object( obj );
+        return NULL;
+    }
+    return (struct event *)obj;
+}
+
 /* return a directory object for creating/opening some object; no access rights are required */
 struct object *get_directory_obj( struct process *process, obj_handle_t handle )
 {
@@ -342,6 +395,9 @@ static void create_session( unsigned int id )
     release_object( link_local );
     release_object( link_session );
     release_object( link_bno );
+
+    release_object( create_event( &dir_bno->obj, desktop_switch_event_str,
+                                  OBJ_PERMANENT, 1, 0, NULL ));
 
     release_object( dir_dosdevices );
     release_object( dir_winstation );
