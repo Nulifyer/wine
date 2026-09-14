@@ -441,6 +441,43 @@ PVOID WINAPI RtlSetThreadSubProcessTag( PVOID tag )
 
 
 /***********************************************************************
+ *              RtlClearThreadWorkOnBehalfTicket  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlClearThreadWorkOnBehalfTicket( void )
+{
+    memset( NtCurrentTeb()->WorkingOnBehalfOfTicket, 0,
+            sizeof(NtCurrentTeb()->WorkingOnBehalfOfTicket) );
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *              RtlGetThreadWorkOnBehalfTicket  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlGetThreadWorkOnBehalfTicket( ULONGLONG *ticket, ULONG flags )
+{
+    if ((flags & ~7) || (flags & 3) == 3) return STATUS_INVALID_PARAMETER_2;
+
+    /* Windows may query kernel scheduling state when flag 2 is set. Wine has
+     * no corresponding host-kernel state, so the TEB copy is authoritative. */
+    memcpy( ticket, NtCurrentTeb()->WorkingOnBehalfOfTicket, sizeof(*ticket) );
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *              RtlSetThreadWorkOnBehalfTicket  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSetThreadWorkOnBehalfTicket( const ULONGLONG *ticket )
+{
+    if (!ticket) return STATUS_INVALID_PARAMETER;
+
+    memcpy( NtCurrentTeb()->WorkingOnBehalfOfTicket, ticket, sizeof(*ticket) );
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
  *              RtlGetThreadErrorMode  (NTDLL.@)
  */
 DWORD WINAPI RtlGetThreadErrorMode( void )

@@ -43,6 +43,9 @@ static NTSTATUS  (WINAPI *pNtQueueApcThreadEx)(HANDLE handle, HANDLE reserve_han
 static NTSTATUS  (WINAPI *pNtQueueApcThreadEx2)(HANDLE handle, HANDLE reserve_handle, ULONG flags, PNTAPCFUNC func,
                                                 ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3);
 static NTSTATUS  (WINAPI *pRtlWow64GetProcessMachines)(HANDLE, WORD*, WORD*);
+static NTSTATUS  (WINAPI *pRtlClearThreadWorkOnBehalfTicket)(void);
+static NTSTATUS  (WINAPI *pRtlGetThreadWorkOnBehalfTicket)(ULONGLONG *, ULONG);
+static NTSTATUS  (WINAPI *pRtlSetThreadWorkOnBehalfTicket)(const ULONGLONG *);
 static void *    (WINAPI *pRtlSetThreadSubProcessTag)(void *);
 
 #ifdef __x86_64__
@@ -65,6 +68,9 @@ static void init_function_pointers(void)
     GET_FUNC( NtQueueApcThreadEx );
     GET_FUNC( NtQueueApcThreadEx2 );
     GET_FUNC( NtResumeProcess );
+    GET_FUNC( RtlClearThreadWorkOnBehalfTicket );
+    GET_FUNC( RtlGetThreadWorkOnBehalfTicket );
+    GET_FUNC( RtlSetThreadWorkOnBehalfTicket );
     GET_FUNC( RtlSetThreadSubProcessTag );
     GET_FUNC( RtlWow64GetProcessMachines );
     GET_FUNC( _errno );
@@ -76,6 +82,63 @@ static void init_function_pointers(void)
     hdll = GetModuleHandleA( "kernel32.dll" );
     GET_FUNC( IsWow64Process );
 #undef GET_FUNC
+}
+
+static void test_RtlThreadWorkOnBehalfTicket(void)
+{
+    static const ULONG valid_flags[] = {0, 1, 2, 4, 5, 6};
+    static const ULONG invalid_flags[] = {3, 7, 8, 0x80000000};
+    const ULONGLONG expected = 0x0123456789abcdef;
+    ULONGLONG ticket;
+    NTSTATUS status;
+    unsigned int i;
+
+    if (!pRtlClearThreadWorkOnBehalfTicket || !pRtlGetThreadWorkOnBehalfTicket ||
+        !pRtlSetThreadWorkOnBehalfTicket)
+    {
+        win_skip( "Thread work-on-behalf ticket functions are not available.\n" );
+        return;
+    }
+
+    status = pRtlClearThreadWorkOnBehalfTicket();
+    ok( status == STATUS_SUCCESS, "RtlClearThreadWorkOnBehalfTicket returned %#lx.\n", status );
+
+    ticket = 0xdeadbeefdeadbeef;
+    status = pRtlGetThreadWorkOnBehalfTicket( &ticket, 0 );
+    ok( status == STATUS_SUCCESS, "RtlGetThreadWorkOnBehalfTicket returned %#lx.\n", status );
+    ok( !ticket, "Got unexpected initial ticket %#I64x.\n", ticket );
+
+    status = pRtlSetThreadWorkOnBehalfTicket( &expected );
+    ok( status == STATUS_SUCCESS, "RtlSetThreadWorkOnBehalfTicket returned %#lx.\n", status );
+
+    for (i = 0; i < ARRAY_SIZE(valid_flags); ++i)
+    {
+        ticket = 0;
+        status = pRtlGetThreadWorkOnBehalfTicket( &ticket, valid_flags[i] );
+        ok( status == STATUS_SUCCESS, "flags %#lx returned %#lx.\n", valid_flags[i], status );
+        ok( ticket == expected, "flags %#lx got ticket %#I64x, expected %#I64x.\n",
+            valid_flags[i], ticket, expected );
+    }
+
+    for (i = 0; i < ARRAY_SIZE(invalid_flags); ++i)
+    {
+        ticket = 0xdeadbeefdeadbeef;
+        status = pRtlGetThreadWorkOnBehalfTicket( &ticket, invalid_flags[i] );
+        ok( status == STATUS_INVALID_PARAMETER_2, "flags %#lx returned %#lx.\n",
+            invalid_flags[i], status );
+        ok( ticket == 0xdeadbeefdeadbeef, "flags %#lx modified ticket to %#I64x.\n",
+            invalid_flags[i], ticket );
+    }
+
+    status = pRtlSetThreadWorkOnBehalfTicket( NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "NULL ticket returned %#lx.\n", status );
+
+    status = pRtlClearThreadWorkOnBehalfTicket();
+    ok( status == STATUS_SUCCESS, "RtlClearThreadWorkOnBehalfTicket returned %#lx.\n", status );
+    ticket = 0xdeadbeefdeadbeef;
+    status = pRtlGetThreadWorkOnBehalfTicket( &ticket, 0 );
+    ok( status == STATUS_SUCCESS, "RtlGetThreadWorkOnBehalfTicket returned %#lx.\n", status );
+    ok( !ticket, "Got unexpected cleared ticket %#I64x.\n", ticket );
 }
 
 static void test_RtlSetThreadSubProcessTag(void)
@@ -573,6 +636,7 @@ START_TEST(thread)
     }
 
     test_dbg_hidden_thread_creation();
+    test_RtlThreadWorkOnBehalfTicket();
     test_RtlSetThreadSubProcessTag();
     test_unique_teb();
     test_errno();

@@ -569,6 +569,7 @@
 @ stdcall RtlCheckTokenCapability(long ptr ptr)
 @ stdcall RtlClearAllBits(ptr)
 @ stdcall RtlClearBits(ptr long long)
+@ stdcall RtlClearThreadWorkOnBehalfTicket()
 # @ stub RtlCloneMemoryStream
 @ stub RtlClosePropertySet
 # @ stub RtlCommitMemoryStream
@@ -827,6 +828,7 @@
 @ stdcall -ret64 RtlGetSystemTimePrecise()
 @ stdcall RtlGetThreadErrorMode()
 @ stdcall RtlGetThreadPreferredUILanguages(long ptr ptr ptr)
+@ stdcall RtlGetThreadWorkOnBehalfTicket(ptr long)
 @ stdcall RtlGetUnloadEventTrace()
 @ stdcall RtlGetUnloadEventTraceEx(ptr ptr ptr)
 @ stdcall RtlGetUserInfoHeap(ptr long ptr ptr ptr)
@@ -1113,6 +1115,7 @@
 @ stdcall RtlSetThreadPlaceholderCompatibilityMode(long)
 @ stdcall RtlSetThreadPreferredUILanguages(long ptr ptr)
 @ stdcall RtlSetThreadSubProcessTag(ptr)
+@ stdcall RtlSetThreadWorkOnBehalfTicket(ptr)
 # @ stub RtlSetThreadPoolStartFunc
 @ stdcall RtlSetTimeZoneInformation(ptr)
 # @ stub RtlSetTimer
