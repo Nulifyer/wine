@@ -31,6 +31,10 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(sspicli);
 
+#ifndef SECURITY_WINDOW_MANAGER_BASE_RID
+#define SECURITY_WINDOW_MANAGER_BASE_RID 90
+#endif
+
 static void *query_token_info( HANDLE token, TOKEN_INFORMATION_CLASS class )
 {
     void *buffer;
@@ -83,6 +87,11 @@ static NTSTATUS create_supported_well_known_sid( WELL_KNOWN_SID_TYPE type, SID *
         authority = &nt_authority;
         count = 1;
         subauthorities[0] = SECURITY_NETWORK_RID;
+        break;
+    case WinInteractiveSid:
+        authority = &nt_authority;
+        count = 1;
+        subauthorities[0] = SECURITY_INTERACTIVE_RID;
         break;
     case WinServiceSid:
         authority = &nt_authority;
@@ -311,6 +320,157 @@ done:
     return FALSE;
 }
 
+static BOOL parse_dwm_account( const WCHAR *username, const WCHAR *domain, DWORD *session_id )
+{
+    const WCHAR *cursor;
+    DWORD value = 0;
+
+    if (!domain || lstrcmpiW( domain, L"Window Manager" ) ||
+        !username || wcsncmp( username, L"DWM-", 4 ))
+        return FALSE;
+
+    cursor = username + 4;
+    if (!*cursor) return FALSE;
+    while (*cursor)
+    {
+        DWORD digit;
+
+        if (*cursor < '0' || *cursor > '9') return FALSE;
+        digit = *cursor++ - '0';
+        if (value > (MAXDWORD - digit) / 10) return FALSE;
+        value = value * 10 + digit;
+    }
+    *session_id = value;
+    return TRUE;
+}
+
+static BOOL create_dwm_token( DWORD session_id, const TOKEN_GROUPS *extra_groups, HANDLE *token )
+{
+    static const WELL_KNOWN_SID_TYPE group_types[] =
+    {
+        WinWorldSid,
+        WinLocalSid,
+        WinAuthenticatedUserSid,
+        WinBuiltinUsersSid,
+        WinInteractiveSid,
+    };
+    static const SID_IDENTIFIER_AUTHORITY nt_authority = { SECURITY_NT_AUTHORITY };
+    union sid_buffer
+    {
+        SID sid;
+        BYTE bytes[SECURITY_MAX_SID_SIZE];
+    } user_buffer, window_manager_group, group_buffers[ARRAY_SIZE(group_types)];
+    struct token_privileges
+    {
+        DWORD PrivilegeCount;
+        LUID_AND_ATTRIBUTES Privileges[1];
+    } privileges;
+    TOKEN_DEFAULT_DACL default_dacl = {NULL};
+    TOKEN_PRIMARY_GROUP primary_group;
+    TOKEN_GROUPS *combined_groups = NULL;
+    TOKEN_OWNER owner;
+    TOKEN_SOURCE source = {{0}};
+    TOKEN_USER user;
+    OBJECT_ATTRIBUTES attributes;
+    LARGE_INTEGER expiration;
+    LUID auth_id;
+    ULONG base_count = ARRAY_SIZE(group_types) + 1;
+    ULONG extra_count = extra_groups ? extra_groups->GroupCount : 0;
+    ULONG count, i, size;
+    NTSTATUS status;
+
+    *token = NULL;
+    if (extra_count > MAXDWORD - base_count ||
+        base_count + extra_count >
+        (MAXDWORD - FIELD_OFFSET( TOKEN_GROUPS, Groups )) / sizeof(*combined_groups->Groups))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    status = RtlInitializeSid( &user_buffer.sid, (SID_IDENTIFIER_AUTHORITY *)&nt_authority, 3 );
+    if (!status)
+    {
+        *RtlSubAuthoritySid( &user_buffer.sid, 0 ) = SECURITY_WINDOW_MANAGER_BASE_RID;
+        *RtlSubAuthoritySid( &user_buffer.sid, 1 ) = 0;
+        *RtlSubAuthoritySid( &user_buffer.sid, 2 ) = session_id;
+        status = RtlInitializeSid( &window_manager_group.sid,
+                                   (SID_IDENTIFIER_AUTHORITY *)&nt_authority, 2 );
+    }
+    if (status)
+    {
+        SetLastError( RtlNtStatusToDosError( status ));
+        return FALSE;
+    }
+    *RtlSubAuthoritySid( &window_manager_group.sid, 0 ) = SECURITY_WINDOW_MANAGER_BASE_RID;
+    *RtlSubAuthoritySid( &window_manager_group.sid, 1 ) = 0;
+
+    count = base_count + extra_count;
+    size = FIELD_OFFSET( TOKEN_GROUPS, Groups ) + count * sizeof(*combined_groups->Groups);
+    if (!(combined_groups = HeapAlloc( GetProcessHeap(), 0, size )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return FALSE;
+    }
+    combined_groups->GroupCount = count;
+    for (i = 0; i < ARRAY_SIZE(group_types); ++i)
+    {
+        status = create_supported_well_known_sid( group_types[i], &group_buffers[i].sid );
+        if (status)
+        {
+            SetLastError( RtlNtStatusToDosError( status ));
+            goto failed;
+        }
+        combined_groups->Groups[i].Sid = &group_buffers[i].sid;
+        combined_groups->Groups[i].Attributes = SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT |
+                                                SE_GROUP_ENABLED;
+    }
+    combined_groups->Groups[i].Sid = &window_manager_group.sid;
+    combined_groups->Groups[i++].Attributes = SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT |
+                                              SE_GROUP_ENABLED;
+    for (; i < count; ++i) combined_groups->Groups[i] = extra_groups->Groups[i - base_count];
+
+    privileges.PrivilegeCount = ARRAY_SIZE(privileges.Privileges);
+    privileges.Privileges[0].Luid.LowPart = SE_CHANGE_NOTIFY_PRIVILEGE;
+    privileges.Privileges[0].Luid.HighPart = 0;
+    privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    user.User.Sid = &user_buffer.sid;
+    user.User.Attributes = 0;
+    owner.Owner = &user_buffer.sid;
+    primary_group.PrimaryGroup = &window_manager_group.sid;
+    memcpy( source.SourceName, "SspiCli", sizeof("SspiCli") - 1 );
+    status = NtAllocateLocallyUniqueId( &auth_id );
+    if (status)
+    {
+        SetLastError( RtlNtStatusToDosError( status ));
+        goto failed;
+    }
+    NtAllocateLocallyUniqueId( &source.SourceIdentifier );
+    expiration.QuadPart = 0x7fffffffffffffff;
+    InitializeObjectAttributes( &attributes, NULL, 0, NULL, NULL );
+    status = NtCreateToken( token, MAXIMUM_ALLOWED, &attributes, TokenPrimary, &auth_id,
+                            &expiration, &user, combined_groups,
+                            (TOKEN_PRIVILEGES *)&privileges, &owner, &primary_group,
+                            &default_dacl, &source );
+    if (!status)
+        status = NtSetInformationToken( *token, TokenSessionId, &session_id, sizeof(session_id) );
+    if (status)
+    {
+        if (*token) NtClose( *token );
+        *token = NULL;
+        SetLastError( RtlNtStatusToDosError( status ));
+        goto failed;
+    }
+
+    TRACE( "created DWM virtual-account token %p for session %lu\n", *token, session_id );
+    HeapFree( GetProcessHeap(), 0, combined_groups );
+    return TRUE;
+
+failed:
+    HeapFree( GetProcessHeap(), 0, combined_groups );
+    return FALSE;
+}
+
 static BOOL copy_logon_sid( HANDLE token, const TOKEN_GROUPS *groups, SID **logon_sid )
 {
     TOKEN_USER *user = NULL;
@@ -364,9 +524,10 @@ done:
 /***********************************************************************
  *              LogonUserExExW (SSPICLI.@)
  *
- * Native services.exe uses this entry point to obtain the primary token
- * for service hosts. Construct the supported service identities directly on
- * the Wine token boundary instead of entering the native LSA/ALPC path.
+ * Native services.exe and dwminit.dll use this entry point to obtain primary
+ * tokens for service hosts and the per-session DWM virtual account. Construct
+ * those supported identities directly on the Wine token boundary instead of
+ * entering the native LSA/ALPC path.
  */
 BOOL WINAPI LogonUserExExW( const WCHAR *username, const WCHAR *domain, const WCHAR *password,
                             DWORD logon_type, DWORD provider, TOKEN_GROUPS *groups,
@@ -374,6 +535,7 @@ BOOL WINAPI LogonUserExExW( const WCHAR *username, const WCHAR *domain, const WC
                             DWORD *profile_length, QUOTA_LIMITS *quota_limits )
 {
     HANDLE process_token, result_token;
+    DWORD dwm_session_id;
     NTSTATUS status;
     BOOL ret;
 
@@ -409,6 +571,8 @@ BOOL WINAPI LogonUserExExW( const WCHAR *username, const WCHAR *domain, const WC
         ret = create_service_token( WinLocalServiceSid, 0x3e5, groups, &result_token );
     else if (!lstrcmpiW( username, L"NetworkService" ))
         ret = create_service_token( WinNetworkServiceSid, 0x3e4, groups, &result_token );
+    else if (parse_dwm_account( username, domain, &dwm_session_id ))
+        ret = create_dwm_token( dwm_session_id, groups, &result_token );
     else
     {
         SetLastError( ERROR_LOGON_FAILURE );
@@ -416,7 +580,7 @@ BOOL WINAPI LogonUserExExW( const WCHAR *username, const WCHAR *domain, const WC
     }
     if (!ret)
     {
-        TRACE( "service-token creation for %s failed with error %lu\n",
+        TRACE( "token creation for %s failed with error %lu\n",
                debugstr_w(username), GetLastError() );
         return FALSE;
     }

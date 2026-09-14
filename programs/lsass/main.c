@@ -33,6 +33,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 static WCHAR samssW[] = L"SamSs";
 static HANDLE exit_event;
 static HANDLE rpc_ready_event;
+static HANDLE subsystem_ready_event;
 static SERVICE_STATUS_HANDLE service_handle;
 
 void* __RPC_USER MIDL_user_allocate( SIZE_T size )
@@ -184,6 +185,11 @@ int WINAPI wWinMain( HINSTANCE instance, HINSTANCE prev_instance, WCHAR *cmdline
         return 0;
     }
     load_auth_packages();
+
+    subsystem_ready_event = CreateEventW( NULL, TRUE, FALSE,
+                                          L"Global\\LSA_SUBSYSTEM_INITIALIZED" );
+    if (!subsystem_ready_event || !SetEvent( subsystem_ready_event ))
+        WARN( "Failed to publish LSA subsystem readiness, error %lu.\n", GetLastError() );
 
     rpc_ready_event = CreateEventW( NULL, TRUE, FALSE, L"LSA_RPC_SERVER_ACTIVE" );
     if (!rpc_ready_event || !SetEvent( rpc_ready_event ))
