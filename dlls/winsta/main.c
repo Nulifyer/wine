@@ -107,9 +107,34 @@ BOOLEAN WINAPI WinStationQueryInformationA( HANDLE server, ULONG logon_id, WINST
 BOOLEAN WINAPI WinStationQueryInformationW( HANDLE server, ULONG logon_id, WINSTATIONINFOCLASS class,
                                             void *info, ULONG len, ULONG *ret_len )
 {
+    WINSTATIONINFORMATIONW station_info;
     ULONG session_type;
 
     TRACE( "%p %lu %u %p %lu %p\n", server, logon_id, class, info, len, ret_len );
+
+    if (class == WinStationInformation)
+    {
+        if (!info || len < sizeof(station_info))
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
+
+        if (logon_id == LOGONID_CURRENT) logon_id = NtCurrentTeb()->Peb->SessionId;
+        if (logon_id > 1)
+        {
+            SetLastError( ERROR_FILE_NOT_FOUND );
+            return FALSE;
+        }
+
+        memset( &station_info, 0, sizeof(station_info) );
+        *(ULONG *)station_info.Reserved2 = State_Active;
+        station_info.LogonId = logon_id;
+        memcpy( info, &station_info, sizeof(station_info) );
+        if (ret_len) *ret_len = sizeof(station_info);
+        SetLastError( ERROR_SUCCESS );
+        return TRUE;
+    }
 
     if (class == WinStationType)
     {
@@ -141,6 +166,45 @@ BOOLEAN WINAPI WinStationQueryInformationW( HANDLE server, ULONG logon_id, WINST
     FIXME( "%p %lu %u %p %lu %p\n", server, logon_id, class, info, len, ret_len );
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return FALSE;
+}
+
+BOOL WINAPI WinStationIsSessionPermitted(void)
+{
+    TRACE( "\n" );
+
+    /* Wine exposes only its service and interactive console sessions, both of
+     * which are permitted to complete their local startup. */
+    return TRUE;
+}
+
+BOOL WINAPI WinStationRegisterSessionNotification( HANDLE server, HWND hwnd, ULONG flags )
+{
+    TRACE( "%p %p %#lx\n", server, hwnd, flags );
+
+    /* Wine does not currently transition its local console between terminal
+     * session states, so there are no later changes to deliver. */
+    return TRUE;
+}
+
+BOOL WINAPI WinStationUnRegisterSessionNotification( HANDLE server, HWND hwnd )
+{
+    TRACE( "%p %p\n", server, hwnd );
+    return TRUE;
+}
+
+BOOLEAN WINAPI _WinStationWaitForConnect(void)
+{
+    TRACE( "\n" );
+    return TRUE;
+}
+
+BOOLEAN WINAPI _WinStationWaitForConnectEx( const GUID *activity_id )
+{
+    TRACE( "%s\n", debugstr_guid(activity_id) );
+
+    /* Wine's service and interactive console sessions are connected when they
+     * are published; there is no separate terminal-services connect handshake. */
+    return TRUE;
 }
 
 BOOLEAN WINAPI WinStationRegisterConsoleNotification( HANDLE server, HWND hwnd, ULONG flags )

@@ -28,6 +28,69 @@
 
 static BOOLEAN (WINAPI *pWinStationQueryInformationA)(HANDLE,ULONG,WINSTATIONINFOCLASS,void *,ULONG,ULONG *);
 static BOOLEAN (WINAPI *pWinStationQueryInformationW)(HANDLE,ULONG,WINSTATIONINFOCLASS,void *,ULONG,ULONG *);
+static BOOL (WINAPI *pWinStationIsSessionPermitted)(void);
+static BOOLEAN (WINAPI *p_WinStationWaitForConnect)(void);
+static BOOLEAN (WINAPI *p_WinStationWaitForConnectEx)(const GUID *);
+
+static void test_wait_for_connect(void)
+{
+    static const GUID activity_id =
+        {0x9dcf77ab, 0xaed8, 0x4d85, {0x8a, 0x54, 0x74, 0x09, 0x4d, 0x68, 0x0c, 0x20}};
+    BOOLEAN ret;
+
+    SetLastError(0xdeadbeef);
+    ret = p_WinStationWaitForConnect();
+    ok(ret, "_WinStationWaitForConnect failed, error %lu\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "expected last error to remain unchanged, got %lu\n",
+       GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = p_WinStationWaitForConnectEx(&activity_id);
+    ok(ret, "_WinStationWaitForConnectEx failed, error %lu\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "expected last error to remain unchanged, got %lu\n",
+       GetLastError());
+}
+
+static void test_session_permitted(void)
+{
+    BOOL ret;
+
+    SetLastError(0xdeadbeef);
+    ret = pWinStationIsSessionPermitted();
+    ok(ret, "WinStationIsSessionPermitted failed, error %lu\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "expected last error to remain unchanged, got %lu\n",
+       GetLastError());
+}
+
+static void test_query_session_information(void)
+{
+    struct
+    {
+        WINSTATIONINFORMATIONW info;
+        ULONG guard;
+    } buffer;
+    ULONG length, session_id;
+    BOOLEAN ret;
+
+    ret = ProcessIdToSessionId(GetCurrentProcessId(), &session_id);
+    ok(ret, "ProcessIdToSessionId failed, error %lu\n", GetLastError());
+
+    memset(&buffer, 0xa5, sizeof(buffer));
+    length = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = pWinStationQueryInformationW(NULL, LOGONID_CURRENT, WinStationInformation,
+                                       &buffer.info, sizeof(buffer.info), &length);
+    ok(ret, "WinStationQueryInformationW failed, error %lu\n", GetLastError());
+    ok(!GetLastError(), "expected ERROR_SUCCESS, got %lu\n", GetLastError());
+    ok(length == sizeof(buffer.info), "expected length %Iu, got %lu\n", sizeof(buffer.info), length);
+    ok(*(ULONG *)buffer.info.Reserved2 == State_Active, "expected active state, got %lu\n",
+       *(ULONG *)buffer.info.Reserved2);
+    ok(buffer.info.LogonId == session_id, "expected session %lu, got %lu\n",
+       session_id, buffer.info.LogonId);
+    ok(!buffer.info.Reserved3[0] && !buffer.info.Reserved3[sizeof(buffer.info.Reserved3) - 1],
+       "expected reserved information to be cleared\n");
+    ok(buffer.guard == 0xa5a5a5a5, "function wrote past the information buffer\n");
+}
 
 static void test_query_session_type(void)
 {
@@ -92,10 +155,18 @@ START_TEST(winsta)
     }
     pWinStationQueryInformationA = (void *)GetProcAddress(module, "WinStationQueryInformationA");
     pWinStationQueryInformationW = (void *)GetProcAddress(module, "WinStationQueryInformationW");
-    if (!pWinStationQueryInformationA || !pWinStationQueryInformationW)
+    pWinStationIsSessionPermitted = (void *)GetProcAddress(module, "WinStationIsSessionPermitted");
+    p_WinStationWaitForConnect = (void *)GetProcAddress(module, "_WinStationWaitForConnect");
+    p_WinStationWaitForConnectEx = (void *)GetProcAddress(module, "_WinStationWaitForConnectEx");
+    if (!pWinStationQueryInformationA || !pWinStationQueryInformationW ||
+        !pWinStationIsSessionPermitted || !p_WinStationWaitForConnect ||
+        !p_WinStationWaitForConnectEx)
     {
-        win_skip("WinStationQueryInformation is unavailable\n");
+        win_skip("required WinStation exports are unavailable\n");
         return;
     }
+    test_session_permitted();
+    test_wait_for_connect();
+    test_query_session_information();
     test_query_session_type();
 }

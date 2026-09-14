@@ -44,6 +44,7 @@
 @ stub WinStationInstallLicense
 @ stub WinStationIsHelpAssistantSession
 @ stdcall WinStationIsCurrentSessionRemoteable(ptr)
+@ stdcall WinStationIsSessionPermitted()
 @ stdcall WinStationIsSessionRemoteable(ptr long ptr)
 @ stub WinStationNameFromLogonIdA
 @ stub WinStationNameFromLogonIdW
@@ -56,6 +57,7 @@
 @ stub WinStationQueryLogonCredentialsW
 @ stub WinStationQueryUpdateRequired
 @ stdcall WinStationRegisterConsoleNotification(ptr ptr long)
+@ stdcall WinStationRegisterSessionNotification(ptr ptr long)
 @ stub WinStationRemoveLicense
 @ stub WinStationRenameA
 @ stub WinStationRenameW
@@ -72,6 +74,7 @@
 @ stub WinStationShutdownSystem
 @ stub WinStationTerminateProcess
 @ stdcall WinStationUnRegisterConsoleNotification(ptr ptr)
+@ stdcall WinStationUnRegisterSessionNotification(ptr ptr)
 @ stdcall WinStationVirtualOpen(ptr ptr ptr)
 @ stub WinStationWaitSystemEvent
 @ stub _NWLogonQueryAdmin
@@ -94,4 +97,5 @@
 @ stub _WinStationUpdateClientCachedCredentials
 @ stub _WinStationUpdateSettings
 @ stub _WinStationUpdateUserConfig
-@ stub _WinStationWaitForConnect
+@ stdcall _WinStationWaitForConnect()
+@ stdcall _WinStationWaitForConnectEx(ptr)
