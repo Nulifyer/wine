@@ -965,12 +965,17 @@ struct aggregate_identity
 {
     IMultiQI IMultiQI_iface;
     IUnknown identity_unmarshal_iface;
+    IInternalUnknown internal_unknown_iface;
+    IMultiQI internal_unknown_IMultiQI_iface;
     LONG refs;
     IUnknown *handler;
+    LONG std_identity_flags;
 };
 
 static const IID aggregate_identity_unmarshal_iid =
     {0x0000001b, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+static const IID aggregate_internal_unknown_iid =
+    {0x00000021, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
 
 static inline struct aggregate_identity *impl_from_aggregate_IMultiQI(IMultiQI *iface)
 {
@@ -980,6 +985,16 @@ static inline struct aggregate_identity *impl_from_aggregate_IMultiQI(IMultiQI *
 static inline struct aggregate_identity *impl_from_identity_unmarshal_IUnknown(IUnknown *iface)
 {
     return CONTAINING_RECORD(iface, struct aggregate_identity, identity_unmarshal_iface);
+}
+
+static inline struct aggregate_identity *impl_from_internal_IInternalUnknown(IInternalUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, struct aggregate_identity, internal_unknown_iface);
+}
+
+static inline struct aggregate_identity *impl_from_internal_IMultiQI(IMultiQI *iface)
+{
+    return CONTAINING_RECORD(iface, struct aggregate_identity, internal_unknown_IMultiQI_iface);
 }
 
 static HRESULT WINAPI aggregate_identity_QueryInterface(IMultiQI *iface, REFIID iid, void **obj)
@@ -1054,6 +1069,106 @@ static const IUnknownVtbl identity_unmarshal_vtbl =
     identity_unmarshal_Release,
 };
 
+static HRESULT aggregate_internal_query_interface(struct aggregate_identity *identity,
+        REFIID iid, void **obj)
+{
+    *obj = NULL;
+    if (IsEqualIID(iid, &IID_IUnknown) || IsEqualIID(iid, &IID_IMultiQI))
+        *obj = &identity->internal_unknown_IMultiQI_iface;
+    else if (IsEqualIID(iid, &aggregate_internal_unknown_iid))
+        *obj = &identity->internal_unknown_iface;
+    else
+        return E_NOINTERFACE;
+
+    IMultiQI_AddRef(&identity->IMultiQI_iface);
+    return S_OK;
+}
+
+static HRESULT WINAPI aggregate_internal_QueryInterface(IInternalUnknown *iface, REFIID iid,
+        void **obj)
+{
+    struct aggregate_identity *identity = impl_from_internal_IInternalUnknown(iface);
+
+    TRACE("%p, %s, %p\n", iface, debugstr_guid(iid), obj);
+    return aggregate_internal_query_interface(identity, iid, obj);
+}
+
+static ULONG WINAPI aggregate_internal_AddRef(IInternalUnknown *iface)
+{
+    struct aggregate_identity *identity = impl_from_internal_IInternalUnknown(iface);
+    return IMultiQI_AddRef(&identity->IMultiQI_iface);
+}
+
+static ULONG WINAPI aggregate_internal_Release(IInternalUnknown *iface)
+{
+    struct aggregate_identity *identity = impl_from_internal_IInternalUnknown(iface);
+    return IMultiQI_Release(&identity->IMultiQI_iface);
+}
+
+static HRESULT WINAPI aggregate_internal_QueryInternalInterface(IInternalUnknown *iface,
+        REFIID iid, void **obj)
+{
+    struct aggregate_identity *identity = impl_from_internal_IInternalUnknown(iface);
+
+    TRACE("%p, %s, %p\n", iface, debugstr_guid(iid), obj);
+    return aggregate_internal_query_interface(identity, iid, obj);
+}
+
+static const IInternalUnknownVtbl aggregate_internal_unknown_vtbl =
+{
+    aggregate_internal_QueryInterface,
+    aggregate_internal_AddRef,
+    aggregate_internal_Release,
+    aggregate_internal_QueryInternalInterface,
+};
+
+static HRESULT WINAPI aggregate_internal_IMultiQI_QueryInterface(IMultiQI *iface, REFIID iid,
+        void **obj)
+{
+    struct aggregate_identity *identity = impl_from_internal_IMultiQI(iface);
+
+    TRACE("%p, %s, %p\n", iface, debugstr_guid(iid), obj);
+    return aggregate_internal_query_interface(identity, iid, obj);
+}
+
+static ULONG WINAPI aggregate_internal_IMultiQI_AddRef(IMultiQI *iface)
+{
+    struct aggregate_identity *identity = impl_from_internal_IMultiQI(iface);
+    return IMultiQI_AddRef(&identity->IMultiQI_iface);
+}
+
+static ULONG WINAPI aggregate_internal_IMultiQI_Release(IMultiQI *iface)
+{
+    struct aggregate_identity *identity = impl_from_internal_IMultiQI(iface);
+    return IMultiQI_Release(&identity->IMultiQI_iface);
+}
+
+static HRESULT WINAPI aggregate_internal_QueryMultipleInterfaces(IMultiQI *iface, ULONG count,
+        MULTI_QI *queries)
+{
+    ULONG i, successful = 0;
+
+    TRACE("%p, %lu, %p\n", iface, count, queries);
+
+    for (i = 0; i < count; ++i)
+    {
+        queries[i].hr = IMultiQI_QueryInterface(iface, queries[i].pIID, (void **)&queries[i].pItf);
+        if (queries[i].hr == S_OK) ++successful;
+    }
+
+    if (successful == count) return S_OK;
+    if (!successful) return E_NOINTERFACE;
+    return S_FALSE;
+}
+
+static const IMultiQIVtbl aggregate_internal_multi_qi_vtbl =
+{
+    aggregate_internal_IMultiQI_QueryInterface,
+    aggregate_internal_IMultiQI_AddRef,
+    aggregate_internal_IMultiQI_Release,
+    aggregate_internal_QueryMultipleInterfaces,
+};
+
 static ULONG WINAPI aggregate_identity_Release(IMultiQI *iface)
 {
     struct aggregate_identity *identity = impl_from_aggregate_IMultiQI(iface);
@@ -1109,6 +1224,8 @@ HRESULT WINAPI InternalCreateCAggId(REFCLSID clsid, IMultiQI **agg_id)
 
     identity->IMultiQI_iface.lpVtbl = &aggregate_identity_vtbl;
     identity->identity_unmarshal_iface.lpVtbl = &identity_unmarshal_vtbl;
+    identity->internal_unknown_iface.lpVtbl = &aggregate_internal_unknown_vtbl;
+    identity->internal_unknown_IMultiQI_iface.lpVtbl = &aggregate_internal_multi_qi_vtbl;
     identity->refs = 1;
     *agg_id = &identity->IMultiQI_iface;
     return S_OK;
@@ -1134,6 +1251,39 @@ HRESULT WINAPI InternalCAggIdSetHandler(IMultiQI *iface, IUnknown *handler)
 ULONG WINAPI InternalCAggIdRelease(IMultiQI *iface)
 {
     return IMultiQI_Release(iface);
+}
+
+/***********************************************************************
+ *            InternalCStdIdentityGetIProxyManager    (combase.@)
+ */
+IUnknown * WINAPI InternalCStdIdentityGetIProxyManager(IUnknown *iface)
+{
+    TRACE("%p\n", iface);
+    return iface;
+}
+
+/***********************************************************************
+ *            InternalCStdIdentityGetInternalUnk    (combase.@)
+ */
+IInternalUnknown * WINAPI InternalCStdIdentityGetInternalUnk(IUnknown *iface)
+{
+    struct aggregate_identity *identity = impl_from_identity_unmarshal_IUnknown(iface);
+
+    TRACE("%p\n", iface);
+    return &identity->internal_unknown_iface;
+}
+
+/***********************************************************************
+ *            InternalCStdIdentityUpdateFlags    (combase.@)
+ */
+ULONG WINAPI InternalCStdIdentityUpdateFlags(IUnknown *iface, ULONG flags)
+{
+    struct aggregate_identity *identity = impl_from_identity_unmarshal_IUnknown(iface);
+    ULONG updated;
+
+    updated = InterlockedOr(&identity->std_identity_flags, flags) | flags;
+    TRACE("%p, %#lx, returning %#lx\n", iface, flags, updated);
+    return updated;
 }
 
 static HRESULT proxy_manager_get_remunknown(struct proxy_manager * This, IRemUnknown **remunk);

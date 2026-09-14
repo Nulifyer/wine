@@ -21,11 +21,16 @@
 typedef HRESULT (WINAPI *create_agg_id_fn)(REFCLSID, void **);
 typedef HRESULT (WINAPI *set_agg_id_handler_fn)(void *, IUnknown *);
 typedef ULONG (WINAPI *release_agg_id_fn)(void *);
+typedef IInternalUnknown *(WINAPI *get_internal_unknown_fn)(IUnknown *);
+typedef ULONG (WINAPI *update_identity_flags_fn)(IUnknown *, ULONG);
+typedef IUnknown *(WINAPI *get_proxy_manager_fn)(IUnknown *);
 
 static const GUID test_handler_iid =
     {0xf7518c88, 0xb43f, 0x4e8e, {0xad, 0x5a, 0xf0, 0x2c, 0xb2, 0x38, 0x03, 0x8a}};
 static const GUID identity_unmarshal_iid =
     {0x0000001b, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+static const GUID internal_unknown_iid =
+    {0x00000021, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
 
 struct test_handler
 {
@@ -83,6 +88,10 @@ static void test_aggregate_identity(void)
     set_agg_id_handler_fn set_handler;
     release_agg_id_fn release;
     create_agg_id_fn create;
+    get_internal_unknown_fn get_internal_unknown;
+    update_identity_flags_fn update_identity_flags;
+    get_proxy_manager_fn get_proxy_manager;
+    IInternalUnknown *internal_unknown;
     IUnknown *unknown, *identity_unmarshal, *controlling_unknown;
     void *agg_id, *out;
     HRESULT hr;
@@ -93,9 +102,15 @@ static void test_aggregate_identity(void)
     create = (void *)GetProcAddress(module, "InternalCreateCAggId");
     set_handler = (void *)GetProcAddress(module, "InternalCAggIdSetHandler");
     release = (void *)GetProcAddress(module, "InternalCAggIdRelease");
+    get_internal_unknown = (void *)GetProcAddress(module, "InternalCStdIdentityGetInternalUnk");
+    update_identity_flags = (void *)GetProcAddress(module, "InternalCStdIdentityUpdateFlags");
+    get_proxy_manager = (void *)GetProcAddress(module, "InternalCStdIdentityGetIProxyManager");
     ok(!!create, "InternalCreateCAggId is unavailable.\n");
     ok(!!set_handler, "InternalCAggIdSetHandler is unavailable.\n");
     ok(!!release, "InternalCAggIdRelease is unavailable.\n");
+    ok(!!get_internal_unknown, "InternalCStdIdentityGetInternalUnk is unavailable.\n");
+    ok(!!update_identity_flags, "InternalCStdIdentityUpdateFlags is unavailable.\n");
+    ok(!!get_proxy_manager, "InternalCStdIdentityGetIProxyManager is unavailable.\n");
     if (!create || !set_handler || !release) return;
 
     agg_id = (void *)0xdeadbeef;
@@ -146,6 +161,53 @@ static void test_aggregate_identity(void)
         trace("aggregate %p identity-unmarshal %p controlling unknown %p\n",
                 unknown, identity_unmarshal, controlling_unknown);
         if (controlling_unknown) IUnknown_Release(controlling_unknown);
+
+        if (get_internal_unknown)
+        {
+            internal_unknown = get_internal_unknown(identity_unmarshal);
+            ok(!!internal_unknown, "Internal unknown is %p.\n", internal_unknown);
+            ok((void *)internal_unknown != (void *)identity_unmarshal,
+                    "Internal unknown aliases identity-unmarshal %p.\n", identity_unmarshal);
+            ok(get_internal_unknown(identity_unmarshal) == internal_unknown,
+                    "Internal unknown accessor is unstable.\n");
+            out = (void *)0xdeadbeef;
+            hr = IInternalUnknown_QueryInterface(internal_unknown, &IID_IUnknown, &out);
+            ok(hr == S_OK, "Internal unknown IUnknown query returned %#lx.\n", hr);
+            ok(out != unknown && out != identity_unmarshal,
+                    "Internal unknown IUnknown aliases an outer identity %p.\n", out);
+            ok(out == (BYTE *)internal_unknown + sizeof(void *),
+                    "Internal unknown IUnknown is %p, expected %p.\n",
+                    out, (BYTE *)internal_unknown + sizeof(void *));
+            if (SUCCEEDED(hr)) IUnknown_Release((IUnknown *)out);
+
+            out = (void *)0xdeadbeef;
+            hr = IInternalUnknown_QueryInterface(internal_unknown, &internal_unknown_iid, &out);
+            ok(hr == S_OK, "Internal unknown self query returned %#lx.\n", hr);
+            ok(out == internal_unknown, "Internal unknown self query returned %p.\n", out);
+            if (SUCCEEDED(hr)) IUnknown_Release((IUnknown *)out);
+
+            out = (void *)0xdeadbeef;
+            hr = IInternalUnknown_QueryInternalInterface(internal_unknown, &test_handler_iid, &out);
+            ok(hr == E_NOINTERFACE, "Internal handler query returned %#lx.\n", hr);
+            ok(!out, "Internal handler query returned %p.\n", out);
+            ok(first.query_count == 1, "Internal handler query reached handler; count %ld.\n",
+                    first.query_count);
+            if (SUCCEEDED(hr)) IUnknown_Release((IUnknown *)out);
+        }
+        if (update_identity_flags)
+        {
+            ULONG initial_flags, updated_flags;
+
+            initial_flags = update_identity_flags(identity_unmarshal, 0);
+            updated_flags = update_identity_flags(identity_unmarshal, 0x40000000);
+            ok(updated_flags == (initial_flags | 0x40000000),
+                    "Updated identity flags %#lx, initial %#lx.\n", updated_flags, initial_flags);
+            ok(update_identity_flags(identity_unmarshal, 0) == updated_flags,
+                    "Identity flag update did not persist.\n");
+        }
+        if (get_proxy_manager)
+            ok(get_proxy_manager(identity_unmarshal) == identity_unmarshal,
+                    "Proxy manager does not preserve identity %p.\n", identity_unmarshal);
         IUnknown_Release(identity_unmarshal);
     }
 

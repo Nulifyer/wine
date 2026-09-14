@@ -248,6 +248,9 @@
 @ stub InternalAppInvokeExceptionFilter
 @ stdcall InternalCAggIdRelease(ptr)
 @ stdcall InternalCAggIdSetHandler(ptr ptr)
+@ stdcall InternalCStdIdentityGetIProxyManager(ptr)
+@ stdcall InternalCStdIdentityGetInternalUnk(ptr)
+@ stdcall InternalCStdIdentityUpdateFlags(ptr long)
 @ stub InternalCCFreeUnused
 @ stub InternalCCGetClassInformationForDde
 @ stub InternalCCGetClassInformationFromKey
