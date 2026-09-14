@@ -599,7 +599,6 @@ static void unlink_precreated_session_directory( struct directory *parent,
 DECL_HANDLER(set_session_object)
 {
     static const WCHAR dosdevicesW[] = {'D','o','s','D','e','v','i','c','e','s'};
-    static const WCHAR bnoW[] = {'B','a','s','e','N','a','m','e','d','O','b','j','e','c','t','s'};
     static const WCHAR windowsW[] = {'W','i','n','d','o','w','s'};
     struct directory *dir;
 
@@ -620,8 +619,9 @@ DECL_HANDLER(set_session_object)
         dir->native_session_initialized = 1;
         if (current->process->session_id)
         {
+            /* Named kernel objects still cross the wineserver boundary, so
+             * retain BaseNamedObjects and its Global and Local links. */
             unlink_precreated_session_directory( dir, dosdevicesW, sizeof(dosdevicesW) );
-            unlink_precreated_session_directory( dir, bnoW, sizeof(bnoW) );
             unlink_precreated_session_directory( dir, windowsW, sizeof(windowsW) );
         }
     }
