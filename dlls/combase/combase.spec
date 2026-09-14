@@ -246,6 +246,8 @@
 @ stub HkOleRegisterObject
 @ stdcall IIDFromString(wstr ptr)
 @ stub InternalAppInvokeExceptionFilter
+@ stdcall InternalCAggIdRelease(ptr)
+@ stdcall InternalCAggIdSetHandler(ptr ptr)
 @ stub InternalCCFreeUnused
 @ stub InternalCCGetClassInformationForDde
 @ stub InternalCCGetClassInformationFromKey
@@ -261,7 +263,7 @@
 @ stdcall InternalCoStdMarshalObject(ptr long ptr ptr)
 @ stub InternalCoUnregisterDisconnectCallback
 @ stub InternalCompleteObjRef
-@ stub InternalCreateCAggId
+@ stdcall InternalCreateCAggId(ptr ptr)
 @ stub InternalCreateIdentityHandler
 @ stub InternalDoATClassCreate
 @ stub InternalFillLocalOXIDInfo

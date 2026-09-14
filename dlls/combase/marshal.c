@@ -961,6 +961,128 @@ HRESULT marshal_object(struct apartment *apt, STDOBJREF *stdobjref, REFIID riid,
 
 /* Client-side identity of the server object */
 
+struct aggregate_identity
+{
+    IMultiQI IMultiQI_iface;
+    LONG refs;
+    IUnknown *handler;
+};
+
+static inline struct aggregate_identity *impl_from_aggregate_IMultiQI(IMultiQI *iface)
+{
+    return CONTAINING_RECORD(iface, struct aggregate_identity, IMultiQI_iface);
+}
+
+static HRESULT WINAPI aggregate_identity_QueryInterface(IMultiQI *iface, REFIID iid, void **obj)
+{
+    struct aggregate_identity *identity = impl_from_aggregate_IMultiQI(iface);
+
+    TRACE("%p, %s, %p\n", iface, debugstr_guid(iid), obj);
+
+    *obj = NULL;
+    if (IsEqualIID(iid, &IID_IUnknown) || IsEqualIID(iid, &IID_IMultiQI))
+    {
+        *obj = iface;
+        IMultiQI_AddRef(iface);
+        return S_OK;
+    }
+
+    if (identity->handler)
+        return IUnknown_QueryInterface(identity->handler, iid, obj);
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI aggregate_identity_AddRef(IMultiQI *iface)
+{
+    struct aggregate_identity *identity = impl_from_aggregate_IMultiQI(iface);
+    ULONG refs = InterlockedIncrement(&identity->refs);
+
+    TRACE("%p, refs %lu\n", iface, refs);
+    return refs;
+}
+
+static ULONG WINAPI aggregate_identity_Release(IMultiQI *iface)
+{
+    struct aggregate_identity *identity = impl_from_aggregate_IMultiQI(iface);
+    ULONG refs = InterlockedDecrement(&identity->refs);
+
+    TRACE("%p, refs %lu\n", iface, refs);
+    if (!refs)
+    {
+        if (identity->handler) IUnknown_Release(identity->handler);
+        free(identity);
+    }
+    return refs;
+}
+
+static HRESULT WINAPI aggregate_identity_QueryMultipleInterfaces(IMultiQI *iface, ULONG count,
+        MULTI_QI *queries)
+{
+    ULONG i, successful = 0;
+
+    TRACE("%p, %lu, %p\n", iface, count, queries);
+
+    for (i = 0; i < count; ++i)
+    {
+        queries[i].hr = IMultiQI_QueryInterface(iface, queries[i].pIID, (void **)&queries[i].pItf);
+        if (queries[i].hr == S_OK) ++successful;
+    }
+
+    if (successful == count) return S_OK;
+    if (!successful) return E_NOINTERFACE;
+    return S_FALSE;
+}
+
+static const IMultiQIVtbl aggregate_identity_vtbl =
+{
+    aggregate_identity_QueryInterface,
+    aggregate_identity_AddRef,
+    aggregate_identity_Release,
+    aggregate_identity_QueryMultipleInterfaces,
+};
+
+/***********************************************************************
+ *            InternalCreateCAggId    (combase.@)
+ */
+HRESULT WINAPI InternalCreateCAggId(REFCLSID clsid, IMultiQI **agg_id)
+{
+    struct aggregate_identity *identity;
+
+    TRACE("%s, %p\n", debugstr_guid(clsid), agg_id);
+
+    if (!agg_id) return E_INVALIDARG;
+    *agg_id = NULL;
+    if (!(identity = calloc(1, sizeof(*identity)))) return E_FAIL;
+
+    identity->IMultiQI_iface.lpVtbl = &aggregate_identity_vtbl;
+    identity->refs = 1;
+    *agg_id = &identity->IMultiQI_iface;
+    return S_OK;
+}
+
+/***********************************************************************
+ *            InternalCAggIdSetHandler    (combase.@)
+ */
+HRESULT WINAPI InternalCAggIdSetHandler(IMultiQI *iface, IUnknown *handler)
+{
+    struct aggregate_identity *identity = impl_from_aggregate_IMultiQI(iface);
+
+    TRACE("%p, %p\n", iface, handler);
+
+    if (InterlockedCompareExchangePointer((void **)&identity->handler, handler, NULL)) return E_FAIL;
+    IUnknown_AddRef(handler);
+    return S_OK;
+}
+
+/***********************************************************************
+ *            InternalCAggIdRelease    (combase.@)
+ */
+ULONG WINAPI InternalCAggIdRelease(IMultiQI *iface)
+{
+    return IMultiQI_Release(iface);
+}
+
 static HRESULT proxy_manager_get_remunknown(struct proxy_manager * This, IRemUnknown **remunk);
 static void proxy_manager_destroy(struct proxy_manager * This);
 static HRESULT proxy_manager_find_ifproxy(struct proxy_manager * This, REFIID riid, struct ifproxy ** ifproxy_found);
