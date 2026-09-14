@@ -456,7 +456,7 @@ RPC_STATUS WINAPI RpcEpResolveBinding( RPC_BINDING_HANDLE Binding, RPC_IF_HANDLE
   ept_lookup_handle_t entry_handle = NULL;
   twr_t *tower;
   twr_t *towers[4] = { NULL };
-  unsigned32 num_towers, i;
+  unsigned32 num_towers = 0, i;
   GUID uuid = GUID_NULL;
   char *resolved_endpoint = NULL;
 
@@ -506,6 +506,11 @@ RPC_STATUS WINAPI RpcEpResolveBinding( RPC_BINDING_HANDLE Binding, RPC_IF_HANDLE
 
   RpcBindingFree(&handle);
   I_RpcFree(tower);
+
+  /* A zero-result endpoint-map reply has no endpoint to resolve.  Some
+   * endpoint mappers leave the trailing status value unspecified in that
+   * case; report the endpoint-map contract instead of propagating it. */
+  if (!num_towers) status2 = RPC_S_OK;
 
   if (status2 != RPC_S_OK)
   {
