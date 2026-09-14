@@ -1161,6 +1161,11 @@ BOOL SYSCALL_API NtGdiUpdateColors( HDC hDC )
     SYSCALL_FUNC( NtGdiUpdateColors );
 }
 
+BOOL SYSCALL_API NtGdiWaitForTextReady( void )
+{
+    SYSCALL_FUNC( NtGdiWaitForTextReady );
+}
+
 BOOL SYSCALL_API NtGdiWidenPath( HDC hdc )
 {
     SYSCALL_FUNC( NtGdiWidenPath );

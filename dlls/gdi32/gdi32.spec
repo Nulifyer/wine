@@ -321,6 +321,7 @@
 # @ stub GdiTrackHDelete
 @ stdcall GdiTransparentBlt(long long long long long long long long long long long)
 # @ stub GdiValidateHandle
+@ stdcall GdiWaitForTextReady() win32u.NtGdiWaitForTextReady
 @ stub GdiWinWatchClose
 @ stub GdiWinWatchDidStatusChange
 @ stub GdiWinWatchGetClipList

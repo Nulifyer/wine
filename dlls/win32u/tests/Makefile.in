@@ -5,4 +5,5 @@ SOURCES = \
 	cursor_suppression.c \
 	d3dkmt.c \
 	device_removal.c \
+	text_ready.c \
 	win32u.c

@@ -7034,6 +7034,15 @@ BOOL WINAPI NtGdiGetCharWidthInfo( HDC hdc, struct char_width_info *info )
     return ret;
 }
 
+/*************************************************************
+ *           NtGdiWaitForTextReady    (win32u.@)
+ */
+BOOL WINAPI NtGdiWaitForTextReady( void )
+{
+    /* Wine's text rendering pipeline has no asynchronous kernel work to drain. */
+    return TRUE;
+}
+
 /***********************************************************************
  *           DrawTextW    (win32u.so)
  */

@@ -514,6 +514,7 @@ W32KAPI BOOL     WINAPI NtGdiTransformPoints( HDC hdc, const POINT *points_in, P
                                               INT count, UINT mode );
 W32KAPI BOOL     WINAPI NtGdiUnrealizeObject( HGDIOBJ obj );
 W32KAPI BOOL     WINAPI NtGdiUpdateColors( HDC hdc );
+W32KAPI BOOL     WINAPI NtGdiWaitForTextReady( void );
 W32KAPI BOOL     WINAPI NtGdiWidenPath( HDC hdc );
 
 W32KAPI NTSTATUS WINAPI NtGdiDdDDIAcquireKeyedMutex( D3DKMT_ACQUIREKEYEDMUTEX *params );

@@ -3544,7 +3544,6 @@
     SYSCALL_STUB( NtGdiUnloadPrinterDriver ) \
     SYSCALL_STUB( NtGdiUnmapMemFont ) \
     SYSCALL_STUB( NtGdiUpdateTransform ) \
-    SYSCALL_STUB( NtGdiWaitForTextReady ) \
     SYSCALL_STUB( NtGdiXFORMOBJ_bApplyXform ) \
     SYSCALL_STUB( NtGdiXFORMOBJ_iGetXform ) \
     SYSCALL_STUB( NtGdiXLATEOBJ_cGetPalette ) \
