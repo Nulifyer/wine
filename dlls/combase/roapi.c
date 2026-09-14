@@ -799,6 +799,88 @@ HRESULT WINAPI SetRestrictedErrorInfo(IRestrictedErrorInfo *info)
 }
 
 /***********************************************************************
+ *      OriginateOrTransformError (combase.176)
+ */
+void WINAPI OriginateOrTransformError(HRESULT error)
+{
+    TRACE("%#lx\n", error);
+
+    RoOriginateError(error, NULL);
+}
+
+/***********************************************************************
+ *      SetChainRestrictedErrors (combase.177)
+ */
+HRESULT WINAPI SetChainRestrictedErrors(void)
+{
+    struct tlsdata *data;
+    HRESULT hr;
+
+    TRACE("\n");
+
+    if (FAILED(hr = com_get_tlsdata(&data))) return hr;
+    data->chain_restricted_errors = TRUE;
+    return S_OK;
+}
+
+/***********************************************************************
+ *      ClearChainRestrictedErrors (combase.178)
+ */
+void WINAPI ClearChainRestrictedErrors(void)
+{
+    struct tlsdata *data;
+
+    TRACE("\n");
+
+    if (SUCCEEDED(com_get_tlsdata(&data))) data->chain_restricted_errors = FALSE;
+}
+
+/***********************************************************************
+ *      RpcMarshalRestrictedErrorFromTlsToExtent (combase.164)
+ */
+HRESULT WINAPI RpcMarshalRestrictedErrorFromTlsToExtent(void *reserved, ORPC_EXTENT **extent)
+{
+    FIXME("%p, %p: semi-stub\n", reserved, extent);
+
+    if (!extent) return E_INVALIDARG;
+    *extent = NULL;
+    return S_OK;
+}
+
+/***********************************************************************
+ *      RpcMarshalRestrictedErrorFromTls (combase.165)
+ */
+HRESULT WINAPI RpcMarshalRestrictedErrorFromTls(void *reserved, MInterfacePointer **marshaled_error)
+{
+    FIXME("%p, %p: semi-stub\n", reserved, marshaled_error);
+
+    if (!marshaled_error) return E_INVALIDARG;
+    *marshaled_error = NULL;
+    return S_OK;
+}
+
+/***********************************************************************
+ *      RpcUnmarshalRestrictedErrorToTls (combase.166)
+ */
+HRESULT WINAPI RpcUnmarshalRestrictedErrorToTls(void *reserved, MInterfacePointer *marshaled_error)
+{
+    FIXME("%p, %p: semi-stub\n", reserved, marshaled_error);
+    return marshaled_error ? E_NOTIMPL : S_OK;
+}
+
+/***********************************************************************
+ *      RoGetRegistrationStoreContext (combase.153)
+ */
+HRESULT WINAPI RoGetRegistrationStoreContext(UINT32 scope, void *sid, UINT32 flags, REFIID iid, void **out)
+{
+    FIXME("%u, %p, %#x, %s, %p: stub\n", scope, sid, flags, debugstr_guid(iid), out);
+
+    if (!out) return E_INVALIDARG;
+    *out = NULL;
+    return E_NOTIMPL;
+}
+
+/***********************************************************************
  *      RoOriginateLanguageException (combase.@)
  */
 BOOL WINAPI RoOriginateLanguageException(HRESULT error, HSTRING message, IUnknown *language_exception)

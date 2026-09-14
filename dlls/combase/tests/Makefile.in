@@ -6,6 +6,7 @@ SOURCES = \
 	cleanup.c \
 	combase.rc \
 	implicit_local_server.c \
+	native_ordinals.c \
 	outgoing_call_state.c \
 	restricted_error.c \
 	roapi.c \

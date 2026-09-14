@@ -1,4 +1,12 @@
-@ extern ObjectStublessClient3 rpcrt4.__wine_ObjectStublessClient3
+153 stdcall -noname RoGetRegistrationStoreContext(long ptr long ptr ptr)
+164 stdcall -noname RpcMarshalRestrictedErrorFromTlsToExtent(ptr ptr)
+165 stdcall -noname RpcMarshalRestrictedErrorFromTls(ptr ptr)
+166 stdcall -noname RpcUnmarshalRestrictedErrorToTls(ptr ptr)
+176 stdcall -noname OriginateOrTransformError(long)
+177 stdcall -noname SetChainRestrictedErrors()
+178 stdcall -noname ClearChainRestrictedErrors()
+
+1 extern ObjectStublessClient3 rpcrt4.__wine_ObjectStublessClient3
 @ extern ObjectStublessClient4 rpcrt4.__wine_ObjectStublessClient4
 @ extern ObjectStublessClient5 rpcrt4.__wine_ObjectStublessClient5
 @ extern ObjectStublessClient6 rpcrt4.__wine_ObjectStublessClient6

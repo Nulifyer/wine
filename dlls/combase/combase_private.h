@@ -94,6 +94,7 @@ struct tlsdata
     DWORD             cancelcount;
     CO_MTA_USAGE_COOKIE implicit_mta_cookie; /* mta referenced by roapi from sta thread */
     ULONG_PTR         outgoing_call_state;
+    BOOL              chain_restricted_errors;
 };
 
 extern HRESULT WINAPI InternalTlsAllocData(struct tlsdata **data);
