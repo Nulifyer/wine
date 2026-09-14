@@ -22,12 +22,12 @@
     SYSCALL_ENTRY( 0x1012, NtDCompositionConnectPipe, 0 ) \
     SYSCALL_ENTRY( 0x1013, NtDCompositionCreateAndBindSharedSection, 0 ) \
     SYSCALL_ENTRY( 0x1014, NtDCompositionCreateChannel, 0 ) \
-    SYSCALL_ENTRY( 0x1015, NtDCompositionCreateConnection, 0 ) \
+    SYSCALL_ENTRY( 0x1015, NtDCompositionCreateConnection, 12 ) \
     SYSCALL_ENTRY( 0x1016, NtDCompositionCreateDwmChannel, 0 ) \
     SYSCALL_ENTRY( 0x1017, NtDCompositionCreateSharedResourceHandle, 0 ) \
     SYSCALL_ENTRY( 0x1018, NtDCompositionCreateSynchronizationObject, 0 ) \
     SYSCALL_ENTRY( 0x1019, NtDCompositionDestroyChannel, 0 ) \
-    SYSCALL_ENTRY( 0x101a, NtDCompositionDestroyConnection, 0 ) \
+    SYSCALL_ENTRY( 0x101a, NtDCompositionDestroyConnection, 4 ) \
     SYSCALL_ENTRY( 0x101b, NtDCompositionDiscardFrame, 0 ) \
     SYSCALL_ENTRY( 0x101c, NtDCompositionDuplicateHandleToProcess, 0 ) \
     SYSCALL_ENTRY( 0x101d, NtDCompositionDuplicateSwapchainHandleToDwm, 0 ) \
@@ -1564,12 +1564,12 @@
     SYSCALL_ENTRY( 0x1012, NtDCompositionConnectPipe, 0 ) \
     SYSCALL_ENTRY( 0x1013, NtDCompositionCreateAndBindSharedSection, 0 ) \
     SYSCALL_ENTRY( 0x1014, NtDCompositionCreateChannel, 0 ) \
-    SYSCALL_ENTRY( 0x1015, NtDCompositionCreateConnection, 0 ) \
+    SYSCALL_ENTRY( 0x1015, NtDCompositionCreateConnection, 24 ) \
     SYSCALL_ENTRY( 0x1016, NtDCompositionCreateDwmChannel, 0 ) \
     SYSCALL_ENTRY( 0x1017, NtDCompositionCreateSharedResourceHandle, 0 ) \
     SYSCALL_ENTRY( 0x1018, NtDCompositionCreateSynchronizationObject, 0 ) \
     SYSCALL_ENTRY( 0x1019, NtDCompositionDestroyChannel, 0 ) \
-    SYSCALL_ENTRY( 0x101a, NtDCompositionDestroyConnection, 0 ) \
+    SYSCALL_ENTRY( 0x101a, NtDCompositionDestroyConnection, 8 ) \
     SYSCALL_ENTRY( 0x101b, NtDCompositionDiscardFrame, 0 ) \
     SYSCALL_ENTRY( 0x101c, NtDCompositionDuplicateHandleToProcess, 0 ) \
     SYSCALL_ENTRY( 0x101d, NtDCompositionDuplicateSwapchainHandleToDwm, 0 ) \
@@ -3108,12 +3108,10 @@
     SYSCALL_STUB( NtDCompositionConnectPipe ) \
     SYSCALL_STUB( NtDCompositionCreateAndBindSharedSection ) \
     SYSCALL_STUB( NtDCompositionCreateChannel ) \
-    SYSCALL_STUB( NtDCompositionCreateConnection ) \
     SYSCALL_STUB( NtDCompositionCreateDwmChannel ) \
     SYSCALL_STUB( NtDCompositionCreateSharedResourceHandle ) \
     SYSCALL_STUB( NtDCompositionCreateSynchronizationObject ) \
     SYSCALL_STUB( NtDCompositionDestroyChannel ) \
-    SYSCALL_STUB( NtDCompositionDestroyConnection ) \
     SYSCALL_STUB( NtDCompositionDiscardFrame ) \
     SYSCALL_STUB( NtDCompositionDuplicateHandleToProcess ) \
     SYSCALL_STUB( NtDCompositionDuplicateSwapchainHandleToDwm ) \

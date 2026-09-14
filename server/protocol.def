@@ -4733,3 +4733,16 @@ struct alpc_message_info
     unsigned int previous_state;
     VARARG(payload,bytes);
 @END
+
+/* Create a DirectComposition connection retaining its work event. */
+@REQ(create_dcomp_connection)
+    int          is_dwm;       /* whether the caller is the desktop compositor */
+    obj_handle_t event;        /* work notification event */
+@REPLY
+    obj_handle_t handle;       /* connection handle */
+@END
+
+/* Destroy a DirectComposition connection. Keep new requests appended. */
+@REQ(destroy_dcomp_connection)
+    obj_handle_t handle;       /* connection handle to consume */
+@END

@@ -20,12 +20,12 @@
 @ stub -syscall NtDCompositionConnectPipe
 @ stub -syscall NtDCompositionCreateAndBindSharedSection
 @ stub -syscall NtDCompositionCreateChannel
-@ stub -syscall NtDCompositionCreateConnection
+@ stdcall -syscall NtDCompositionCreateConnection(long long ptr)
 @ stub -syscall NtDCompositionCreateDwmChannel
 @ stub -syscall NtDCompositionCreateSharedResourceHandle
 @ stub -syscall NtDCompositionCreateSynchronizationObject
 @ stub -syscall NtDCompositionDestroyChannel
-@ stub -syscall NtDCompositionDestroyConnection
+@ stdcall -syscall NtDCompositionDestroyConnection(long)
 @ stub -syscall NtDCompositionDiscardFrame
 @ stub -syscall NtDCompositionDuplicateHandleToProcess
 @ stub -syscall NtDCompositionDuplicateSwapchainHandleToDwm

@@ -353,6 +353,8 @@ DECL_HANDLER(adjust_token_groups);
 DECL_HANDLER(delete_wnf_state_data);
 DECL_HANDLER(alpc_query_information);
 DECL_HANDLER(notify_change_session);
+DECL_HANDLER(create_dcomp_connection);
+DECL_HANDLER(destroy_dcomp_connection);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -703,6 +705,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_delete_wnf_state_data,
     (req_handler)req_alpc_query_information,
     (req_handler)req_notify_change_session,
+    (req_handler)req_create_dcomp_connection,
+    (req_handler)req_destroy_dcomp_connection,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -2710,3 +2714,10 @@ C_ASSERT( offsetof(struct notify_change_session_request, event) == 28 );
 C_ASSERT( offsetof(struct notify_change_session_request, new_state) == 32 );
 C_ASSERT( offsetof(struct notify_change_session_request, previous_state) == 36 );
 C_ASSERT( sizeof(struct notify_change_session_request) == 40 );
+C_ASSERT( offsetof(struct create_dcomp_connection_request, is_dwm) == 12 );
+C_ASSERT( offsetof(struct create_dcomp_connection_request, event) == 16 );
+C_ASSERT( sizeof(struct create_dcomp_connection_request) == 24 );
+C_ASSERT( offsetof(struct create_dcomp_connection_reply, handle) == 8 );
+C_ASSERT( sizeof(struct create_dcomp_connection_reply) == 16 );
+C_ASSERT( offsetof(struct destroy_dcomp_connection_request, handle) == 12 );
+C_ASSERT( sizeof(struct destroy_dcomp_connection_request) == 16 );

@@ -3967,6 +3967,22 @@ static void dump_notify_change_session_request( const struct notify_change_sessi
     dump_varargs_bytes( ", payload=", cur_size );
 }
 
+static void dump_create_dcomp_connection_request( const struct create_dcomp_connection_request *req )
+{
+    fprintf( stderr, " is_dwm=%d", req->is_dwm );
+    fprintf( stderr, ", event=%04x", req->event );
+}
+
+static void dump_create_dcomp_connection_reply( const struct create_dcomp_connection_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_destroy_dcomp_connection_request( const struct destroy_dcomp_connection_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4317,6 +4333,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_delete_wnf_state_data_request,
     (dump_func)dump_alpc_query_information_request,
     (dump_func)dump_notify_change_session_request,
+    (dump_func)dump_create_dcomp_connection_request,
+    (dump_func)dump_destroy_dcomp_connection_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4666,6 +4684,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_adjust_token_groups_reply,
     NULL,
     (dump_func)dump_alpc_query_information_reply,
+    NULL,
+    (dump_func)dump_create_dcomp_connection_reply,
     NULL,
 };
 
@@ -5017,6 +5037,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "delete_wnf_state_data",
     "alpc_query_information",
     "notify_change_session",
+    "create_dcomp_connection",
+    "destroy_dcomp_connection",
 };
 
 static const struct

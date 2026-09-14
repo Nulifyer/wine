@@ -6886,6 +6886,32 @@ struct notify_change_session_reply
 };
 
 
+struct create_dcomp_connection_request
+{
+    struct request_header __header;
+    int          is_dwm;
+    obj_handle_t event;
+    char __pad_20[4];
+};
+struct create_dcomp_connection_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+struct destroy_dcomp_connection_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct destroy_dcomp_connection_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -7234,6 +7260,8 @@ enum request
     REQ_delete_wnf_state_data,
     REQ_alpc_query_information,
     REQ_notify_change_session,
+    REQ_create_dcomp_connection,
+    REQ_destroy_dcomp_connection,
     REQ_NB_REQUESTS
 };
 
@@ -7587,6 +7615,8 @@ union generic_request
     struct delete_wnf_state_data_request delete_wnf_state_data_request;
     struct alpc_query_information_request alpc_query_information_request;
     struct notify_change_session_request notify_change_session_request;
+    struct create_dcomp_connection_request create_dcomp_connection_request;
+    struct destroy_dcomp_connection_request destroy_dcomp_connection_request;
 };
 union generic_reply
 {
@@ -7938,8 +7968,10 @@ union generic_reply
     struct delete_wnf_state_data_reply delete_wnf_state_data_reply;
     struct alpc_query_information_reply alpc_query_information_reply;
     struct notify_change_session_reply notify_change_session_reply;
+    struct create_dcomp_connection_reply create_dcomp_connection_reply;
+    struct destroy_dcomp_connection_reply destroy_dcomp_connection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 998
+#define SERVER_PROTOCOL_VERSION 999
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
