@@ -132,6 +132,7 @@ struct timeout_user;
 extern timeout_t current_time;
 extern timeout_t monotonic_time;
 extern struct _KUSER_SHARED_DATA *user_shared_data;
+extern void set_active_console_id( unsigned int id );
 
 #define TICKS_PER_SEC 10000000
 

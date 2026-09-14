@@ -301,6 +301,11 @@ static void atomic_store_ulong(volatile ULONG *ptr, ULONG value)
 #endif
 }
 
+void set_active_console_id( unsigned int id )
+{
+    if (user_shared_data) atomic_store_ulong( &user_shared_data->ActiveConsoleId, id );
+}
+
 static void atomic_store_long(volatile LONG *ptr, LONG value)
 {
 #if defined(__i386__) || defined(__x86_64__)

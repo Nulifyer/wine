@@ -1458,7 +1458,13 @@ DECL_HANDLER(new_process)
         set_error( STATUS_INVALID_PARAMETER );
         goto done;
     }
-    if (native_session_id >= 0) next_native_session_id++;
+    if (native_session_id >= 0)
+    {
+        /* Native-machine mode currently has one local console.  The newest
+         * admitted per-session owner is therefore the active console session. */
+        set_active_console_id( native_session_id );
+        next_native_session_id++;
+    }
 
     process->machine = req->machine;
     process->startup_info = (struct startup_info *)grab_object( info );
