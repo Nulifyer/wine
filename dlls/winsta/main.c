@@ -29,6 +29,20 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(winsta);
 
+struct connection_property_value
+{
+    USHORT type;
+    BYTE reserved[6];
+    ULONG value;
+    ULONG reserved2;
+    void *allocated_value;
+};
+
+/* Native LogonController treats a type-1 zero for this property as the
+ * disabled/default local-session case. */
+static const GUID logoncontroller_local_session_property =
+    {0x846b20bb, 0x6254, 0x430e, {0x95, 0x2f, 0xb0, 0xc7, 0xca, 0x08, 0x19, 0x15}};
+
 static DWORD get_effective_session_id( ULONG *session )
 {
     HANDLE token;
@@ -41,6 +55,68 @@ static DWORD get_effective_session_id( ULONG *session )
     status = NtQueryInformationToken( token, TokenSessionId, session, sizeof(*session), NULL );
     NtClose( token );
     return RtlNtStatusToDosError( status );
+}
+
+BOOLEAN WINAPI WinStationGetConnectionProperty( ULONG session, const GUID *property, void **value )
+{
+    struct connection_property_value *property_value;
+    ULONG current;
+    DWORD error;
+
+    TRACE( "%lu %s %p\n", session, debugstr_guid(property), value );
+
+    if (!property || !value)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    *value = NULL;
+
+    if ((error = get_effective_session_id( &current )))
+    {
+        SetLastError( error );
+        return FALSE;
+    }
+    if (session != LOGONID_CURRENT && session != current)
+    {
+        SetLastError( ERROR_FILE_NOT_FOUND );
+        return FALSE;
+    }
+    if (!IsEqualGUID( property, &logoncontroller_local_session_property ))
+    {
+        SetLastError( ERROR_NOT_SUPPORTED );
+        return FALSE;
+    }
+    if (!(property_value = LocalAlloc( LMEM_FIXED | LMEM_ZEROINIT, sizeof(*property_value) )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return FALSE;
+    }
+
+    property_value->type = 1;
+    property_value->value = FALSE;
+    *value = property_value;
+    SetLastError( ERROR_SUCCESS );
+    return TRUE;
+}
+
+BOOLEAN WINAPI WinStationFreePropertyValue( void *value )
+{
+    USHORT type;
+
+    TRACE( "%p\n", value );
+
+    if (!value)
+    {
+        SetLastError( ERROR_INVALID_DATA );
+        return FALSE;
+    }
+
+    type = *(USHORT *)value;
+    if ((type == 2 || type == 3) && *(void **)((BYTE *)value + 16))
+        LocalFree( *(void **)((BYTE *)value + 16) );
+    LocalFree( value );
+    return TRUE;
 }
 
 BOOLEAN WINAPI WinStationIsCurrentSessionRemoteable( BOOLEAN *remoteable )

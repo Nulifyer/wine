@@ -34,8 +34,10 @@
 @ stub WinStationEnumerate_IndexedW
 @ stub WinStationFreeGAPMemory
 @ stub WinStationFreeMemory
+@ stdcall WinStationFreePropertyValue(ptr)
 @ stub WinStationGenerateLicense
 @ stdcall WinStationGetAllProcesses(ptr long ptr ptr)
+@ stdcall WinStationGetConnectionProperty(long ptr ptr)
 @ stub WinStationGetLanAdapterNameA
 @ stub WinStationGetLanAdapterNameW
 @ stub WinStationGetMachinePolicy

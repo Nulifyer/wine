@@ -28,9 +28,58 @@
 
 static BOOLEAN (WINAPI *pWinStationQueryInformationA)(HANDLE,ULONG,WINSTATIONINFOCLASS,void *,ULONG,ULONG *);
 static BOOLEAN (WINAPI *pWinStationQueryInformationW)(HANDLE,ULONG,WINSTATIONINFOCLASS,void *,ULONG,ULONG *);
+static BOOLEAN (WINAPI *pWinStationGetConnectionProperty)(ULONG,const GUID *,void **);
+static BOOLEAN (WINAPI *pWinStationFreePropertyValue)(void *);
 static DWORD (WINAPI *pWinStationIsSessionPermitted)(void);
 static BOOLEAN (WINAPI *p_WinStationWaitForConnect)(void);
 static BOOLEAN (WINAPI *p_WinStationWaitForConnectEx)(const GUID *);
+
+static void test_connection_property(void)
+{
+    static const GUID property =
+        {0x846b20bb, 0x6254, 0x430e, {0x95, 0x2f, 0xb0, 0xc7, 0xca, 0x08, 0x19, 0x15}};
+    static const GUID unknown_property =
+        {0xdeadbeef, 0x1234, 0x5678, {0x90, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67}};
+    void *value = (void *)0xdeadbeef;
+    BOOLEAN ret;
+
+    SetLastError(0xdeadbeef);
+    ret = pWinStationGetConnectionProperty(LOGONID_CURRENT, &property, &value);
+    ok(ret, "WinStationGetConnectionProperty failed, error %lu\n", GetLastError());
+    ok(!GetLastError(), "expected ERROR_SUCCESS, got %lu\n", GetLastError());
+    ok(value != NULL, "expected an allocated property value\n");
+    if (value)
+    {
+        ok(*(USHORT *)value == 1, "expected type 1, got %#x\n", *(USHORT *)value);
+        ok(*(ULONG *)((BYTE *)value + 8) == FALSE, "expected a disabled property, got %#lx\n",
+           *(ULONG *)((BYTE *)value + 8));
+        SetLastError(0xdeadbeef);
+        ret = pWinStationFreePropertyValue(value);
+        ok(ret, "WinStationFreePropertyValue failed, error %lu\n", GetLastError());
+        ok(GetLastError() == 0xdeadbeef, "expected last error to remain unchanged, got %lu\n",
+           GetLastError());
+    }
+
+    value = (void *)0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = pWinStationGetConnectionProperty(LOGONID_CURRENT, &unknown_property, &value);
+    ok(!ret, "expected an unknown property to fail\n");
+    ok(GetLastError() == ERROR_NOT_SUPPORTED, "expected ERROR_NOT_SUPPORTED, got %lu\n",
+       GetLastError());
+    ok(value == NULL, "expected the output to be cleared, got %p\n", value);
+
+    SetLastError(0xdeadbeef);
+    ret = pWinStationGetConnectionProperty(LOGONID_CURRENT, &property, NULL);
+    ok(!ret, "expected a null output pointer to fail\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %lu\n",
+       GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pWinStationFreePropertyValue(NULL);
+    ok(!ret, "expected a null property value to fail\n");
+    ok(GetLastError() == ERROR_INVALID_DATA, "expected ERROR_INVALID_DATA, got %lu\n",
+       GetLastError());
+}
 
 static void test_wait_for_connect(void)
 {
@@ -155,10 +204,13 @@ START_TEST(winsta)
     }
     pWinStationQueryInformationA = (void *)GetProcAddress(module, "WinStationQueryInformationA");
     pWinStationQueryInformationW = (void *)GetProcAddress(module, "WinStationQueryInformationW");
+    pWinStationGetConnectionProperty = (void *)GetProcAddress(module, "WinStationGetConnectionProperty");
+    pWinStationFreePropertyValue = (void *)GetProcAddress(module, "WinStationFreePropertyValue");
     pWinStationIsSessionPermitted = (void *)GetProcAddress(module, "WinStationIsSessionPermitted");
     p_WinStationWaitForConnect = (void *)GetProcAddress(module, "_WinStationWaitForConnect");
     p_WinStationWaitForConnectEx = (void *)GetProcAddress(module, "_WinStationWaitForConnectEx");
     if (!pWinStationQueryInformationA || !pWinStationQueryInformationW ||
+        !pWinStationGetConnectionProperty || !pWinStationFreePropertyValue ||
         !pWinStationIsSessionPermitted || !p_WinStationWaitForConnect ||
         !p_WinStationWaitForConnectEx)
     {
@@ -166,6 +218,7 @@ START_TEST(winsta)
         return;
     }
     test_session_permitted();
+    test_connection_property();
     test_wait_for_connect();
     test_query_session_information();
     test_query_session_type();
