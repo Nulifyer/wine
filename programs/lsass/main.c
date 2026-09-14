@@ -23,6 +23,7 @@
 #include "winsvc.h"
 #include "lsass.h"
 #include "lsapolicylookup.h"
+#include "lsarpc.h"
 #include "lsass_private.h"
 
 #include "wine/debug.h"
@@ -75,6 +76,7 @@ static RPC_STATUS rpc_initialize( void )
     unsigned short protseq[] = LSASS_PROTSEQ;
     unsigned short endpoint[] = LSASS_ENDPOINT;
     unsigned short policy_endpoint[] = LSA_POLICY_LOOKUP_ENDPOINT;
+    unsigned short native_policy_endpoint[] = LSARPC_ENDPOINT;
     RPC_STATUS status;
 
     status = RpcServerRegisterIf( lsass_v1_0_s_ifspec, NULL, NULL );
@@ -83,13 +85,21 @@ static RPC_STATUS rpc_initialize( void )
     status = RpcServerRegisterIf( lsapolicylookup_v1_0_s_ifspec, NULL, NULL );
     if (status != RPC_S_OK) goto failed_lsass_interface;
 
+    status = RpcServerRegisterIf( lsarpc_v0_0_s_ifspec, NULL, NULL );
+    if (status != RPC_S_OK) goto failed_policy_lookup_interface;
+
     status = RpcServerUseProtseqEpW( protseq, RPC_C_PROTSEQ_MAX_REQS_DEFAULT, endpoint, NULL );
     if (status == RPC_S_OK)
         status = RpcServerUseProtseqEpW( protseq, RPC_C_PROTSEQ_MAX_REQS_DEFAULT, policy_endpoint, NULL );
     if (status == RPC_S_OK)
+        status = RpcServerUseProtseqEpW( protseq, RPC_C_PROTSEQ_MAX_REQS_DEFAULT,
+                                        native_policy_endpoint, NULL );
+    if (status == RPC_S_OK)
         status = RpcServerListen( 1, RPC_C_LISTEN_MAX_CALLS_DEFAULT, TRUE );
     if (status == RPC_S_OK) return RPC_S_OK;
 
+    RpcServerUnregisterIf( lsarpc_v0_0_s_ifspec, NULL, FALSE );
+failed_policy_lookup_interface:
     RpcServerUnregisterIf( lsapolicylookup_v1_0_s_ifspec, NULL, FALSE );
 failed_lsass_interface:
     RpcServerUnregisterIf( lsass_v1_0_s_ifspec, NULL, FALSE );

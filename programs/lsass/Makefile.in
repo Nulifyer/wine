@@ -7,6 +7,8 @@ SOURCES = \
 	lsass.c \
 	lsass.idl \
 	lsapolicylookup.idl \
+	lsarpc.c \
+	lsarpc.idl \
 	main.c \
 	negotiate.c \
 	policy_lookup.c

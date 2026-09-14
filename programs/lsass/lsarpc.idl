@@ -1,0 +1,282 @@
+/*
+ * Local Security Authority policy RPC entry point
+ *
+ * Copyright 2026
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ */
+
+#pragma makedep server
+
+import "wtypes.idl";
+
+cpp_quote("#include <winternl.h>")
+cpp_quote("#define LSARPC_ENDPOINT {'L','S','A','R','P','C','_','E','N','D','P','O','I','N','T',0}")
+
+[
+    uuid(12345778-1234-abcd-ef00-0123456789ab),
+    version(0.0),
+    pointer_default(unique)
+]
+interface lsarpc
+{
+    cpp_quote("#if 0")
+    typedef LONG NTSTATUS;
+    cpp_quote("#endif")
+
+    typedef [context_handle] void *LSARPC_HANDLE;
+
+    typedef struct
+    {
+        USHORT Length;
+        USHORT MaximumLength;
+        [size_is(MaximumLength), length_is(Length)] char *Buffer;
+    } LSARPC_STRING;
+
+    typedef enum
+    {
+        LsarpcSecurityAnonymous,
+        LsarpcSecurityIdentification,
+        LsarpcSecurityImpersonation,
+        LsarpcSecurityDelegation
+    } LSARPC_SECURITY_IMPERSONATION_LEVEL;
+
+    typedef struct
+    {
+        ULONG Length;
+        LSARPC_SECURITY_IMPERSONATION_LEVEL ImpersonationLevel;
+        BYTE ContextTrackingMode;
+        BYTE EffectiveOnly;
+    } LSARPC_SECURITY_QUALITY_OF_SERVICE;
+
+    typedef struct
+    {
+        ULONG Length;
+        [unique] BYTE *RootDirectory;
+        [unique] LSARPC_STRING *ObjectName;
+        ULONG Attributes;
+        [unique] BYTE *SecurityDescriptor;
+        [unique] LSARPC_SECURITY_QUALITY_OF_SERVICE *SecurityQualityOfService;
+    } LSARPC_OBJECT_ATTRIBUTES;
+
+    typedef struct
+    {
+        USHORT Length;
+        USHORT MaximumLength;
+        [size_is(MaximumLength / 2), length_is(Length / 2)] WCHAR *Buffer;
+    } LSARPC_UNICODE_STRING;
+
+    typedef enum
+    {
+        LsarpcPolicyAuditLogInformation = 1,
+        LsarpcPolicyAuditEventsInformation,
+        LsarpcPolicyPrimaryDomainInformation,
+        LsarpcPolicyPdAccountInformation,
+        LsarpcPolicyAccountDomainInformation,
+        LsarpcPolicyLsaServerRoleInformation,
+        LsarpcPolicyReplicaSourceInformation,
+        LsarpcPolicyInformationNotUsedOnWire,
+        LsarpcPolicyModificationInformation,
+        LsarpcPolicyAuditFullSetInformation,
+        LsarpcPolicyAuditFullQueryInformation,
+        LsarpcPolicyDnsDomainInformation,
+        LsarpcPolicyDnsDomainInformationInt,
+        LsarpcPolicyLocalAccountDomainInformation,
+        LsarpcPolicyMachineAccountInformation,
+        LsarpcPolicyLastEntry
+    } LSARPC_POLICY_INFORMATION_CLASS;
+
+    typedef struct
+    {
+        LSARPC_UNICODE_STRING DomainName;
+        SID *DomainSid;
+    } LSARPC_POLICY_ACCOUNT_DOMAIN_INFO;
+
+    typedef struct
+    {
+        LSARPC_UNICODE_STRING Name;
+        LSARPC_UNICODE_STRING DnsDomainName;
+        LSARPC_UNICODE_STRING DnsForestName;
+        GUID DomainGuid;
+        SID *Sid;
+    } LSARPC_POLICY_DNS_DOMAIN_INFO;
+
+    typedef [switch_type(LSARPC_POLICY_INFORMATION_CLASS)] union
+    {
+        [case(LsarpcPolicyAccountDomainInformation)]
+            LSARPC_POLICY_ACCOUNT_DOMAIN_INFO AccountDomainInformation;
+        [case(LsarpcPolicyDnsDomainInformation)]
+            LSARPC_POLICY_DNS_DOMAIN_INFO DnsDomainInformation;
+        [case(LsarpcPolicyDnsDomainInformationInt)]
+            LSARPC_POLICY_DNS_DOMAIN_INFO DnsDomainInformationInt;
+        [case(LsarpcPolicyLocalAccountDomainInformation)]
+            LSARPC_POLICY_ACCOUNT_DOMAIN_INFO LocalAccountDomainInformation;
+    } LSARPC_POLICY_INFORMATION;
+
+    typedef struct
+    {
+        ULONG Revision;
+        ULONG SupportedFeatures;
+    } LSARPC_REVISION_INFO_V1;
+
+    typedef [switch_type(ULONG)] union
+    {
+        [case(1)] LSARPC_REVISION_INFO_V1 V1;
+    } LSARPC_REVISION_INFO;
+
+    NTSTATUS lsarpc_close([in, out] LSARPC_HANDLE *handle);
+    /* Unsupported methods retain their protocol opnum positions. */
+    NTSTATUS lsarpc_unused_1(void);
+    NTSTATUS lsarpc_unused_2(void);
+    NTSTATUS lsarpc_unused_3(void);
+    NTSTATUS lsarpc_unused_4(void);
+    NTSTATUS lsarpc_unused_5(void);
+    NTSTATUS lsarpc_unused_6(void);
+    NTSTATUS lsarpc_unused_7(void);
+    NTSTATUS lsarpc_unused_8(void);
+    NTSTATUS lsarpc_unused_9(void);
+    NTSTATUS lsarpc_unused_10(void);
+    NTSTATUS lsarpc_unused_11(void);
+    NTSTATUS lsarpc_unused_12(void);
+    NTSTATUS lsarpc_unused_13(void);
+    NTSTATUS lsarpc_unused_14(void);
+    NTSTATUS lsarpc_unused_15(void);
+    NTSTATUS lsarpc_unused_16(void);
+    NTSTATUS lsarpc_unused_17(void);
+    NTSTATUS lsarpc_unused_18(void);
+    NTSTATUS lsarpc_unused_19(void);
+    NTSTATUS lsarpc_unused_20(void);
+    NTSTATUS lsarpc_unused_21(void);
+    NTSTATUS lsarpc_unused_22(void);
+    NTSTATUS lsarpc_unused_23(void);
+    NTSTATUS lsarpc_unused_24(void);
+    NTSTATUS lsarpc_unused_25(void);
+    NTSTATUS lsarpc_unused_26(void);
+    NTSTATUS lsarpc_unused_27(void);
+    NTSTATUS lsarpc_unused_28(void);
+    NTSTATUS lsarpc_unused_29(void);
+    NTSTATUS lsarpc_unused_30(void);
+    NTSTATUS lsarpc_unused_31(void);
+    NTSTATUS lsarpc_unused_32(void);
+    NTSTATUS lsarpc_unused_33(void);
+    NTSTATUS lsarpc_unused_34(void);
+    NTSTATUS lsarpc_unused_35(void);
+    NTSTATUS lsarpc_unused_36(void);
+    NTSTATUS lsarpc_unused_37(void);
+    NTSTATUS lsarpc_unused_38(void);
+    NTSTATUS lsarpc_unused_39(void);
+    NTSTATUS lsarpc_unused_40(void);
+    NTSTATUS lsarpc_unused_41(void);
+    NTSTATUS lsarpc_unused_42(void);
+    NTSTATUS lsarpc_unused_43(void);
+
+    NTSTATUS lsarpc_open_policy2(
+        [in, unique, string] WCHAR *server_name,
+        [in] LSARPC_OBJECT_ATTRIBUTES *attributes,
+        [in] ULONG access,
+        [out] LSARPC_HANDLE *handle);
+    NTSTATUS lsarpc_get_user_name(
+        [in, unique, string] WCHAR *server_name,
+        [in, out] LSARPC_UNICODE_STRING **user_name,
+        [in, out, unique] LSARPC_UNICODE_STRING **domain_name);
+    NTSTATUS lsarpc_query_information_policy2(
+        [in] LSARPC_HANDLE handle,
+        [in] LSARPC_POLICY_INFORMATION_CLASS info_class,
+        [out, switch_is(info_class)] LSARPC_POLICY_INFORMATION **info);
+    /* Unsupported methods retain their protocol opnum positions. */
+    NTSTATUS lsarpc_unused_47(void);
+    NTSTATUS lsarpc_unused_48(void);
+    NTSTATUS lsarpc_unused_49(void);
+    NTSTATUS lsarpc_unused_50(void);
+    NTSTATUS lsarpc_unused_51(void);
+    NTSTATUS lsarpc_unused_52(void);
+    NTSTATUS lsarpc_unused_53(void);
+    NTSTATUS lsarpc_unused_54(void);
+    NTSTATUS lsarpc_unused_55(void);
+    NTSTATUS lsarpc_unused_56(void);
+    NTSTATUS lsarpc_unused_57(void);
+    NTSTATUS lsarpc_unused_58(void);
+    NTSTATUS lsarpc_unused_59(void);
+    NTSTATUS lsarpc_unused_60(void);
+    NTSTATUS lsarpc_unused_61(void);
+    NTSTATUS lsarpc_unused_62(void);
+    NTSTATUS lsarpc_unused_63(void);
+    NTSTATUS lsarpc_unused_64(void);
+    NTSTATUS lsarpc_unused_65(void);
+    NTSTATUS lsarpc_unused_66(void);
+    NTSTATUS lsarpc_unused_67(void);
+    NTSTATUS lsarpc_unused_68(void);
+    NTSTATUS lsarpc_unused_69(void);
+    NTSTATUS lsarpc_unused_70(void);
+    NTSTATUS lsarpc_unused_71(void);
+    NTSTATUS lsarpc_unused_72(void);
+    NTSTATUS lsarpc_unused_73(void);
+    NTSTATUS lsarpc_unused_74(void);
+    NTSTATUS lsarpc_unused_75(void);
+    NTSTATUS lsarpc_unused_76(void);
+    NTSTATUS lsarpc_unused_77(void);
+    NTSTATUS lsarpc_unused_78(void);
+    NTSTATUS lsarpc_unused_79(void);
+    NTSTATUS lsarpc_unused_80(void);
+    NTSTATUS lsarpc_unused_81(void);
+    NTSTATUS lsarpc_unused_82(void);
+    NTSTATUS lsarpc_unused_83(void);
+    NTSTATUS lsarpc_unused_84(void);
+    NTSTATUS lsarpc_unused_85(void);
+    NTSTATUS lsarpc_unused_86(void);
+    NTSTATUS lsarpc_unused_87(void);
+    NTSTATUS lsarpc_unused_88(void);
+    NTSTATUS lsarpc_unused_89(void);
+    NTSTATUS lsarpc_unused_90(void);
+    NTSTATUS lsarpc_unused_91(void);
+    NTSTATUS lsarpc_unused_92(void);
+    NTSTATUS lsarpc_unused_93(void);
+    NTSTATUS lsarpc_unused_94(void);
+    NTSTATUS lsarpc_unused_95(void);
+    NTSTATUS lsarpc_unused_96(void);
+    NTSTATUS lsarpc_unused_97(void);
+    NTSTATUS lsarpc_unused_98(void);
+    NTSTATUS lsarpc_unused_99(void);
+    NTSTATUS lsarpc_unused_100(void);
+    NTSTATUS lsarpc_unused_101(void);
+    NTSTATUS lsarpc_unused_102(void);
+    NTSTATUS lsarpc_unused_103(void);
+    NTSTATUS lsarpc_unused_104(void);
+    NTSTATUS lsarpc_unused_105(void);
+    NTSTATUS lsarpc_unused_106(void);
+    NTSTATUS lsarpc_unused_107(void);
+    NTSTATUS lsarpc_unused_108(void);
+    NTSTATUS lsarpc_unused_109(void);
+    NTSTATUS lsarpc_unused_110(void);
+    NTSTATUS lsarpc_unused_111(void);
+    NTSTATUS lsarpc_unused_112(void);
+    NTSTATUS lsarpc_unused_113(void);
+    NTSTATUS lsarpc_unused_114(void);
+    NTSTATUS lsarpc_unused_115(void);
+    NTSTATUS lsarpc_unused_116(void);
+    NTSTATUS lsarpc_unused_117(void);
+    NTSTATUS lsarpc_unused_118(void);
+    NTSTATUS lsarpc_unused_119(void);
+    NTSTATUS lsarpc_unused_120(void);
+    NTSTATUS lsarpc_unused_121(void);
+    NTSTATUS lsarpc_unused_122(void);
+    NTSTATUS lsarpc_unused_123(void);
+    NTSTATUS lsarpc_unused_124(void);
+    NTSTATUS lsarpc_unused_125(void);
+    NTSTATUS lsarpc_unused_126(void);
+    NTSTATUS lsarpc_unused_127(void);
+    NTSTATUS lsarpc_unused_128(void);
+    NTSTATUS lsarpc_unused_129(void);
+    NTSTATUS lsarpc_open_policy3(
+        [in, unique, string] WCHAR *server_name,
+        [in] LSARPC_OBJECT_ATTRIBUTES *attributes,
+        [in] ULONG access,
+        [in] ULONG in_version,
+        [in, switch_is(in_version)] LSARPC_REVISION_INFO *in_revision_info,
+        [out] ULONG *out_version,
+        [out, switch_is(*out_version)] LSARPC_REVISION_INFO *out_revision_info,
+        [out] LSARPC_HANDLE *handle);
+}
