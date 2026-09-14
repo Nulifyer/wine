@@ -4719,6 +4719,18 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
         return STATUS_SUCCESS;
     }
 
+    case SystemVideoState:
+    {
+        MONITOR_DISPLAY_STATE *state = output;
+
+        if (input || in_size) return STATUS_INVALID_PARAMETER;
+        if (!output || out_size < sizeof(*state)) return STATUS_BUFFER_TOO_SMALL;
+
+        /* Wine's graphical session is active while this process is running. */
+        *state = PowerMonitorOn;
+        return STATUS_SUCCESS;
+    }
+
     case ProcessorInformation:
     {
         const int cannedMHz = 1000; /* We fake a 1GHz processor if we can't conjure up real values */

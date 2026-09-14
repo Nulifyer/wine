@@ -5797,9 +5797,16 @@ typedef enum _POWER_INFORMATION_LEVEL {
         VerifyProcessorPowerPolicyAc,
         VerifyProcessorPowerPolicyDc,
         ProcessorPowerPolicyCurrent,
+        SystemVideoState = 29,
         PowerInformationInternal = 87,
         UpdateBlackBoxRecorder = 94
 } POWER_INFORMATION_LEVEL;
+
+typedef enum _MONITOR_DISPLAY_STATE {
+        PowerMonitorOff,
+        PowerMonitorOn,
+        PowerMonitorDim
+} MONITOR_DISPLAY_STATE, *PMONITOR_DISPLAY_STATE;
 
 typedef struct _ADMINISTRATOR_POWER_POLICY {
 	SYSTEM_POWER_STATE MinSleep;

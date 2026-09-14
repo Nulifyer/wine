@@ -1783,6 +1783,28 @@ static void test_power_user_absence_prediction_capability(void)
     ok(status == STATUS_BUFFER_TOO_SMALL, "Expected STATUS_BUFFER_TOO_SMALL, got %08lx\n", status);
 }
 
+static void test_query_video_state(void)
+{
+    MONITOR_DISPLAY_STATE state = 0xdeadbeef;
+    NTSTATUS status;
+
+    status = pNtPowerInformation(SystemVideoState, NULL, 0, &state, sizeof(state));
+    if (status == STATUS_NOT_IMPLEMENTED)
+    {
+        skip("SystemVideoState not implemented\n");
+        return;
+    }
+
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+    if (status == STATUS_SUCCESS)
+    {
+        ok(state == PowerMonitorOff || state == PowerMonitorOn || state == PowerMonitorDim,
+           "Expected a valid monitor display state, got %u\n", state);
+        if (winetest_platform_is_wine)
+            ok(state == PowerMonitorOn, "Wine unexpectedly reported monitor display state %u\n", state);
+    }
+}
+
 static void test_query_processor_power_info(void)
 {
     NTSTATUS status;
@@ -4882,6 +4904,7 @@ START_TEST(info)
     test_query_battery();
     test_power_black_box_update();
     test_power_user_absence_prediction_capability();
+    test_query_video_state();
     test_query_processor_power_info();
 
     /* NtQueryInformationProcess */
