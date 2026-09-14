@@ -24,6 +24,8 @@ typedef ULONG (WINAPI *release_agg_id_fn)(void *);
 
 static const GUID test_handler_iid =
     {0xf7518c88, 0xb43f, 0x4e8e, {0xad, 0x5a, 0xf0, 0x2c, 0xb2, 0x38, 0x03, 0x8a}};
+static const GUID identity_unmarshal_iid =
+    {0x0000001b, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
 
 struct test_handler
 {
@@ -81,7 +83,7 @@ static void test_aggregate_identity(void)
     set_agg_id_handler_fn set_handler;
     release_agg_id_fn release;
     create_agg_id_fn create;
-    IUnknown *unknown;
+    IUnknown *unknown, *identity_unmarshal, *controlling_unknown;
     void *agg_id, *out;
     HRESULT hr;
     ULONG refs;
@@ -126,6 +128,26 @@ static void test_aggregate_identity(void)
     ok(out == &first.IUnknown_iface, "Delegated query returned %p.\n", out);
     ok(first.query_count == 1, "First handler received %ld queries.\n", first.query_count);
     if (SUCCEEDED(hr)) IUnknown_Release((IUnknown *)out);
+
+    identity_unmarshal = NULL;
+    hr = IUnknown_QueryInterface(unknown, &identity_unmarshal_iid, (void **)&identity_unmarshal);
+    ok(hr == S_OK, "Identity-unmarshal query returned %#lx.\n", hr);
+    ok(!!identity_unmarshal, "Identity-unmarshal query returned %p.\n", identity_unmarshal);
+    ok(identity_unmarshal != unknown, "Identity-unmarshal interface aliases aggregate %p.\n", unknown);
+    ok(first.query_count == 1, "Identity-unmarshal query reached handler; count %ld.\n", first.query_count);
+    if (SUCCEEDED(hr) && identity_unmarshal)
+    {
+        controlling_unknown = NULL;
+        hr = IUnknown_QueryInterface(identity_unmarshal, &IID_IUnknown,
+                (void **)&controlling_unknown);
+        ok(hr == S_OK, "Identity-unmarshal IUnknown query returned %#lx.\n", hr);
+        ok(!!controlling_unknown, "Identity-unmarshal IUnknown query returned %p.\n",
+                controlling_unknown);
+        trace("aggregate %p identity-unmarshal %p controlling unknown %p\n",
+                unknown, identity_unmarshal, controlling_unknown);
+        if (controlling_unknown) IUnknown_Release(controlling_unknown);
+        IUnknown_Release(identity_unmarshal);
+    }
 
     refs = release(agg_id);
     ok(!refs, "Final aggregate identity release returned %lu.\n", refs);

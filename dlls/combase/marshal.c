@@ -964,13 +964,22 @@ HRESULT marshal_object(struct apartment *apt, STDOBJREF *stdobjref, REFIID riid,
 struct aggregate_identity
 {
     IMultiQI IMultiQI_iface;
+    IUnknown identity_unmarshal_iface;
     LONG refs;
     IUnknown *handler;
 };
 
+static const IID aggregate_identity_unmarshal_iid =
+    {0x0000001b, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+
 static inline struct aggregate_identity *impl_from_aggregate_IMultiQI(IMultiQI *iface)
 {
     return CONTAINING_RECORD(iface, struct aggregate_identity, IMultiQI_iface);
+}
+
+static inline struct aggregate_identity *impl_from_identity_unmarshal_IUnknown(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, struct aggregate_identity, identity_unmarshal_iface);
 }
 
 static HRESULT WINAPI aggregate_identity_QueryInterface(IMultiQI *iface, REFIID iid, void **obj)
@@ -983,6 +992,12 @@ static HRESULT WINAPI aggregate_identity_QueryInterface(IMultiQI *iface, REFIID 
     if (IsEqualIID(iid, &IID_IUnknown) || IsEqualIID(iid, &IID_IMultiQI))
     {
         *obj = iface;
+        IMultiQI_AddRef(iface);
+        return S_OK;
+    }
+    if (IsEqualIID(iid, &aggregate_identity_unmarshal_iid))
+    {
+        *obj = &identity->identity_unmarshal_iface;
         IMultiQI_AddRef(iface);
         return S_OK;
     }
@@ -1001,6 +1016,43 @@ static ULONG WINAPI aggregate_identity_AddRef(IMultiQI *iface)
     TRACE("%p, refs %lu\n", iface, refs);
     return refs;
 }
+
+static HRESULT WINAPI identity_unmarshal_QueryInterface(IUnknown *iface, REFIID iid, void **obj)
+{
+    struct aggregate_identity *identity = impl_from_identity_unmarshal_IUnknown(iface);
+
+    TRACE("%p, %s, %p\n", iface, debugstr_guid(iid), obj);
+
+    *obj = NULL;
+    if (IsEqualIID(iid, &IID_IUnknown))
+        *obj = &identity->IMultiQI_iface;
+    else if (IsEqualIID(iid, &aggregate_identity_unmarshal_iid))
+        *obj = iface;
+    else
+        return E_NOINTERFACE;
+
+    IMultiQI_AddRef(&identity->IMultiQI_iface);
+    return S_OK;
+}
+
+static ULONG WINAPI identity_unmarshal_AddRef(IUnknown *iface)
+{
+    struct aggregate_identity *identity = impl_from_identity_unmarshal_IUnknown(iface);
+    return IMultiQI_AddRef(&identity->IMultiQI_iface);
+}
+
+static ULONG WINAPI identity_unmarshal_Release(IUnknown *iface)
+{
+    struct aggregate_identity *identity = impl_from_identity_unmarshal_IUnknown(iface);
+    return IMultiQI_Release(&identity->IMultiQI_iface);
+}
+
+static const IUnknownVtbl identity_unmarshal_vtbl =
+{
+    identity_unmarshal_QueryInterface,
+    identity_unmarshal_AddRef,
+    identity_unmarshal_Release,
+};
 
 static ULONG WINAPI aggregate_identity_Release(IMultiQI *iface)
 {
@@ -1056,6 +1108,7 @@ HRESULT WINAPI InternalCreateCAggId(REFCLSID clsid, IMultiQI **agg_id)
     if (!(identity = calloc(1, sizeof(*identity)))) return E_FAIL;
 
     identity->IMultiQI_iface.lpVtbl = &aggregate_identity_vtbl;
+    identity->identity_unmarshal_iface.lpVtbl = &identity_unmarshal_vtbl;
     identity->refs = 1;
     *agg_id = &identity->IMultiQI_iface;
     return S_OK;
