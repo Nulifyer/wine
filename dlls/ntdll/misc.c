@@ -247,6 +247,14 @@ void WINAPI WinSqmIncrementDWORD(DWORD unk1, DWORD unk2, DWORD unk3)
 }
 
 /*********************************************************************
+ *          WinSqmAddToStream (NTDLL.@)
+ */
+void WINAPI WinSqmAddToStream(HANDLE session, DWORD datapoint_id, DWORD count, const void *data)
+{
+    TRACE("(%p, %lu, %lu, %p)\n", session, datapoint_id, count, data);
+}
+
+/*********************************************************************
  *                  WinSqmIsOptedIn   (NTDLL.@)
  */
 BOOL WINAPI WinSqmIsOptedIn(void)

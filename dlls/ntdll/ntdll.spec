@@ -1287,6 +1287,8 @@
 @ stdcall TpWaitForWait(ptr long)
 @ stdcall TpWaitForWork(ptr long)
 @ stdcall -ret64 VerSetConditionMask(int64 long long)
+@ stdcall WinSqmAddToStream(long long long long)
+@ stdcall WinSqmAddToStreamEx(long long long long) WinSqmAddToStream
 @ stdcall WinSqmEndSession(long)
 @ stdcall WinSqmIncrementDWORD(long long long)
 @ stdcall WinSqmIsOptedIn()
