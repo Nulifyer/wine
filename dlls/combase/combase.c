@@ -45,6 +45,7 @@ static ULONG_PTR global_options[COMGLB_PROPERTIES_RESERVED3 + 1];
 /* Ole32 exports */
 extern void WINAPI DestroyRunningObjectTable(void);
 extern HRESULT WINAPI Ole32DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj);
+extern HRESULT WINAPI COMBASE_DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj);
 
 /*
  * Number of times CoInitialize is called. It is decreased every time CoUninitialize is called. When it hits 0, the COM libraries are freed
@@ -574,6 +575,153 @@ static const IClassFactoryVtbl context_switcher_factory_vtbl =
 };
 static IClassFactory context_switcher_factory = { &context_switcher_factory_vtbl };
 
+static LONG psfactory_class_factory_refcount;
+static LONG psfactory_refcount;
+
+static HRESULT psfactory_get_ole32(IPSFactoryBuffer **factory)
+{
+    typedef HRESULT (WINAPI *dll_get_class_object_fn)(REFCLSID, REFIID, void **);
+    dll_get_class_object_fn get_class_object;
+    HMODULE module;
+
+    *factory = NULL;
+    if (!(module = GetModuleHandleW(L"ole32.dll"))) return E_NOINTERFACE;
+    if (!(get_class_object = (void *)GetProcAddress(module, "DllGetClassObject"))) return E_NOINTERFACE;
+    return get_class_object(&CLSID_PSFactoryBuffer, &IID_IPSFactoryBuffer, (void **)factory);
+}
+
+static HRESULT WINAPI psfactory_QueryInterface(IPSFactoryBuffer *iface, REFIID riid, void **obj)
+{
+    if (!obj) return E_POINTER;
+
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IPSFactoryBuffer))
+    {
+        *obj = iface;
+        IPSFactoryBuffer_AddRef(iface);
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI psfactory_AddRef(IPSFactoryBuffer *iface)
+{
+    return InterlockedIncrement(&psfactory_refcount);
+}
+
+static ULONG WINAPI psfactory_Release(IPSFactoryBuffer *iface)
+{
+    return InterlockedDecrement(&psfactory_refcount);
+}
+
+static HRESULT WINAPI psfactory_CreateProxy(IPSFactoryBuffer *iface, IUnknown *outer, REFIID riid,
+        IRpcProxyBuffer **proxy, void **obj)
+{
+    IPSFactoryBuffer *factory;
+    HRESULT hr;
+
+    hr = COMBASE_DllGetClassObject(&CLSID_PSFactoryBuffer, &IID_IPSFactoryBuffer, (void **)&factory);
+    if (SUCCEEDED(hr))
+    {
+        hr = IPSFactoryBuffer_CreateProxy(factory, outer, riid, proxy, obj);
+        IPSFactoryBuffer_Release(factory);
+    }
+    if (hr != E_NOINTERFACE) return hr;
+
+    hr = psfactory_get_ole32(&factory);
+    if (SUCCEEDED(hr))
+    {
+        hr = IPSFactoryBuffer_CreateProxy(factory, outer, riid, proxy, obj);
+        IPSFactoryBuffer_Release(factory);
+    }
+    return hr;
+}
+
+static HRESULT WINAPI psfactory_CreateStub(IPSFactoryBuffer *iface, REFIID riid, IUnknown *server,
+        IRpcStubBuffer **stub)
+{
+    IPSFactoryBuffer *factory;
+    HRESULT hr;
+
+    hr = COMBASE_DllGetClassObject(&CLSID_PSFactoryBuffer, &IID_IPSFactoryBuffer, (void **)&factory);
+    if (SUCCEEDED(hr))
+    {
+        hr = IPSFactoryBuffer_CreateStub(factory, riid, server, stub);
+        IPSFactoryBuffer_Release(factory);
+    }
+    if (hr != E_NOINTERFACE) return hr;
+
+    hr = psfactory_get_ole32(&factory);
+    if (SUCCEEDED(hr))
+    {
+        hr = IPSFactoryBuffer_CreateStub(factory, riid, server, stub);
+        IPSFactoryBuffer_Release(factory);
+    }
+    return hr;
+}
+
+static const IPSFactoryBufferVtbl psfactory_vtbl =
+{
+    psfactory_QueryInterface,
+    psfactory_AddRef,
+    psfactory_Release,
+    psfactory_CreateProxy,
+    psfactory_CreateStub,
+};
+
+static IPSFactoryBuffer psfactory = { &psfactory_vtbl };
+
+static HRESULT WINAPI psfactory_class_factory_QueryInterface(IClassFactory *iface, REFIID riid, void **obj)
+{
+    if (!obj) return E_POINTER;
+
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IClassFactory))
+    {
+        *obj = iface;
+        IClassFactory_AddRef(iface);
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI psfactory_class_factory_AddRef(IClassFactory *iface)
+{
+    return InterlockedIncrement(&psfactory_class_factory_refcount);
+}
+
+static ULONG WINAPI psfactory_class_factory_Release(IClassFactory *iface)
+{
+    return InterlockedDecrement(&psfactory_class_factory_refcount);
+}
+
+static HRESULT WINAPI psfactory_class_factory_CreateInstance(IClassFactory *iface, IUnknown *outer,
+        REFIID riid, void **obj)
+{
+    if (outer) return CLASS_E_NOAGGREGATION;
+    return IPSFactoryBuffer_QueryInterface(&psfactory, riid, obj);
+}
+
+static const IClassFactoryVtbl psfactory_class_factory_vtbl =
+{
+    psfactory_class_factory_QueryInterface,
+    psfactory_class_factory_AddRef,
+    psfactory_class_factory_Release,
+    psfactory_class_factory_CreateInstance,
+    class_factory_LockServer,
+};
+
+static IClassFactory psfactory_class_factory = { &psfactory_class_factory_vtbl };
+
+static HRESULT psfactory_get_class_object(REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IClassFactory))
+        return IClassFactory_QueryInterface(&psfactory_class_factory, riid, obj);
+    return IPSFactoryBuffer_QueryInterface(&psfactory, riid, obj);
+}
+
 static HRESULT get_builtin_class_factory(REFCLSID rclsid, REFIID riid, void **obj)
 {
     if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
@@ -582,6 +730,8 @@ static HRESULT get_builtin_class_factory(REFCLSID rclsid, REFIID riid, void **ob
         return IClassFactory_QueryInterface(&context_switcher_factory, riid, obj);
     if (IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
         return git_get_class_factory(riid, obj);
+    if (IsEqualCLSID(rclsid, &CLSID_PSFactoryBuffer))
+        return psfactory_get_class_object(riid, obj);
     return E_UNEXPECTED;
 }
 
@@ -1804,12 +1954,14 @@ static HRESULT com_get_class_object(REFCLSID rclsid, DWORD clscontext,
                 IsEqualCLSID(rclsid, &CLSID_GlobalOptions) ||
                 IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
                 (!(clscontext & CLSCTX_APPCONTAINER) && IsEqualCLSID(rclsid, &CLSID_ManualResetEvent)) ||
-                IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
+                IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable) ||
+                IsEqualCLSID(rclsid, &CLSID_PSFactoryBuffer))
         {
             apartment_release(apt);
 
             if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
-                    IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
+                    IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable) ||
+                    IsEqualCLSID(rclsid, &CLSID_PSFactoryBuffer))
                 return get_builtin_class_factory(rclsid, riid, obj);
             else
                 return Ole32DllGetClassObject(rclsid, riid, obj);
@@ -3849,7 +4001,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj)
     *obj = NULL;
 
     if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
-            IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
+            IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable) ||
+            IsEqualCLSID(rclsid, &CLSID_PSFactoryBuffer))
         return get_builtin_class_factory(rclsid, riid, obj);
 
     return CLASS_E_CLASSNOTAVAILABLE;

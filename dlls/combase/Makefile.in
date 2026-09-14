@@ -20,3 +20,5 @@ SOURCES = \
 	string.c \
 	stubmanager.c \
 	usrmarshal.c
+
+dlldata_EXTRADEFS = -DENTRY_PREFIX=COMBASE_ -DPROXY_CLSID=CLSID_PSFactoryBuffer

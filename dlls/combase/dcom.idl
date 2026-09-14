@@ -19,10 +19,16 @@
 /* see the official DCOM specification
  * (there's a copy at http://www.grimes.demon.co.uk/DCOM/DCOMSpec.htm) */
 
-#pragma makedep header
+#pragma makedep proxy
 
 #include "hstring.idl"
 #include "wine/orpc.idl"
+
+[
+    threading(both),
+    uuid(00000320-0000-0000-c000-000000000046)
+]
+coclass PSFactoryBuffer { interface IPSFactoryBuffer; }
 
 [
     object,
