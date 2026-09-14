@@ -580,6 +580,8 @@ static HRESULT get_builtin_class_factory(REFCLSID rclsid, REFIID riid, void **ob
         return IClassFactory_QueryInterface(&global_options_factory, riid, obj);
     if (IsEqualCLSID(rclsid, &CLSID_ContextSwitcher))
         return IClassFactory_QueryInterface(&context_switcher_factory, riid, obj);
+    if (IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
+        return git_get_class_factory(riid, obj);
     return E_UNEXPECTED;
 }
 
@@ -1806,7 +1808,8 @@ static HRESULT com_get_class_object(REFCLSID rclsid, DWORD clscontext,
         {
             apartment_release(apt);
 
-            if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher))
+            if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
+                    IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
                 return get_builtin_class_factory(rclsid, riid, obj);
             else
                 return Ole32DllGetClassObject(rclsid, riid, obj);
@@ -3826,6 +3829,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
     case DLL_PROCESS_DETACH:
         com_revoke_local_servers();
         if (reserved) break;
+        git_release();
         apartment_global_cleanup();
         DeleteCriticalSection(&registered_classes_cs);
         rpc_unregister_channel_hooks();
@@ -3844,7 +3848,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj)
 
     *obj = NULL;
 
-    if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher))
+    if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
+            IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
         return get_builtin_class_factory(rclsid, riid, obj);
 
     return CLASS_E_CLASSNOTAVAILABLE;

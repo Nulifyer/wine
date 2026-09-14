@@ -845,7 +845,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID reserved)
     case DLL_PROCESS_DETACH:
         clipbrd_destroy();
         if (reserved) break;
-        release_std_git();
         break;
     }
     return TRUE;

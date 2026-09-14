@@ -159,6 +159,12 @@ static const IClassFactoryVtbl ComCatCFVtbl =
 
 static IClassFactory ComCatCF = { &ComCatCFVtbl };
 
+static HRESULT WINAPI GlobalInterfaceTable_CreateInstance(IClassFactory *iface, IUnknown *outer,
+        REFIID riid, void **obj)
+{
+    return CoCreateInstance(&CLSID_StdGlobalInterfaceTable, outer, CLSCTX_INPROC_SERVER, riid, obj);
+}
+
 static const IClassFactoryVtbl GlobalInterfaceTableCFVtbl =
 {
     ClassFactory_QueryInterface,

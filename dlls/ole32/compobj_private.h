@@ -65,10 +65,6 @@ struct oletls
     CO_MTA_USAGE_COOKIE implicit_mta_cookie; /* mta referenced by roapi from sta thread */
 };
 
-/* Global Interface Table Functions */
-extern void release_std_git(void);
-extern HRESULT StdGlobalInterfaceTable_GetFactory(LPVOID *ppv);
-
 HRESULT COM_OpenKeyForCLSID(REFCLSID clsid, LPCWSTR keyname, REGSAM access, HKEY *key);
 HRESULT MARSHAL_GetStandardMarshalCF(LPVOID *ppv);
 HRESULT FTMarshalCF_Create(REFIID riid, LPVOID *ppv);
@@ -103,8 +99,6 @@ extern HRESULT HandlerCF_Create(REFCLSID rclsid, REFIID riid, LPVOID *ppv);
 extern HRESULT WINAPI GlobalOptions_CreateInstance(IClassFactory *iface, IUnknown *pUnk,
                                                    REFIID riid, void **ppv);
 extern IClassFactory GlobalOptionsCF;
-extern HRESULT WINAPI GlobalInterfaceTable_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID riid,
-        void **obj);
 extern IClassFactory GlobalInterfaceTableCF;
 extern HRESULT WINAPI ManualResetEvent_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID riid,
         void **obj);

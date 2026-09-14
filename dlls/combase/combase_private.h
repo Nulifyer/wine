@@ -22,6 +22,9 @@
 
 extern HINSTANCE hProxyDll;
 
+HRESULT git_get_class_factory(REFIID riid, void **obj);
+void git_release(void);
+
 struct apartment
 {
     struct list entry;

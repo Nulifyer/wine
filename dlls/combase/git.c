@@ -35,12 +35,12 @@
 #include "ole2.h"
 #include "winerror.h"
 
-#include "compobj_private.h" 
+#include "combase_private.h"
 
 #include "wine/list.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(ole);
+WINE_DEFAULT_DEBUG_CHANNEL(combase);
 
 /****************************************************************************
  * StdGlobalInterfaceTable definition
@@ -300,7 +300,7 @@ static const IGlobalInterfaceTableVtbl StdGlobalInterfaceTableImpl_Vtbl =
     StdGlobalInterfaceTable_GetInterfaceFromGlobal
 };
 
-HRESULT WINAPI GlobalInterfaceTable_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID riid, void **obj)
+static HRESULT WINAPI git_factory_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID riid, void **obj)
 {
     StdGlobalInterfaceTableImpl *git;
 
@@ -324,7 +324,7 @@ HRESULT WINAPI GlobalInterfaceTable_CreateInstance(IClassFactory *iface, IUnknow
     return IGlobalInterfaceTable_QueryInterface(std_git, riid, obj);
 }
 
-void release_std_git(void)
+void git_release(void)
 {
     StdGlobalInterfaceTableImpl *git;
     StdGITEntry *entry, *entry2;
@@ -342,4 +342,49 @@ void release_std_git(void)
     }
 
     free(git);
+}
+
+static HRESULT WINAPI git_factory_QueryInterface(IClassFactory *iface, REFIID riid, void **obj)
+{
+    if (!obj) return E_INVALIDARG;
+
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IClassFactory))
+    {
+        *obj = iface;
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI git_factory_AddRef(IClassFactory *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI git_factory_Release(IClassFactory *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI git_factory_LockServer(IClassFactory *iface, BOOL lock)
+{
+    return S_OK;
+}
+
+static const IClassFactoryVtbl git_factory_vtbl =
+{
+    git_factory_QueryInterface,
+    git_factory_AddRef,
+    git_factory_Release,
+    git_factory_CreateInstance,
+    git_factory_LockServer,
+};
+
+static IClassFactory git_factory = { &git_factory_vtbl };
+
+HRESULT git_get_class_factory(REFIID riid, void **obj)
+{
+    return IClassFactory_QueryInterface(&git_factory, riid, obj);
 }

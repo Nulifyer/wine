@@ -24,7 +24,6 @@ SOURCES = \
 	filelockbytes.c \
 	filemoniker.c \
 	ftmarshal.c \
-	git.c \
 	irot.idl \
 	itemmoniker.c \
 	marshal.c \
