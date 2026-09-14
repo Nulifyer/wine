@@ -168,13 +168,13 @@ BOOLEAN WINAPI WinStationQueryInformationW( HANDLE server, ULONG logon_id, WINST
     return FALSE;
 }
 
-BOOL WINAPI WinStationIsSessionPermitted(void)
+DWORD WINAPI WinStationIsSessionPermitted(void)
 {
     TRACE( "\n" );
 
     /* Wine exposes only its service and interactive console sessions, both of
      * which are permitted to complete their local startup. */
-    return TRUE;
+    return ERROR_SUCCESS;
 }
 
 BOOL WINAPI WinStationRegisterSessionNotification( HANDLE server, HWND hwnd, ULONG flags )

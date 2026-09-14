@@ -28,7 +28,7 @@
 
 static BOOLEAN (WINAPI *pWinStationQueryInformationA)(HANDLE,ULONG,WINSTATIONINFOCLASS,void *,ULONG,ULONG *);
 static BOOLEAN (WINAPI *pWinStationQueryInformationW)(HANDLE,ULONG,WINSTATIONINFOCLASS,void *,ULONG,ULONG *);
-static BOOL (WINAPI *pWinStationIsSessionPermitted)(void);
+static DWORD (WINAPI *pWinStationIsSessionPermitted)(void);
 static BOOLEAN (WINAPI *p_WinStationWaitForConnect)(void);
 static BOOLEAN (WINAPI *p_WinStationWaitForConnectEx)(const GUID *);
 
@@ -53,11 +53,11 @@ static void test_wait_for_connect(void)
 
 static void test_session_permitted(void)
 {
-    BOOL ret;
+    DWORD ret;
 
     SetLastError(0xdeadbeef);
     ret = pWinStationIsSessionPermitted();
-    ok(ret, "WinStationIsSessionPermitted failed, error %lu\n", GetLastError());
+    ok(ret == ERROR_SUCCESS, "WinStationIsSessionPermitted returned %lu.\n", ret);
     ok(GetLastError() == 0xdeadbeef, "expected last error to remain unchanged, got %lu\n",
        GetLastError());
 }
