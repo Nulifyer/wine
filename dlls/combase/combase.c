@@ -411,6 +411,7 @@ HRESULT WINAPI InternalTlsAllocData(struct tlsdata **data)
     if (!(*data = calloc(1, sizeof(**data))))
         return E_OUTOFMEMORY;
 
+    (*data)->outgoing_call_state = ~(ULONG_PTR)0;
     list_init(&(*data)->spies);
     NtCurrentTeb()->ReservedForOle = *data;
 
@@ -1177,6 +1178,23 @@ HRESULT WINAPI CoGetCallState(int arg1, ULONG *arg2)
     FIXME("%d, %p.\n", arg1, arg2);
 
     return E_NOTIMPL;
+}
+
+/***********************************************************************
+ *          CoSetOutgoingCallState        (combase.@)
+ */
+HRESULT WINAPI CoSetOutgoingCallState(const ULONG_PTR *state, ULONG_PTR *old_state)
+{
+    struct tlsdata *tlsdata;
+    HRESULT hr;
+
+    TRACE("%p, %p.\n", state, old_state);
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata))) return hr;
+
+    if (old_state) *old_state = tlsdata->outgoing_call_state;
+    tlsdata->outgoing_call_state = *state;
+    return S_OK;
 }
 
 /***********************************************************************

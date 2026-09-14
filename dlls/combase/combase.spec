@@ -158,6 +158,7 @@
 @ stdcall CoRevokeMallocSpy()
 @ stub CoSetCancelObject
 @ stdcall CoSetErrorInfo(long ptr) SetErrorInfo
+@ stdcall CoSetOutgoingCallState(ptr ptr)
 @ stdcall CoSetProxyBlanket(ptr long long ptr long long ptr long)
 @ stdcall CoSuspendClassObjects()
 @ stdcall CoSwitchCallContext(ptr ptr)
