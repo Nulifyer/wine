@@ -806,6 +806,30 @@ static void test_RpcStringBindingFromBinding(void)
     ok(status == RPC_S_OK, "RpcBindingFree failed with error %lu\n", status);
 }
 
+static void test_RpcMgmtIsServerListening(void)
+{
+    static unsigned char ncalrpc[] = "ncalrpc";
+    RPC_BINDING_HANDLE handle;
+    RPC_CSTR binding;
+    RPC_STATUS status;
+
+    status = RpcStringBindingComposeA(NULL, ncalrpc, NULL, NULL, NULL, &binding);
+    ok(status == RPC_S_OK, "RpcStringBindingComposeA failed with error %lu\n", status);
+    if (status != RPC_S_OK) return;
+
+    status = RpcBindingFromStringBindingA(binding, &handle);
+    ok(status == RPC_S_OK, "RpcBindingFromStringBindingA failed with error %lu\n", status);
+    RpcStringFreeA(&binding);
+    if (status != RPC_S_OK) return;
+
+    status = RpcMgmtIsServerListening(handle);
+    ok(status == RPC_S_INVALID_BINDING,
+       "RpcMgmtIsServerListening returned %lu, expected RPC_S_INVALID_BINDING\n", status);
+
+    status = RpcBindingFree(&handle);
+    ok(status == RPC_S_OK, "RpcBindingFree failed with error %lu\n", status);
+}
+
 static void test_UuidCreate(void)
 {
     UUID guid;
@@ -1353,6 +1377,7 @@ START_TEST( rpc )
 
     test_towers();
     test_RpcStringBindingFromBinding();
+    test_RpcMgmtIsServerListening();
     test_RpcBindingFree();
     test_RpcIfInqId();
     test_RpcServerInqDefaultPrincName();

@@ -1820,6 +1820,11 @@ RPC_STATUS WINAPI RpcMgmtIsServerListening(RPC_BINDING_HANDLE Binding)
 
   if (Binding) {
     RpcBinding *rpc_binding = (RpcBinding*)Binding;
+    /* Windows performs a remote management call for client bindings, which
+     * also supports bindings that need endpoint resolution.  The direct
+     * transport probe below cannot represent that operation. */
+    if (!rpc_binding->Endpoint || !rpc_binding->Endpoint[0])
+      return RPC_S_INVALID_BINDING;
     status = RPCRT4_IsServerListening(rpc_binding->Protseq, rpc_binding->Endpoint);
   }else {
     EnterCriticalSection(&listen_cs);
