@@ -480,8 +480,10 @@ BOOL WINAPI UnregisterSuspendResumeNotification(HPOWERNOTIFY handle)
  */
 BOOL WINAPI IsImmersiveProcess( HANDLE process )
 {
-    FIXME("(%p): stub\n", process);
-    return FALSE;
+    struct ntuser_process_ui_context_information information;
+
+    if (!NtUserGetProcessUIContextInformation( process, &information )) return FALSE;
+    return information.context == 1 || information.context == 2;
 }
 
 /**********************************************************************

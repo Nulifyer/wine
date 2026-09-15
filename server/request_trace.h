@@ -223,6 +223,21 @@ static void dump_get_process_info_reply( const struct get_process_info_reply *re
     dump_varargs_pe_image_info( ", image=", cur_size );
 }
 
+static void dump_init_process_ui_context_request( const struct init_process_ui_context_request *req )
+{
+}
+
+static void dump_get_process_ui_context_request( const struct get_process_ui_context_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_process_ui_context_reply( const struct get_process_ui_context_reply *req )
+{
+    fprintf( stderr, " context=%08x", req->context );
+    fprintf( stderr, ", flags=%08x", req->flags );
+}
+
 static void dump_get_process_debug_info_request( const struct get_process_debug_info_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -4018,6 +4033,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_terminate_process_request,
     (dump_func)dump_terminate_thread_request,
     (dump_func)dump_get_process_info_request,
+    (dump_func)dump_init_process_ui_context_request,
+    (dump_func)dump_get_process_ui_context_request,
     (dump_func)dump_get_process_debug_info_request,
     (dump_func)dump_get_process_image_name_request,
     (dump_func)dump_get_process_vm_counters_request,
@@ -4372,6 +4389,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_terminate_process_reply,
     (dump_func)dump_terminate_thread_reply,
     (dump_func)dump_get_process_info_reply,
+    NULL,
+    (dump_func)dump_get_process_ui_context_reply,
     (dump_func)dump_get_process_debug_info_reply,
     (dump_func)dump_get_process_image_name_reply,
     (dump_func)dump_get_process_vm_counters_reply,
@@ -4726,6 +4745,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "terminate_process",
     "terminate_thread",
     "get_process_info",
+    "init_process_ui_context",
+    "get_process_ui_context",
     "get_process_debug_info",
     "get_process_image_name",
     "get_process_vm_counters",
@@ -5175,6 +5196,7 @@ static const struct
     { "NOT_A_DIRECTORY",             STATUS_NOT_A_DIRECTORY },
     { "NOT_A_REPARSE_POINT",         STATUS_NOT_A_REPARSE_POINT },
     { "NOT_FOUND",                   STATUS_NOT_FOUND },
+    { "NOT_GUI_PROCESS",             STATUS_NOT_GUI_PROCESS },
     { "NOT_IMPLEMENTED",             STATUS_NOT_IMPLEMENTED },
     { "NOT_MAPPED_VIEW",             STATUS_NOT_MAPPED_VIEW },
     { "NOT_REGISTRY_FILE",           STATUS_NOT_REGISTRY_FILE },

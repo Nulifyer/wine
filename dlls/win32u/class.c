@@ -329,6 +329,12 @@ static void init_user(void)
     sysparams_init();
     winstation_init();
     register_desktop_class();
+
+    SERVER_START_REQ( init_process_ui_context )
+    {
+        wine_server_call( req );
+    }
+    SERVER_END_REQ;
 }
 
 /***********************************************************************

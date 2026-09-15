@@ -7584,7 +7584,42 @@ ULONG WINAPI NtUserGetProcessDpiAwarenessContext( HANDLE process )
 }
 
 /***********************************************************************
- *	     NtUserGetProcessDefaultLayout    (win32u.@)
+ *       NtUserGetProcessUIContextInformation    (win32u.@)
+ */
+BOOL WINAPI NtUserGetProcessUIContextInformation(
+    HANDLE process, struct ntuser_process_ui_context_information *information )
+{
+    struct ntuser_process_ui_context_information result;
+    NTSTATUS status;
+
+    if (!information)
+    {
+        RtlSetLastWin32Error( ERROR_NOACCESS );
+        return FALSE;
+    }
+
+    SERVER_START_REQ( get_process_ui_context )
+    {
+        req->handle = wine_server_obj_handle( process );
+        if (!(status = wine_server_call( req )))
+        {
+            result.context = reply->context;
+            result.flags = reply->flags;
+        }
+    }
+    SERVER_END_REQ;
+
+    if (status)
+    {
+        RtlSetLastWin32Error( RtlNtStatusToDosError( status ) );
+        return FALSE;
+    }
+    *information = result;
+    return TRUE;
+}
+
+/***********************************************************************
+ *       NtUserGetProcessDefaultLayout    (win32u.@)
  */
 BOOL WINAPI NtUserGetProcessDefaultLayout( ULONG *layout )
 {

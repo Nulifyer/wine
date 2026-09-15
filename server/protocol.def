@@ -1276,6 +1276,20 @@ typedef volatile struct
 @END
 
 
+/* Mark the current process as connected to the USER subsystem */
+@REQ(init_process_ui_context)
+@END
+
+
+/* Retrieve USER subsystem process state */
+@REQ(get_process_ui_context)
+    obj_handle_t handle;           /* process handle */
+@REPLY
+    unsigned int context;          /* process UI context */
+    unsigned int flags;            /* process UI flags */
+@END
+
+
 /* Retrieve debug information about a process */
 @REQ(get_process_debug_info)
     obj_handle_t handle;           /* process handle */

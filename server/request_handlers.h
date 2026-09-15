@@ -17,6 +17,8 @@ DECL_HANDLER(init_thread);
 DECL_HANDLER(terminate_process);
 DECL_HANDLER(terminate_thread);
 DECL_HANDLER(get_process_info);
+DECL_HANDLER(init_process_ui_context);
+DECL_HANDLER(get_process_ui_context);
 DECL_HANDLER(get_process_debug_info);
 DECL_HANDLER(get_process_image_name);
 DECL_HANDLER(get_process_vm_counters);
@@ -371,6 +373,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_terminate_process,
     (req_handler)req_terminate_thread,
     (req_handler)req_get_process_info,
+    (req_handler)req_init_process_ui_context,
+    (req_handler)req_get_process_ui_context,
     (req_handler)req_get_process_debug_info,
     (req_handler)req_get_process_image_name,
     (req_handler)req_get_process_vm_counters,
@@ -861,6 +865,12 @@ C_ASSERT( offsetof(struct get_process_info_reply, disable_boost) == 58 );
 C_ASSERT( offsetof(struct get_process_info_reply, handle_checking_mode) == 59 );
 C_ASSERT( offsetof(struct get_process_info_reply, machine) == 60 );
 C_ASSERT( sizeof(struct get_process_info_reply) == 64 );
+C_ASSERT( sizeof(struct init_process_ui_context_request) == 16 );
+C_ASSERT( offsetof(struct get_process_ui_context_request, handle) == 12 );
+C_ASSERT( sizeof(struct get_process_ui_context_request) == 16 );
+C_ASSERT( offsetof(struct get_process_ui_context_reply, context) == 8 );
+C_ASSERT( offsetof(struct get_process_ui_context_reply, flags) == 12 );
+C_ASSERT( sizeof(struct get_process_ui_context_reply) == 16 );
 C_ASSERT( offsetof(struct get_process_debug_info_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_process_debug_info_request) == 16 );
 C_ASSERT( offsetof(struct get_process_debug_info_reply, debug) == 8 );

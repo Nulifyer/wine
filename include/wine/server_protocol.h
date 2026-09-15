@@ -1325,6 +1325,32 @@ struct get_process_info_reply
 
 
 
+struct init_process_ui_context_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct init_process_ui_context_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct get_process_ui_context_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_process_ui_context_reply
+{
+    struct reply_header __header;
+    unsigned int context;
+    unsigned int flags;
+};
+
+
+
 struct get_process_debug_info_request
 {
     struct request_header __header;
@@ -6952,6 +6978,8 @@ enum request
     REQ_terminate_process,
     REQ_terminate_thread,
     REQ_get_process_info,
+    REQ_init_process_ui_context,
+    REQ_get_process_ui_context,
     REQ_get_process_debug_info,
     REQ_get_process_image_name,
     REQ_get_process_vm_counters,
@@ -7309,6 +7337,8 @@ union generic_request
     struct terminate_process_request terminate_process_request;
     struct terminate_thread_request terminate_thread_request;
     struct get_process_info_request get_process_info_request;
+    struct init_process_ui_context_request init_process_ui_context_request;
+    struct get_process_ui_context_request get_process_ui_context_request;
     struct get_process_debug_info_request get_process_debug_info_request;
     struct get_process_image_name_request get_process_image_name_request;
     struct get_process_vm_counters_request get_process_vm_counters_request;
@@ -7664,6 +7694,8 @@ union generic_reply
     struct terminate_process_reply terminate_process_reply;
     struct terminate_thread_reply terminate_thread_reply;
     struct get_process_info_reply get_process_info_reply;
+    struct init_process_ui_context_reply init_process_ui_context_reply;
+    struct get_process_ui_context_reply get_process_ui_context_reply;
     struct get_process_debug_info_reply get_process_debug_info_reply;
     struct get_process_image_name_reply get_process_image_name_reply;
     struct get_process_vm_counters_reply get_process_vm_counters_reply;
@@ -8006,6 +8038,6 @@ union generic_reply
     struct destroy_dcomp_connection_reply destroy_dcomp_connection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1003
+#define SERVER_PROTOCOL_VERSION 1004
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

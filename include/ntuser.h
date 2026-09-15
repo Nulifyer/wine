@@ -896,6 +896,13 @@ W32KAPI BOOL    WINAPI NtUserGetPointerDeviceRects( HANDLE handle, RECT *device_
 W32KAPI INT     WINAPI NtUserGetPriorityClipboardFormat( UINT *list, INT count );
 W32KAPI BOOL    WINAPI NtUserGetProcessDefaultLayout( ULONG *layout );
 W32KAPI ULONG   WINAPI NtUserGetProcessDpiAwarenessContext( HANDLE process );
+struct ntuser_process_ui_context_information
+{
+    UINT context;
+    UINT flags;
+};
+W32KAPI BOOL    WINAPI NtUserGetProcessUIContextInformation(
+    HANDLE process, struct ntuser_process_ui_context_information *information );
 W32KAPI HWINSTA WINAPI NtUserGetProcessWindowStation(void);
 W32KAPI HANDLE  WINAPI NtUserGetProp( HWND hwnd, const WCHAR *str );
 W32KAPI DWORD   WINAPI NtUserGetQueueStatus( UINT flags );

@@ -630,8 +630,11 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->handle_checking_mode = 0;
     process->native_session_owner = 0;
     process->subsystem_process = 0;
+    process->ui_context_initialized = 0;
     process->critical        = 0;
     process->protection      = 0;
+    process->ui_context      = 0;
+    process->ui_context_flags = 0;
     process->suspend         = 0;
     process->is_system       = 0;
     process->debug_children  = 1;
@@ -1078,6 +1081,7 @@ static void process_killed( struct process *process )
     close_process_desktop( process );
     process->winstation = 0;
     process->desktop = 0;
+    process->ui_context_initialized = 0;
     cancel_terminating_process_asyncs( process );
     cleanup_process_wnf_states( process );
     close_process_handles( process );
@@ -1713,6 +1717,34 @@ DECL_HANDLER(get_process_info)
         }
         release_object( process );
     }
+}
+
+/* mark the current process as connected to the USER subsystem */
+DECL_HANDLER(init_process_ui_context)
+{
+    current->process->ui_context = 0;
+    current->process->ui_context_flags = 0;
+    current->process->ui_context_initialized = 1;
+}
+
+/* fetch USER subsystem information about a process */
+DECL_HANDLER(get_process_ui_context)
+{
+    struct process *process;
+
+    if (!(process = get_process_from_handle( req->handle, PROCESS_QUERY_LIMITED_INFORMATION )))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!process->ui_context_initialized || !process->running_threads)
+        set_error( STATUS_NOT_GUI_PROCESS );
+    else
+    {
+        reply->context = process->ui_context;
+        reply->flags = process->ui_context_flags;
+    }
+    release_object( process );
 }
 
 /* retrieve debug information about a process */

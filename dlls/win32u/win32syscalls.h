@@ -1079,7 +1079,7 @@
     SYSCALL_ENTRY( 0x1433, NtUserGetPriorityClipboardFormat, 8 ) \
     SYSCALL_ENTRY( 0x1434, NtUserGetProcessDefaultLayout, 4 ) \
     SYSCALL_ENTRY( 0x1435, NtUserGetProcessDpiAwarenessContext, 4 ) \
-    SYSCALL_ENTRY( 0x1436, NtUserGetProcessUIContextInformation, 0 ) \
+    SYSCALL_ENTRY( 0x1436, NtUserGetProcessUIContextInformation, 8 ) \
     SYSCALL_ENTRY( 0x1437, NtUserGetProcessWindowStation, 0 ) \
     SYSCALL_ENTRY( 0x1438, NtUserGetProp, 8 ) \
     SYSCALL_ENTRY( 0x1439, NtUserGetProp2, 0 ) \
@@ -2621,7 +2621,7 @@
     SYSCALL_ENTRY( 0x1433, NtUserGetPriorityClipboardFormat, 16 ) \
     SYSCALL_ENTRY( 0x1434, NtUserGetProcessDefaultLayout, 8 ) \
     SYSCALL_ENTRY( 0x1435, NtUserGetProcessDpiAwarenessContext, 8 ) \
-    SYSCALL_ENTRY( 0x1436, NtUserGetProcessUIContextInformation, 0 ) \
+    SYSCALL_ENTRY( 0x1436, NtUserGetProcessUIContextInformation, 16 ) \
     SYSCALL_ENTRY( 0x1437, NtUserGetProcessWindowStation, 0 ) \
     SYSCALL_ENTRY( 0x1438, NtUserGetProp, 16 ) \
     SYSCALL_ENTRY( 0x1439, NtUserGetProp2, 0 ) \
@@ -3824,7 +3824,6 @@
     SYSCALL_STUB( NtUserGetPointerInputTransform ) \
     SYSCALL_STUB( NtUserGetPointerProprietaryId ) \
     SYSCALL_STUB( NtUserGetPrecisionTouchPadConfiguration ) \
-    SYSCALL_STUB( NtUserGetProcessUIContextInformation ) \
     SYSCALL_STUB( NtUserGetProp2 ) \
     SYSCALL_STUB( NtUserGetQueueIocp ) \
     SYSCALL_STUB( NtUserGetQueueStatusReadonly ) \

@@ -1808,6 +1808,12 @@ ULONG SYSCALL_API NtUserGetProcessDpiAwarenessContext( HANDLE process )
     SYSCALL_FUNC( NtUserGetProcessDpiAwarenessContext );
 }
 
+BOOL SYSCALL_API NtUserGetProcessUIContextInformation(
+    HANDLE process, struct ntuser_process_ui_context_information *information )
+{
+    SYSCALL_FUNC( NtUserGetProcessUIContextInformation );
+}
+
 HWINSTA SYSCALL_API NtUserGetProcessWindowStation(void)
 {
     SYSCALL_FUNC( NtUserGetProcessWindowStation );

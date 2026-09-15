@@ -32,7 +32,7 @@
 2518 stub @
 2519 stdcall -noname EnableMouseInputForCursorSuppression(long) NtUserEnableMouseInputForCursorSuppression
 2520 stub -noname IsMouseInputEnabled  # NtUserIsMouseInputEnabled
-2521 stub GetProcessUIContextInformation  # NtUserGetProcessUIContextInformation
+2521 stdcall GetProcessUIContextInformation(ptr ptr) NtUserGetProcessUIContextInformation
 2522 stdcall -noname SetBrokeredForeground(long) NtUserSetBrokeredForeground
 2523 stub @
 2524 stub @

@@ -1077,7 +1077,7 @@
 @ stdcall -syscall NtUserGetPriorityClipboardFormat(ptr long)
 @ stdcall -syscall NtUserGetProcessDefaultLayout(ptr)
 @ stdcall -syscall NtUserGetProcessDpiAwarenessContext(long)
-@ stub -syscall NtUserGetProcessUIContextInformation
+@ stdcall -syscall NtUserGetProcessUIContextInformation(ptr ptr)
 @ stdcall -syscall NtUserGetProcessWindowStation()
 @ stdcall -syscall NtUserGetProp(long wstr)
 @ stub -syscall NtUserGetProp2
