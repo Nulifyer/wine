@@ -18,10 +18,12 @@
 #include "wine/test.h"
 
 typedef BOOL (WINAPI *is_current_process_gdi_scaled_fn)(void);
+typedef BOOL (WINAPI *enable_mouse_in_pointer_for_thread_fn)(void);
 
 static void test_gdi_scaled_process(void)
 {
     is_current_process_gdi_scaled_fn is_current_process_gdi_scaled;
+    enable_mouse_in_pointer_for_thread_fn enable_mouse_in_pointer_for_thread;
     HMODULE module = GetModuleHandleW(L"user32.dll");
     BOOL ret;
 
@@ -29,8 +31,16 @@ static void test_gdi_scaled_process(void)
     if (!module) return;
 
     is_current_process_gdi_scaled = (void *)GetProcAddress(module, (const char *)2565);
+    enable_mouse_in_pointer_for_thread = (void *)GetProcAddress(module, (const char *)2561);
     ok(!!is_current_process_gdi_scaled, "Ordinal 2565 is unavailable.\n");
+    ok(!!enable_mouse_in_pointer_for_thread, "Ordinal 2561 is unavailable.\n");
     if (!is_current_process_gdi_scaled) return;
+
+    if (enable_mouse_in_pointer_for_thread)
+    {
+        ret = enable_mouse_in_pointer_for_thread();
+        ok(ret, "EnableMouseInPointerForThread failed, error %lu.\n", GetLastError());
+    }
 
     ret = is_current_process_gdi_scaled();
     ok(!ret, "Default process unexpectedly reports GDI scaling.\n");

@@ -2912,9 +2912,11 @@ BOOL WINAPI NtUserEnableMouseInPointer( BOOL enable )
  */
 BOOL WINAPI NtUserEnableMouseInPointerForThread( void )
 {
-    FIXME( "stub!\n" );
-    RtlSetLastWin32Error( ERROR_CALL_NOT_IMPLEMENTED );
-    return FALSE;
+    struct user_thread_info *info = get_user_thread_info();
+
+    TRACE( "\n" );
+    info->mouse_in_pointer = TRUE;
+    return TRUE;
 }
 
 /**********************************************************************
@@ -2945,7 +2947,7 @@ BOOL WINAPI NtUserIsMouseInPointerEnabled(void)
 
 BOOL is_mouse_in_pointer_enabled( HWND hwnd )
 {
-    return ReadNoFence( &enable_mouse_in_pointer ) == 1;
+    return ReadNoFence( &enable_mouse_in_pointer ) == 1 || get_user_thread_info()->mouse_in_pointer;
 }
 
 static BOOL is_captured_by_system(void)
