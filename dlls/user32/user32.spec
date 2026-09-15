@@ -339,8 +339,8 @@
 # @ stub CreateSystemThreads
 @ stdcall CreateWindowExA(long str str long long long long long long long long ptr)
 @ stdcall CreateWindowExW(long wstr wstr long long long long long long long long ptr)
-@ stub -arch=win64 CreateWindowInBand
-# @ stub CreateWindowInBandEx
+@ stdcall CreateWindowInBand(long wstr wstr long long long long long long long long ptr long)
+@ stdcall CreateWindowInBandEx(long wstr wstr long long long long long long long long ptr long long)
 # @ stub CreateWindowIndirect
 @ stdcall CreateWindowStationA(str long long ptr)
 @ stdcall CreateWindowStationW(wstr long long ptr)
@@ -696,7 +696,7 @@
 @ stdcall GetUserObjectSecurity(long ptr ptr long ptr)
 # @ stub GetWinStationInfo
 @ stdcall GetWindow(long long)
-# @ stub GetWindowBand
+@ stdcall GetWindowBand(long ptr)
 # @ stub GetWindowCompositionAttribute
 # @ stub GetWindowCompositionInfo
 @ stdcall GetWindowContextHelpId(long) NtUserGetWindowContextHelpId

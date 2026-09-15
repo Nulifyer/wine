@@ -33,6 +33,7 @@ SOURCES = \
 	testdll.spec \
 	text.c \
 	uitools.c \
+	window_band.c \
 	win.c \
 	winstation.c \
 	wsprintf.c

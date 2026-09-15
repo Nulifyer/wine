@@ -462,6 +462,100 @@ HWND WINAPI DECLSPEC_HOTPATCH CreateWindowExW( DWORD exStyle, LPCWSTR className,
 }
 
 
+static const WCHAR window_band_prop[] = L"__wine_window_band";
+
+static BOOL is_local_system_process(void)
+{
+    DWORD_PTR token_buffer[(sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE) / sizeof(DWORD_PTR)];
+    BYTE sid_buffer[SECURITY_MAX_SID_SIZE];
+    SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
+    SID *local_system = (SID *)sid_buffer;
+    TOKEN_USER *user = (TOKEN_USER *)token_buffer;
+    DWORD size = sizeof(token_buffer);
+
+    if (!GetTokenInformation( GetCurrentProcessToken(), TokenUser, user, size, &size )) return FALSE;
+    if (!InitializeSid( local_system, &authority, 1 )) return FALSE;
+    *GetSidSubAuthority( local_system, 0 ) = SECURITY_LOCAL_SYSTEM_RID;
+    return EqualSid( user->User.Sid, local_system );
+}
+
+/***********************************************************************
+ *              CreateWindowInBandEx (USER32.@)
+ */
+HWND WINAPI CreateWindowInBandEx( DWORD ex_style, LPCWSTR class_name, LPCWSTR window_name,
+                                  DWORD style, INT x, INT y, INT width, INT height,
+                                  HWND parent, HMENU menu, HINSTANCE instance, void *data,
+                                  DWORD band, DWORD type_flags )
+{
+    HWND hwnd;
+    DWORD error;
+
+    TRACE( "class %s band %lu type_flags %#lx\n", debugstr_w(class_name), band, type_flags );
+
+    if (band > 18)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+    if ((band > 1 || type_flags) && !is_local_system_process())
+    {
+        SetLastError( ERROR_ACCESS_DENIED );
+        return 0;
+    }
+
+    hwnd = CreateWindowExW( ex_style, class_name, window_name, style, x, y, width, height,
+                            parent, menu, instance, data );
+    if (!hwnd) return 0;
+
+    error = GetLastError();
+    if (band > 1 && !SetPropW( hwnd, window_band_prop, ULongToHandle( band + 1 )))
+    {
+        NtUserDestroyWindow( hwnd );
+        return 0;
+    }
+    SetLastError( error );
+    return hwnd;
+}
+
+/***********************************************************************
+ *              CreateWindowInBand (USER32.@)
+ */
+HWND WINAPI CreateWindowInBand( DWORD ex_style, LPCWSTR class_name, LPCWSTR window_name,
+                                DWORD style, INT x, INT y, INT width, INT height,
+                                HWND parent, HMENU menu, HINSTANCE instance, void *data,
+                                DWORD band )
+{
+    return CreateWindowInBandEx( ex_style, class_name, window_name, style, x, y, width, height,
+                                 parent, menu, instance, data, band, 0 );
+}
+
+/***********************************************************************
+ *              GetWindowBand (USER32.@)
+ */
+BOOL WINAPI GetWindowBand( HWND hwnd, DWORD *band )
+{
+    HANDLE value;
+    DWORD error;
+
+    if (!band)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    if (!IsWindow( hwnd ))
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+
+    error = GetLastError();
+    value = GetPropW( hwnd, window_band_prop );
+    *band = value ? HandleToUlong( value ) - 1 : 1;
+    SetLastError( error );
+    return TRUE;
+}
+
+
 /***********************************************************************
  *		CloseWindow (USER32.@)
  */
