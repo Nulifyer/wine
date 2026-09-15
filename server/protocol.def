@@ -4530,7 +4530,7 @@ struct alpc_message_info
 @END
 
 
-/* Begin admission to a named ALPC listener. Payload follows name and SID. */
+/* Begin admission to a named ALPC listener. Payload follows name, SID, and server security descriptor. */
 @REQ(alpc_connect_port)
     obj_handle_t rootdir;
     unsigned int attributes;
@@ -4539,7 +4539,8 @@ struct alpc_message_info
     mem_size_t max_msg_len;
     data_size_t name_size;
     data_size_t sid_size;
-    int wow64;
+    data_size_t server_sd_size;
+    int client_flags; /* bit 0: WoW64, bit 1: explicit security context */
     client_ptr_t message_context;
     VARARG(data,bytes);
 @REPLY

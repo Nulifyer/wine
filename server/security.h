@@ -84,6 +84,10 @@ extern const struct sid *token_get_primary_group( struct token *token );
 extern unsigned int token_get_session_id( struct token *token );
 extern void token_set_session_id( struct token *token, unsigned int session_id );
 extern int token_sid_present( struct token *token, const struct sid *sid, int deny );
+extern int token_check_security_descriptor_access( struct token *token,
+                                                   const struct security_descriptor *sd,
+                                                   unsigned int desired,
+                                                   const struct generic_map *mapping );
 
 static inline struct ace *ace_first( const struct acl *acl )
 {

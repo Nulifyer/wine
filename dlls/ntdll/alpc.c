@@ -93,49 +93,6 @@ NTSTATUS WINAPI RtlSendMsgToSm( HANDLE connection_handle, ALPC_PORT_MESSAGE *mes
 }
 
 /***********************************************************************
- *           NtAlpcConnectPortEx    (NTDLL.@)
- *
- * The extended entry point names the connection port through object
- * attributes.  Wine's existing connection owner takes the same lookup
- * attributes separately from the name, so the security-neutral subset can
- * be adapted without adding a second ALPC connection implementation.
- */
-NTSTATUS WINAPI NtAlpcConnectPortEx( HANDLE *port_handle,
-                                     OBJECT_ATTRIBUTES *connection_port_attributes,
-                                     OBJECT_ATTRIBUTES *client_port_attributes,
-                                     ALPC_PORT_ATTRIBUTES *port_attributes, ULONG flags,
-                                     SECURITY_DESCRIPTOR *server_security_requirements,
-                                     ALPC_PORT_MESSAGE *connection_message, SIZE_T *buffer_length,
-                                     ALPC_MESSAGE_ATTRIBUTES *out_message_attributes,
-                                     ALPC_MESSAGE_ATTRIBUTES *in_message_attributes,
-                                     LARGE_INTEGER *timeout )
-{
-    OBJECT_ATTRIBUTES lookup_attributes;
-
-    TRACE( "%p %p %p %p %#lx %p %p %p %p %p %p\n", port_handle,
-           connection_port_attributes, client_port_attributes, port_attributes, flags,
-           server_security_requirements, connection_message, buffer_length,
-           out_message_attributes, in_message_attributes, timeout );
-
-    if (!port_handle || !connection_port_attributes) return STATUS_ACCESS_VIOLATION;
-    if (connection_port_attributes->Length != sizeof(*connection_port_attributes) ||
-        !connection_port_attributes->ObjectName)
-        return STATUS_INVALID_PARAMETER;
-
-    /* The current server does not yet model client-port object attributes or
-     * server security-descriptor authorization.  Do not silently discard
-     * either contract. */
-    if (client_port_attributes || server_security_requirements) return STATUS_NOT_IMPLEMENTED;
-
-    lookup_attributes = *connection_port_attributes;
-    lookup_attributes.ObjectName = NULL;
-    return NtAlpcConnectPort( port_handle, connection_port_attributes->ObjectName,
-                              &lookup_attributes, port_attributes, flags, NULL,
-                              connection_message, buffer_length, out_message_attributes,
-                              in_message_attributes, timeout );
-}
-
-/***********************************************************************
  *           NtAlpcQueryInformation    (NTDLL.@)
  */
 NTSTATUS WINAPI NtAlpcQueryInformation( HANDLE port_handle, ULONG information_class,

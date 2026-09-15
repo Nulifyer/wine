@@ -1187,7 +1187,8 @@ static unsigned int token_access_check_pass( struct token *token, int restricted
                                  unsigned int *priv_count,
                                  const struct generic_map *mapping,
                                  unsigned int *granted_access,
-                                 unsigned int *status )
+                                 unsigned int *status,
+                                 int require_owner_group )
 {
     unsigned int current_access = 0;
     unsigned int denied_access = 0;
@@ -1210,7 +1211,7 @@ static unsigned int token_access_check_pass( struct token *token, int restricted
 
     dacl = sd_get_dacl( sd, &dacl_present );
     owner = sd_get_owner( sd );
-    if (!owner || !sd_get_group( sd ))
+    if (require_owner_group && (!owner || !sd_get_group( sd )))
     {
         if (priv_count) *priv_count = 0;
         return STATUS_INVALID_SECURITY_DESCR;
@@ -1269,7 +1270,7 @@ static unsigned int token_access_check_pass( struct token *token, int restricted
     /* NOTE: SeTakeOwnershipPrivilege is not checked for here - it is instead
      * checked when a "set owner" call is made, overriding the access rights
      * determined here. */
-    if (access_sid_present( token, owner, FALSE, restricted ))
+    if (owner && access_sid_present( token, owner, FALSE, restricted ))
     {
         owner_access = READ_CONTROL | WRITE_DAC;
         current_access |= owner_access;
@@ -1338,14 +1339,35 @@ static unsigned int token_access_check( struct token *token, const struct securi
     const struct generic_map *mapping, unsigned int *granted, unsigned int *status )
 {
     unsigned int ret, restricted_access, restricted_status;
-    ret = token_access_check_pass( token, 0, sd, desired, privs, priv_count, mapping, granted, status );
+    ret = token_access_check_pass( token, 0, sd, desired, privs, priv_count, mapping, granted, status, TRUE );
     if (ret || *status || !token->restricted) return ret;
     ret = token_access_check_pass( token, 1, sd, desired, NULL, NULL, mapping,
-                                  &restricted_access, &restricted_status );
+                                  &restricted_access, &restricted_status, TRUE );
     if (ret) return ret;
     *granted &= restricted_access;
     if (restricted_status || !*granted) *status = STATUS_ACCESS_DENIED;
     return STATUS_SUCCESS;
+}
+
+/* Server-security requirements are access-check descriptors, not object
+ * security descriptors. Native callers commonly omit owner and group, so
+ * evaluate their DACL without applying the object-creation shape requirement. */
+int token_check_security_descriptor_access( struct token *token,
+                                            const struct security_descriptor *sd,
+                                            unsigned int desired,
+                                            const struct generic_map *mapping )
+{
+    unsigned int granted, status, restricted_granted, restricted_status;
+    unsigned int ret;
+
+    ret = token_access_check_pass( token, FALSE, sd, desired, NULL, NULL, mapping,
+                                   &granted, &status, FALSE );
+    if (ret || status) return FALSE;
+    if (!token->restricted) return TRUE;
+
+    ret = token_access_check_pass( token, TRUE, sd, desired, NULL, NULL, mapping,
+                                   &restricted_granted, &restricted_status, FALSE );
+    return !ret && !restricted_status && (granted & restricted_granted) == desired;
 }
 
 const struct acl *token_get_default_dacl( struct token *token )

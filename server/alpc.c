@@ -94,6 +94,7 @@ struct alpc_port
     unsigned int            connect_status;
     unsigned int            request_delivered;
     unsigned int            want_reply;
+    unsigned int            security_context;
     struct list             connecting_entry;      /* weak, while NTDLL owns the temporary handle */
     obj_handle_t            connecting_wait_handle; /* private admission wait handle */
     struct object          *connect_sync;
@@ -266,6 +267,7 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     port->connect_status = STATUS_PENDING;
     port->request_delivered = 0;
     port->want_reply = 0;
+    port->security_context = 0;
     list_init( &port->connecting_entry );
     port->connecting_handle = 0;
     port->connecting_wait_handle = 0;
@@ -1201,6 +1203,7 @@ DECL_HANDLER(alpc_connect_port)
     data_size_t size = get_req_data_size(), payload_size;
     struct unicode_str name;
     const struct sid *sid;
+    const struct security_descriptor *server_sd;
     struct alpc_port *listener = NULL, *client = NULL, *server = NULL;
     struct alpc_message *message;
     struct alpc_port_init_data init = { .type = COMMUNICATION_PORT, .flags = req->port_flags,
@@ -1218,7 +1221,8 @@ DECL_HANDLER(alpc_connect_port)
     { set_error( STATUS_INVALID_PARAMETER ); return; }
     if (qos->impersonation_level < SecurityAnonymous || qos->impersonation_level > SecurityDelegation)
     { set_error( STATUS_BAD_IMPERSONATION_LEVEL ); return; }
-    if (req->name_size > size || req->name_size % sizeof(WCHAR) || req->sid_size > size - req->name_size)
+    if (req->name_size > size || req->name_size % sizeof(WCHAR) || req->sid_size > size - req->name_size ||
+        req->server_sd_size > size - req->name_size - req->sid_size)
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -1237,11 +1241,17 @@ DECL_HANDLER(alpc_connect_port)
         set_error( STATUS_INVALID_SID );
         return;
     }
-    payload_size = size - req->name_size - req->sid_size;
+    server_sd = (const struct security_descriptor *)(data + req->name_size + req->sid_size);
+    if (req->server_sd_size && !sd_is_valid( server_sd, req->server_sd_size ))
+    {
+        set_error( STATUS_INVALID_SECURITY_DESCR );
+        return;
+    }
+    payload_size = size - req->name_size - req->sid_size - req->server_sd_size;
     if (!req->rootdir && !req->attributes && name.len == sizeof(power_port_name) &&
         !memcmp( name.str, power_port_name, sizeof(power_port_name) ))
     {
-        if (req->sid_size || payload_size)
+        if (req->sid_size || req->server_sd_size || payload_size)
         {
             set_error( STATUS_INVALID_PARAMETER );
             goto done;
@@ -1298,6 +1308,13 @@ DECL_HANDLER(alpc_connect_port)
         set_error( STATUS_SERVER_SID_MISMATCH );
         goto done;
     }
+    if (req->server_sd_size &&
+        !token_check_security_descriptor_access( listener->thread->process->token, server_sd,
+                                                 ALPC_PORT_QUERY_STATE, &alpc_port_type.mapping ))
+    {
+        set_error( STATUS_SERVER_SID_MISMATCH );
+        goto done;
+    }
     if (payload_size > 65535 - sizeof(ALPC_PORT_MESSAGE) ||
         payload_size + sizeof(ALPC_PORT_MESSAGE) > listener->max_msg_len)
     {
@@ -1307,14 +1324,15 @@ DECL_HANDLER(alpc_connect_port)
     if (!(client = create_named_object( &params ))) goto done;
     client->impersonation_level = qos->impersonation_level;
     client->tracking_mode = qos->tracking_mode;
+    client->security_context = !!(req->client_flags & 2);
     if (qos->tracking_mode == SECURITY_DYNAMIC_TRACKING)
         client->client_token = (struct token *)grab_object( thread_get_impersonation_token( current ) );
     else if (!(client->client_token = token_duplicate_impersonation( thread_get_impersonation_token( current ),
                                        qos->impersonation_level, qos->effective_only & 1 ))) goto done;
     if (!(handle = alloc_handle( current->process, client, ALPC_PORT_ALL_ACCESS, 0 ))) goto done;
-    if (!(message = new_message( data + req->name_size + req->sid_size, payload_size,
+    if (!(message = new_message( data + req->name_size + req->sid_size + req->server_sd_size, payload_size,
                                 ALPC_MESSAGE_TYPE_CONNECTION_REQUEST | 0x2000 |
-                                (req->wow64 ? 0x1000 : 0), 0, current )))
+                                (req->client_flags & 1 ? 0x1000 : 0), 0, current )))
     {
         close_handle( current->process, handle );
         goto done;
@@ -1335,7 +1353,7 @@ DECL_HANDLER(alpc_connect_port)
     list_add_tail( &connecting_ports, &client->connecting_entry );
     client->want_reply = req->flags & 0x20000;
     client->connection_id = message->info.id;
-    client->wow64 = req->wow64;
+    client->wow64 = req->client_flags & 1;
     client->pending_listener = listener;
     list_add_tail( &listener->pending_connections, &client->pending_entry );
     grab_object( client );
@@ -1559,6 +1577,11 @@ DECL_HANDLER(alpc_impersonate_client)
                     client->request_delivered)
                 {
                     if (client->pending_listener != port) { set_error( STATUS_ACCESS_DENIED ); goto done; }
+                    if (client->security_context)
+                    {
+                        source = client->client_token;
+                        level = client->impersonation_level;
+                    }
                     found = 1;
                     break;
                 }

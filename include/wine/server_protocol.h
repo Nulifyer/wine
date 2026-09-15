@@ -6548,8 +6548,8 @@ struct alpc_connect_port_request
     mem_size_t max_msg_len;
     data_size_t name_size;
     data_size_t sid_size;
-    int wow64;
-    char __pad_52[4];
+    data_size_t server_sd_size;
+    int client_flags;
     client_ptr_t message_context;
     /* VARARG(data,bytes); */
 };
@@ -8006,6 +8006,6 @@ union generic_reply
     struct destroy_dcomp_connection_reply destroy_dcomp_connection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1000
+#define SERVER_PROTOCOL_VERSION 1002
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

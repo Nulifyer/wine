@@ -3721,7 +3721,8 @@ static void dump_alpc_connect_port_request( const struct alpc_connect_port_reque
     dump_uint64( ", max_msg_len=", &req->max_msg_len );
     fprintf( stderr, ", name_size=%u", req->name_size );
     fprintf( stderr, ", sid_size=%u", req->sid_size );
-    fprintf( stderr, ", wow64=%d", req->wow64 );
+    fprintf( stderr, ", server_sd_size=%u", req->server_sd_size );
+    fprintf( stderr, ", client_flags=%d", req->client_flags );
     dump_uint64( ", message_context=", &req->message_context );
     dump_varargs_bytes( ", data=", cur_size );
 }

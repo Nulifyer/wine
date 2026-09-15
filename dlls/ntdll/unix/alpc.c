@@ -153,17 +153,22 @@ NTSTATUS WINAPI NtAlpcAcceptConnectPort( HANDLE *communication_port, HANDLE conn
     return status;
 }
 
-NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_name,
-                                   OBJECT_ATTRIBUTES *obj_attr, ALPC_PORT_ATTRIBUTES *port_attr,
-                                   DWORD flags, PSID required_server_sid,
-                                   ALPC_PORT_MESSAGE *connect_msg, SIZE_T *connect_msg_size,
-                                   ALPC_MESSAGE_ATTRIBUTES *send_msg_attr,
-                                   ALPC_MESSAGE_ATTRIBUTES *recv_msg_attr, LARGE_INTEGER *timeout )
+static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
+                              OBJECT_ATTRIBUTES *obj_attr, ALPC_PORT_ATTRIBUTES *port_attr,
+                              DWORD flags, PSID required_server_sid,
+                              SECURITY_DESCRIPTOR *server_security_requirements,
+                              BOOL security_context,
+                              ALPC_PORT_MESSAGE *connect_msg, SIZE_T *connect_msg_size,
+                              ALPC_MESSAGE_ATTRIBUTES *send_msg_attr,
+                              ALPC_MESSAGE_ATTRIBUTES *recv_msg_attr, LARGE_INTEGER *timeout )
 {
     HANDLE handle = NULL, wait_handle = NULL;
     NTSTATUS status;
     SIZE_T capacity = connect_msg_size ? *connect_msg_size : 0;
     struct alpc_security_qos qos;
+    struct object_attributes *server_objattr = NULL;
+    const struct security_descriptor *server_sd = NULL;
+    data_size_t server_objattr_size = 0, server_sd_size = 0;
     ULONG sid_size = 0;
     struct token_identity receipt;
     unsigned int recv_attributes = receive_attributes( recv_msg_attr );
@@ -184,6 +189,15 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
             return STATUS_INVALID_SID;
         sid_size = offsetof( SID, SubAuthority[sid->SubAuthorityCount] );
     }
+    if (server_security_requirements)
+    {
+        OBJECT_ATTRIBUTES attributes = { sizeof(attributes), 0, NULL, 0,
+                                         server_security_requirements, NULL };
+        if ((status = wine_server_alloc_object_attributes( &attributes, &server_objattr,
+                                                            &server_objattr_size ))) return status;
+        server_sd_size = server_objattr->sd_len;
+        server_sd = (const struct security_descriptor *)(server_objattr + 1);
+    }
     SERVER_START_REQ( alpc_connect_port )
     {
         req->rootdir = wine_server_obj_handle( obj_attr ? obj_attr->RootDirectory : NULL );
@@ -193,7 +207,8 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
         req->max_msg_len = port_attr->MaxMessageLength;
         req->name_size = port_name->Length;
         req->sid_size = sid_size;
-        req->wow64 = is_wow64();
+        req->server_sd_size = server_sd_size;
+        req->client_flags = (is_wow64() ? 1 : 0) | (security_context ? 2 : 0);
         req->message_context = get_message_context( send_msg_attr );
         qos.impersonation_level = port_attr->SecurityQos.ImpersonationLevel;
         qos.tracking_mode = port_attr->SecurityQos.ContextTrackingMode;
@@ -201,6 +216,7 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
         wine_server_add_data( req, &qos, sizeof(qos) );
         wine_server_add_data( req, port_name->Buffer, port_name->Length );
         if (sid_size) wine_server_add_data( req, required_server_sid, sid_size );
+        if (server_sd_size) wine_server_add_data( req, server_sd, server_sd_size );
         if (connect_msg) wine_server_add_data( req, connect_msg + 1, connect_msg->DataLength );
         status = wine_server_call( req );
         if (!status)
@@ -210,6 +226,7 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
         }
     }
     SERVER_END_REQ;
+    free( server_objattr );
     if (status) return status;
 
     /* Exactly one wait owns the caller's timeout. A pending request is canceled
@@ -235,6 +252,58 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
     if (status) NtClose( handle );
     else *port_handle = handle;
     return status;
+}
+
+NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_name,
+                                   OBJECT_ATTRIBUTES *obj_attr, ALPC_PORT_ATTRIBUTES *port_attr,
+                                   DWORD flags, PSID required_server_sid,
+                                   ALPC_PORT_MESSAGE *connect_msg, SIZE_T *connect_msg_size,
+                                   ALPC_MESSAGE_ATTRIBUTES *send_msg_attr,
+                                   ALPC_MESSAGE_ATTRIBUTES *recv_msg_attr, LARGE_INTEGER *timeout )
+{
+    return connect_port( port_handle, port_name, obj_attr, port_attr, flags, required_server_sid, NULL, FALSE,
+                         connect_msg, connect_msg_size, send_msg_attr, recv_msg_attr, timeout );
+}
+
+NTSTATUS WINAPI NtAlpcConnectPortEx( HANDLE *port_handle,
+                                     OBJECT_ATTRIBUTES *connection_port_attributes,
+                                     OBJECT_ATTRIBUTES *client_port_attributes,
+                                     ALPC_PORT_ATTRIBUTES *port_attributes, ULONG flags,
+                                     SECURITY_DESCRIPTOR *server_security_requirements,
+                                     ALPC_PORT_MESSAGE *connection_message, SIZE_T *buffer_length,
+                                     ALPC_MESSAGE_ATTRIBUTES *out_message_attributes,
+                                     ALPC_MESSAGE_ATTRIBUTES *in_message_attributes,
+                                     LARGE_INTEGER *timeout )
+{
+    OBJECT_ATTRIBUTES lookup_attributes;
+    BOOL security_context = FALSE;
+
+    if (!port_handle || !connection_port_attributes) return STATUS_ACCESS_VIOLATION;
+    if (connection_port_attributes->Length != sizeof(*connection_port_attributes) ||
+        !connection_port_attributes->ObjectName) return STATUS_INVALID_PARAMETER;
+    if (client_port_attributes)
+    {
+        if (client_port_attributes->Length != sizeof(*client_port_attributes)) return STATUS_INVALID_PARAMETER;
+        if (client_port_attributes->RootDirectory || client_port_attributes->ObjectName ||
+            client_port_attributes->Attributes || client_port_attributes->SecurityDescriptor ||
+            client_port_attributes->SecurityQualityOfService) return STATUS_NOT_IMPLEMENTED;
+    }
+    if (out_message_attributes && out_message_attributes->ValidAttributes == ALPC_MESSAGE_SECURITY_ATTRIBUTE &&
+        out_message_attributes->AllocatedAttributes == ALPC_MESSAGE_SECURITY_ATTRIBUTE)
+    {
+        const ALPC_SECURITY_ATTR *security = wine_alpc_get_attribute( out_message_attributes,
+                                                                      ALPC_MESSAGE_SECURITY_ATTRIBUTE );
+        if (!security || security->Flags || security->QoS || security->ContextHandle != NtCurrentThread())
+            return STATUS_NOT_IMPLEMENTED;
+        security_context = TRUE;
+        out_message_attributes = NULL;
+    }
+
+    lookup_attributes = *connection_port_attributes;
+    lookup_attributes.ObjectName = NULL;
+    return connect_port( port_handle, connection_port_attributes->ObjectName, &lookup_attributes,
+                         port_attributes, flags, NULL, server_security_requirements, security_context, connection_message,
+                         buffer_length, out_message_attributes, in_message_attributes, timeout );
 }
 
 NTSTATUS WINAPI NtAlpcOpenSenderProcess( HANDLE *process_handle, HANDLE port_handle,
