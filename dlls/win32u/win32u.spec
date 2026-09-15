@@ -492,7 +492,7 @@
 @ stub -syscall NtGdiGetCharacterPlacementW
 @ stdcall -syscall NtGdiGetColorAdjustment(long ptr)
 @ stub -syscall NtGdiGetColorSpaceforBitmap
-@ stub -syscall NtGdiGetCurrentDpiInfo
+@ stdcall -syscall NtGdiGetCurrentDpiInfo(long ptr)
 @ stub -syscall NtGdiGetDCDpiScaleValue
 @ stdcall -syscall NtGdiGetDCDword(long long ptr)
 @ stdcall -syscall NtGdiGetDCObject(long long)

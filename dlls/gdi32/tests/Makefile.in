@@ -7,6 +7,7 @@ SOURCES = \
 	clipping.c \
 	dc.c \
 	dib.c \
+	dpi.c \
 	font.c \
 	gdiobj.c \
 	generated.c \

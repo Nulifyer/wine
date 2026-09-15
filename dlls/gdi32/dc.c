@@ -21,6 +21,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "gdi_private.h"
 #include "ntuser.h"
 #include "ddrawgdi.h"
@@ -33,6 +35,19 @@
 WINE_DEFAULT_DEBUG_CHANNEL(gdi);
 
 static struct list drivers = LIST_INIT( drivers );
+
+/***********************************************************************
+ *           GetCurrentDpiInfo   (GDI32.@)
+ */
+BOOL WINAPI GetCurrentDpiInfo( HMONITOR monitor, struct ntgdi_current_dpi_info *info )
+{
+    NTSTATUS status = NtGdiGetCurrentDpiInfo( monitor, info );
+
+    if (status >= 0) return TRUE;
+    if (status == STATUS_UNSUCCESSFUL) SetLastError( ERROR_INVALID_PARAMETER );
+    else if (status == STATUS_INVALID_PARAMETER) SetLastError( ERROR_INVALID_HANDLE );
+    return FALSE;
+}
 
 static CRITICAL_SECTION driver_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =

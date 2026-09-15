@@ -126,6 +126,14 @@ enum
     NtGdiSetTextAlign,
 };
 
+/* Private monitor DPI record returned by NtGdiGetCurrentDpiInfo.  The public
+ * field names are not documented; keep the ABI explicit without assigning
+ * meanings that have not been established. */
+struct ntgdi_current_dpi_info
+{
+    UINT values[24];
+};
+
 /* NtGdiGetDCDword parameter, not compatible with Windows */
 enum
 {
@@ -373,6 +381,8 @@ W32KAPI INT      WINAPI NtGdiGetAppClipBox( HDC hdc, RECT *rect );
 W32KAPI LONG     WINAPI NtGdiGetBitmapBits( HBITMAP bitmap, LONG count, void *bits );
 W32KAPI BOOL     WINAPI NtGdiGetBitmapDimension( HBITMAP bitmap, SIZE *size );
 W32KAPI UINT     WINAPI NtGdiGetBoundsRect( HDC hdc, RECT *rect, UINT flags );
+W32KAPI NTSTATUS WINAPI NtGdiGetCurrentDpiInfo( HMONITOR monitor,
+                                                 struct ntgdi_current_dpi_info *info );
 W32KAPI BOOL     WINAPI NtGdiGetCharABCWidthsW( HDC hdc, UINT first, UINT last, WCHAR *chars,
                                                 ULONG flags, void *buffer );
 W32KAPI BOOL     WINAPI NtGdiGetCharWidthW( HDC hdc, UINT first_char, UINT last_char, WCHAR *chars,

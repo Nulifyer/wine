@@ -363,7 +363,7 @@
 @ stdcall GetClipRgn(long long)
 @ stdcall GetColorAdjustment(long ptr) NtGdiGetColorAdjustment
 @ stdcall GetColorSpace(long)
-# @ stub GetCurrentDpiInfo
+@ stdcall GetCurrentDpiInfo(long ptr)
 @ stdcall GetCurrentObject(long long)
 @ stdcall GetCurrentPositionEx(long ptr)
 @ stdcall GetDCBrushColor(long)

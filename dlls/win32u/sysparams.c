@@ -3217,6 +3217,44 @@ static struct ratio get_monitor_dpi( HMONITOR handle, UINT type, struct ratio *x
     return dpi;
 }
 
+/***********************************************************************
+ *           NtGdiGetCurrentDpiInfo   (win32u.@)
+ *
+ * Windows keeps this private 96-byte record with each display device.  Its
+ * generic fallback initializes four 100-percent scale values, the physical
+ * monitor extent, a valid-state word and the physical-coordinate flag.  Wine
+ * has no kernel display driver record, so derive that fallback from the
+ * existing monitor topology instead of maintaining parallel display state.
+ */
+NTSTATUS WINAPI NtGdiGetCurrentDpiInfo( HMONITOR handle, struct ntgdi_current_dpi_info *info )
+{
+    struct ntgdi_current_dpi_info current = {{100, 100, 100, 100}};
+    struct monitor *monitor;
+    RECT rect;
+
+    C_ASSERT( sizeof(*info) == 96 );
+
+    if (!info || !lock_display_devices( FALSE )) return STATUS_UNSUCCESSFUL;
+
+    if (!(monitor = get_monitor_from_handle( handle )))
+    {
+        unlock_display_devices();
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    rect = monitor_get_rect( monitor, no_dpi, MDT_RAW_DPI );
+    current.values[8] = rect.right - rect.left;
+    current.values[9] = rect.bottom - rect.top;
+    current.values[22] = 1;
+    current.values[23] = 0x20;
+    *info = current;
+
+    TRACE( "monitor %p, physical size %ux%u\n", handle,
+           current.values[8], current.values[9] );
+    unlock_display_devices();
+    return STATUS_SUCCESS;
+}
+
 /* keep in sync with user32 */
 static BOOL is_valid_dpi_awareness_context( UINT context, UINT dpi )
 {

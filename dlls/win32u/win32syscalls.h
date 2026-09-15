@@ -494,7 +494,7 @@
     SYSCALL_ENTRY( 0x11ea, NtGdiGetCharacterPlacementW, 0 ) \
     SYSCALL_ENTRY( 0x11eb, NtGdiGetColorAdjustment, 8 ) \
     SYSCALL_ENTRY( 0x11ec, NtGdiGetColorSpaceforBitmap, 0 ) \
-    SYSCALL_ENTRY( 0x11ed, NtGdiGetCurrentDpiInfo, 0 ) \
+    SYSCALL_ENTRY( 0x11ed, NtGdiGetCurrentDpiInfo, 8 ) \
     SYSCALL_ENTRY( 0x11ee, NtGdiGetDCDpiScaleValue, 0 ) \
     SYSCALL_ENTRY( 0x11ef, NtGdiGetDCDword, 12 ) \
     SYSCALL_ENTRY( 0x11f0, NtGdiGetDCObject, 8 ) \
@@ -2036,7 +2036,7 @@
     SYSCALL_ENTRY( 0x11ea, NtGdiGetCharacterPlacementW, 0 ) \
     SYSCALL_ENTRY( 0x11eb, NtGdiGetColorAdjustment, 16 ) \
     SYSCALL_ENTRY( 0x11ec, NtGdiGetColorSpaceforBitmap, 0 ) \
-    SYSCALL_ENTRY( 0x11ed, NtGdiGetCurrentDpiInfo, 0 ) \
+    SYSCALL_ENTRY( 0x11ed, NtGdiGetCurrentDpiInfo, 16 ) \
     SYSCALL_ENTRY( 0x11ee, NtGdiGetDCDpiScaleValue, 0 ) \
     SYSCALL_ENTRY( 0x11ef, NtGdiGetDCDword, 24 ) \
     SYSCALL_ENTRY( 0x11f0, NtGdiGetDCObject, 16 ) \
@@ -3464,7 +3464,6 @@
     SYSCALL_STUB( NtGdiGetCharSet ) \
     SYSCALL_STUB( NtGdiGetCharacterPlacementW ) \
     SYSCALL_STUB( NtGdiGetColorSpaceforBitmap ) \
-    SYSCALL_STUB( NtGdiGetCurrentDpiInfo ) \
     SYSCALL_STUB( NtGdiGetDCDpiScaleValue ) \
     SYSCALL_STUB( NtGdiGetDCforBitmap ) \
     SYSCALL_STUB( NtGdiGetDeviceCapsAll ) \
