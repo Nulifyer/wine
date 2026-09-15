@@ -736,8 +736,12 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
         }
     }
 
-    if (sd) default_set_sd( &token->obj, sd, OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION |
-                            DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION );
+    if (sd && !default_set_sd( &token->obj, sd, OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION |
+                               DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION ))
+    {
+        release_object( token );
+        return NULL;
+    }
 
     if (src_token->obj.sd)
     {
@@ -760,13 +764,44 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
     return token;
 }
 
-/* Ordinary process creation does not admit protected images. Keep the copied
- * security identity, but do not turn a token's queryable trust into admission. */
-struct token *token_duplicate_for_unprotected_process( struct token *source )
+/* Duplicate a primary token for internal process assignment. This is distinct
+ * from public NtDuplicateToken object creation. An explicitly supplied token
+ * used to be unsecured here; retain that access behavior with a real ACL so
+ * native callers can append an ACE to its object security descriptor. */
+struct token *token_duplicate_for_process( struct token *source, int preserve_trust,
+                                           int materialize_security )
 {
-    struct token *token = token_duplicate( source, TRUE, 0, NULL, NULL, 0, NULL, 0 );
+    static const struct
+    {
+        struct security_descriptor sd;
+        struct acl dacl;
+        struct ace ace;
+        struct sid sid;
+    } permissive_sd =
+    {
+        .sd =
+        {
+            .control = SE_DACL_PRESENT,
+            .dacl_len = sizeof(struct acl) + sizeof(struct ace) + offsetof(struct sid, sub_auth[1]),
+        },
+        .dacl =
+        {
+            .revision = ACL_REVISION,
+            .size = sizeof(struct acl) + sizeof(struct ace) + offsetof(struct sid, sub_auth[1]),
+            .count = 1,
+        },
+        .ace =
+        {
+            .type = ACCESS_ALLOWED_ACE_TYPE,
+            .size = sizeof(struct ace) + offsetof(struct sid, sub_auth[1]),
+            .mask = GENERIC_ALL,
+        },
+        .sid = {SID_REVISION, 1, SECURITY_WORLD_SID_AUTHORITY, {SECURITY_WORLD_RID}},
+    };
+    const struct security_descriptor *sd = materialize_security ? &permissive_sd.sd : NULL;
+    struct token *token = token_duplicate( source, TRUE, 0, sd, NULL, 0, NULL, 0 );
 
-    if (token)
+    if (token && !preserve_trust)
     {
         free( token->trust_level );
         token->trust_level = NULL;
@@ -782,7 +817,7 @@ int security_assign_unprotected_process_token( struct process *process, struct t
 
     if (source->trust_level)
     {
-        if (!(token = token_duplicate_for_unprotected_process( source ))) return 0;
+        if (!(token = token_duplicate_for_process( source, FALSE, FALSE ))) return 0;
     }
     else token = (struct token *)grab_object( source );
     release_object( process->token );
@@ -1408,6 +1443,7 @@ int check_object_access(struct token *token, struct object *obj, unsigned int *a
 /* create a security token */
 DECL_HANDLER(create_token)
 {
+    static const struct security_descriptor empty_sd;
     struct token *token;
     struct object_params params;
     struct sid *user;
@@ -1497,9 +1533,14 @@ DECL_HANDLER(create_token)
                           privs, req->priv_count, dacl, NULL, req->primary_group, req->impersonation_level, 0 );
     if (token)
     {
-        token->authentication_id.low_part = req->token_id.low_part;
-        token->authentication_id.high_part = req->token_id.high_part;
-        reply->token = alloc_handle( current->process, token, req->access, params.attr );
+        if (default_set_sd( &token->obj, params.sd ? params.sd : &empty_sd,
+                            OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION |
+                            DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION ))
+        {
+            token->authentication_id.low_part = req->token_id.low_part;
+            token->authentication_id.high_part = req->token_id.high_part;
+            reply->token = alloc_handle( current->process, token, req->access, params.attr );
+        }
         release_object( token );
     }
     free( default_dacl );
@@ -1760,7 +1801,8 @@ DECL_HANDLER(duplicate_token)
                                                      TOKEN_DUPLICATE,
                                                      &token_ops )))
     {
-        struct token *token = token_duplicate( src_token, req->primary, req->impersonation_level, params.sd, NULL, 0, NULL, 0 );
+        struct token *token = token_duplicate( src_token, req->primary, req->impersonation_level,
+                                               params.sd, NULL, 0, NULL, 0 );
         if (token)
         {
             unsigned int access = req->access ? req->access : get_handle_access( current->process, req->handle );

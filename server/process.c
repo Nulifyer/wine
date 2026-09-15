@@ -708,11 +708,9 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
          * an explicitly protected creation. Native-machine mode alone must
          * not trust ordinary children. Protected-process requests are
          * validated below. */
-        if (preserve_trust || (flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS))
-            process->token = token_duplicate( token ? token : parent->token, TRUE, 0,
-                                              NULL, NULL, 0, NULL, 0 );
-        else
-            process->token = token_duplicate_for_unprotected_process( token ? token : parent->token );
+        process->token = token_duplicate_for_process(
+            token ? token : parent->token,
+            preserve_trust || (flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS), token != NULL );
         process->affinity = parent->affinity;
     }
     if (!process->handles || !process->token) goto error;

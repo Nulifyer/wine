@@ -40,6 +40,38 @@ struct ksec_duplicate_handle_request
     ULONGLONG package_id;
 };
 
+static void check_token_object_dacl( HANDLE token, const char *context )
+{
+    SECURITY_DESCRIPTOR *sd;
+    BOOLEAN present, defaulted;
+    ACL *dacl = NULL;
+    ULONG size = 0;
+    NTSTATUS status;
+
+    status = NtQuerySecurityObject( token, DACL_SECURITY_INFORMATION, NULL, 0, &size );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "%s: NtQuerySecurityObject returned %#lx.\n", context, status );
+    ok( size >= SECURITY_DESCRIPTOR_MIN_LENGTH, "%s: got size %lu.\n", context, size );
+    if (status != STATUS_BUFFER_TOO_SMALL || size < SECURITY_DESCRIPTOR_MIN_LENGTH) return;
+
+    sd = malloc( size );
+    ok( !!sd, "%s: failed to allocate %lu bytes.\n", context, size );
+    if (!sd) return;
+
+    status = NtQuerySecurityObject( token, DACL_SECURITY_INFORMATION, sd, size, &size );
+    ok( status == STATUS_SUCCESS, "%s: NtQuerySecurityObject returned %#lx.\n", context, status );
+    if (!status)
+    {
+        status = RtlGetDaclSecurityDescriptor( sd, &present, &dacl, &defaulted );
+        ok( status == STATUS_SUCCESS, "%s: RtlGetDaclSecurityDescriptor returned %#lx.\n", context, status );
+        if (!status)
+        {
+            ok( present, "%s: DACL is not present.\n", context );
+            ok( !!dacl, "%s: DACL is null.\n", context );
+        }
+    }
+    free( sd );
+}
+
 static void test_ksec_duplicate_handle(void)
 {
     struct ksec_duplicate_handle_request request;
@@ -501,6 +533,8 @@ static void test_adjust_groups(void)
                             &primary_group, &default_dacl, &source );
     ok( status == STATUS_SUCCESS, "NtCreateToken returned %#lx.\n", status );
     if (status) return;
+
+    check_token_object_dacl( token, "created token" );
 
     {
         TOKEN_STATISTICS statistics;

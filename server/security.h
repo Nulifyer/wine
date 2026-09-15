@@ -73,7 +73,8 @@ extern struct token *token_duplicate( struct token *src_token, unsigned primary,
 extern int token_check_privileges( struct token *token, int all_required,
                                    const struct luid_attr *reqprivs,
                                    unsigned int count, struct luid_attr *usedprivs );
-extern struct token *token_duplicate_for_unprotected_process( struct token *source );
+extern struct token *token_duplicate_for_process( struct token *source, int preserve_trust,
+                                                  int materialize_security );
 extern struct token *token_duplicate_impersonation( struct token *token, int level, int effective_only );
 extern void token_get_identity( struct token *token, struct token_identity *identity );
 extern const struct acl *token_get_default_dacl( struct token *token );
