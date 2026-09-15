@@ -76,7 +76,7 @@
 
 2563 stub -noname ClearForeground  # NtUserClearForeground
 2564 stub -noname RegisterWindowArrangementCallout  # NtUserRegisterWindowArrangementCallout
-2565 stub @
+2565 stdcall -noname IsCurrentProcessGdiScaledX()
 2566 stub @
 2567 stub -noname EnableShellWindowManagementBehavior  # NtUserEnableShellWindowManagementBehavior
 2568 stub -noname SetModernAppWindow  # NtUserSetModernAppWindow

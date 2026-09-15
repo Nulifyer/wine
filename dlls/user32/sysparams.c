@@ -714,6 +714,15 @@ BOOL WINAPI GetProcessDpiAwarenessInternal( HANDLE process, DPI_AWARENESS *aware
 }
 
 /**********************************************************************
+ *              IsCurrentProcessGdiScaledX   (USER32.2565)
+ */
+BOOL WINAPI IsCurrentProcessGdiScaledX(void)
+{
+    ULONG context = NtUserGetProcessDpiAwarenessContext( GetCurrentProcess() );
+    return !!(NTUSER_DPI_CONTEXT_GET_FLAGS( context ) & NTUSER_DPI_CONTEXT_FLAG_GDISCALED);
+}
+
+/**********************************************************************
  *              SetProcessDpiAwarenessInternal   (USER32.@)
  */
 BOOL WINAPI SetProcessDpiAwarenessInternal( DPI_AWARENESS awareness )

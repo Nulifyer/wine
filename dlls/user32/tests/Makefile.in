@@ -23,6 +23,7 @@ SOURCES = \
 	menu.c \
 	monitor.c \
 	msg.c \
+	native_ordinals.c \
 	resource.c \
 	resource.rc \
 	scroll.c \
