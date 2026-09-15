@@ -31,6 +31,7 @@
 #include "winerror.h"
 
 #include "rpc.h"
+#include "rpcasync.h"
 #include "rpcndr.h"
 #include "excpt.h"
 
@@ -110,6 +111,38 @@ static ULONG rpc_process_mode;
 static RPC_FORWARD_FUNCTION server_forward_function;
 static void *server_address_change_fn;
 
+struct rpc_server_notification
+{
+    BOOL subscribed;
+    BOOL delivered;
+    RPC_NOTIFICATION_TYPES type;
+    RPC_ASYNC_NOTIFICATION_INFO info;
+    ULONG queued;
+};
+
+struct rpc_server_call
+{
+    LONG refs;
+    CRITICAL_SECTION cs;
+    struct list entry;
+    RpcConnection *connection;
+    RpcBinding *binding;
+    RPC_ASYNC_STATE *async;
+    ULONG call_id;
+    BOOL disconnected;
+    BOOL cancelled;
+    struct rpc_server_notification notifications[2];
+};
+
+struct rpc_server_notification_work
+{
+    struct rpc_server_call *call;
+    RPC_ASYNC_NOTIFICATION_INFO info;
+    RPC_ASYNC_STATE *handle;
+    RPC_NOTIFICATION_TYPES type;
+    RPC_ASYNC_EVENT event;
+};
+
 struct rpc_port_allocation_data
 {
     ULONG unknown0;
@@ -119,6 +152,251 @@ struct rpc_port_allocation_data
     void *unknown10;
     void *unknown18;
 };
+
+static void rpc_server_call_release(struct rpc_server_call *call)
+{
+    RpcConnection *connection;
+
+    connection = call->connection;
+    EnterCriticalSection(&connection->server_calls_cs);
+    if (InterlockedDecrement(&call->refs))
+    {
+        LeaveCriticalSection(&connection->server_calls_cs);
+        return;
+    }
+    list_remove(&call->entry);
+    LeaveCriticalSection(&connection->server_calls_cs);
+    call->binding->server_call = NULL;
+    RPCRT4_ReleaseBinding(call->binding);
+    call->cs.DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection(&call->cs);
+    free(call);
+    RPCRT4_ReleaseConnection(connection);
+}
+
+static RPC_STATUS rpc_server_call_create(RpcConnection *connection,
+                                         ULONG call_id,
+                                         struct rpc_server_call **call_out)
+{
+    struct rpc_server_call *call;
+    RPC_STATUS status;
+
+    if (!(call = calloc(1, sizeof(*call)))) return RPC_S_OUT_OF_RESOURCES;
+
+    call->refs = 1;
+    call->connection = RPCRT4_GrabConnection(connection);
+    call->call_id = call_id;
+    InitializeCriticalSectionEx(&call->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    call->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": rpc_server_call.cs");
+
+    if (!connection->server_binding || !connection->server_binding->Assoc)
+        status = RPC_S_INVALID_BINDING;
+    else
+        status = RPCRT4_MakeBinding(&call->binding, connection);
+    if (status == RPC_S_OK)
+        status = RpcServerAssoc_GetAssociation(rpcrt4_conn_get_name(connection),
+                                               connection->NetworkAddr, connection->Endpoint,
+                                               connection->NetworkOptions,
+                                               connection->server_binding->Assoc->assoc_group_id,
+                                               &call->binding->Assoc);
+    if (status != RPC_S_OK)
+    {
+        if (call->binding) RPCRT4_ReleaseBinding(call->binding);
+        call->cs.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&call->cs);
+        RPCRT4_ReleaseConnection(call->connection);
+        free(call);
+        return status;
+    }
+
+    call->binding->server_call = call;
+    EnterCriticalSection(&connection->server_calls_cs);
+    call->disconnected = connection->server_disconnected;
+    list_add_tail(&connection->server_calls, &call->entry);
+    LeaveCriticalSection(&connection->server_calls_cs);
+    *call_out = call;
+    return RPC_S_OK;
+}
+
+static void rpc_server_notification_work_release(struct rpc_server_notification_work *work)
+{
+    rpc_server_call_release(work->call);
+    free(work);
+}
+
+static void CALLBACK rpc_server_notification_apc(ULONG_PTR param)
+{
+    struct rpc_server_notification_work *work = (void *)param;
+
+    work->info.APC.NotificationRoutine(work->handle, NULL, work->event);
+    rpc_server_notification_work_release(work);
+}
+
+static DWORD CALLBACK rpc_server_notification_worker(void *param)
+{
+    struct rpc_server_notification_work *work = param;
+
+    switch (work->type)
+    {
+    case RpcNotificationTypeEvent:
+        SetEvent(work->info.hEvent);
+        break;
+    case RpcNotificationTypeApc:
+        if (QueueUserAPC(rpc_server_notification_apc, work->info.APC.hThread,
+                         (ULONG_PTR)work))
+            return 0;
+        break;
+    case RpcNotificationTypeIoc:
+        PostQueuedCompletionStatus(work->info.IOC.hIOPort,
+                                   work->info.IOC.dwNumberOfBytesTransferred,
+                                   work->info.IOC.dwCompletionKey,
+                                   work->info.IOC.lpOverlapped);
+        break;
+    case RpcNotificationTypeHwnd:
+        PostMessageW(work->info.HWND.hWnd, work->info.HWND.Msg, 0, 0);
+        break;
+    case RpcNotificationTypeCallback:
+        work->info.NotificationRoutine(work->handle, NULL, work->event);
+        break;
+    default:
+        break;
+    }
+
+    rpc_server_notification_work_release(work);
+    return 0;
+}
+
+static void rpc_server_call_queue_notification(struct rpc_server_call *call,
+                                               RPC_NOTIFICATIONS notification)
+{
+    struct rpc_server_notification_work *work;
+    struct rpc_server_notification *state;
+    unsigned int index = notification - RpcNotificationClientDisconnect;
+
+    if (index >= ARRAY_SIZE(call->notifications)) return;
+
+    EnterCriticalSection(&call->cs);
+    state = &call->notifications[index];
+    if (!state->subscribed || state->delivered)
+    {
+        LeaveCriticalSection(&call->cs);
+        return;
+    }
+
+    if (!(work = malloc(sizeof(*work))))
+    {
+        ERR("failed to allocate notification work for call %p\n", call);
+        LeaveCriticalSection(&call->cs);
+        return;
+    }
+
+    InterlockedIncrement(&call->refs);
+    work->call = call;
+    work->info = state->info;
+    work->handle = call->async ? call->async : (RPC_ASYNC_STATE *)call->binding;
+    work->type = state->type;
+    work->event = notification == RpcNotificationClientDisconnect
+                  ? RpcClientDisconnect : RpcClientCancel;
+    state->delivered = TRUE;
+    ++state->queued;
+    if (!QueueUserWorkItem(rpc_server_notification_worker, work, WT_EXECUTEDEFAULT))
+    {
+        ERR("failed to queue notification work for call %p, error %lu\n",
+            call, GetLastError());
+        state->delivered = FALSE;
+        --state->queued;
+        InterlockedDecrement(&call->refs);
+        free(work);
+    }
+    LeaveCriticalSection(&call->cs);
+}
+
+static RPC_STATUS rpc_server_call_from_binding(RPC_BINDING_HANDLE binding_handle,
+                                               struct rpc_server_call **call_out)
+{
+    RpcBinding *binding = binding_handle ? binding_handle : RPCRT4_GetThreadCurrentCallHandle();
+
+    if (!binding) return RPC_S_NO_CALL_ACTIVE;
+    if (!binding->server || !binding->FromConn) return RPC_S_INVALID_BINDING;
+    if (!binding->server_call) return RPC_S_NO_CALL_ACTIVE;
+    *call_out = binding->server_call;
+    return RPC_S_OK;
+}
+
+void RPCRT4_ServerConnectionClosed(RpcConnection *connection)
+{
+    struct rpc_server_call *call;
+
+    EnterCriticalSection(&connection->server_calls_cs);
+    if (!connection->server_disconnected)
+    {
+        connection->server_disconnected = TRUE;
+        LIST_FOR_EACH_ENTRY(call, &connection->server_calls, struct rpc_server_call, entry)
+        {
+            EnterCriticalSection(&call->cs);
+            call->disconnected = TRUE;
+            LeaveCriticalSection(&call->cs);
+            rpc_server_call_queue_notification(call, RpcNotificationClientDisconnect);
+        }
+    }
+    LeaveCriticalSection(&connection->server_calls_cs);
+}
+
+void RPCRT4_ServerCallCancelled(RpcConnection *connection, ULONG call_id)
+{
+    struct rpc_server_call *call;
+
+    EnterCriticalSection(&connection->server_calls_cs);
+    LIST_FOR_EACH_ENTRY(call, &connection->server_calls, struct rpc_server_call, entry)
+    {
+        if (call->call_id != call_id) continue;
+        EnterCriticalSection(&call->cs);
+        call->cancelled = TRUE;
+        LeaveCriticalSection(&call->cs);
+        rpc_server_call_queue_notification(call, RpcNotificationCallCancel);
+        break;
+    }
+    LeaveCriticalSection(&connection->server_calls_cs);
+}
+
+struct rpc_server_call *RPCRT4_AsyncServerCallStart(RPC_ASYNC_STATE *async)
+{
+    RpcBinding *binding = RPCRT4_GetThreadCurrentCallHandle();
+    struct rpc_server_call *call;
+
+    if (!binding || !(call = binding->server_call)) return NULL;
+
+    EnterCriticalSection(&call->cs);
+    if (call->async)
+    {
+        LeaveCriticalSection(&call->cs);
+        return NULL;
+    }
+    InterlockedIncrement(&call->refs);
+    call->async = async;
+    async->RuntimeInfo = binding;
+    LeaveCriticalSection(&call->cs);
+    return call;
+}
+
+void RPCRT4_AsyncServerCallFinish(struct rpc_server_call *call, RPC_ASYNC_STATE *async)
+{
+    unsigned int i;
+
+    if (!call) return;
+
+    EnterCriticalSection(&call->cs);
+    if (call->async == async)
+    {
+        for (i = 0; i < ARRAY_SIZE(call->notifications); ++i)
+            if (call->notifications[i].subscribed)
+                WARN("async call %p completed with notification %u still subscribed\n", async, i + 1);
+        call->async = NULL;
+        async->RuntimeInfo = NULL;
+    }
+    LeaveCriticalSection(&call->cs);
+    rpc_server_call_release(call);
+}
 
 static UUID uuid_nil;
 
@@ -380,6 +658,7 @@ static RPC_STATUS process_request_packet(RpcConnection *conn, RpcPktRequestHdr *
   RPC_STATUS status;
   RpcPktHdr *response = NULL;
   RpcServerInterface* sif;
+  struct rpc_server_call *call;
   RPC_DISPATCH_FUNCTION func;
   BOOL exception;
   UUID *object_uuid;
@@ -413,6 +692,20 @@ static RPC_STATUS process_request_packet(RpcConnection *conn, RpcPktRequestHdr *
     free(response);
     return RPC_S_OK;
   }
+  status = rpc_server_call_create(conn, hdr->common.call_id, &call);
+  if (status != RPC_S_OK)
+  {
+    response = RPCRT4_BuildFaultHeader(NDR_LOCAL_DATA_REPRESENTATION,
+                                       RPC2NCA_STATUS(status));
+    if (response)
+    {
+      RPCRT4_Send(conn, response, NULL, 0);
+      free(response);
+    }
+    RPCRT4_release_server_interface(sif);
+    return RPC_S_OK;
+  }
+  msg->Handle = (RPC_BINDING_HANDLE)call->binding;
   msg->RpcInterfaceInformation = sif->If;
   /* copy the endpoint vector from sif to msg so that midl-generated code will use it */
   msg->ManagerEpv = sif->MgrEpv;
@@ -494,6 +787,7 @@ static RPC_STATUS process_request_packet(RpcConnection *conn, RpcPktRequestHdr *
   if ((msg->RpcFlags & RPC_BUFFER_ASYNC) || msg->Buffer == buf) buf = NULL;
   TRACE("freeing Buffer=%p\n", buf);
   I_RpcFree(buf);
+  rpc_server_call_release(call);
 
   return status;
 }
@@ -629,6 +923,11 @@ static DWORD CALLBACK RPCRT4_io_thread(LPVOID the_arg)
       status = process_auth3_packet(conn, &hdr->common, msg, auth_data,
                                     auth_length);
       break;
+    case PKT_CO_CANCEL:
+      TRACE("got cancel packet for call %u\n", hdr->common.call_id);
+      RPCRT4_ServerCallCancelled(conn, hdr->common.call_id);
+      status = RPC_S_OK;
+      break;
     default:
       FIXME("unhandled packet type %u\n", hdr->common.ptype);
       break;
@@ -645,6 +944,7 @@ static DWORD CALLBACK RPCRT4_io_thread(LPVOID the_arg)
     }
   }
 exit:
+  RPCRT4_ServerConnectionClosed(conn);
   RPCRT4_ReleaseConnection(conn);
   return 0;
 }
@@ -1936,7 +2236,10 @@ RPC_STATUS WINAPI RpcServerInqBindingHandle(RPC_BINDING_HANDLE *binding)
  */
 RPC_STATUS WINAPI RpcServerTestCancel(RPC_BINDING_HANDLE client_binding)
 {
+    struct rpc_server_call *call;
     RpcBinding *binding;
+    RPC_STATUS status;
+    BOOL cancelled;
 
     TRACE("%p\n", client_binding);
 
@@ -1944,9 +2247,105 @@ RPC_STATUS WINAPI RpcServerTestCancel(RPC_BINDING_HANDLE client_binding)
     if (!binding) return RPC_S_NO_CALL_ACTIVE;
     if (!binding->FromConn) return RPC_S_INVALID_BINDING;
 
-    /* The current transports do not receive connection-oriented cancel PDUs,
-     * so a live inbound call cannot have a pending cancellation request. */
-    return RPC_S_CALL_IN_PROGRESS;
+    status = rpc_server_call_from_binding(client_binding, &call);
+    if (status != RPC_S_OK) return status;
+
+    EnterCriticalSection(&call->cs);
+    cancelled = call->cancelled;
+    LeaveCriticalSection(&call->cs);
+
+    return cancelled ? RPC_S_CALL_CANCELLED : RPC_S_CALL_IN_PROGRESS;
+}
+
+/***********************************************************************
+ *             RpcServerSubscribeForNotification (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerSubscribeForNotification(RPC_BINDING_HANDLE binding,
+                                                     RPC_NOTIFICATIONS notification,
+                                                     RPC_NOTIFICATION_TYPES type,
+                                                     RPC_ASYNC_NOTIFICATION_INFO *info)
+{
+    struct rpc_server_call *call;
+    RPC_STATUS status;
+    unsigned int i;
+    BOOL disconnected, cancelled;
+
+    TRACE("%p %#x %u %p\n", binding, notification, type, info);
+
+    if (!notification || notification & ~(RpcNotificationClientDisconnect | RpcNotificationCallCancel))
+        return RPC_S_CANNOT_SUPPORT;
+    if (!info || type <= RpcNotificationTypeNone || type > RpcNotificationTypeCallback)
+        return RPC_S_INVALID_ARG;
+    if (type == RpcNotificationTypeEvent &&
+        notification == (RpcNotificationClientDisconnect | RpcNotificationCallCancel))
+        return RPC_S_INVALID_ARG;
+
+    status = rpc_server_call_from_binding(binding, &call);
+    if (status != RPC_S_OK) return status;
+
+    EnterCriticalSection(&call->cs);
+    for (i = 0; i < ARRAY_SIZE(call->notifications); ++i)
+    {
+        if (!(notification & (RpcNotificationClientDisconnect << i))) continue;
+        if (call->notifications[i].subscribed)
+        {
+            LeaveCriticalSection(&call->cs);
+            return RPC_S_ALREADY_REGISTERED;
+        }
+    }
+    for (i = 0; i < ARRAY_SIZE(call->notifications); ++i)
+    {
+        if (!(notification & (RpcNotificationClientDisconnect << i))) continue;
+        call->notifications[i].subscribed = TRUE;
+        call->notifications[i].type = type;
+        call->notifications[i].info = *info;
+    }
+    disconnected = call->disconnected;
+    cancelled = call->cancelled;
+    LeaveCriticalSection(&call->cs);
+
+    if (disconnected && notification & RpcNotificationClientDisconnect)
+        rpc_server_call_queue_notification(call, RpcNotificationClientDisconnect);
+    if (cancelled && notification & RpcNotificationCallCancel)
+        rpc_server_call_queue_notification(call, RpcNotificationCallCancel);
+
+    return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             RpcServerUnsubscribeForNotification (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerUnsubscribeForNotification(RPC_BINDING_HANDLE binding,
+                                                       RPC_NOTIFICATIONS notification,
+                                                       ULONG *notifications_queued)
+{
+    struct rpc_server_call *call;
+    struct rpc_server_notification *state;
+    RPC_STATUS status;
+    unsigned int index;
+
+    TRACE("%p %u %p\n", binding, notification, notifications_queued);
+
+    if (notification != RpcNotificationClientDisconnect &&
+        notification != RpcNotificationCallCancel)
+        return RPC_S_CANNOT_SUPPORT;
+    if (!notifications_queued) return RPC_S_INVALID_ARG;
+
+    status = rpc_server_call_from_binding(binding, &call);
+    if (status != RPC_S_OK) return status;
+
+    index = notification - RpcNotificationClientDisconnect;
+    EnterCriticalSection(&call->cs);
+    state = &call->notifications[index];
+    if (!state->subscribed)
+    {
+        LeaveCriticalSection(&call->cs);
+        return RPC_S_INVALID_ARG;
+    }
+    state->subscribed = FALSE;
+    *notifications_queued = state->queued;
+    LeaveCriticalSection(&call->cs);
+    return RPC_S_OK;
 }
 
 /***********************************************************************

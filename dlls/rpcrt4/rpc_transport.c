@@ -3380,6 +3380,11 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
 
   list_init(&NewConnection->conn_pool_entry);
   list_init(&NewConnection->protseq_entry);
+  list_init(&NewConnection->server_calls);
+  InitializeCriticalSectionEx(&NewConnection->server_calls_cs, 0,
+                              RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+  NewConnection->server_calls_cs.DebugInfo->Spare[0] =
+      (DWORD_PTR)(__FILE__ ": RpcConnection.server_calls_cs");
 
   TRACE("connection: %p\n", NewConnection);
   *Connection = NewConnection;
@@ -3468,6 +3473,10 @@ void RPCRT4_ReleaseConnection(RpcConnection *connection)
         /* server-only */
         if (connection->server_binding) RPCRT4_ReleaseBinding(connection->server_binding);
         else if (connection->assoc) RpcAssoc_ConnectionReleased(connection->assoc);
+
+        assert(list_empty(&connection->server_calls));
+        connection->server_calls_cs.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&connection->server_calls_cs);
 
         if (connection->wait_release) SetEvent(connection->wait_release);
 

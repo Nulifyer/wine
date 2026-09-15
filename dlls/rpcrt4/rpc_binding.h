@@ -59,6 +59,7 @@ typedef struct _RpcQualityOfService
 } RpcQualityOfService;
 
 struct connection_ops;
+struct rpc_server_call;
 
 typedef struct _RpcConnection
 {
@@ -95,6 +96,9 @@ typedef struct _RpcConnection
   struct list protseq_entry;
   struct _RpcServerProtseq *protseq;
   struct _RpcBinding *server_binding;
+  CRITICAL_SECTION server_calls_cs;
+  struct list server_calls;
+  BOOL server_disconnected;
 } RpcConnection;
 
 struct connection_ops {
@@ -155,6 +159,7 @@ typedef struct _RpcBinding
   ULONG CallTimeout;
   RPC_SYNTAX_IDENTIFIER FastInterface;
   RPC_SYNTAX_IDENTIFIER FastTransferSyntax;
+  struct rpc_server_call *server_call;
 } RpcBinding;
 
 LPWSTR RPCRT4_strndupW(LPCWSTR src, INT len);

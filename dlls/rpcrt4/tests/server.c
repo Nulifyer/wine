@@ -46,6 +46,9 @@ static const char *progname, *client_test_name;
 static BOOL old_windows_version;
 
 static HANDLE stop_event, stop_wait_event;
+static HANDLE disconnect_ready_event, disconnect_notification_event, disconnect_done_event;
+static RPC_BINDING_HANDLE disconnect_binding;
+static LONG disconnect_notification_count;
 static PROCESS_INFORMATION client_info;
 
 static void (WINAPI *pNDRSContextMarshall2)(RPC_BINDING_HANDLE, NDR_SCONTEXT, void*, NDR_RUNDOWN, void*, ULONG);
@@ -60,6 +63,12 @@ static LONG (WINAPI *pI_RpcOpenClientThread)(RPC_BINDING_HANDLE, ACCESS_MASK, HA
 static RPC_STATUS (WINAPI *pRpcServerInqCallAttributesW)(RPC_BINDING_HANDLE, void *);
 static RPC_STATUS (WINAPI *pRpcServerInqBindingHandle)(RPC_BINDING_HANDLE *);
 static RPC_STATUS (WINAPI *pRpcServerTestCancel)(RPC_BINDING_HANDLE);
+static RPC_STATUS (WINAPI *pRpcServerSubscribeForNotification)(RPC_BINDING_HANDLE,
+                                                               RPC_NOTIFICATIONS,
+                                                               RPC_NOTIFICATION_TYPES,
+                                                               RPC_ASYNC_NOTIFICATION_INFO *);
+static RPC_STATUS (WINAPI *pRpcServerUnsubscribeForNotification)(RPC_BINDING_HANDLE,
+                                                                 RPC_NOTIFICATIONS, ULONG *);
 static RPC_STATUS (WINAPI *pRpcSsGetContextBinding)(void *, RPC_BINDING_HANDLE *);
 
 static char *domain_and_user;
@@ -171,6 +180,7 @@ static ctx_handle_t (__cdecl *get_handle)(void);
 static void (__cdecl *get_handle_by_ptr)(ctx_handle_t *r);
 static void (__cdecl *test_handle)(ctx_handle_t ctx_handle);
 static void (__cdecl *test_I_RpcBindingInqLocalClientPID)(unsigned int protseq, RPC_BINDING_HANDLE binding);
+static void (__cdecl *test_client_disconnect)(void);
 
 #define SERVER_FUNCTIONS \
     X(int_return) \
@@ -279,7 +289,8 @@ static void (__cdecl *test_I_RpcBindingInqLocalClientPID)(unsigned int protseq, 
     X(get_handle) \
     X(get_handle_by_ptr) \
     X(test_handle) \
-    X(test_I_RpcBindingInqLocalClientPID)
+    X(test_I_RpcBindingInqLocalClientPID) \
+    X(test_client_disconnect)
 
 /* type check statements generated in header file */
 fnprintf *p_printf = printf;
@@ -313,6 +324,10 @@ static void InitFunctionPointers(void)
     pRpcServerInqCallAttributesW = (void *)GetProcAddress(hrpcrt4, "RpcServerInqCallAttributesW");
     pRpcServerInqBindingHandle = (void *)GetProcAddress(hrpcrt4, "RpcServerInqBindingHandle");
     pRpcServerTestCancel = (void *)GetProcAddress(hrpcrt4, "RpcServerTestCancel");
+    pRpcServerSubscribeForNotification =
+        (void *)GetProcAddress(hrpcrt4, "RpcServerSubscribeForNotification");
+    pRpcServerUnsubscribeForNotification =
+        (void *)GetProcAddress(hrpcrt4, "RpcServerUnsubscribeForNotification");
     pRpcSsGetContextBinding = (void *)GetProcAddress(hrpcrt4, "RpcSsGetContextBinding");
 
     if (!pNDRSContextMarshall2) old_windows_version = TRUE;
@@ -1273,10 +1288,31 @@ struct test_thread_params
     RPC_BINDING_HANDLE binding;
 };
 
+static void RPC_ENTRY unexpected_server_notification(RPC_ASYNC_STATE *state, void *context,
+                                                     RPC_ASYNC_EVENT event)
+{
+    ok(0, "unexpected server notification state %p, context %p, event %u\n",
+       state, context, event);
+}
+
+static void RPC_ENTRY server_disconnect_notification(RPC_ASYNC_STATE *state, void *context,
+                                                     RPC_ASYNC_EVENT event)
+{
+    ok(state == (RPC_ASYNC_STATE *)disconnect_binding,
+       "expected binding handle %p, got state %p\n", disconnect_binding, state);
+    ok(!context, "expected null context, got %p\n", context);
+    ok(event == RpcClientDisconnect, "expected RpcClientDisconnect, got event %u\n", event);
+    InterlockedIncrement(&disconnect_notification_count);
+    SetEvent(disconnect_notification_event);
+}
+
 static DWORD CALLBACK test_I_RpcBindingInqLocalClientPID_thread_func(void *args)
 {
     struct test_thread_params *params = (struct test_thread_params *)args;
+    RPC_ASYNC_NOTIFICATION_INFO info;
     RPC_STATUS status;
+    HANDLE event;
+    ULONG queued;
     ULONG pid;
 
     winetest_push_context("%s", client_test_name);
@@ -1292,15 +1328,33 @@ static DWORD CALLBACK test_I_RpcBindingInqLocalClientPID_thread_func(void *args)
         ok(pid == client_info.dwProcessId, "Got unexpected pid.\n");
     }
 
+    if (pRpcServerSubscribeForNotification && pRpcServerUnsubscribeForNotification)
+    {
+        event = CreateEventW(NULL, FALSE, FALSE, NULL);
+        ok(event != NULL, "CreateEvent failed with error %lu.\n", GetLastError());
+        info.hEvent = event;
+        status = pRpcServerSubscribeForNotification(params->binding, RpcNotificationCallCancel,
+                                                     RpcNotificationTypeEvent, &info);
+        ok(status == RPC_S_OK, "RpcServerSubscribeForNotification returned %ld.\n", status);
+        queued = 0xdeadbeef;
+        status = pRpcServerUnsubscribeForNotification(params->binding, RpcNotificationCallCancel,
+                                                       &queued);
+        ok(status == RPC_S_OK, "RpcServerUnsubscribeForNotification returned %ld.\n", status);
+        ok(!queued, "expected no queued cancel notifications, got %lu.\n", queued);
+        CloseHandle(event);
+    }
+
     winetest_pop_context();
     return 0;
 }
 
 void __cdecl s_test_I_RpcBindingInqLocalClientPID(unsigned int protseq, RPC_BINDING_HANDLE binding)
 {
+    RPC_ASYNC_NOTIFICATION_INFO info;
     struct test_thread_params params;
     RPC_STATUS status;
     HANDLE thread;
+    ULONG queued;
     ULONG pid;
     unsigned int is_local;
 
@@ -1313,6 +1367,21 @@ void __cdecl s_test_I_RpcBindingInqLocalClientPID(unsigned int protseq, RPC_BIND
     }
     else
         win_skip("RpcServerTestCancel is unavailable\n");
+
+    if (pRpcServerSubscribeForNotification && pRpcServerUnsubscribeForNotification)
+    {
+        info.NotificationRoutine = unexpected_server_notification;
+        status = pRpcServerSubscribeForNotification(NULL, RpcNotificationClientDisconnect,
+                                                     RpcNotificationTypeCallback, &info);
+        ok(status == RPC_S_OK, "RpcServerSubscribeForNotification returned %ld.\n", status);
+        queued = 0xdeadbeef;
+        status = pRpcServerUnsubscribeForNotification(NULL, RpcNotificationClientDisconnect,
+                                                       &queued);
+        ok(status == RPC_S_OK, "RpcServerUnsubscribeForNotification returned %ld.\n", status);
+        ok(!queued, "expected no queued disconnect notifications, got %lu.\n", queued);
+    }
+    else
+        win_skip("server notification APIs are unavailable\n");
 
     if (protseq == RPC_PROTSEQ_LRPC && pI_RpcOpenClientProcess)
     {
@@ -1433,6 +1502,43 @@ void __cdecl s_test_I_RpcBindingInqLocalClientPID(unsigned int protseq, RPC_BIND
     CloseHandle(thread);
 
     winetest_pop_context();
+}
+
+void __cdecl s_test_client_disconnect(void)
+{
+    RPC_ASYNC_NOTIFICATION_INFO info;
+    RPC_STATUS status;
+    DWORD wait;
+    ULONG queued;
+
+    status = pRpcServerInqBindingHandle(&disconnect_binding);
+    ok(status == RPC_S_OK, "RpcServerInqBindingHandle returned %ld.\n", status);
+    info.NotificationRoutine = server_disconnect_notification;
+    status = pRpcServerSubscribeForNotification(NULL,
+                                                 RpcNotificationClientDisconnect |
+                                                 RpcNotificationCallCancel,
+                                                 RpcNotificationTypeCallback, &info);
+    ok(status == RPC_S_OK, "RpcServerSubscribeForNotification returned %ld.\n", status);
+    SetEvent(disconnect_ready_event);
+
+    if (status == RPC_S_OK)
+    {
+        wait = WaitForSingleObject(disconnect_notification_event, 10000);
+        ok(wait == WAIT_OBJECT_0, "disconnect notification wait returned %lu.\n", wait);
+
+        queued = 0xdeadbeef;
+        status = pRpcServerUnsubscribeForNotification(NULL, RpcNotificationClientDisconnect,
+                                                       &queued);
+        ok(status == RPC_S_OK, "RpcServerUnsubscribeForNotification returned %ld.\n", status);
+        ok(queued == 1, "expected one queued disconnect notification, got %lu.\n", queued);
+        queued = 0xdeadbeef;
+        status = pRpcServerUnsubscribeForNotification(NULL, RpcNotificationCallCancel,
+                                                       &queued);
+        ok(status == RPC_S_OK, "RpcServerUnsubscribeForNotification returned %ld.\n", status);
+        ok(!queued, "expected no queued cancel notifications, got %lu.\n", queued);
+    }
+
+    SetEvent(disconnect_done_event);
 }
 
 int __cdecl s_add(handle_t binding, int a, int b)
@@ -2494,6 +2600,73 @@ client(const char *test)
     ok(RPC_S_OK == RpcStringFreeA(&binding), "RpcStringFree\n");
     ok(RPC_S_OK == RpcBindingFree(&IMixedServer_IfHandle), "RpcBindingFree\n");
   }
+  else if (strcmp(test, "disconnect_notification") == 0)
+  {
+    ok(RPC_S_OK == RpcStringBindingComposeA(NULL, ncalrpc, NULL, guid, NULL, &binding), "RpcStringBindingCompose\n");
+    ok(RPC_S_OK == RpcBindingFromStringBindingA(binding, &IMixedServer_IfHandle), "RpcBindingFromStringBinding\n");
+
+    test_client_disconnect();
+
+    ok(RPC_S_OK == RpcStringFreeA(&binding), "RpcStringFree\n");
+    ok(RPC_S_OK == RpcBindingFree(&IMixedServer_IfHandle), "RpcBindingFree\n");
+  }
+}
+
+static void test_server_disconnect_notification(void)
+{
+  char cmdline[MAX_PATH];
+  STARTUPINFOA startup;
+  DWORD ret;
+
+  if (!pRpcServerInqBindingHandle || !pRpcServerSubscribeForNotification ||
+      !pRpcServerUnsubscribeForNotification)
+  {
+    win_skip("server notification APIs are unavailable\n");
+    return;
+  }
+
+  disconnect_ready_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+  disconnect_notification_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+  disconnect_done_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+  disconnect_binding = NULL;
+  disconnect_notification_count = 0;
+  ok(disconnect_ready_event != NULL, "CreateEvent failed with error %lu.\n", GetLastError());
+  ok(disconnect_notification_event != NULL, "CreateEvent failed with error %lu.\n", GetLastError());
+  ok(disconnect_done_event != NULL, "CreateEvent failed with error %lu.\n", GetLastError());
+  if (!disconnect_ready_event || !disconnect_notification_event || !disconnect_done_event)
+      goto done;
+
+  memset(&startup, 0, sizeof(startup));
+  startup.cb = sizeof(startup);
+  memset(&client_info, 0, sizeof(client_info));
+  client_test_name = "disconnect_notification";
+  make_cmdline(cmdline, client_test_name);
+  ok(CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &client_info),
+     "CreateProcess failed with error %lu.\n", GetLastError());
+  if (!client_info.hProcess) goto done;
+
+  ret = WaitForSingleObject(disconnect_ready_event, 10000);
+  ok(ret == WAIT_OBJECT_0, "server call ready wait returned %lu.\n", ret);
+  if (ret == WAIT_OBJECT_0)
+      ok(TerminateProcess(client_info.hProcess, 0), "TerminateProcess failed with error %lu.\n",
+         GetLastError());
+
+  ret = WaitForSingleObject(client_info.hProcess, 10000);
+  ok(ret == WAIT_OBJECT_0, "client process wait returned %lu.\n", ret);
+  ret = WaitForSingleObject(disconnect_done_event, 15000);
+  ok(ret == WAIT_OBJECT_0, "disconnect completion wait returned %lu.\n", ret);
+  ok(disconnect_notification_count == 1, "expected one disconnect callback, got %ld.\n",
+     disconnect_notification_count);
+  CloseHandle(client_info.hThread);
+  CloseHandle(client_info.hProcess);
+  memset(&client_info, 0, sizeof(client_info));
+
+done:
+  if (disconnect_done_event) CloseHandle(disconnect_done_event);
+  if (disconnect_notification_event) CloseHandle(disconnect_notification_event);
+  if (disconnect_ready_event) CloseHandle(disconnect_ready_event);
+  disconnect_done_event = disconnect_notification_event = disconnect_ready_event = NULL;
+  disconnect_binding = NULL;
 }
 
 static void
@@ -2561,6 +2734,7 @@ server(void)
 
     /* we don't need to register RPC_C_AUTHN_WINNT for ncalrpc */
     run_client("ncalrpc_secure");
+    test_server_disconnect_notification();
   }
   else
     skip("lrpc tests skipped due to earlier failure\n");

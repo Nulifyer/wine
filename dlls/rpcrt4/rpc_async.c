@@ -143,8 +143,17 @@ RPC_STATUS WINAPI RpcAsyncCompleteCall(PRPC_ASYNC_STATE pAsync, void *Reply)
  */
 RPC_STATUS WINAPI RpcAsyncAbortCall(PRPC_ASYNC_STATE pAsync, ULONG ExceptionCode)
 {
-    FIXME("(%p, %ld/0x%lx): stub\n", pAsync, ExceptionCode, ExceptionCode);
-    return RPC_S_INVALID_ASYNC_HANDLE;
+    struct async_call_data *data;
+
+    TRACE("(%p, %ld/0x%lx)\n", pAsync, ExceptionCode, ExceptionCode);
+
+    if (!valid_async_handle(pAsync) || !pAsync->StubInfo)
+        return RPC_S_INVALID_ASYNC_HANDLE;
+    if (!ExceptionCode) return RPC_S_INVALID_ARG;
+
+    data = pAsync->StubInfo;
+    if (data->pStubMsg->IsClient) return RPC_S_INVALID_ASYNC_HANDLE;
+    return NdrpAbortAsyncServerCall(pAsync, ExceptionCode);
 }
 
 /***********************************************************************

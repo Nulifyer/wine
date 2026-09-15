@@ -44,6 +44,7 @@
 #include "ndr_stubless.h"
 #include "rpc_binding.h"
 #include "rpc_message.h"
+#include "rpc_server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(rpc);
 
@@ -1572,6 +1573,7 @@ static void do_ndr_async_client_call( const MIDL_STUB_DESC *pStubDesc, PFORMAT_S
     async_call_data = I_RpcAllocate(sizeof(*async_call_data) + sizeof(MIDL_STUB_MESSAGE) + sizeof(RPC_MESSAGE));
     if (!async_call_data) RpcRaiseException(RPC_X_NO_MEMORY);
     async_call_data->pProcHeader = pProcHeader;
+    async_call_data->server_call = NULL;
 
     async_call_data->pStubMsg = pStubMsg = (PMIDL_STUB_MESSAGE)(async_call_data + 1);
     pRpcMsg = (PRPC_MESSAGE)(pStubMsg + 1);
@@ -1988,6 +1990,7 @@ static void ndr_async_server_call(PRPC_MESSAGE pRpcMsg, const MIDL_SYNTAX_INFO *
     async_call_data = I_RpcAllocate(sizeof(*async_call_data) + sizeof(MIDL_STUB_MESSAGE) + sizeof(RPC_MESSAGE));
     if (!async_call_data) RpcRaiseException(RPC_X_NO_MEMORY);
     async_call_data->pProcHeader = pProcHeader;
+    async_call_data->server_call = NULL;
 
     async_call_data->pStubMsg = (PMIDL_STUB_MESSAGE)(async_call_data + 1);
     async_rpc_msg = (PRPC_MESSAGE)(async_call_data->pStubMsg + 1);
@@ -2075,6 +2078,9 @@ static void ndr_async_server_call(PRPC_MESSAGE pRpcMsg, const MIDL_SYNTAX_INFO *
         RpcRaiseException(status);
 
     pAsync->StubInfo = async_call_data;
+    async_call_data->server_call = RPCRT4_AsyncServerCallStart(pAsync);
+    if (!async_call_data->server_call)
+        RpcRaiseException(RPC_S_NO_CALL_ACTIVE);
     TRACE("pAsync %p, pAsync->StubInfo %p, pFormat %p\n", pAsync, pAsync->StubInfo, async_call_data->pHandleFormat);
 
     /* add the implicit pAsync pointer as the first arg to the function */
@@ -2292,9 +2298,48 @@ RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply)
     free(async_call_data->pStubMsg->StackTop);
     I_RpcFree(async_call_data->request_buffer);
     I_RpcFree(pStubMsg->RpcMsg->Buffer);
+    RPCRT4_AsyncServerCallFinish(async_call_data->server_call, pAsync);
     I_RpcFree(async_call_data);
     I_RpcFree(pAsync);
 
+    return status;
+}
+
+RPC_STATUS NdrpAbortAsyncServerCall(RPC_ASYNC_STATE *pAsync, ULONG exception_code)
+{
+    struct async_call_data *async_call_data = pAsync->StubInfo;
+    PMIDL_STUB_MESSAGE stub_msg = async_call_data->pStubMsg;
+    RpcConnection *connection = stub_msg->RpcMsg->ReservedForRuntime;
+    RpcPktHdr *response;
+    RPC_STATUS status = RPC_S_OK;
+    enum stubless_phase phase;
+
+    TRACE("pAsync %p, exception %#lx\n", pAsync, exception_code);
+
+    for (phase = STUBLESS_MUSTFREE; phase <= STUBLESS_FREE; ++phase)
+        stub_do_args(stub_msg, async_call_data->pHandleFormat, phase,
+                     async_call_data->number_of_params);
+
+    if (connection)
+    {
+        response = RPCRT4_BuildFaultHeader(stub_msg->RpcMsg->DataRepresentation,
+                                           RPC2NCA_STATUS(exception_code));
+        if (response)
+        {
+            status = RPCRT4_Send(connection, response, NULL, 0);
+            free(response);
+        }
+        else
+            status = RPC_S_OUT_OF_RESOURCES;
+        RPCRT4_ReleaseConnection(connection);
+    }
+
+    free(stub_msg->StackTop);
+    I_RpcFree(async_call_data->request_buffer);
+    RPCRT4_AsyncServerCallFinish(async_call_data->server_call, pAsync);
+    pAsync->Signature = 0;
+    I_RpcFree(async_call_data);
+    I_RpcFree(pAsync);
     return status;
 }
 

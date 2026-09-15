@@ -453,9 +453,11 @@
 @ stdcall RpcServerRegisterIf3(ptr ptr ptr long long long ptr ptr)
 @ stdcall RpcServerRegisterIf(ptr ptr ptr)
 @ stdcall RpcServerRegisterIfEx(ptr ptr ptr long long ptr)
+@ stdcall RpcServerSubscribeForNotification(ptr long long ptr)
 @ stdcall RpcServerTestCancel(ptr)
 @ stdcall RpcServerUnregisterIf(ptr ptr long)
 @ stdcall RpcServerUnregisterIfEx(ptr ptr long)
+@ stdcall RpcServerUnsubscribeForNotification(ptr long ptr)
 @ stub RpcServerUseAllProtseqs
 @ stub RpcServerUseAllProtseqsEx
 @ stub RpcServerUseAllProtseqsIf

@@ -239,6 +239,7 @@ struct async_call_data
     /* location to put retval into */
     LONG_PTR *retval_ptr;
     size_t retval_size;
+    struct rpc_server_call *server_call;
     /* correlation cache */
     ULONG_PTR NdrCorrCache[256];
 };
@@ -262,3 +263,4 @@ PFORMAT_STRING convert_old_args( PMIDL_STUB_MESSAGE pStubMsg, PFORMAT_STRING pFo
                                  void *buffer, unsigned int size, unsigned int *count );
 RPC_STATUS NdrpCompleteAsyncClientCall(RPC_ASYNC_STATE *pAsync, void *Reply);
 RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply);
+RPC_STATUS NdrpAbortAsyncServerCall(RPC_ASYNC_STATE *pAsync, ULONG exception_code);

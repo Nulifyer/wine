@@ -524,4 +524,5 @@ cpp_quote("#endif")
   void test_handle(ctx_handle_t ctx_handle);
 
   void test_I_RpcBindingInqLocalClientPID([in] unsigned int protseq, [in] handle_t binding);
+  void test_client_disconnect();
 }

@@ -25,6 +25,7 @@
 #include "wine/list.h"
 
 struct protseq_ops;
+struct rpc_server_call;
 
 typedef struct _RpcServerProtseq
 {
@@ -79,6 +80,11 @@ typedef struct _RpcServerInterface
 
 void RPCRT4_new_client(RpcConnection* conn);
 const struct protseq_ops *rpcrt4_get_protseq_ops(const char *protseq);
+
+struct rpc_server_call *RPCRT4_AsyncServerCallStart(RPC_ASYNC_STATE *async);
+void RPCRT4_AsyncServerCallFinish(struct rpc_server_call *call, RPC_ASYNC_STATE *async);
+void RPCRT4_ServerConnectionClosed(RpcConnection *connection);
+void RPCRT4_ServerCallCancelled(RpcConnection *connection, ULONG call_id);
 
 void RPCRT4_destroy_all_protseqs(void);
 void RPCRT4_ServerFreeAllRegisteredAuthInfo(void);
