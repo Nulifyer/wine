@@ -2068,7 +2068,7 @@ static void test_byte_count_pointer(void)
     RPC_MESSAGE rpc_msg;
     MIDL_STUB_MESSAGE msg;
     DWORD value, output, exception;
-    unsigned char wire[32];
+    unsigned char wire[64];
     unsigned char *memory;
     void *allocated;
     union
@@ -2077,6 +2077,17 @@ static void test_byte_count_pointer(void)
         unsigned char bytes[8];
         DWORD values[2];
     } complex_memory;
+    union
+    {
+        ULONGLONG align;
+        unsigned char bytes[64];
+    } pointer_memory;
+    struct byte_count_strings
+    {
+        DWORD value;
+        WCHAR *first;
+        WCHAR *second;
+    } *strings;
 
     static const unsigned char simple_long[] =
     {
@@ -2095,6 +2106,24 @@ static void test_byte_count_pointer(void)
         NdrFcShort(2),
         FC_STRUCT, 3, NdrFcShort(8),
         FC_END,
+    };
+    static const unsigned char complex_pointers[] =
+    {
+        FC_BYTE_COUNT_POINTER, FC_PAD,
+        FC_CONSTANT_CONFORMANCE, 0, NdrFcShort(sizeof(pointer_memory.bytes)),
+        NdrFcShort(4),
+        FC_C_WSTRING, FC_PAD,
+        FC_BOGUS_STRUCT, 3, NdrFcShort(sizeof(struct byte_count_strings)),
+        NdrFcShort(0), NdrFcShort(8),
+        FC_LONG,
+#ifdef _WIN64
+        FC_ALIGNM8,
+#else
+        FC_PAD,
+#endif
+        FC_POINTER, FC_POINTER, FC_PAD, FC_END,
+        FC_UP, 0, NdrFcShort(-18),
+        FC_UP, 0, NdrFcShort(-22),
     };
 
     desc.pFormatTypes = simple_long;
@@ -2163,6 +2192,41 @@ static void test_byte_count_pointer(void)
     ok(complex_memory.values[0] == 0x11111111, "got first value %#lx\n", complex_memory.values[0]);
     ok(complex_memory.values[1] == 0x22222222, "got second value %#lx\n", complex_memory.values[1]);
     ok(msg.Buffer == wire + 8, "got buffer %p\n", msg.Buffer);
+    ok(!msg.pAllocAllNodesContext, "allocation context was not cleared\n");
+    ok(!my_alloc_called, "alloc called %d\n", my_alloc_called);
+
+    memset(wire, 0, sizeof(wire));
+    *(DWORD *)(wire + 0) = 0x12345678;
+    *(DWORD *)(wire + 4) = 0x20000;
+    *(DWORD *)(wire + 8) = 0x20004;
+    *(DWORD *)(wire + 12) = 4;
+    *(DWORD *)(wire + 16) = 0;
+    *(DWORD *)(wire + 20) = 4;
+    memcpy(wire + 24, L"one", 4 * sizeof(WCHAR));
+    *(DWORD *)(wire + 32) = 4;
+    *(DWORD *)(wire + 36) = 0;
+    *(DWORD *)(wire + 40) = 4;
+    memcpy(wire + 44, L"two", 4 * sizeof(WCHAR));
+    memset(pointer_memory.bytes, 0, sizeof(pointer_memory.bytes));
+    memory = pointer_memory.bytes;
+    msg.Buffer = wire;
+    msg.BufferEnd = wire + 52;
+    my_alloc_called = 0;
+    NdrByteCountPointerUnmarshall(&msg, &memory, complex_pointers, FALSE);
+    strings = (struct byte_count_strings *)pointer_memory.bytes;
+    ok(memory == pointer_memory.bytes, "got memory %p\n", memory);
+    ok(strings->value == 0x12345678, "got value %#lx\n", strings->value);
+    ok((ULONG_PTR)strings->first >= (ULONG_PTR)pointer_memory.bytes &&
+       (ULONG_PTR)strings->first < (ULONG_PTR)(pointer_memory.bytes + sizeof(pointer_memory.bytes)),
+       "first pointer %p outside byte-count memory\n", strings->first);
+    ok((ULONG_PTR)strings->second >= (ULONG_PTR)pointer_memory.bytes &&
+       (ULONG_PTR)strings->second < (ULONG_PTR)(pointer_memory.bytes + sizeof(pointer_memory.bytes)),
+       "second pointer %p outside byte-count memory\n", strings->second);
+    ok(strings->first && !wcscmp(strings->first, L"one"), "got first string %s\n",
+       wine_dbgstr_w(strings->first));
+    ok(strings->second && !wcscmp(strings->second, L"two"), "got second string %s\n",
+       wine_dbgstr_w(strings->second));
+    ok(msg.Buffer == wire + 52, "got buffer %p\n", msg.Buffer);
     ok(!msg.pAllocAllNodesContext, "allocation context was not cleared\n");
     ok(!my_alloc_called, "alloc called %d\n", my_alloc_called);
 

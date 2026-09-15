@@ -148,9 +148,9 @@ static inline void call_freer(PMIDL_STUB_MESSAGE pStubMsg, unsigned char *pMemor
     if (m) m(pStubMsg, pMemory, pFormat);
 }
 
-static DWORD calc_arg_size(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
+static SIZE_T calc_arg_size(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
 {
-    DWORD size;
+    SIZE_T size;
     switch(*pFormat)
     {
     case FC_RP:
@@ -218,6 +218,9 @@ static DWORD calc_arg_size(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
         size = *(const WORD *)(pFormat + 8 + pStubMsg->CorrDespIncrement + offset);
         break;
     }
+    case FC_BYTE_COUNT_POINTER:
+        ComputeConformanceOrVariance(pStubMsg, NULL, pFormat + 2, 0, &size);
+        break;
     default:
         FIXME("Unhandled type %02x\n", *pFormat);
         /* fallthrough */
@@ -1202,7 +1205,7 @@ static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
                 }
                 else
                 {
-                    DWORD size = calc_arg_size(pStubMsg, pTypeFormat);
+                    SIZE_T size = calc_arg_size(pStubMsg, pTypeFormat);
                     if (size)
                     {
                         *(void **)pArg = NdrAllocate(pStubMsg, size);

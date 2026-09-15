@@ -6657,6 +6657,44 @@ static ULONG byte_count_pointer_simple_wire_size(unsigned char type)
     }
 }
 
+static ULONG byte_count_pointer_complex_memory_size(MIDL_STUB_MESSAGE *stub_msg,
+                                                     PFORMAT_STRING pointee)
+{
+    NDR_MEMORYSIZE sizer = NdrMemorySizer[*pointee & NDR_TABLE_MASK];
+    unsigned char *saved_buffer = stub_msg->Buffer;
+    unsigned char *saved_pointer_buffer_mark = stub_msg->PointerBufferMark;
+    ULONG saved_memory_size = stub_msg->MemorySize;
+    int saved_ignore_embedded = stub_msg->IgnoreEmbeddedPointers;
+    ULONG memory_size;
+
+    if (!sizer) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+
+    /* A complex structure keeps all embedded pointer IDs in its fixed wire
+     * portion and the pointed-to data after it. Its memory sizer expects a
+     * PointerBufferMark at the latter position, just like the unmarshaller. */
+    if (*pointee == FC_BOGUS_STRUCT && !stub_msg->PointerBufferMark)
+    {
+        stub_msg->IgnoreEmbeddedPointers = 1;
+        stub_msg->MemorySize = 0;
+        sizer(stub_msg, pointee);
+        stub_msg->IgnoreEmbeddedPointers = saved_ignore_embedded;
+        stub_msg->PointerBufferMark = stub_msg->Buffer;
+        stub_msg->Buffer = saved_buffer;
+    }
+
+    stub_msg->MemorySize = 0;
+    memory_size = sizer(stub_msg, pointee);
+    if (stub_msg->Buffer > stub_msg->BufferEnd ||
+        (stub_msg->PointerBufferMark && stub_msg->PointerBufferMark > stub_msg->BufferEnd))
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+
+    stub_msg->Buffer = saved_buffer;
+    stub_msg->PointerBufferMark = saved_pointer_buffer_mark;
+    stub_msg->MemorySize = saved_memory_size;
+    stub_msg->IgnoreEmbeddedPointers = saved_ignore_embedded;
+    return memory_size;
+}
+
 unsigned char *  WINAPI NdrByteCountPointerMarshall(PMIDL_STUB_MESSAGE pStubMsg,
                                 unsigned char *pMemory,
                                 PFORMAT_STRING pFormat)
@@ -6690,7 +6728,6 @@ unsigned char *  WINAPI NdrByteCountPointerUnmarshall(PMIDL_STUB_MESSAGE pStubMs
 {
     struct NDR_ALLOC_ALL_NODES_CONTEXT context;
     PFORMAT_STRING pointee = NULL;
-    unsigned char *saved_buffer;
     ULONG_PTR byte_count;
     ULONG memory_size;
 
@@ -6700,17 +6737,8 @@ unsigned char *  WINAPI NdrByteCountPointerUnmarshall(PMIDL_STUB_MESSAGE pStubMs
 
     if (pFormat[1] == FC_PAD)
     {
-        NDR_MEMORYSIZE sizer;
-
         pointee = byte_count_pointer_pointee(pStubMsg, pFormat);
-        sizer = NdrMemorySizer[*pointee & NDR_TABLE_MASK];
-        if (!sizer) RpcRaiseException(RPC_X_BAD_STUB_DATA);
-
-        saved_buffer = pStubMsg->Buffer;
-        pStubMsg->MemorySize = 0;
-        memory_size = sizer(pStubMsg, pointee);
-        if (pStubMsg->Buffer > pStubMsg->BufferEnd) RpcRaiseException(RPC_X_BAD_STUB_DATA);
-        pStubMsg->Buffer = saved_buffer;
+        memory_size = byte_count_pointer_complex_memory_size(pStubMsg, pointee);
     }
     else
         memory_size = byte_count_pointer_simple_memory_size(pFormat[1]);
