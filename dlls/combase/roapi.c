@@ -34,6 +34,15 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(combase);
 
+enum ro_apartment_type
+{
+    RO_APARTMENT_STA,
+    RO_APARTMENT_ASTA,
+    RO_APARTMENT_MTA,
+    RO_APARTMENT_NA,
+    RO_APARTMENT_BSTA,
+};
+
 struct activatable_class_data
 {
     ULONG size;
@@ -139,6 +148,28 @@ HRESULT WINAPI RoInitialize(RO_INIT_TYPE type)
         FIXME("type %d\n", type);
     case RO_INIT_MULTITHREADED:
         return CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    }
+}
+
+/***********************************************************************
+ *      RoInitializeStrict (combase.@)
+ */
+HRESULT WINAPI RoInitializeStrict(enum ro_apartment_type type)
+{
+    switch (type)
+    {
+    case RO_APARTMENT_STA:
+        return CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    case RO_APARTMENT_ASTA:
+    case RO_APARTMENT_BSTA:
+        FIXME("Apartment type %u treated as STA.\n", type);
+        return CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    case RO_APARTMENT_MTA:
+        return CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    case RO_APARTMENT_NA:
+        return CO_E_NOT_SUPPORTED;
+    default:
+        return E_INVALIDARG;
     }
 }
 

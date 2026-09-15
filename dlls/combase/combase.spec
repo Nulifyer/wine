@@ -5,6 +5,13 @@
 176 stdcall -noname OriginateOrTransformError(long)
 177 stdcall -noname SetChainRestrictedErrors()
 178 stdcall -noname ClearChainRestrictedErrors()
+179 stdcall -noname RoInitializeStrict(long)
+180 stdcall -noname CoUnmarshalInterface_ordinal180(ptr ptr ptr) CoUnmarshalInterface
+359 stdcall CoUnmarshalHresult(ptr ptr)
+360 stdcall CoUnmarshalInterface(ptr ptr ptr)
+598 stub WindowsInspectString
+599 stub WindowsInspectString2
+600 stdcall WindowsIsStringEmpty(ptr)
 
 1 extern ObjectStublessClient3 rpcrt4.__wine_ObjectStublessClient3
 @ extern ObjectStublessClient4 rpcrt4.__wine_ObjectStublessClient4
@@ -177,8 +184,6 @@
 @ stdcall CoTreatAsClass(ptr ptr)
 @ stdcall CoUninitialize()
 @ stub CoUnloadingWOW
-@ stdcall CoUnmarshalHresult(ptr ptr)
-@ stdcall CoUnmarshalInterface(ptr ptr ptr)
 @ stub CoVrfCheckThreadState
 @ stub CoVrfGetThreadState
 @ stub CoVrfReleaseThreadState
@@ -357,8 +362,6 @@
 @ stdcall WindowsDuplicateString(ptr ptr)
 @ stdcall WindowsGetStringLen(ptr)
 @ stdcall WindowsGetStringRawBuffer(ptr ptr)
-@ stub WindowsInspectString
-@ stdcall WindowsIsStringEmpty(ptr)
 @ stdcall WindowsPreallocateStringBuffer(long ptr ptr)
 @ stdcall WindowsPromoteStringBuffer(ptr ptr)
 @ stub WindowsReplaceString
