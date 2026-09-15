@@ -32,6 +32,7 @@
 #define WNF_PNPA_PORTS_CHANGED_SESSION 0x0096003da3bc4035ULL
 #define WNF_PO_SCENARIO_CHANGE 0x41c6013da3bce875ULL
 #define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
+#define WNF_SHEL_LOCKSCREEN_ACTIVE 0x0d83063ea3bc5835ULL
 
 typedef NTSTATUS (WINAPI *wnf_callback)( ULONGLONG, ULONG, const GUID *, void *, const void *, ULONG );
 static NTSTATUS (WINAPI *pNtCreateWnfStateName)( ULONGLONG *, ULONG, ULONG, BOOLEAN, const GUID *,
@@ -357,6 +358,7 @@ START_TEST(wnf)
             WNF_PNPA_PORTS_CHANGED_SESSION,
             WNF_PO_SCENARIO_CHANGE,
             WNF_RPCF_FWMAN_RUNNING,
+            WNF_SHEL_LOCKSCREEN_ACTIVE,
         };
         ULONGLONG id = 0xdeadbeef;
         unsigned int i;

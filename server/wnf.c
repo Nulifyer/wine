@@ -42,6 +42,7 @@
 #define WNF_PNPA_PORTS_CHANGED_SESSION 0x0096003da3bc4035ULL
 #define WNF_PO_SCENARIO_CHANGE 0x41c6013da3bce875ULL
 #define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
+#define WNF_SHEL_LOCKSCREEN_ACTIVE 0x0d83063ea3bc5835ULL
 
 static const struct sid network_service_sid =
     { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_NETWORK_SERVICE_RID } };
@@ -60,6 +61,7 @@ static const unsigned __int64 well_known_states[] =
     WNF_PNPA_PORTS_CHANGED_SESSION,
     WNF_PO_SCENARIO_CHANGE,
     WNF_RPCF_FWMAN_RUNNING,
+    WNF_SHEL_LOCKSCREEN_ACTIVE,
 };
 
 static const WCHAR wnf_name[] = {'W','n','f','S','t','a','t','e'};
@@ -120,7 +122,8 @@ static struct wnf_state *create_well_known_state( unsigned __int64 name, unsigne
     state->name = name;
     state->type_low = state->type_high = 0;
     if (name == WNF_PO_SCENARIO_CHANGE) state->maximum = 20;
-    else if (name == WNF_RPCF_FWMAN_RUNNING) state->maximum = sizeof(unsigned int);
+    else if (name == WNF_RPCF_FWMAN_RUNNING || name == WNF_SHEL_LOCKSCREEN_ACTIVE)
+        state->maximum = sizeof(unsigned int);
     else state->maximum = 0;
     state->size = state->stamp = 0;
     state->session = session;
@@ -237,7 +240,8 @@ static int can_write_well_known_state( const struct wnf_state *state )
     token = current->token ? current->token : current->process->token;
     user = token ? token_get_user( token ) : NULL;
     if (user &&
-        ((state->name == WNF_PO_SCENARIO_CHANGE && equal_sid( user, &local_system_sid )) ||
+        (((state->name == WNF_PO_SCENARIO_CHANGE || state->name == WNF_SHEL_LOCKSCREEN_ACTIVE) &&
+          equal_sid( user, &local_system_sid )) ||
          (state->name == WNF_RPCF_FWMAN_RUNNING &&
           (equal_sid( user, &local_system_sid ) || equal_sid( user, &network_service_sid ))))) return 1;
     set_error( STATUS_ACCESS_DENIED );
