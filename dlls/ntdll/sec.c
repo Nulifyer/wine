@@ -2563,6 +2563,78 @@ NTSTATUS WINAPI RtlCheckTokenCapability( HANDLE token, PSID capability_sid, BOOL
     return status;
 }
 
+/******************************************************************************
+ * RtlCheckTokenMembership (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlCheckTokenMembership( HANDLE token, PSID sid, BOOLEAN *is_member )
+{
+    return RtlCheckTokenMembershipEx( token, sid, 0, is_member );
+}
+
+/******************************************************************************
+ * RtlCheckTokenMembershipEx (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlCheckTokenMembershipEx( HANDLE token, PSID sid, ULONG flags, BOOLEAN *is_member )
+{
+    TOKEN_GROUPS *groups = NULL;
+    TOKEN_USER *user = NULL;
+    TOKEN_TYPE type;
+    NTSTATUS status;
+    ULONG size, i;
+    BOOL explicit_token = !!token;
+
+    TRACE( "token %p, sid %p, flags %#lx, is_member %p.\n", token, sid, flags, is_member );
+
+    if (!is_member) return STATUS_ACCESS_VIOLATION;
+    *is_member = FALSE;
+    if (flags & ~3) return STATUS_INVALID_PARAMETER;
+    if (!RtlValidSid( sid )) return STATUS_INVALID_SID;
+
+    if (!token) token = GetCurrentThreadEffectiveToken();
+    if (explicit_token)
+    {
+        status = NtQueryInformationToken( token, TokenType, &type, sizeof(type), &size );
+        if (status) return status;
+        if (type == TokenPrimary) return STATUS_NO_IMPERSONATION_TOKEN;
+    }
+
+    status = NtQueryInformationToken( token, TokenUser, NULL, 0, &size );
+    if (status != STATUS_BUFFER_TOO_SMALL) return status;
+    if (!(user = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
+    status = NtQueryInformationToken( token, TokenUser, user, size, &size );
+    if (status) goto done;
+    if (RtlEqualSid( user->User.Sid, sid ))
+    {
+        *is_member = TRUE;
+        goto done;
+    }
+
+    status = NtQueryInformationToken( token, TokenGroups, NULL, 0, &size );
+    if (status != STATUS_BUFFER_TOO_SMALL) goto done;
+    if (!(groups = RtlAllocateHeap( GetProcessHeap(), 0, size )))
+    {
+        status = STATUS_NO_MEMORY;
+        goto done;
+    }
+    status = NtQueryInformationToken( token, TokenGroups, groups, size, &size );
+    if (status) goto done;
+
+    for (i = 0; i < groups->GroupCount; ++i)
+    {
+        if ((groups->Groups[i].Attributes & SE_GROUP_ENABLED) &&
+            RtlEqualSid( groups->Groups[i].Sid, sid ))
+        {
+            *is_member = TRUE;
+            break;
+        }
+    }
+
+done:
+    RtlFreeHeap( GetProcessHeap(), 0, groups );
+    RtlFreeHeap( GetProcessHeap(), 0, user );
+    return status;
+}
+
 /***********************************************************************
  *             RtlGetAppContainerSidType  (NTDLL.@)
  */

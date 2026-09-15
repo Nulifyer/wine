@@ -131,7 +131,7 @@
 @ stdcall CheckRemoteDebuggerPresent(long ptr)
 # @ stub CheckTokenCapability
 @ stdcall CheckTokenMembership(long ptr ptr)
-# @ stub CheckTokenMembershipEx
+@ stdcall CheckTokenMembershipEx(long ptr long ptr)
 @ stdcall ChrCmpIA(long long)
 @ stdcall ChrCmpIW(long long)
 @ stdcall ClearCommBreak(long)

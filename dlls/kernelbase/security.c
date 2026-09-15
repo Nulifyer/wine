@@ -870,6 +870,30 @@ exit:
     return ret;
 }
 
+/******************************************************************************
+ * CheckTokenMembershipEx    (kernelbase.@)
+ */
+BOOL WINAPI CheckTokenMembershipEx( HANDLE token, PSID sid_to_check, DWORD flags, PBOOL is_member )
+{
+    BOOLEAN member;
+    NTSTATUS status;
+
+    TRACE("(%p %s %#lx %p)\n", token, debugstr_sid(sid_to_check), flags, is_member);
+
+    if (!sid_to_check || !is_member)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    *is_member = FALSE;
+    status = RtlCheckTokenMembershipEx( token, sid_to_check, flags, &member );
+    if (status) return set_ntstatus( status );
+
+    *is_member = member;
+    return TRUE;
+}
+
 /*************************************************************************
  * CreateRestrictedToken    (kernelbase.@)
  */

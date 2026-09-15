@@ -36,8 +36,80 @@ static HRESULT (WINAPI *pAppContainerLookupDisplayNameMrtReference)(PSID, WCHAR 
 static HRESULT (WINAPI *pAppContainerRegisterSid)(PSID, const WCHAR *, const WCHAR *);
 static HRESULT (WINAPI *pAppContainerUnregisterSid)(PSID);
 static void (WINAPI *pAppContainerFreeMemory)(void *);
+static BOOL (WINAPI *pCheckTokenMembershipEx)(HANDLE, PSID, DWORD, PBOOL);
 
 static NTSTATUS (WINAPI *pRtlDeriveCapabilitySidsFromName)(UNICODE_STRING *, PSID, PSID);
+
+static void test_CheckTokenMembershipEx(void)
+{
+    static SID world_sid = { SID_REVISION, 1, { SECURITY_WORLD_SID_AUTHORITY }, { SECURITY_WORLD_RID } };
+    static SID invalid_sid = { 0, 1, { SECURITY_WORLD_SID_AUTHORITY }, { SECURITY_WORLD_RID } };
+    HANDLE process_token, impersonation_token;
+    BOOL member, ret;
+    DWORD flags;
+
+    if (!pCheckTokenMembershipEx)
+    {
+        win_skip("CheckTokenMembershipEx is not available.\n");
+        return;
+    }
+
+    for (flags = 0; flags <= 3; ++flags)
+    {
+        member = FALSE;
+        SetLastError(0xdeadbeef);
+        ret = pCheckTokenMembershipEx(NULL, &world_sid, flags, &member);
+        ok(ret, "flags %#lx failed, error %lu.\n", flags, GetLastError());
+        ok(member, "flags %#lx did not find the World SID.\n", flags);
+        ok(GetLastError() == 0xdeadbeef, "flags %#lx changed error to %lu.\n", flags, GetLastError());
+    }
+
+    member = 0x7f7f7f7f;
+    SetLastError(0xdeadbeef);
+    ret = pCheckTokenMembershipEx(NULL, NULL, 1, &member);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "null SID returned %d, error %lu.\n",
+       ret, GetLastError());
+    ok(member == 0x7f7f7f7f, "null SID changed member to %#x.\n", member);
+
+    member = TRUE;
+    SetLastError(0xdeadbeef);
+    ret = pCheckTokenMembershipEx(NULL, &world_sid, 4, &member);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "invalid flags returned %d, error %lu.\n",
+       ret, GetLastError());
+    ok(!member, "invalid flags did not clear member.\n");
+
+    member = TRUE;
+    SetLastError(0xdeadbeef);
+    ret = pCheckTokenMembershipEx(NULL, &invalid_sid, 1, &member);
+    ok(!ret && GetLastError() == ERROR_INVALID_SID, "invalid SID returned %d, error %lu.\n",
+       ret, GetLastError());
+    ok(!member, "invalid SID did not clear member.\n");
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &process_token);
+    ok(ret, "OpenProcessToken failed, error %lu.\n", GetLastError());
+    if (!ret) return;
+
+    member = TRUE;
+    SetLastError(0xdeadbeef);
+    ret = pCheckTokenMembershipEx(process_token, &world_sid, 1, &member);
+    ok(!ret && GetLastError() == ERROR_NO_IMPERSONATION_TOKEN,
+       "primary token returned %d, error %lu.\n", ret, GetLastError());
+    ok(!member, "primary token did not clear member.\n");
+
+    ret = DuplicateToken(process_token, SecurityImpersonation, &impersonation_token);
+    ok(ret, "DuplicateToken failed, error %lu.\n", GetLastError());
+    if (ret)
+    {
+        member = FALSE;
+        SetLastError(0xdeadbeef);
+        ret = pCheckTokenMembershipEx(impersonation_token, &world_sid, 1, &member);
+        ok(ret, "impersonation token failed, error %lu.\n", GetLastError());
+        ok(member, "impersonation token did not find the World SID.\n");
+        ok(GetLastError() == 0xdeadbeef, "impersonation token changed error to %lu.\n", GetLastError());
+        CloseHandle(impersonation_token);
+    }
+    CloseHandle(process_token);
+}
 
 static void test_AppContainerDeriveSidFromMoniker(void)
 {
@@ -246,11 +318,13 @@ START_TEST(security)
     pAppContainerRegisterSid = (void *)GetProcAddress(hmod, "AppContainerRegisterSid");
     pAppContainerUnregisterSid = (void *)GetProcAddress(hmod, "AppContainerUnregisterSid");
     pAppContainerFreeMemory = (void *)GetProcAddress(hmod, "AppContainerFreeMemory");
+    pCheckTokenMembershipEx = (void *)GetProcAddress(hmod, "CheckTokenMembershipEx");
 
     hmod = LoadLibraryA("ntdll.dll");
     pRtlDeriveCapabilitySidsFromName = (void *)GetProcAddress(hmod, "RtlDeriveCapabilitySidsFromName");
 
     test_DeriveCapabilitySidsFromName();
+    test_CheckTokenMembershipEx();
     test_AppContainerDeriveSidFromMoniker();
     test_AppContainerLookupMoniker();
 }

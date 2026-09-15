@@ -567,6 +567,8 @@
 # @ stub RtlCheckProcessParameters
 @ stdcall RtlCheckRegistryKey(long ptr)
 @ stdcall RtlCheckTokenCapability(long ptr ptr)
+@ stdcall RtlCheckTokenMembership(long ptr ptr)
+@ stdcall RtlCheckTokenMembershipEx(long ptr long ptr)
 @ stdcall RtlClearAllBits(ptr)
 @ stdcall RtlClearBits(ptr long long)
 @ stdcall RtlClearThreadWorkOnBehalfTicket()
