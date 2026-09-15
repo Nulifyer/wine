@@ -38,9 +38,12 @@
 #define WIDL_using_Windows_System
 #include "windows.system.h"
 
+#include "dispatcherqueue.h"
+
 #include "async_private.h"
 
 HRESULT async_action_create( IUnknown *invoker, async_operation_callback callback, IAsyncAction **out );
+HRESULT dispatcher_queue_controller_create( DispatcherQueueOptions options, IDispatcherQueueController **out );
 
 #define DEFINE_IINSPECTABLE_( pfx, iface_type, impl_type, impl_from, iface_mem, expr )             \
     static inline impl_type *impl_from( iface_type *iface )                                        \

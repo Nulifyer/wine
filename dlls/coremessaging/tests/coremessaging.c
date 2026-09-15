@@ -133,6 +133,10 @@ struct dispatcher_queue_handler
     LONG ref;
 
     HANDLE event;
+    HANDLE invoked_event;
+    LONG *order;
+    LONG invocation_order;
+    DWORD invocation_thread;
 };
 
 static struct dispatcher_queue_handler *impl_from_IDispatcherQueueHandler( IDispatcherQueueHandler *iface )
@@ -170,6 +174,7 @@ static ULONG WINAPI dispatcher_queue_handler_Release( IDispatcherQueueHandler *i
     if (!ref)
     {
         CloseHandle( handler->event );
+        CloseHandle( handler->invoked_event );
         free( handler );
     }
 
@@ -181,8 +186,11 @@ static HRESULT WINAPI dispatcher_queue_handler_Invoke( IDispatcherQueueHandler *
     struct dispatcher_queue_handler *handler = impl_from_IDispatcherQueueHandler( iface );
     DWORD ret;
 
+    handler->invocation_thread = GetCurrentThreadId();
     ret = WaitForSingleObject( handler->event, 5000 );
     ok( !ret, "Unexpected wait result %lu.\n", ret );
+    if (handler->order) handler->invocation_order = InterlockedIncrement( handler->order );
+    SetEvent( handler->invoked_event );
 
     return S_OK;
 }
@@ -206,6 +214,7 @@ static HRESULT create_dispatcher_queue_handler( IDispatcherQueueHandler **handle
     impl->IDispatcherQueueHandler_iface.lpVtbl = &dispatcher_queue_handler_vtbl;
     impl->ref = 1;
     impl->event = CreateEventW( NULL, TRUE, FALSE, NULL );
+    impl->invoked_event = CreateEventW( NULL, TRUE, FALSE, NULL );
 
     *handler = &impl->IDispatcherQueueHandler_iface;
     return S_OK;
@@ -267,7 +276,6 @@ static void check_create_dispatcher_queue_controller_( unsigned int line, DWORD 
     if (hr == E_INVALIDARG) return;
 
     hr = IDispatcherQueueController_get_DispatcherQueue( dispatcher_queue_controller, &dispatcher_queue );
-    todo_wine
     ok_(__FILE__, line)( hr == S_OK, "got IDispatcherQueueController_get_DispatcherQueue hr %#lx.\n", hr );
     if (FAILED(hr)) goto done;
 
@@ -309,7 +317,7 @@ static void check_create_dispatcher_queue_controller_( unsigned int line, DWORD 
     /* shutdown waits for queued handlers */
     if (winetest_platform_is_wine) Sleep( 200 );
     ret = WaitForSingleObject( event_handler->event, 100 );
-    todo_wine ok_(__FILE__, line)( ret == WAIT_TIMEOUT, "Unexpected wait result %lu.\n", ret );
+    ok_(__FILE__, line)( ret == WAIT_TIMEOUT, "Unexpected wait result %lu.\n", ret );
     SetEvent( queue_handler->event );
 
     /* queue uses the message loop when dispatched on current thread */
@@ -325,6 +333,10 @@ static void check_create_dispatcher_queue_controller_( unsigned int line, DWORD 
         ret = WaitForSingleObject( event_handler->event, 5000 );
         ok_(__FILE__, line)( !ret, "Unexpected wait result %lu.\n", ret );
     }
+    ok_(__FILE__, line)( !!queue_handler->invocation_thread, "handler was not invoked.\n" );
+    ok_(__FILE__, line)( (queue_handler->invocation_thread == GetCurrentThreadId()) ==
+                         (thread_type == DQTYPE_THREAD_CURRENT), "handler ran on thread %lu, caller %lu.\n",
+                         queue_handler->invocation_thread, GetCurrentThreadId() );
 
     hr = IAsyncInfo_get_Status( async_info, &status );
     ok_(__FILE__, line)( hr == S_OK, "got IAsyncInfo_get_Status hr %#lx.\n", hr );
@@ -438,18 +450,14 @@ static void test_DispatcherQueueController_Statics(void)
     ok( hr == S_OK, "got hr %#lx.\n", hr );
 
     hr = IDispatcherQueueControllerStatics_CreateOnDedicatedThread( dispatcher_queue_controller_statics, NULL );
-    todo_wine
     ok( hr == E_POINTER || hr == 0x80000005 /* win10 22h2 */, "got hr %#lx.\n", hr );
     hr = IDispatcherQueueControllerStatics_CreateOnDedicatedThread( dispatcher_queue_controller_statics, &dispatcher_queue_controller );
-    todo_wine
     ok( hr == S_OK, "got hr %#lx.\n", hr );
     if (FAILED(hr)) goto done;
 
     hr = IDispatcherQueueController_get_DispatcherQueue( dispatcher_queue_controller, NULL );
-    todo_wine
     ok( hr == E_POINTER || hr == 0x80000005 /* win10 22h2 */, "got hr %#lx.\n", hr );
     hr = IDispatcherQueueController_get_DispatcherQueue( dispatcher_queue_controller, &dispatcher_queue );
-    todo_wine
     ok( hr == S_OK, "got hr %#lx.\n", hr );
 
     check_interface( dispatcher_queue, &IID_IUnknown );
@@ -500,11 +508,13 @@ static void test_DispatcherQueueController_Statics(void)
     /* shutdown waits for queued handlers */
     if (winetest_platform_is_wine) Sleep( 200 );
     ret = WaitForSingleObject( event_handler->event, 100 );
-    todo_wine ok( ret == WAIT_TIMEOUT, "Unexpected wait result %lu.\n", ret );
+    ok( ret == WAIT_TIMEOUT, "Unexpected wait result %lu.\n", ret );
 
     SetEvent( queue_handler->event );
     ret = WaitForSingleObject( event_handler->event, 5000 );
     ok( !ret, "Unexpected wait result %lu.\n", ret );
+    ok( !!queue_handler->invocation_thread, "handler was not invoked.\n" );
+    ok( queue_handler->invocation_thread != GetCurrentThreadId(), "handler ran on caller thread.\n" );
 
     hr = IAsyncInfo_get_Status( async_info, &status );
     ok( hr == S_OK, "got hr %#lx.\n", hr );
@@ -536,6 +546,81 @@ done:
     ok( ref == 1, "got ref %ld.\n", ref );
 }
 
+static void test_DispatcherQueue_priority(void)
+{
+    ITypedEventHandler_DispatcherQueue_IInspectable *event_handler_iface;
+    struct typed_event_handler_dispatcher_queue *event_handler;
+    IDispatcherQueueController *controller;
+    IDispatcherQueueController *duplicate = (void *)0xdeadbeef;
+    struct dispatcher_queue_handler *high, *normal, *low;
+    IDispatcherQueueHandler *high_iface, *normal_iface, *low_iface;
+    struct DispatcherQueueOptions options = {sizeof(options), DQTYPE_THREAD_CURRENT, DQTAT_COM_ASTA};
+    IDispatcherQueue *queue;
+    IAsyncAction *operation;
+    EventRegistrationToken token;
+    boolean result;
+    LONG order = 0;
+    HRESULT hr;
+    DWORD ret;
+
+    hr = CreateDispatcherQueueController( options, &controller );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = CreateDispatcherQueueController( options, &duplicate );
+    ok( FAILED(hr), "duplicate current-thread queue returned hr %#lx.\n", hr );
+    ok( duplicate == NULL, "got duplicate controller %p.\n", duplicate );
+    hr = IDispatcherQueueController_get_DispatcherQueue( controller, &queue );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+
+    hr = create_dispatcher_queue_handler( &low_iface );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = create_dispatcher_queue_handler( &normal_iface );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = create_dispatcher_queue_handler( &high_iface );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    low = impl_from_IDispatcherQueueHandler( low_iface );
+    normal = impl_from_IDispatcherQueueHandler( normal_iface );
+    high = impl_from_IDispatcherQueueHandler( high_iface );
+    low->order = normal->order = high->order = &order;
+    SetEvent( low->event );
+    SetEvent( normal->event );
+    SetEvent( high->event );
+
+    hr = IDispatcherQueue_TryEnqueueWithPriority( queue, DispatcherQueuePriority_Low, low_iface, &result );
+    ok( hr == S_OK && result, "got hr %#lx, result %d.\n", hr, result );
+    hr = IDispatcherQueue_TryEnqueueWithPriority( queue, DispatcherQueuePriority_Normal, normal_iface, &result );
+    ok( hr == S_OK && result, "got hr %#lx, result %d.\n", hr, result );
+    hr = IDispatcherQueue_TryEnqueueWithPriority( queue, DispatcherQueuePriority_High, high_iface, &result );
+    ok( hr == S_OK && result, "got hr %#lx, result %d.\n", hr, result );
+
+    ret = msg_wait_for_events( 1, &low->invoked_event, 5000 );
+    ok( !ret, "Unexpected wait result %lu.\n", ret );
+    ok( high->invocation_order == 1, "high priority ran at %ld.\n", high->invocation_order );
+    ok( normal->invocation_order == 2, "normal priority ran at %ld.\n", normal->invocation_order );
+    ok( low->invocation_order == 3, "low priority ran at %ld.\n", low->invocation_order );
+    ok( high->invocation_thread == GetCurrentThreadId(), "high priority ran on thread %lu.\n", high->invocation_thread );
+    ok( normal->invocation_thread == GetCurrentThreadId(), "normal priority ran on thread %lu.\n", normal->invocation_thread );
+    ok( low->invocation_thread == GetCurrentThreadId(), "low priority ran on thread %lu.\n", low->invocation_thread );
+
+    hr = create_typed_event_handler_dispatcher_queue( &event_handler_iface );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    event_handler = impl_from_ITypedEventHandler_DispatcherQueue_IInspectable( event_handler_iface );
+    hr = IDispatcherQueue_add_ShutdownCompleted( queue, event_handler_iface, &token );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = IDispatcherQueueController_ShutdownQueueAsync( controller, &operation );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ret = msg_wait_for_events( 1, &event_handler->event, 5000 );
+    ok( !ret, "Unexpected wait result %lu.\n", ret );
+
+    IAsyncAction_Release( operation );
+    IDispatcherQueue_remove_ShutdownCompleted( queue, token );
+    ITypedEventHandler_DispatcherQueue_IInspectable_Release( event_handler_iface );
+    IDispatcherQueueHandler_Release( high_iface );
+    IDispatcherQueueHandler_Release( normal_iface );
+    IDispatcherQueueHandler_Release( low_iface );
+    IDispatcherQueue_Release( queue );
+    IDispatcherQueueController_Release( controller );
+}
+
 START_TEST(coremessaging)
 {
     HRESULT hr;
@@ -545,6 +630,7 @@ START_TEST(coremessaging)
 
     test_CreateDispatcherQueueController();
     test_DispatcherQueueController_Statics();
+    test_DispatcherQueue_priority();
 
     RoUninitialize();
 }
