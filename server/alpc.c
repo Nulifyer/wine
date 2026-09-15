@@ -162,10 +162,19 @@ struct alpc_message
     struct alpc_request *request;
     struct alpc_message_info info;
     struct token *token; /* owned security capture for this receipt */
+    unsigned __int64 work_ticket; /* opaque per-message work-on-behalf receipt */
     unsigned char data[];
 };
 
 static void free_message_request( struct alpc_request *request );
+
+static data_size_t get_receipt_size( unsigned int attributes )
+{
+    data_size_t size = 0;
+    if (attributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE) size += sizeof(struct token_identity);
+    if (attributes & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE) size += sizeof(unsigned __int64);
+    return size;
+}
 
 /* Messages keep security alive independently of weak endpoint pointers. */
 static void free_message( struct alpc_message *message )
@@ -180,8 +189,9 @@ static void free_message( struct alpc_message *message )
  * Error and short paths publish only the fixed message information. */
 static int get_receive_capacity( unsigned int attributes, data_size_t *capacity )
 {
-    data_size_t prefix = attributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE ? sizeof(struct token_identity) : 0;
-    if ((attributes & ~ALPC_MESSAGE_TOKEN_ATTRIBUTE) || get_reply_max_size() < prefix)
+    data_size_t prefix = get_receipt_size( attributes );
+    if ((attributes & ~(ALPC_MESSAGE_TOKEN_ATTRIBUTE | ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)) ||
+        get_reply_max_size() < prefix)
     {
         set_error( STATUS_INVALID_PARAMETER );
         return 0;
@@ -193,15 +203,19 @@ static int get_receive_capacity( unsigned int attributes, data_size_t *capacity 
 static int set_message_reply( const struct alpc_message *message, unsigned int attributes )
 {
     struct token_identity identity = {0};
-    data_size_t prefix = attributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE ? sizeof(identity) : 0;
-    unsigned char *data;
+    data_size_t prefix = get_receipt_size( attributes );
+    unsigned char *data, *receipt;
     if (!prefix && !message->info.size) return 1;
     if (!(data = set_reply_data_size( prefix + message->info.size ))) return 0;
-    if (prefix)
+    receipt = data;
+    if (attributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE)
     {
         if (message->token) token_get_identity( message->token, &identity );
-        memcpy( data, &identity, prefix );
+        memcpy( receipt, &identity, sizeof(identity) );
+        receipt += sizeof(identity);
     }
+    if (attributes & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)
+        memcpy( receipt, &message->work_ticket, sizeof(message->work_ticket) );
     if (message->info.size) memcpy( data + prefix, message->data, message->info.size );
     return 1;
 }
@@ -327,6 +341,7 @@ static void alpc_port_destroy( struct object *obj )
 }
 
 static unsigned int next_message_id;
+static unsigned __int64 next_work_ticket;
 static struct list connecting_ports = LIST_INIT(connecting_ports);
 
 static void finish_connect_operation( struct alpc_port *port )
@@ -359,6 +374,7 @@ static struct alpc_message *new_message( const void *data, data_size_t size, uns
     if (!id && !(id = ++next_message_id)) id = ++next_message_id;
     message->request = NULL;
     message->token = NULL;
+    message->work_ticket = 0;
     memset( &message->info, 0, sizeof(message->info) );
     message->info.callback_id = id;
     message->info.id = id;
@@ -722,7 +738,8 @@ static struct alpc_port *message_queue( struct alpc_port *endpoint )
 }
 
 static int send_message( struct alpc_port *port, unsigned int flags, unsigned int id,
-                         int wow64, client_ptr_t message_context, const void *data, data_size_t size, struct alpc_wait *wait )
+                         int wow64, unsigned int send_attributes, client_ptr_t message_context,
+                         const void *data, data_size_t size, struct alpc_wait *wait )
 {
     struct alpc_port *target = port, *queue, *origin = port;
     struct alpc_request *request = NULL, *candidate;
@@ -811,6 +828,11 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
         return 0;
     }
     if (!(message = new_message( data, size, type | (wow64 ? 0x1000 : 0), id, current ))) return 0;
+    if (send_attributes & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)
+    {
+        if (!(message->work_ticket = ++next_work_ticket)) message->work_ticket = ++next_work_ticket;
+        message->info.attributes_valid |= ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE;
+    }
     if (!origin->connection_port && !origin->tracking_mode && origin->client_token)
     {
         message->token = (struct token *)grab_object( origin->client_token );
@@ -1114,7 +1136,7 @@ DECL_HANDLER(alpc_send_receive)
     }
     if ((req->flags & 0x20000) && !reply_receive && !(wait = create_message_wait( capacity ))) goto done;
     if (req->send && !send_message( port, reply_receive ? 1 : req->flags, req->message_id,
-                                    req->wow64, req->message_context,
+                                    req->wow64, req->send_attributes, req->message_context,
                                     get_req_data(), size, wait )) goto done;
     if (wait)
     {

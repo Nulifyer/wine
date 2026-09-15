@@ -6506,7 +6506,7 @@ struct alpc_send_receive_request
     int receive;
     int wow64;
     int no_wait;
-    char __pad_44[4];
+    unsigned int send_attributes;
     client_ptr_t message_context;
     /* VARARG(message,bytes); */
 };
@@ -8006,6 +8006,6 @@ union generic_reply
     struct destroy_dcomp_connection_reply destroy_dcomp_connection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1002
+#define SERVER_PROTOCOL_VERSION 1003
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

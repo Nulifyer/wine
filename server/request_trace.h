@@ -3688,6 +3688,7 @@ static void dump_alpc_send_receive_request( const struct alpc_send_receive_reque
     fprintf( stderr, ", receive=%d", req->receive );
     fprintf( stderr, ", wow64=%d", req->wow64 );
     fprintf( stderr, ", no_wait=%d", req->no_wait );
+    fprintf( stderr, ", send_attributes=%08x", req->send_attributes );
     dump_uint64( ", message_context=", &req->message_context );
     dump_varargs_bytes( ", message=", cur_size );
 }

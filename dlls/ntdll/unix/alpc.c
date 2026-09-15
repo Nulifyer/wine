@@ -38,7 +38,9 @@ static NTSTATUS validate_message_attributes( const ALPC_MESSAGE_ATTRIBUTES *send
         (receive && (receive->AllocatedAttributes & ~ALPC_MESSAGE_ATTRIBUTE_ALL)))
         return STATUS_NOT_IMPLEMENTED;
     if (send && (send->ValidAttributes & ~send->AllocatedAttributes)) return STATUS_INVALID_PARAMETER;
-    if (send && (send->ValidAttributes & ~ALPC_MESSAGE_CONTEXT_ATTRIBUTE)) return STATUS_NOT_IMPLEMENTED;
+    if (send && (send->ValidAttributes & ~(ALPC_MESSAGE_CONTEXT_ATTRIBUTE |
+                                           ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)))
+        return STATUS_NOT_IMPLEMENTED;
     return STATUS_SUCCESS;
 }
 
@@ -53,23 +55,32 @@ static client_ptr_t get_message_context( const ALPC_MESSAGE_ATTRIBUTES *attribut
 /* The payload stays at message + 1. Its token prefix temporarily occupies
  * header bytes rebuilt on success, so waits need no additional heap buffer.
  * No variable reply bytes may be written on a short or failed operation. */
-C_ASSERT( sizeof(ALPC_PORT_MESSAGE) >= sizeof(struct token_identity) );
+C_ASSERT( sizeof(ALPC_PORT_MESSAGE) >= sizeof(struct token_identity) + sizeof(ULONGLONG) );
 static unsigned int receive_attributes( const ALPC_MESSAGE_ATTRIBUTES *attributes )
 {
-    return attributes ? attributes->AllocatedAttributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE : 0;
+    return attributes ? attributes->AllocatedAttributes &
+                        (ALPC_MESSAGE_TOKEN_ATTRIBUTE | ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE) : 0;
+}
+
+static data_size_t receipt_size( unsigned int attributes )
+{
+    data_size_t size = 0;
+    if (attributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE) size += sizeof(struct token_identity);
+    if (attributes & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE) size += sizeof(ULONGLONG);
+    return size;
 }
 
 static void *receive_buffer( ALPC_PORT_MESSAGE *message, unsigned int attributes,
-                             struct token_identity *fallback )
+                             void *fallback )
 {
     if (!message) return fallback;
-    return (char *)(message + 1) - (attributes ? sizeof(*fallback) : 0);
+    return (char *)(message + 1) - receipt_size( attributes );
 }
 
 static data_size_t receive_capacity( ALPC_PORT_MESSAGE *message, SIZE_T capacity, unsigned int attributes )
 {
     return (message ? capacity - sizeof(*message) : 0) +
-           (attributes ? sizeof(struct token_identity) : 0);
+           receipt_size( attributes );
 }
 
 /* Admission, ordinary receives, and private waits serialize one result shape.
@@ -81,16 +92,24 @@ static void receive_message_info( NTSTATUS status, const struct alpc_message_inf
     ALPC_CONTEXT_ATTR *context;
     struct token_identity identity;
     ALPC_TOKEN_ATTR *token;
-    void *work;
+    ALPC_WORK_ON_BEHALF_ATTR *work;
+    unsigned int requested = receive_attributes( attributes );
+    const unsigned char *receipt_bytes = receipt;
+    ULONGLONG work_ticket = 0;
+    void *work_slot;
     if (status && status != STATUS_BUFFER_TOO_SMALL) return;
     if (message && size && (actual_size || status == STATUS_BUFFER_TOO_SMALL))
         *size = sizeof(*message) + info->size;
-    if (!status && attributes && (info->attributes_valid & receive_attributes( attributes )))
-        memcpy( &identity, receipt, sizeof(identity) );
+    if (!status && (info->attributes_valid & requested & ALPC_MESSAGE_TOKEN_ATTRIBUTE))
+        memcpy( &identity, receipt_bytes, sizeof(identity) );
+    if (requested & ALPC_MESSAGE_TOKEN_ATTRIBUTE) receipt_bytes += sizeof(identity);
+    if (!status && (info->attributes_valid & requested & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE))
+        memcpy( &work_ticket, receipt_bytes, sizeof(work_ticket) );
     if (attributes && info->sequence)
     {
         attributes->ValidAttributes = info->attributes_valid & attributes->AllocatedAttributes;
-        if (status) attributes->ValidAttributes &= ~ALPC_MESSAGE_TOKEN_ATTRIBUTE;
+        if (status) attributes->ValidAttributes &= ~(ALPC_MESSAGE_TOKEN_ATTRIBUTE |
+                                                       ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE);
         if (attributes->ValidAttributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE)
         {
             token = wine_alpc_get_attribute( attributes, ALPC_MESSAGE_TOKEN_ATTRIBUTE );
@@ -98,7 +117,13 @@ static void receive_message_info( NTSTATUS status, const struct alpc_message_inf
             memcpy( &token->AuthenticationId, &identity.authentication_id, sizeof(token->AuthenticationId) );
             memcpy( &token->ModifiedId, &identity.modified_id, sizeof(token->ModifiedId) );
         }
-        if (!status && (work = wine_alpc_get_receipt_work_slot( attributes ))) memset( work, 0, sizeof(ULONGLONG) );
+        if (attributes->ValidAttributes & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)
+        {
+            work = wine_alpc_get_attribute( attributes, ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE );
+            work->Ticket = work_ticket;
+        }
+        else if (!status && (work_slot = wine_alpc_get_receipt_work_slot( attributes )))
+            memset( work_slot, 0, sizeof(ULONGLONG) );
         if (attributes->AllocatedAttributes & ALPC_MESSAGE_CONTEXT_ATTRIBUTE)
         {
             context = wine_alpc_get_attribute( attributes, ALPC_MESSAGE_CONTEXT_ATTRIBUTE );
@@ -170,7 +195,7 @@ static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
     const struct security_descriptor *server_sd = NULL;
     data_size_t server_objattr_size = 0, server_sd_size = 0;
     ULONG sid_size = 0;
-    struct token_identity receipt;
+    unsigned char receipt[sizeof(struct token_identity) + sizeof(ULONGLONG)];
     unsigned int recv_attributes = receive_attributes( recv_msg_attr );
 
     if (!port_handle || !port_name) return STATUS_ACCESS_VIOLATION;
@@ -413,7 +438,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
     SIZE_T capacity = recv_buffer_size ? *recv_buffer_size : 65535;
     NTSTATUS status;
     HANDLE wait_handle = NULL;
-    struct token_identity receipt;
+    unsigned char receipt[sizeof(struct token_identity) + sizeof(ULONGLONG)];
     unsigned int recv_attributes = recv_msg ? receive_attributes( recv_msg_attr ) : 0;
 
     TRACE( "%p, %#x, %p, %p, %p, %p, %p, %p.\n", port_handle, (unsigned int)flags,
@@ -439,6 +464,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         req->receive = !!recv_msg;
         req->receive_attributes = recv_attributes;
         req->wow64 = is_wow64();
+        req->send_attributes = send_msg_attr ? send_msg_attr->ValidAttributes : 0;
         req->message_context = get_message_context( send_msg_attr );
         req->no_wait = timeout && !timeout->QuadPart;
         if (send_msg) wine_server_add_data( req, send_msg + 1, send_msg->DataLength );

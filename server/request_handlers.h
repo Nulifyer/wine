@@ -2564,6 +2564,7 @@ C_ASSERT( offsetof(struct alpc_send_receive_request, send) == 28 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, receive) == 32 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, wow64) == 36 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, no_wait) == 40 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, send_attributes) == 44 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, message_context) == 48 );
 C_ASSERT( sizeof(struct alpc_send_receive_request) == 56 );
 C_ASSERT( offsetof(struct alpc_send_receive_reply, wait_handle) == 8 );

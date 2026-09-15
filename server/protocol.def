@@ -4510,6 +4510,7 @@ struct alpc_message_info
     int receive;
     int wow64;
     int no_wait;
+    unsigned int send_attributes;
     client_ptr_t message_context;
     VARARG(message,bytes);
 @REPLY
