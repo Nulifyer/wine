@@ -26,6 +26,89 @@
 #include "winbase.h"
 #include "ntuser.h"
 
+struct kst_test
+{
+    BOOL update;
+    BOOL initialized;
+    DWORD initialize_error;
+    UINT reason;
+    UINT stop_reason;
+};
+
+static DWORD WINAPI kst_thread( void *arg )
+{
+    struct kst_test *test = arg;
+    HANDLE events[2];
+
+    events[0] = CreateEventW( NULL, FALSE, FALSE, NULL );
+    events[1] = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!events[0] && !!events[1], "failed to create KST events, error %lu\n", GetLastError() );
+    if (!events[0] || !events[1]) return 1;
+
+    SetLastError( 0xdeadbeef );
+    test->initialized = NtKSTInitialize( events[0], events[1] );
+    test->initialize_error = GetLastError();
+    if (test->initialized)
+    {
+        ok( SetEvent( events[test->update] ), "failed to signal KST event, error %lu\n", GetLastError() );
+        test->reason = NtKSTWait();
+        if (test->update)
+        {
+            ok( SetEvent( events[0] ), "failed to signal KST stop event, error %lu\n", GetLastError() );
+            test->stop_reason = NtKSTWait();
+        }
+    }
+    CloseHandle( events[1] );
+    CloseHandle( events[0] );
+    return 0;
+}
+
+static void test_kst(void)
+{
+    struct kst_test test;
+    HANDLE thread;
+    DWORD exit_code;
+    UINT reason;
+
+    SetLastError( 0xdeadbeef );
+    reason = NtKSTWait();
+    ok( reason == 1, "got uninitialized KST reason %u\n", reason );
+    ok( GetLastError() == ERROR_INVALID_STATE, "got uninitialized KST error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ok( !NtKSTInitialize( NULL, NULL ), "KST initialize unexpectedly accepted null events\n" );
+    ok( GetLastError() == ERROR_INVALID_HANDLE, "got null-event KST error %lu\n", GetLastError() );
+
+    memset( &test, 0xcc, sizeof(test) );
+    test.update = FALSE;
+    thread = CreateThread( NULL, 0, kst_thread, &test, 0, NULL );
+    ok( !!thread, "failed to create KST stop thread, error %lu\n", GetLastError() );
+    if (thread)
+    {
+        ok( WaitForSingleObject( thread, 5000 ) == WAIT_OBJECT_0, "KST stop thread did not exit\n" );
+        ok( GetExitCodeThread( thread, &exit_code ) && !exit_code, "got KST stop exit code %lu\n", exit_code );
+        CloseHandle( thread );
+        ok( test.initialized, "KST stop initialize failed, error %lu\n", test.initialize_error );
+        ok( test.initialize_error == 0xdeadbeef, "KST stop changed last error to %lu\n", test.initialize_error );
+        ok( test.reason == 0, "got KST stop reason %u\n", test.reason );
+    }
+
+    memset( &test, 0xcc, sizeof(test) );
+    test.update = TRUE;
+    thread = CreateThread( NULL, 0, kst_thread, &test, 0, NULL );
+    ok( !!thread, "failed to create KST update thread, error %lu\n", GetLastError() );
+    if (thread)
+    {
+        ok( WaitForSingleObject( thread, 5000 ) == WAIT_OBJECT_0, "KST update thread did not exit\n" );
+        ok( GetExitCodeThread( thread, &exit_code ) && !exit_code, "got KST update exit code %lu\n", exit_code );
+        CloseHandle( thread );
+        ok( test.initialized, "KST update initialize failed, error %lu\n", test.initialize_error );
+        ok( test.initialize_error == 0xdeadbeef, "KST update changed last error to %lu\n", test.initialize_error );
+        ok( test.reason == 2, "got KST update reason %u\n", test.reason );
+        ok( test.stop_reason == 0, "got KST post-update stop reason %u\n", test.stop_reason );
+    }
+}
+
 static void test_frame_statistics(void)
 {
     struct dcomposition_frame_statistics statistics, second;
@@ -383,6 +466,7 @@ static void test_token_manager_lifetime(void)
 
 START_TEST(dcomp)
 {
+    test_kst();
     test_frame_statistics();
     test_channel_lifetime();
     test_connection_queue();

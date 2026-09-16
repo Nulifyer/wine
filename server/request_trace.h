@@ -4140,6 +4140,12 @@ static void dump_set_d3dkmt_process_scheduling_priority_class_request( const str
     fprintf( stderr, ", priority_class=%08x", req->priority_class );
 }
 
+static void dump_initialize_kst_request( const struct initialize_kst_request *req )
+{
+    fprintf( stderr, " stop_event=%04x", req->stop_event );
+    fprintf( stderr, ", update_event=%04x", req->update_event );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4509,6 +4515,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_commit_dcomp_channel_request,
     (dump_func)dump_get_d3dkmt_process_scheduling_priority_class_request,
     (dump_func)dump_set_d3dkmt_process_scheduling_priority_class_request,
+    (dump_func)dump_initialize_kst_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4877,6 +4884,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_dcomp_channel_batch_id_reply,
     (dump_func)dump_commit_dcomp_channel_reply,
     (dump_func)dump_get_d3dkmt_process_scheduling_priority_class_reply,
+    NULL,
     NULL,
 };
 
@@ -5247,6 +5255,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "commit_dcomp_channel",
     "get_d3dkmt_process_scheduling_priority_class",
     "set_d3dkmt_process_scheduling_priority_class",
+    "initialize_kst",
 };
 
 static const struct

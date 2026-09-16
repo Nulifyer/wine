@@ -677,8 +677,8 @@
 @ stub -syscall NtHWCursorUpdatePointer
 @ stub -syscall NtInputSpaceRegionFromPoint
 @ stub -syscall NtIsOneCoreTransformMode
-@ stub -syscall NtKSTInitialize
-@ stub -syscall NtKSTWait
+@ stdcall -syscall NtKSTInitialize(long long)
+@ stdcall -syscall NtKSTWait()
 @ stub -syscall NtMITAccessibilityTimerNotification
 @ stub -syscall NtMITActivateInputProcessing
 @ stub -syscall NtMITConfigureVirtualTouchpad

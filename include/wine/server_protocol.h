@@ -7148,6 +7148,19 @@ struct set_d3dkmt_process_scheduling_priority_class_reply
 };
 
 
+struct initialize_kst_request
+{
+    struct request_header __header;
+    obj_handle_t stop_event;
+    obj_handle_t update_event;
+    char __pad_20[4];
+};
+struct initialize_kst_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -7515,6 +7528,7 @@ enum request
     REQ_commit_dcomp_channel,
     REQ_get_d3dkmt_process_scheduling_priority_class,
     REQ_set_d3dkmt_process_scheduling_priority_class,
+    REQ_initialize_kst,
     REQ_NB_REQUESTS
 };
 
@@ -7887,6 +7901,7 @@ union generic_request
     struct commit_dcomp_channel_request commit_dcomp_channel_request;
     struct get_d3dkmt_process_scheduling_priority_class_request get_d3dkmt_process_scheduling_priority_class_request;
     struct set_d3dkmt_process_scheduling_priority_class_request set_d3dkmt_process_scheduling_priority_class_request;
+    struct initialize_kst_request initialize_kst_request;
 };
 union generic_reply
 {
@@ -8257,8 +8272,9 @@ union generic_reply
     struct commit_dcomp_channel_reply commit_dcomp_channel_reply;
     struct get_d3dkmt_process_scheduling_priority_class_reply get_d3dkmt_process_scheduling_priority_class_reply;
     struct set_d3dkmt_process_scheduling_priority_class_reply set_d3dkmt_process_scheduling_priority_class_reply;
+    struct initialize_kst_reply initialize_kst_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1012
+#define SERVER_PROTOCOL_VERSION 1013
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

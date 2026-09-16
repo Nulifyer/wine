@@ -134,6 +134,8 @@ struct user_thread_info
     struct mouse_tracking_info   *mouse_tracking_info;    /* NtUserTrackMouseEvent handling */
     struct opengl_thread_data    *opengl_data;            /* OpenGL private thread data */
     HANDLE                        core_messaging_iocp;     /* CoreMessaging completion port */
+    HANDLE                        kst_events[2];           /* KST stop and MMCSS-update events */
+    BOOL                          kst_initialized;         /* KST state belongs to this thread */
     struct list                   core_messaging_windows; /* registered CoreMessaging windows */
     struct list                   known_pointers;         /* list of known pointers */
 };

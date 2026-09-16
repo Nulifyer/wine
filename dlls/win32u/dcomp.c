@@ -29,6 +29,7 @@
 
 #include "ntstatus.h"
 #include "win32u_private.h"
+#include "ntuser_private.h"
 #include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dcomp);
@@ -116,6 +117,52 @@ BOOL WINAPI NtUserDwmKernelStartup(void)
     }
     SERVER_END_REQ;
     return ret;
+}
+
+BOOL WINAPI NtKSTInitialize( HANDLE stop_event, HANDLE update_event )
+{
+    struct user_thread_info *info = get_user_thread_info();
+    BOOL ret;
+
+    TRACE( "stop_event %p, update_event %p\n", stop_event, update_event );
+
+    SERVER_START_REQ( initialize_kst )
+    {
+        req->stop_event = wine_server_obj_handle( stop_event );
+        req->update_event = wine_server_obj_handle( update_event );
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    if (!ret) return FALSE;
+
+    info->kst_events[0] = stop_event;
+    info->kst_events[1] = update_event;
+    info->kst_initialized = TRUE;
+    return TRUE;
+}
+
+UINT WINAPI NtKSTWait(void)
+{
+    struct user_thread_info *info = get_user_thread_info();
+    NTSTATUS status;
+
+    TRACE( "\n" );
+
+    if (!info->kst_initialized)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_STATE );
+        return 1;
+    }
+    status = NtWaitForMultipleObjects( 2, info->kst_events, WaitAny, FALSE, NULL );
+    if (status == STATUS_WAIT_0)
+    {
+        info->kst_initialized = FALSE;
+        return 0;
+    }
+    if (status == STATUS_WAIT_0 + 1) return 2;
+
+    RtlSetLastWin32Error( RtlNtStatusToDosError( status ) );
+    return 1;
 }
 
 NTSTATUS WINAPI NtDCompositionCreateConnection( BOOL is_dwm, HANDLE event, HANDLE *connection )

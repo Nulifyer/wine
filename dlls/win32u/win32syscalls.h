@@ -679,7 +679,7 @@
     SYSCALL_ENTRY( 0x12a3, NtHWCursorUpdatePointer, 0 ) \
     SYSCALL_ENTRY( 0x12a4, NtInputSpaceRegionFromPoint, 0 ) \
     SYSCALL_ENTRY( 0x12a5, NtIsOneCoreTransformMode, 0 ) \
-    SYSCALL_ENTRY( 0x12a6, NtKSTInitialize, 0 ) \
+    SYSCALL_ENTRY( 0x12a6, NtKSTInitialize, 8 ) \
     SYSCALL_ENTRY( 0x12a7, NtKSTWait, 0 ) \
     SYSCALL_ENTRY( 0x12a8, NtMITAccessibilityTimerNotification, 0 ) \
     SYSCALL_ENTRY( 0x12a9, NtMITActivateInputProcessing, 0 ) \
@@ -2221,7 +2221,7 @@
     SYSCALL_ENTRY( 0x12a3, NtHWCursorUpdatePointer, 0 ) \
     SYSCALL_ENTRY( 0x12a4, NtInputSpaceRegionFromPoint, 0 ) \
     SYSCALL_ENTRY( 0x12a5, NtIsOneCoreTransformMode, 0 ) \
-    SYSCALL_ENTRY( 0x12a6, NtKSTInitialize, 0 ) \
+    SYSCALL_ENTRY( 0x12a6, NtKSTInitialize, 16 ) \
     SYSCALL_ENTRY( 0x12a7, NtKSTWait, 0 ) \
     SYSCALL_ENTRY( 0x12a8, NtMITAccessibilityTimerNotification, 0 ) \
     SYSCALL_ENTRY( 0x12a9, NtMITActivateInputProcessing, 0 ) \
@@ -3536,8 +3536,6 @@
     SYSCALL_STUB( NtHWCursorUpdatePointer ) \
     SYSCALL_STUB( NtInputSpaceRegionFromPoint ) \
     SYSCALL_STUB( NtIsOneCoreTransformMode ) \
-    SYSCALL_STUB( NtKSTInitialize ) \
-    SYSCALL_STUB( NtKSTWait ) \
     SYSCALL_STUB( NtMITAccessibilityTimerNotification ) \
     SYSCALL_STUB( NtMITActivateInputProcessing ) \
     SYSCALL_STUB( NtMITConfigureVirtualTouchpad ) \

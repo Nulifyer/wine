@@ -372,6 +372,7 @@ DECL_HANDLER(get_dcomp_channel_batch_id);
 DECL_HANDLER(commit_dcomp_channel);
 DECL_HANDLER(get_d3dkmt_process_scheduling_priority_class);
 DECL_HANDLER(set_d3dkmt_process_scheduling_priority_class);
+DECL_HANDLER(initialize_kst);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -741,6 +742,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_commit_dcomp_channel,
     (req_handler)req_get_d3dkmt_process_scheduling_priority_class,
     (req_handler)req_set_d3dkmt_process_scheduling_priority_class,
+    (req_handler)req_initialize_kst,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -2829,3 +2831,6 @@ C_ASSERT( sizeof(struct get_d3dkmt_process_scheduling_priority_class_reply) == 1
 C_ASSERT( offsetof(struct set_d3dkmt_process_scheduling_priority_class_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_d3dkmt_process_scheduling_priority_class_request, priority_class) == 16 );
 C_ASSERT( sizeof(struct set_d3dkmt_process_scheduling_priority_class_request) == 24 );
+C_ASSERT( offsetof(struct initialize_kst_request, stop_event) == 12 );
+C_ASSERT( offsetof(struct initialize_kst_request, update_event) == 16 );
+C_ASSERT( sizeof(struct initialize_kst_request) == 24 );

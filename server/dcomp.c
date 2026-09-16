@@ -628,3 +628,25 @@ DECL_HANDLER(commit_dcomp_channel)
 done:
     release_object( channel );
 }
+
+DECL_HANDLER(initialize_kst)
+{
+    struct event *stop_event, *update_event;
+
+    if (is_native_machine() && !current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!(stop_event = get_event_obj( current->process, req->stop_event, SYNCHRONIZE ))) return;
+    if (!(update_event = get_event_obj( current->process, req->update_event, SYNCHRONIZE )))
+    {
+        release_object( stop_event );
+        return;
+    }
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server kst-initialize winpid=%04x wintid=%04x session=%u\n",
+                 current->process->id, current->id, current->process->session_id );
+    release_object( update_event );
+    release_object( stop_event );
+}

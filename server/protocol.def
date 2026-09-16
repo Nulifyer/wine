@@ -4875,3 +4875,9 @@ struct alpc_message_info
     obj_handle_t handle;              /* process handle */
     unsigned int priority_class;      /* D3DKMT_SCHEDULINGPRIORITYCLASS */
 @END
+
+/* Admit a DWM kernel-scheduling worker and validate its notification events. */
+@REQ(initialize_kst)
+    obj_handle_t stop_event;           /* worker shutdown event */
+    obj_handle_t update_event;         /* MMCSS update event */
+@END
