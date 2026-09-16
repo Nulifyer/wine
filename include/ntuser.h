@@ -753,6 +753,36 @@ W32KAPI NTSTATUS WINAPI NtDCompositionCreateChannel( UINT *channel, UINT *sectio
                                                       void **mapped_address, UINT flags );
 W32KAPI NTSTATUS WINAPI NtDCompositionDestroyChannel( UINT channel );
 W32KAPI NTSTATUS WINAPI NtDCompositionGetBatchId( UINT channel, UINT selector, UINT *batch_id );
+W32KAPI NTSTATUS WINAPI NtDCompositionSetChannelConnectionId( UINT channel, INT connection_id,
+                                                               UINT64 connection );
+struct dcomposition_connection_batch
+{
+    UINT type;
+    UINT pad;
+    struct dcomposition_connection_batch *next;
+    union
+    {
+        struct
+        {
+            UINT channel;
+            UINT flags;
+            UINT64 connection;
+            void *object;
+        } create;
+        struct
+        {
+            UINT channel;
+        } close;
+        struct
+        {
+            UINT channel;
+            UINT size;
+            BYTE *data;
+        } batch;
+    } u;
+};
+W32KAPI NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *batch_id,
+                                                           struct dcomposition_connection_batch **batch );
 W32KAPI NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *buffer,
                                                       ULONG length, HANDLE resource,
                                                       const void *resource_data, const UINT *resources,

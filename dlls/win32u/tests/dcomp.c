@@ -81,7 +81,9 @@ static void test_frame_statistics(void)
 
 static void test_connection_lifetime(void)
 {
+    struct dcomposition_connection_batch *record = (void *)0xdeadbeef;
     HANDLE event, connection = (HANDLE)0xdeadbeef;
+    UINT64 cookie = 0x1122334455667788;
     NTSTATUS status;
 
     event = CreateEventW( NULL, FALSE, FALSE, NULL );
@@ -96,6 +98,9 @@ static void test_connection_lifetime(void)
     CloseHandle( event );
     if (!status)
     {
+        status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+        ok( status == STATUS_ACCESS_DENIED, "got ordinary queue status %#lx\n", status );
+        ok( !record, "ordinary queue returned %p\n", record );
         status = NtDCompositionDestroyConnection( connection );
         ok( status == STATUS_SUCCESS, "got destroy status %#lx\n", status );
         status = NtDCompositionDestroyConnection( connection );
@@ -122,6 +127,8 @@ static void test_channel_lifetime(void)
     ok( buffer && buffer != (BYTE *)0xdeadbeef, "got buffer %p\n", buffer );
     if (status) return;
     for (i = 0; i < 32; ++i) ok( !buffer[i], "buffer byte %u is %#x\n", i, buffer[i] );
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_ACCESS_DENIED, "got bind-without-DWM status %#lx\n", status );
 
     for (selector = 0; selector < 4; ++selector)
     {
@@ -175,6 +182,84 @@ static void test_channel_lifetime(void)
 
     status = NtDCompositionDestroyChannel( second_channel );
     ok( status == STATUS_SUCCESS, "got second destroy status %#lx\n", status );
+}
+
+static void test_connection_queue(void)
+{
+    struct dcomposition_connection_batch *record = (void *)0xdeadbeef;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = (BYTE *)0xdeadbeef;
+    UINT channel = 0xcccccccc, size = 0x1000, batch = 0xcccccccc;
+    UINT64 cookie = 0x1122334455667788;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0x90 );
+    ok( status == STATUS_SUCCESS, "got channel status %#lx\n", status );
+    if (status) goto done;
+
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got bind status %#lx\n", status );
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_INVALID_PARAMETER, "got repeated bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got create record status %#lx\n", status );
+    ok( cookie == 0x1122334455667788, "cookie changed to %s\n", wine_dbgstr_longlong(cookie) );
+    ok( !!record, "create record is null\n" );
+    if (record)
+    {
+        ok( record->type == 5, "got create record type %u\n", record->type );
+        ok( !record->next, "got create record next %p\n", record->next );
+        ok( record->u.create.channel == channel, "got create channel %#x\n", record->u.create.channel );
+        ok( record->u.create.flags == 0x90, "got create flags %#x\n", record->u.create.flags );
+        ok( record->u.create.connection == 1, "got create connection %s\n",
+            wine_dbgstr_longlong(record->u.create.connection) );
+        ok( !record->u.create.object, "got create object %p\n", record->u.create.object );
+    }
+
+    buffer[0] = 0x12;
+    buffer[1] = 0x34;
+    buffer[2] = 0x56;
+    buffer[3] = 0x78;
+    status = NtDCompositionCommitChannel( channel, &batch, buffer, 4, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got batch record status %#lx\n", status );
+    ok( !!record, "batch record is null\n" );
+    if (record)
+    {
+        ok( record->type == 7, "got batch record type %u\n", record->type );
+        ok( record->u.batch.channel == channel, "got batch channel %#x\n", record->u.batch.channel );
+        ok( record->u.batch.size == 4, "got batch size %u\n", record->u.batch.size );
+        ok( record->u.batch.data[0] == 0x12 && record->u.batch.data[1] == 0x34 &&
+            record->u.batch.data[2] == 0x56 && record->u.batch.data[3] == 0x78,
+            "got batch data %02x %02x %02x %02x\n", record->u.batch.data[0],
+            record->u.batch.data[1], record->u.batch.data[2], record->u.batch.data[3] );
+    }
+
+    status = NtDCompositionDestroyChannel( channel );
+    ok( status == STATUS_SUCCESS, "got channel destroy status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got close record status %#lx\n", status );
+    ok( !!record, "close record is null\n" );
+    if (record)
+    {
+        ok( record->type == 6, "got close record type %u\n", record->type );
+        ok( record->u.close.channel == channel, "got close channel %#x\n", record->u.close.channel );
+    }
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got empty queue status %#lx\n", status );
+    ok( !record, "empty queue returned %p\n", record );
+    buffer = NULL;
+
+done:
+    if (buffer && buffer != (BYTE *)0xdeadbeef) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
 }
 
 static void test_token_manager_lifetime(void)
@@ -241,6 +326,7 @@ START_TEST(dcomp)
 {
     test_frame_statistics();
     test_channel_lifetime();
+    test_connection_queue();
     test_connection_lifetime();
     test_token_manager_lifetime();
 }

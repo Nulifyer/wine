@@ -34,7 +34,7 @@
     SYSCALL_ENTRY( 0x101e, NtDCompositionEnableMMCSS, 0 ) \
     SYSCALL_ENTRY( 0x101f, NtDCompositionGetBatchId, 12 ) \
     SYSCALL_ENTRY( 0x1020, NtDCompositionGetChannels, 0 ) \
-    SYSCALL_ENTRY( 0x1021, NtDCompositionGetConnectionBatch, 0 ) \
+    SYSCALL_ENTRY( 0x1021, NtDCompositionGetConnectionBatch, 12 ) \
     SYSCALL_ENTRY( 0x1022, NtDCompositionGetDeletedResources, 0 ) \
     SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 0 ) \
     SYSCALL_ENTRY( 0x1024, NtDCompositionGetFrameIdFromBatchId, 0 ) \
@@ -54,7 +54,7 @@
     SYSCALL_ENTRY( 0x1032, NtDCompositionRetireFrame, 0 ) \
     SYSCALL_ENTRY( 0x1033, NtDCompositionSetBlurredWallpaperSurface, 0 ) \
     SYSCALL_ENTRY( 0x1034, NtDCompositionSetChannelCommitCompletionEvent, 0 ) \
-    SYSCALL_ENTRY( 0x1035, NtDCompositionSetChannelConnectionId, 0 ) \
+    SYSCALL_ENTRY( 0x1035, NtDCompositionSetChannelConnectionId, 12 ) \
     SYSCALL_ENTRY( 0x1036, NtDCompositionSetChildRootVisual, 0 ) \
     SYSCALL_ENTRY( 0x1037, NtDCompositionSetDebugCounter, 0 ) \
     SYSCALL_ENTRY( 0x1038, NtDCompositionSetMaterialProperty, 0 ) \
@@ -1576,7 +1576,7 @@
     SYSCALL_ENTRY( 0x101e, NtDCompositionEnableMMCSS, 0 ) \
     SYSCALL_ENTRY( 0x101f, NtDCompositionGetBatchId, 24 ) \
     SYSCALL_ENTRY( 0x1020, NtDCompositionGetChannels, 0 ) \
-    SYSCALL_ENTRY( 0x1021, NtDCompositionGetConnectionBatch, 0 ) \
+    SYSCALL_ENTRY( 0x1021, NtDCompositionGetConnectionBatch, 24 ) \
     SYSCALL_ENTRY( 0x1022, NtDCompositionGetDeletedResources, 0 ) \
     SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 0 ) \
     SYSCALL_ENTRY( 0x1024, NtDCompositionGetFrameIdFromBatchId, 0 ) \
@@ -1596,7 +1596,7 @@
     SYSCALL_ENTRY( 0x1032, NtDCompositionRetireFrame, 0 ) \
     SYSCALL_ENTRY( 0x1033, NtDCompositionSetBlurredWallpaperSurface, 0 ) \
     SYSCALL_ENTRY( 0x1034, NtDCompositionSetChannelCommitCompletionEvent, 0 ) \
-    SYSCALL_ENTRY( 0x1035, NtDCompositionSetChannelConnectionId, 0 ) \
+    SYSCALL_ENTRY( 0x1035, NtDCompositionSetChannelConnectionId, 24 ) \
     SYSCALL_ENTRY( 0x1036, NtDCompositionSetChildRootVisual, 0 ) \
     SYSCALL_ENTRY( 0x1037, NtDCompositionSetDebugCounter, 0 ) \
     SYSCALL_ENTRY( 0x1038, NtDCompositionSetMaterialProperty, 0 ) \
@@ -3114,7 +3114,6 @@
     SYSCALL_STUB( NtDCompositionDuplicateSwapchainHandleToDwm ) \
     SYSCALL_STUB( NtDCompositionEnableMMCSS ) \
     SYSCALL_STUB( NtDCompositionGetChannels ) \
-    SYSCALL_STUB( NtDCompositionGetConnectionBatch ) \
     SYSCALL_STUB( NtDCompositionGetDeletedResources ) \
     SYSCALL_STUB( NtDCompositionGetFrameId ) \
     SYSCALL_STUB( NtDCompositionGetFrameIdFromBatchId ) \
@@ -3133,7 +3132,6 @@
     SYSCALL_STUB( NtDCompositionRetireFrame ) \
     SYSCALL_STUB( NtDCompositionSetBlurredWallpaperSurface ) \
     SYSCALL_STUB( NtDCompositionSetChannelCommitCompletionEvent ) \
-    SYSCALL_STUB( NtDCompositionSetChannelConnectionId ) \
     SYSCALL_STUB( NtDCompositionSetChildRootVisual ) \
     SYSCALL_STUB( NtDCompositionSetDebugCounter ) \
     SYSCALL_STUB( NtDCompositionSetMaterialProperty ) \

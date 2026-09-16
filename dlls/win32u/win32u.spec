@@ -32,7 +32,7 @@
 @ stub -syscall NtDCompositionEnableMMCSS
 @ stdcall -syscall NtDCompositionGetBatchId(long long ptr)
 @ stub -syscall NtDCompositionGetChannels
-@ stub -syscall NtDCompositionGetConnectionBatch
+@ stdcall -syscall NtDCompositionGetConnectionBatch(long ptr ptr)
 @ stub -syscall NtDCompositionGetDeletedResources
 @ stub -syscall NtDCompositionGetFrameId
 @ stub -syscall NtDCompositionGetFrameIdFromBatchId
@@ -52,7 +52,7 @@
 @ stub -syscall NtDCompositionRetireFrame
 @ stub -syscall NtDCompositionSetBlurredWallpaperSurface
 @ stub -syscall NtDCompositionSetChannelCommitCompletionEvent
-@ stub -syscall NtDCompositionSetChannelConnectionId
+@ stdcall -syscall NtDCompositionSetChannelConnectionId(long long long)
 @ stub -syscall NtDCompositionSetChildRootVisual
 @ stub -syscall NtDCompositionSetDebugCounter
 @ stub -syscall NtDCompositionSetMaterialProperty

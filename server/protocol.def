@@ -4793,19 +4793,38 @@ struct alpc_message_info
     mem_size_t   size;         /* requested command-buffer size */
     unsigned int flags;        /* private channel creation flags */
 @REPLY
-    obj_handle_t channel;      /* opaque process-owned channel ID */
+    unsigned int channel;      /* opaque session-visible channel ID */
     obj_handle_t section;      /* writable command-buffer section */
     mem_size_t   size;         /* mapped command-buffer size */
 @END
 
 /* Destroy a DirectComposition channel and its queued batches. */
 @REQ(destroy_dcomp_channel)
-    obj_handle_t channel;      /* channel ID to consume */
+    unsigned int channel;      /* owner channel ID to consume */
+@END
+
+/* Bind a client channel to the session DirectComposition connection. */
+@REQ(set_dcomp_channel_connection)
+    unsigned int channel;      /* session-visible channel ID */
+    int          connection_id;/* private connection slot */
+    client_ptr_t connection;   /* private 64-bit connection value */
+@END
+
+/* Pop one record from a DWM connection's pending batch queue. */
+@REQ(get_dcomp_connection_batch)
+    obj_handle_t connection;   /* DWM connection handle */
+@REPLY
+    unsigned int type;         /* create, close or command batch */
+    unsigned int channel;      /* session-visible channel ID */
+    unsigned int value;        /* create flags or batch byte count */
+    client_ptr_t connection;   /* private client connection value */
+    client_ptr_t object;       /* private create-record object */
+    VARARG(data,bytes);        /* stable command-batch bytes */
 @END
 
 /* Query one of the channel's batch counters. */
 @REQ(get_dcomp_channel_batch_id)
-    obj_handle_t channel;      /* process-owned channel ID */
+    unsigned int channel;      /* owner channel ID */
     unsigned int selector;     /* DCOMPOSITIONBATCHSELECTOR value */
 @REPLY
     unsigned int batch_id;
@@ -4813,7 +4832,7 @@ struct alpc_message_info
 
 /* Copy one command-buffer prefix into the server-owned commit queue. */
 @REQ(commit_dcomp_channel)
-    obj_handle_t channel;      /* process-owned channel ID */
+    unsigned int channel;      /* owner channel ID */
     mem_size_t   length;       /* committed bytes from the shared buffer */
     VARARG(data,bytes);        /* stable copy of the committed bytes */
 @REPLY
