@@ -2,6 +2,7 @@ TESTDLL   = kernelbase.dll
 IMPORTS   = advapi32
 
 SOURCES = \
+	appmodel_state.c \
 	exit.c \
 	file.c \
 	globalization_key.c \

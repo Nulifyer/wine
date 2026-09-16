@@ -1049,7 +1049,7 @@
 @ stdcall OpenProcessToken(long long ptr)
 @ stub OpenRegKey
 @ stdcall OpenSemaphoreW(long long wstr)
-# @ stub OpenState
+@ stdcall OpenState()
 # @ stub OpenStateAtom
 # @ stub OpenStateExplicit
 # @ stub OpenStateExplicitForUserSid
