@@ -6982,6 +6982,64 @@ struct open_token_manager_reply
 };
 
 
+struct create_dcomp_channel_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    mem_size_t   size;
+    unsigned int flags;
+    char __pad_28[4];
+};
+struct create_dcomp_channel_reply
+{
+    struct reply_header __header;
+    obj_handle_t channel;
+    obj_handle_t section;
+    mem_size_t   size;
+};
+
+
+struct destroy_dcomp_channel_request
+{
+    struct request_header __header;
+    obj_handle_t channel;
+};
+struct destroy_dcomp_channel_reply
+{
+    struct reply_header __header;
+};
+
+
+struct get_dcomp_channel_batch_id_request
+{
+    struct request_header __header;
+    obj_handle_t channel;
+    unsigned int selector;
+    char __pad_20[4];
+};
+struct get_dcomp_channel_batch_id_reply
+{
+    struct reply_header __header;
+    unsigned int batch_id;
+    char __pad_12[4];
+};
+
+
+struct commit_dcomp_channel_request
+{
+    struct request_header __header;
+    obj_handle_t channel;
+    mem_size_t   length;
+    /* VARARG(data,bytes); */
+};
+struct commit_dcomp_channel_reply
+{
+    struct reply_header __header;
+    unsigned int batch_id;
+    char __pad_12[4];
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -7337,6 +7395,10 @@ enum request
     REQ_create_dcomp_connection,
     REQ_destroy_dcomp_connection,
     REQ_open_token_manager,
+    REQ_create_dcomp_channel,
+    REQ_destroy_dcomp_channel,
+    REQ_get_dcomp_channel_batch_id,
+    REQ_commit_dcomp_channel,
     REQ_NB_REQUESTS
 };
 
@@ -7697,6 +7759,10 @@ union generic_request
     struct create_dcomp_connection_request create_dcomp_connection_request;
     struct destroy_dcomp_connection_request destroy_dcomp_connection_request;
     struct open_token_manager_request open_token_manager_request;
+    struct create_dcomp_channel_request create_dcomp_channel_request;
+    struct destroy_dcomp_channel_request destroy_dcomp_channel_request;
+    struct get_dcomp_channel_batch_id_request get_dcomp_channel_batch_id_request;
+    struct commit_dcomp_channel_request commit_dcomp_channel_request;
 };
 union generic_reply
 {
@@ -8055,8 +8121,12 @@ union generic_reply
     struct create_dcomp_connection_reply create_dcomp_connection_reply;
     struct destroy_dcomp_connection_reply destroy_dcomp_connection_reply;
     struct open_token_manager_reply open_token_manager_reply;
+    struct create_dcomp_channel_reply create_dcomp_channel_reply;
+    struct destroy_dcomp_channel_reply destroy_dcomp_channel_reply;
+    struct get_dcomp_channel_batch_id_reply get_dcomp_channel_batch_id_reply;
+    struct commit_dcomp_channel_reply commit_dcomp_channel_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1005
+#define SERVER_PROTOCOL_VERSION 1006
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

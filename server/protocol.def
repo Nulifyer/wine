@@ -4787,3 +4787,35 @@ struct alpc_message_info
     obj_handle_t event_a;      /* first session notification event */
     obj_handle_t event_b;      /* second session notification event */
 @END
+
+/* Create a process-owned DirectComposition command channel. */
+@REQ(create_dcomp_channel)
+    mem_size_t   size;         /* requested command-buffer size */
+    unsigned int flags;        /* private channel creation flags */
+@REPLY
+    obj_handle_t channel;      /* opaque process-owned channel ID */
+    obj_handle_t section;      /* writable command-buffer section */
+    mem_size_t   size;         /* mapped command-buffer size */
+@END
+
+/* Destroy a DirectComposition channel and its queued batches. */
+@REQ(destroy_dcomp_channel)
+    obj_handle_t channel;      /* channel ID to consume */
+@END
+
+/* Query one of the channel's batch counters. */
+@REQ(get_dcomp_channel_batch_id)
+    obj_handle_t channel;      /* process-owned channel ID */
+    unsigned int selector;     /* DCOMPOSITIONBATCHSELECTOR value */
+@REPLY
+    unsigned int batch_id;
+@END
+
+/* Copy one command-buffer prefix into the server-owned commit queue. */
+@REQ(commit_dcomp_channel)
+    obj_handle_t channel;      /* process-owned channel ID */
+    mem_size_t   length;       /* committed bytes from the shared buffer */
+    VARARG(data,bytes);        /* stable copy of the committed bytes */
+@REPLY
+    unsigned int batch_id;
+@END

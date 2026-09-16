@@ -360,6 +360,10 @@ DECL_HANDLER(notify_change_session);
 DECL_HANDLER(create_dcomp_connection);
 DECL_HANDLER(destroy_dcomp_connection);
 DECL_HANDLER(open_token_manager);
+DECL_HANDLER(create_dcomp_channel);
+DECL_HANDLER(destroy_dcomp_channel);
+DECL_HANDLER(get_dcomp_channel_batch_id);
+DECL_HANDLER(commit_dcomp_channel);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -717,6 +721,10 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_create_dcomp_connection,
     (req_handler)req_destroy_dcomp_connection,
     (req_handler)req_open_token_manager,
+    (req_handler)req_create_dcomp_channel,
+    (req_handler)req_destroy_dcomp_channel,
+    (req_handler)req_get_dcomp_channel_batch_id,
+    (req_handler)req_commit_dcomp_channel,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -2755,3 +2763,22 @@ C_ASSERT( offsetof(struct open_token_manager_reply, section_size) == 16 );
 C_ASSERT( offsetof(struct open_token_manager_reply, event_a) == 24 );
 C_ASSERT( offsetof(struct open_token_manager_reply, event_b) == 28 );
 C_ASSERT( sizeof(struct open_token_manager_reply) == 32 );
+C_ASSERT( offsetof(struct create_dcomp_channel_request, size) == 16 );
+C_ASSERT( offsetof(struct create_dcomp_channel_request, flags) == 24 );
+C_ASSERT( sizeof(struct create_dcomp_channel_request) == 32 );
+C_ASSERT( offsetof(struct create_dcomp_channel_reply, channel) == 8 );
+C_ASSERT( offsetof(struct create_dcomp_channel_reply, section) == 12 );
+C_ASSERT( offsetof(struct create_dcomp_channel_reply, size) == 16 );
+C_ASSERT( sizeof(struct create_dcomp_channel_reply) == 24 );
+C_ASSERT( offsetof(struct destroy_dcomp_channel_request, channel) == 12 );
+C_ASSERT( sizeof(struct destroy_dcomp_channel_request) == 16 );
+C_ASSERT( offsetof(struct get_dcomp_channel_batch_id_request, channel) == 12 );
+C_ASSERT( offsetof(struct get_dcomp_channel_batch_id_request, selector) == 16 );
+C_ASSERT( sizeof(struct get_dcomp_channel_batch_id_request) == 24 );
+C_ASSERT( offsetof(struct get_dcomp_channel_batch_id_reply, batch_id) == 8 );
+C_ASSERT( sizeof(struct get_dcomp_channel_batch_id_reply) == 16 );
+C_ASSERT( offsetof(struct commit_dcomp_channel_request, channel) == 12 );
+C_ASSERT( offsetof(struct commit_dcomp_channel_request, length) == 16 );
+C_ASSERT( sizeof(struct commit_dcomp_channel_request) == 24 );
+C_ASSERT( offsetof(struct commit_dcomp_channel_reply, batch_id) == 8 );
+C_ASSERT( sizeof(struct commit_dcomp_channel_reply) == 16 );

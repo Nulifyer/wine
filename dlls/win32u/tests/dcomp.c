@@ -103,6 +103,80 @@ static void test_connection_lifetime(void)
     }
 }
 
+static void test_channel_lifetime(void)
+{
+    BYTE *buffer = (BYTE *)0xdeadbeef, *second_buffer = (BYTE *)0xdeadbeef;
+    UINT size = 0x1000, second_size = 0x1000;
+    UINT channel = 0xcccccccc, second_channel = 0xcccccccc;
+    UINT batch, selector;
+    NTSTATUS status;
+    unsigned int i;
+    static const UINT flag_values[] = {0x10, 0x80, 0x90, 0xffffffff};
+
+    SetLastError( 0xdeadbeef );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    ok( GetLastError() == 0xdeadbeef, "got last error %lu\n", GetLastError() );
+    ok( channel && channel != 0xcccccccc, "got channel %#x\n", channel );
+    ok( size == 0x1000, "got section size %u\n", size );
+    ok( buffer && buffer != (BYTE *)0xdeadbeef, "got buffer %p\n", buffer );
+    if (status) return;
+    for (i = 0; i < 32; ++i) ok( !buffer[i], "buffer byte %u is %#x\n", i, buffer[i] );
+
+    for (selector = 0; selector < 4; ++selector)
+    {
+        batch = 0xcccccccc;
+        status = NtDCompositionGetBatchId( channel, selector, &batch );
+        ok( status == STATUS_SUCCESS, "selector %u got status %#lx\n", selector, status );
+        ok( batch == (selector ? 0 : 1), "selector %u got batch %u\n", selector, batch );
+    }
+
+    status = NtDCompositionCreateChannel( &second_channel, &second_size, (void **)&second_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got second status %#lx\n", status );
+    ok( second_channel && second_channel != channel, "got second channel %#x\n", second_channel );
+    ok( second_buffer && second_buffer != buffer, "got second buffer %p\n", second_buffer );
+
+    for (i = 0; i < ARRAY_SIZE(flag_values); ++i)
+    {
+        UINT flag_channel = 0xcccccccc, flag_size = 0x1000;
+        BYTE *flag_buffer = (BYTE *)0xdeadbeef;
+
+        status = NtDCompositionCreateChannel( &flag_channel, &flag_size, (void **)&flag_buffer, flag_values[i] );
+        ok( status == STATUS_SUCCESS, "flags %#x got status %#lx\n", flag_values[i], status );
+        ok( flag_channel && flag_channel != channel && flag_channel != second_channel,
+            "flags %#x got channel %#x\n", flag_values[i], flag_channel );
+        ok( flag_size == 0x1000, "flags %#x got size %u\n", flag_values[i], flag_size );
+        ok( flag_buffer && flag_buffer != buffer && flag_buffer != second_buffer,
+            "flags %#x got buffer %p\n", flag_values[i], flag_buffer );
+        if (!status)
+        {
+            status = NtDCompositionDestroyChannel( flag_channel );
+            ok( status == STATUS_SUCCESS, "flags %#x destroy got status %#lx\n", flag_values[i], status );
+        }
+    }
+
+    batch = 0xcccccccc;
+    SetLastError( 0xdeadbeef );
+    status = NtDCompositionCommitChannel( channel, &batch, buffer, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got commit status %#lx\n", status );
+    ok( batch == 2, "got commit batch %u\n", batch );
+    ok( GetLastError() == 0xdeadbeef, "got last error %lu\n", GetLastError() );
+
+    status = NtDCompositionDestroyChannel( channel );
+    ok( status == STATUS_SUCCESS, "got destroy status %#lx\n", status );
+    batch = 0xcccccccc;
+    status = NtDCompositionGetBatchId( channel, 2, &batch );
+    ok( status == STATUS_ACCESS_DENIED, "got post-destroy status %#lx\n", status );
+    ok( batch == 0xcccccccc, "post-destroy batch changed to %u\n", batch );
+    status = NtDCompositionDestroyChannel( channel );
+    ok( status == STATUS_ACCESS_DENIED, "got second destroy status %#lx\n", status );
+    status = NtDCompositionDestroyChannel( 0xdeadbeef );
+    ok( status == STATUS_ACCESS_DENIED, "got arbitrary destroy status %#lx\n", status );
+
+    status = NtDCompositionDestroyChannel( second_channel );
+    ok( status == STATUS_SUCCESS, "got second destroy status %#lx\n", status );
+}
+
 static void test_token_manager_lifetime(void)
 {
     HANDLE work_event, ordinary_connection = NULL, dwm_connection = NULL;
@@ -166,6 +240,7 @@ static void test_token_manager_lifetime(void)
 START_TEST(dcomp)
 {
     test_frame_statistics();
+    test_channel_lifetime();
     test_connection_lifetime();
     test_token_manager_lifetime();
 }

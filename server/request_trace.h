@@ -4031,6 +4031,47 @@ static void dump_open_token_manager_reply( const struct open_token_manager_reply
     fprintf( stderr, ", event_b=%04x", req->event_b );
 }
 
+static void dump_create_dcomp_channel_request( const struct create_dcomp_channel_request *req )
+{
+    dump_uint64( " size=", &req->size );
+    fprintf( stderr, ", flags=%08x", req->flags );
+}
+
+static void dump_create_dcomp_channel_reply( const struct create_dcomp_channel_reply *req )
+{
+    fprintf( stderr, " channel=%04x", req->channel );
+    fprintf( stderr, ", section=%04x", req->section );
+    dump_uint64( ", size=", &req->size );
+}
+
+static void dump_destroy_dcomp_channel_request( const struct destroy_dcomp_channel_request *req )
+{
+    fprintf( stderr, " channel=%04x", req->channel );
+}
+
+static void dump_get_dcomp_channel_batch_id_request( const struct get_dcomp_channel_batch_id_request *req )
+{
+    fprintf( stderr, " channel=%04x", req->channel );
+    fprintf( stderr, ", selector=%08x", req->selector );
+}
+
+static void dump_get_dcomp_channel_batch_id_reply( const struct get_dcomp_channel_batch_id_reply *req )
+{
+    fprintf( stderr, " batch_id=%08x", req->batch_id );
+}
+
+static void dump_commit_dcomp_channel_request( const struct commit_dcomp_channel_request *req )
+{
+    fprintf( stderr, " channel=%04x", req->channel );
+    dump_uint64( ", length=", &req->length );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_commit_dcomp_channel_reply( const struct commit_dcomp_channel_reply *req )
+{
+    fprintf( stderr, " batch_id=%08x", req->batch_id );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4388,6 +4429,10 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_connection_request,
     (dump_func)dump_destroy_dcomp_connection_request,
     (dump_func)dump_open_token_manager_request,
+    (dump_func)dump_create_dcomp_channel_request,
+    (dump_func)dump_destroy_dcomp_channel_request,
+    (dump_func)dump_get_dcomp_channel_batch_id_request,
+    (dump_func)dump_commit_dcomp_channel_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4745,6 +4790,10 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_connection_reply,
     NULL,
     (dump_func)dump_open_token_manager_reply,
+    (dump_func)dump_create_dcomp_channel_reply,
+    NULL,
+    (dump_func)dump_get_dcomp_channel_batch_id_reply,
+    (dump_func)dump_commit_dcomp_channel_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -5102,6 +5151,10 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "create_dcomp_connection",
     "destroy_dcomp_connection",
     "open_token_manager",
+    "create_dcomp_channel",
+    "destroy_dcomp_channel",
+    "get_dcomp_channel_batch_id",
+    "commit_dcomp_channel",
 };
 
 static const struct

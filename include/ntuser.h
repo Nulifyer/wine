@@ -749,6 +749,14 @@ typedef enum _USERTHREADSTATECLASS
 
 W32KAPI NTSTATUS WINAPI NtDCompositionCreateConnection( BOOL is_dwm, HANDLE event, HANDLE *connection );
 W32KAPI NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection );
+W32KAPI NTSTATUS WINAPI NtDCompositionCreateChannel( UINT *channel, UINT *section_size,
+                                                      void **mapped_address, UINT flags );
+W32KAPI NTSTATUS WINAPI NtDCompositionDestroyChannel( UINT channel );
+W32KAPI NTSTATUS WINAPI NtDCompositionGetBatchId( UINT channel, UINT selector, UINT *batch_id );
+W32KAPI NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *buffer,
+                                                      ULONG length, HANDLE resource,
+                                                      const void *resource_data, const UINT *resources,
+                                                      UINT resource_count );
 struct dcomposition_frame_statistics
 {
     LARGE_INTEGER last_frame_time;

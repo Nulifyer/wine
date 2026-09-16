@@ -14,23 +14,23 @@
 @ stub -syscall NtDCompositionAddCrossDeviceVisualChild
 @ stub -syscall NtDCompositionBeginFrame
 @ stub -syscall NtDCompositionBoostCompositorClock
-@ stub -syscall NtDCompositionCommitChannel
+@ stdcall -syscall NtDCompositionCommitChannel(long ptr ptr long long ptr ptr long)
 @ stub -syscall NtDCompositionCommitSynchronizationObject
 @ stub -syscall NtDCompositionConfirmFrame
 @ stub -syscall NtDCompositionConnectPipe
 @ stub -syscall NtDCompositionCreateAndBindSharedSection
-@ stub -syscall NtDCompositionCreateChannel
+@ stdcall -syscall NtDCompositionCreateChannel(ptr ptr ptr long)
 @ stdcall -syscall NtDCompositionCreateConnection(long long ptr)
 @ stub -syscall NtDCompositionCreateDwmChannel
 @ stub -syscall NtDCompositionCreateSharedResourceHandle
 @ stub -syscall NtDCompositionCreateSynchronizationObject
-@ stub -syscall NtDCompositionDestroyChannel
+@ stdcall -syscall NtDCompositionDestroyChannel(long)
 @ stdcall -syscall NtDCompositionDestroyConnection(long)
 @ stub -syscall NtDCompositionDiscardFrame
 @ stub -syscall NtDCompositionDuplicateHandleToProcess
 @ stub -syscall NtDCompositionDuplicateSwapchainHandleToDwm
 @ stub -syscall NtDCompositionEnableMMCSS
-@ stub -syscall NtDCompositionGetBatchId
+@ stdcall -syscall NtDCompositionGetBatchId(long long ptr)
 @ stub -syscall NtDCompositionGetChannels
 @ stub -syscall NtDCompositionGetConnectionBatch
 @ stub -syscall NtDCompositionGetDeletedResources

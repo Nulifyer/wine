@@ -24,6 +24,8 @@
 
 #include "config.h"
 
+#include <pthread.h>
+
 #include "ntstatus.h"
 #include "win32u_private.h"
 #include "wine/server.h"
@@ -32,6 +34,26 @@ WINE_DEFAULT_DEBUG_CHANNEL(dcomp);
 
 C_ASSERT( sizeof(struct dcomposition_frame_statistics) == 40 );
 C_ASSERT( sizeof(struct dcomposition_capability_info) == 20 );
+
+struct dcomp_channel_view
+{
+    struct list entry;
+    UINT channel;
+    void *address;
+    SIZE_T size;
+};
+
+static pthread_mutex_t dcomp_channel_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct list dcomp_channel_views = LIST_INIT( dcomp_channel_views );
+
+static struct dcomp_channel_view *find_dcomp_channel_view( UINT channel )
+{
+    struct dcomp_channel_view *view;
+
+    LIST_FOR_EACH_ENTRY( view, &dcomp_channel_views, struct dcomp_channel_view, entry )
+        if (view->channel == channel) return view;
+    return NULL;
+}
 
 static UINT get_composition_refresh_rate(void)
 {
@@ -78,6 +100,159 @@ NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection )
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionCreateChannel( UINT *channel, UINT *section_size,
+                                              void **mapped_address, UINT flags )
+{
+    struct dcomp_channel_view *view;
+    HANDLE section = NULL;
+    SIZE_T view_size;
+    UINT requested_size;
+    NTSTATUS status;
+    UINT id = 0;
+    void *address = NULL;
+
+    TRACE( "channel %p, section_size %p, mapped_address %p, flags %#x\n",
+           channel, section_size, mapped_address, flags );
+
+    if (!channel || !section_size || !mapped_address) return STATUS_INVALID_PARAMETER;
+    requested_size = *section_size;
+    *channel = 0;
+    *mapped_address = NULL;
+
+    SERVER_START_REQ( create_dcomp_channel )
+    {
+        req->size = requested_size;
+        req->flags = flags;
+        status = wine_server_call( req );
+        if (!status)
+        {
+            id = reply->channel;
+            section = wine_server_ptr_handle( reply->section );
+            view_size = reply->size;
+        }
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
+    status = NtMapViewOfSection( section, GetCurrentProcess(), &address, 0, 0, NULL, &view_size,
+                                 ViewUnmap, 0, PAGE_READWRITE );
+    NtClose( section );
+    if (status) goto failed;
+
+    if (!(view = calloc( 1, sizeof(*view) )))
+    {
+        status = STATUS_NO_MEMORY;
+        NtUnmapViewOfSection( GetCurrentProcess(), address );
+        goto failed;
+    }
+    view->channel = id;
+    view->address = address;
+    view->size = view_size;
+    pthread_mutex_lock( &dcomp_channel_lock );
+    list_add_tail( &dcomp_channel_views, &view->entry );
+    pthread_mutex_unlock( &dcomp_channel_lock );
+
+    *channel = id;
+    *section_size = view_size;
+    *mapped_address = address;
+    return STATUS_SUCCESS;
+
+failed:
+    SERVER_START_REQ( destroy_dcomp_channel )
+    {
+        req->channel = id;
+        wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionDestroyChannel( UINT channel )
+{
+    struct dcomp_channel_view *view;
+    NTSTATUS status;
+
+    TRACE( "channel %#x\n", channel );
+
+    SERVER_START_REQ( destroy_dcomp_channel )
+    {
+        req->channel = channel;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
+    pthread_mutex_lock( &dcomp_channel_lock );
+    view = find_dcomp_channel_view( channel );
+    if (view) list_remove( &view->entry );
+    pthread_mutex_unlock( &dcomp_channel_lock );
+    if (view)
+    {
+        NtUnmapViewOfSection( GetCurrentProcess(), view->address );
+        free( view );
+    }
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI NtDCompositionGetBatchId( UINT channel, UINT selector, UINT *batch_id )
+{
+    NTSTATUS status;
+
+    TRACE( "channel %#x, selector %u, batch_id %p\n", channel, selector, batch_id );
+
+    if (!batch_id) return STATUS_INVALID_PARAMETER;
+    SERVER_START_REQ( get_dcomp_channel_batch_id )
+    {
+        req->channel = channel;
+        req->selector = selector;
+        status = wine_server_call( req );
+        if (!status) *batch_id = reply->batch_id;
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *buffer,
+                                              ULONG length, HANDLE resource,
+                                              const void *resource_data, const UINT *resources,
+                                              UINT resource_count )
+{
+    struct dcomp_channel_view *view;
+    NTSTATUS status;
+
+    TRACE( "channel %#x, batch_id %p, buffer %p, length %u, resource %p, resource_data %p, "
+           "resources %p, resource_count %u\n", channel, batch_id, buffer, length, resource,
+           resource_data, resources, resource_count );
+
+    if (!batch_id) return STATUS_INVALID_PARAMETER;
+    if (resource || resource_data || resources || resource_count) return STATUS_NOT_SUPPORTED;
+
+    pthread_mutex_lock( &dcomp_channel_lock );
+    view = find_dcomp_channel_view( channel );
+    if (!view)
+    {
+        pthread_mutex_unlock( &dcomp_channel_lock );
+        return STATUS_ACCESS_DENIED;
+    }
+    if (buffer != view->address || length > view->size)
+    {
+        pthread_mutex_unlock( &dcomp_channel_lock );
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    SERVER_START_REQ( commit_dcomp_channel )
+    {
+        req->channel = channel;
+        req->length = length;
+        wine_server_add_data( req, buffer, length );
+        status = wine_server_call( req );
+        if (!status) *batch_id = reply->batch_id;
+    }
+    SERVER_END_REQ;
+    pthread_mutex_unlock( &dcomp_channel_lock );
     return status;
 }
 
