@@ -26,6 +26,59 @@
 #include "winbase.h"
 #include "ntuser.h"
 
+static void test_frame_statistics(void)
+{
+    struct dcomposition_frame_statistics statistics, second;
+    struct dcomposition_capability_info capabilities;
+    LARGE_INTEGER before, after, frequency;
+    NTSTATUS status;
+    UINT i;
+
+    memset( &statistics, 0xcc, sizeof(statistics) );
+    memset( &capabilities, 0xcc, sizeof(capabilities) );
+    QueryPerformanceFrequency( &frequency );
+    QueryPerformanceCounter( &before );
+    SetLastError( 0xdeadbeef );
+    status = NtDCompositionGetFrameStatistics( &statistics, &capabilities );
+    QueryPerformanceCounter( &after );
+
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    ok( GetLastError() == 0xdeadbeef, "got last error %lu\n", GetLastError() );
+    ok( statistics.current_time.QuadPart >= before.QuadPart,
+        "current time %s predates call %s\n", wine_dbgstr_longlong(statistics.current_time.QuadPart),
+        wine_dbgstr_longlong(before.QuadPart) );
+    ok( statistics.current_time.QuadPart <= after.QuadPart,
+        "current time %s follows call %s\n", wine_dbgstr_longlong(statistics.current_time.QuadPart),
+        wine_dbgstr_longlong(after.QuadPart) );
+    ok( statistics.time_frequency.QuadPart == frequency.QuadPart,
+        "got frequency %s, expected %s\n", wine_dbgstr_longlong(statistics.time_frequency.QuadPart),
+        wine_dbgstr_longlong(frequency.QuadPart) );
+    ok( statistics.current_composition_rate.numerator > 1,
+        "got rate numerator %u\n", statistics.current_composition_rate.numerator );
+    ok( statistics.current_composition_rate.denominator == 1,
+        "got rate denominator %u\n", statistics.current_composition_rate.denominator );
+    ok( statistics.last_frame_time.QuadPart <= statistics.current_time.QuadPart,
+        "last frame %s follows current time %s\n", wine_dbgstr_longlong(statistics.last_frame_time.QuadPart),
+        wine_dbgstr_longlong(statistics.current_time.QuadPart) );
+    ok( statistics.next_estimated_frame_time.QuadPart > statistics.current_time.QuadPart,
+        "next frame %s does not follow current time %s\n",
+        wine_dbgstr_longlong(statistics.next_estimated_frame_time.QuadPart),
+        wine_dbgstr_longlong(statistics.current_time.QuadPart) );
+    for (i = 0; i < ARRAY_SIZE(capabilities.values); ++i)
+        ok( !capabilities.values[i], "capability %u is %#x\n", i, capabilities.values[i] );
+
+    Sleep( 30 );
+    memset( &second, 0xcc, sizeof(second) );
+    status = NtDCompositionGetFrameStatistics( &second, NULL );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    ok( second.current_time.QuadPart > statistics.current_time.QuadPart,
+        "second current time %s did not advance from %s\n", wine_dbgstr_longlong(second.current_time.QuadPart),
+        wine_dbgstr_longlong(statistics.current_time.QuadPart) );
+
+    status = NtDCompositionGetFrameStatistics( NULL, &capabilities );
+    ok( status == STATUS_INVALID_PARAMETER, "got null-output status %#lx\n", status );
+}
+
 static void test_connection_lifetime(void)
 {
     HANDLE event, connection = (HANDLE)0xdeadbeef;
@@ -112,6 +165,7 @@ static void test_token_manager_lifetime(void)
 
 START_TEST(dcomp)
 {
+    test_frame_statistics();
     test_connection_lifetime();
     test_token_manager_lifetime();
 }

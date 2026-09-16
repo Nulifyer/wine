@@ -39,7 +39,7 @@
     SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 0 ) \
     SYSCALL_ENTRY( 0x1024, NtDCompositionGetFrameIdFromBatchId, 0 ) \
     SYSCALL_ENTRY( 0x1025, NtDCompositionGetFrameLegacyTokens, 0 ) \
-    SYSCALL_ENTRY( 0x1026, NtDCompositionGetFrameStatistics, 0 ) \
+    SYSCALL_ENTRY( 0x1026, NtDCompositionGetFrameStatistics, 8 ) \
     SYSCALL_ENTRY( 0x1027, NtDCompositionGetFrameSurfaceUpdates, 0 ) \
     SYSCALL_ENTRY( 0x1028, NtDCompositionGetMaterialProperty, 0 ) \
     SYSCALL_ENTRY( 0x1029, NtDCompositionGetStatistics, 0 ) \
@@ -1581,7 +1581,7 @@
     SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 0 ) \
     SYSCALL_ENTRY( 0x1024, NtDCompositionGetFrameIdFromBatchId, 0 ) \
     SYSCALL_ENTRY( 0x1025, NtDCompositionGetFrameLegacyTokens, 0 ) \
-    SYSCALL_ENTRY( 0x1026, NtDCompositionGetFrameStatistics, 0 ) \
+    SYSCALL_ENTRY( 0x1026, NtDCompositionGetFrameStatistics, 16 ) \
     SYSCALL_ENTRY( 0x1027, NtDCompositionGetFrameSurfaceUpdates, 0 ) \
     SYSCALL_ENTRY( 0x1028, NtDCompositionGetMaterialProperty, 0 ) \
     SYSCALL_ENTRY( 0x1029, NtDCompositionGetStatistics, 0 ) \
@@ -3123,7 +3123,6 @@
     SYSCALL_STUB( NtDCompositionGetFrameId ) \
     SYSCALL_STUB( NtDCompositionGetFrameIdFromBatchId ) \
     SYSCALL_STUB( NtDCompositionGetFrameLegacyTokens ) \
-    SYSCALL_STUB( NtDCompositionGetFrameStatistics ) \
     SYSCALL_STUB( NtDCompositionGetFrameSurfaceUpdates ) \
     SYSCALL_STUB( NtDCompositionGetMaterialProperty ) \
     SYSCALL_STUB( NtDCompositionGetStatistics ) \

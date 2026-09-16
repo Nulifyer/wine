@@ -37,7 +37,7 @@
 @ stub -syscall NtDCompositionGetFrameId
 @ stub -syscall NtDCompositionGetFrameIdFromBatchId
 @ stub -syscall NtDCompositionGetFrameLegacyTokens
-@ stub -syscall NtDCompositionGetFrameStatistics
+@ stdcall -syscall NtDCompositionGetFrameStatistics(ptr ptr)
 @ stub -syscall NtDCompositionGetFrameSurfaceUpdates
 @ stub -syscall NtDCompositionGetMaterialProperty
 @ stub -syscall NtDCompositionGetStatistics

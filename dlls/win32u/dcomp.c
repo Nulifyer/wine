@@ -30,6 +30,22 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dcomp);
 
+C_ASSERT( sizeof(struct dcomposition_frame_statistics) == 40 );
+C_ASSERT( sizeof(struct dcomposition_capability_info) == 20 );
+
+static UINT get_composition_refresh_rate(void)
+{
+    DEVMODEW mode = {0};
+
+    mode.dmSize = sizeof(mode);
+    if (NtUserEnumDisplaySettings( NULL, ENUM_CURRENT_SETTINGS, &mode, 0 ) &&
+        (mode.dmFields & DM_DISPLAYFREQUENCY) && mode.dmDisplayFrequency > 1)
+        return mode.dmDisplayFrequency;
+
+    WARN( "Failed to query the primary display refresh rate, using 60 Hz.\n" );
+    return 60;
+}
+
 NTSTATUS WINAPI NtDCompositionCreateConnection( BOOL is_dwm, HANDLE event, HANDLE *connection )
 {
     NTSTATUS status;
@@ -63,6 +79,41 @@ NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection )
     }
     SERVER_END_REQ;
     return status;
+}
+
+NTSTATUS WINAPI NtDCompositionGetFrameStatistics( struct dcomposition_frame_statistics *statistics,
+                                                   struct dcomposition_capability_info *capabilities )
+{
+    LARGE_INTEGER current, frequency;
+    LONGLONG period, last_frame, next_frame;
+    DWORD last_error;
+    UINT refresh_rate;
+
+    TRACE( "statistics %p, capabilities %p\n", statistics, capabilities );
+
+    if (!statistics) return STATUS_INVALID_PARAMETER;
+
+    NtQueryPerformanceCounter( &current, &frequency );
+    last_error = RtlGetLastWin32Error();
+    refresh_rate = get_composition_refresh_rate();
+    RtlSetLastWin32Error( last_error );
+    period = frequency.QuadPart / refresh_rate;
+    if (period < 1) period = 1;
+    last_frame = current.QuadPart - current.QuadPart % period;
+    next_frame = last_frame + period;
+
+    statistics->last_frame_time.QuadPart = last_frame;
+    statistics->current_composition_rate.numerator = refresh_rate;
+    statistics->current_composition_rate.denominator = 1;
+    statistics->current_time = current;
+    statistics->time_frequency = frequency;
+    statistics->next_estimated_frame_time.QuadPart = next_frame;
+
+    /* These fields describe compositor/device capabilities rather than clock state.
+     * Leave unsupported capabilities disabled until their backing paths exist. */
+    if (capabilities) memset( capabilities, 0, sizeof(*capabilities) );
+
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS WINAPI NtTokenManagerOpenSectionAndEvents( HANDLE *section, SIZE_T *section_size,
