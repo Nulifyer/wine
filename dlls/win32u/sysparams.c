@@ -8188,6 +8188,25 @@ done:
 }
 
 /******************************************************************************
+ *           NtDxgkEnumAdapters3    (win32u.@)
+ */
+NTSTATUS WINAPI NtDxgkEnumAdapters3( D3DKMT_ENUMADAPTERS3 *desc )
+{
+    D3DKMT_ENUMADAPTERS2 desc2;
+    NTSTATUS status;
+
+    TRACE( "(%p)\n", desc );
+
+    if (!desc) return STATUS_INVALID_PARAMETER;
+
+    desc2.NumAdapters = desc->NumAdapters;
+    desc2.pAdapters = desc->pAdapters;
+    status = NtGdiDdDDIEnumAdapters2( &desc2 );
+    desc->NumAdapters = desc2.NumAdapters;
+    return status;
+}
+
+/******************************************************************************
  *           NtGdiDdDDIEnumAdapters    (win32u.@)
  */
 NTSTATUS WINAPI NtGdiDdDDIEnumAdapters( D3DKMT_ENUMADAPTERS *desc )

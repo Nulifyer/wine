@@ -120,6 +120,7 @@
 @ stdcall D3DKMTDestroySynchronizationObject(ptr) win32u.NtGdiDdDDIDestroySynchronizationObject
 @ stdcall D3DKMTEnumAdapters(ptr) win32u.NtGdiDdDDIEnumAdapters
 @ stdcall D3DKMTEnumAdapters2(ptr) win32u.NtGdiDdDDIEnumAdapters2
+@ stdcall D3DKMTEnumAdapters3(ptr) win32u.NtDxgkEnumAdapters3
 @ stdcall D3DKMTEscape(ptr) win32u.NtGdiDdDDIEscape
 @ stdcall D3DKMTIsFeatureEnabled(ptr) win32u.NtDxgkIsFeatureEnabled
 @ stdcall D3DKMTOpenAdapterFromDeviceName(ptr) win32u.NtGdiDdDDIOpenAdapterFromDeviceName

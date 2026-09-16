@@ -836,6 +836,65 @@ static void test_D3DKMTEnumAdapters2(void)
     free( enum_adapters_2_desc.pAdapters );
 }
 
+static void test_D3DKMTEnumAdapters3(void)
+{
+    NTSTATUS (WINAPI *pD3DKMTEnumAdapters3)( D3DKMT_ENUMADAPTERS3 *desc );
+    D3DKMT_ENUMADAPTERS3 enum_adapters_3_desc = {0};
+    D3DKMT_CLOSEADAPTER close_adapter_desc;
+    D3DKMT_HANDLE next_local = 0;
+    UINT64 filter;
+    NTSTATUS status;
+    UINT i;
+
+    pD3DKMTEnumAdapters3 = (void *)GetProcAddress( GetModuleHandleA( "gdi32.dll" ),
+                                                  "D3DKMTEnumAdapters3" );
+    if (!pD3DKMTEnumAdapters3)
+    {
+        win_skip( "D3DKMTEnumAdapters3 is unavailable.\n" );
+        return;
+    }
+
+    status = pD3DKMTEnumAdapters3( NULL );
+    ok_nt( STATUS_INVALID_PARAMETER, status );
+
+    enum_adapters_3_desc.Filter.IncludeComputeOnly = 1;
+    enum_adapters_3_desc.Filter.IncludeDisplayOnly = 1;
+    filter = enum_adapters_3_desc.Filter.Value;
+    status = pD3DKMTEnumAdapters3( &enum_adapters_3_desc );
+    ok_nt( STATUS_SUCCESS, status );
+    ok_x8( enum_adapters_3_desc.Filter.Value, ==, filter );
+    ok_u4( enum_adapters_3_desc.NumAdapters, ==, 34 );
+
+    enum_adapters_3_desc.pAdapters = calloc( enum_adapters_3_desc.NumAdapters,
+                                             sizeof(*enum_adapters_3_desc.pAdapters) );
+    ok( !!enum_adapters_3_desc.pAdapters, "Expected a non-null adapter array.\n" );
+    if (!enum_adapters_3_desc.pAdapters) return;
+
+    status = pD3DKMTEnumAdapters3( &enum_adapters_3_desc );
+    ok_nt( STATUS_SUCCESS, status );
+    ok_x8( enum_adapters_3_desc.Filter.Value, ==, filter );
+    ok( enum_adapters_3_desc.NumAdapters, "Expected at least one adapter.\n" );
+
+    for (i = 0; i < enum_adapters_3_desc.NumAdapters; ++i)
+    {
+        check_d3dkmt_local( enum_adapters_3_desc.pAdapters[i].hAdapter, &next_local );
+        ok( enum_adapters_3_desc.pAdapters[i].AdapterLuid.LowPart ||
+            enum_adapters_3_desc.pAdapters[i].AdapterLuid.HighPart,
+            "Expected a nonzero LUID.\n" );
+
+        close_adapter_desc.hAdapter = enum_adapters_3_desc.pAdapters[i].hAdapter;
+        status = D3DKMTCloseAdapter( &close_adapter_desc );
+        ok_nt( STATUS_SUCCESS, status );
+    }
+
+    enum_adapters_3_desc.NumAdapters = 0;
+    status = pD3DKMTEnumAdapters3( &enum_adapters_3_desc );
+    ok_nt( STATUS_BUFFER_TOO_SMALL, status );
+    ok_x8( enum_adapters_3_desc.Filter.Value, ==, filter );
+
+    free( enum_adapters_3_desc.pAdapters );
+}
+
 static void test_D3DKMTCloseAdapter(void)
 {
     D3DKMT_CLOSEADAPTER close_adapter_desc;
@@ -6857,6 +6916,7 @@ START_TEST( d3dkmt )
     test_D3DKMTOpenAdapterFromHdc();
     test_D3DKMTIsFeatureEnabled();
     test_D3DKMTEnumAdapters2();
+    test_D3DKMTEnumAdapters3();
     test_D3DKMTCloseAdapter();
     test_D3DKMTCreateDevice();
     test_D3DKMTDestroyDevice();

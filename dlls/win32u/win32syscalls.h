@@ -88,7 +88,7 @@
     SYSCALL_ENTRY( 0x1054, NtDxgkDisplayMuxSwitchPrepare, 0 ) \
     SYSCALL_ENTRY( 0x1055, NtDxgkDisplayPortOperation, 0 ) \
     SYSCALL_ENTRY( 0x1056, NtDxgkDuplicateHandle, 0 ) \
-    SYSCALL_ENTRY( 0x1057, NtDxgkEnumAdapters3, 0 ) \
+    SYSCALL_ENTRY( 0x1057, NtDxgkEnumAdapters3, 4 ) \
     SYSCALL_ENTRY( 0x1058, NtDxgkEnumProcesses, 0 ) \
     SYSCALL_ENTRY( 0x1059, NtDxgkGetAvailableTrackedWorkloadIndex, 0 ) \
     SYSCALL_ENTRY( 0x105a, NtDxgkGetNativeFenceLogDetail, 0 ) \
@@ -1630,7 +1630,7 @@
     SYSCALL_ENTRY( 0x1054, NtDxgkDisplayMuxSwitchPrepare, 0 ) \
     SYSCALL_ENTRY( 0x1055, NtDxgkDisplayPortOperation, 0 ) \
     SYSCALL_ENTRY( 0x1056, NtDxgkDuplicateHandle, 0 ) \
-    SYSCALL_ENTRY( 0x1057, NtDxgkEnumAdapters3, 0 ) \
+    SYSCALL_ENTRY( 0x1057, NtDxgkEnumAdapters3, 8 ) \
     SYSCALL_ENTRY( 0x1058, NtDxgkEnumProcesses, 0 ) \
     SYSCALL_ENTRY( 0x1059, NtDxgkGetAvailableTrackedWorkloadIndex, 0 ) \
     SYSCALL_ENTRY( 0x105a, NtDxgkGetNativeFenceLogDetail, 0 ) \
@@ -3172,7 +3172,6 @@
     SYSCALL_STUB( NtDxgkDisplayMuxSwitchPrepare ) \
     SYSCALL_STUB( NtDxgkDisplayPortOperation ) \
     SYSCALL_STUB( NtDxgkDuplicateHandle ) \
-    SYSCALL_STUB( NtDxgkEnumAdapters3 ) \
     SYSCALL_STUB( NtDxgkEnumProcesses ) \
     SYSCALL_STUB( NtDxgkGetAvailableTrackedWorkloadIndex ) \
     SYSCALL_STUB( NtDxgkGetNativeFenceLogDetail ) \
