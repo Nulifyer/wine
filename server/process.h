@@ -75,6 +75,7 @@ struct process
     unsigned int         handle_checking_mode; /* process handle checking policy */
     unsigned int         native_session_owner:1; /* admitted per-session native startup owner */
     unsigned int         native_session_delegate:1; /* authenticated descendant of the admitted session owner */
+    unsigned int         native_dwm_owner:1; /* owner of the admitted per-session DWM endpoint */
     unsigned int         subsystem_process:1; /* registered native subsystem owner */
     unsigned int         ui_context_initialized:1; /* connected to the USER subsystem */
     int                  suspend;         /* global process suspend count */

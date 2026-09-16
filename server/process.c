@@ -631,6 +631,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->handle_checking_mode = 0;
     process->native_session_owner = 0;
     process->native_session_delegate = 0;
+    process->native_dwm_owner = 0;
     process->subsystem_process = 0;
     process->ui_context_initialized = 0;
     process->critical        = 0;

@@ -334,7 +334,12 @@ static void alpc_port_destroy( struct object *obj )
     struct alpc_message *message, *next;
 
     assert( obj->ops == &alpc_port_ops );
-    if (!list_empty( &port->kernel_session_entry )) list_remove( &port->kernel_session_entry );
+    if (!list_empty( &port->kernel_session_entry ))
+    {
+        if (port->kernel_port == ALPC_KERNEL_DWM_SESSION_PORT)
+            port->thread->process->native_dwm_owner = 0;
+        list_remove( &port->kernel_session_entry );
+    }
     assert( !port->completion_lease );
     if (port->completion) release_object( port->completion );
 
@@ -1680,12 +1685,19 @@ DECL_HANDLER(register_dwm_session_port)
         set_error( STATUS_INVALID_PARAMETER );
     else if ((registered = find_dwm_session_port( session_id )) && registered != port)
         set_error( STATUS_ALREADY_REGISTERED );
-    else if (!registered)
+    else
     {
-        port->kernel_port = ALPC_KERNEL_DWM_SESSION_PORT;
-        port->kernel_session_id = session_id;
-        port->kernel_session_phase = DWM_SESSION_PORT_REGISTERED;
-        list_add_tail( &dwm_session_ports, &port->kernel_session_entry );
+        if (!registered)
+        {
+            port->kernel_port = ALPC_KERNEL_DWM_SESSION_PORT;
+            port->kernel_session_id = session_id;
+            port->kernel_session_phase = DWM_SESSION_PORT_REGISTERED;
+            list_add_tail( &dwm_session_ports, &port->kernel_session_entry );
+        }
+        current->process->native_dwm_owner = 1;
+        if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+            fprintf( stderr, "linuxnt: server dwm-session-owner winpid=%04x session=%u\n",
+                     current->process->id, session_id );
     }
     release_object( port );
 }

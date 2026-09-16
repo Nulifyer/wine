@@ -22,6 +22,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "ntstatus.h"
 #include "windef.h"
@@ -44,6 +45,7 @@ struct dcomp_connection
     struct process *owner;
     struct event *work_event;
     int is_dwm;
+    int is_consumer;
 };
 
 struct token_manager
@@ -129,8 +131,8 @@ static void dcomp_connection_dump( struct object *obj, int verbose )
     struct dcomp_connection *connection = (struct dcomp_connection *)obj;
 
     assert( obj->ops == &dcomp_connection_ops );
-    fprintf( stderr, "DirectComposition connection is_dwm=%u work_event=%p\n",
-             connection->is_dwm, connection->work_event );
+    fprintf( stderr, "DirectComposition connection flag=%u consumer=%u work_event=%p\n",
+             connection->is_dwm, connection->is_consumer, connection->work_event );
 }
 
 static void dcomp_channel_dump( struct object *obj, int verbose )
@@ -215,12 +217,25 @@ static unsigned int alloc_dcomp_channel_id(void)
     return 0;
 }
 
-static struct dcomp_connection *find_dwm_connection( unsigned int session_id )
+/* The private create flag is not compositor identity: genuine DWM creates its
+ * startup connection with FALSE.  Native startup therefore derives authority
+ * from the process that registered the session DWM port.  Retain the flag as
+ * the regular Wine adapter, whose built-in compositor has no native port. */
+static int is_dcomp_consumer_connection( struct dcomp_connection *connection )
+{
+    if (connection->is_consumer) return 1;
+    if (connection->owner->native_dwm_owner || (!is_native_machine() && connection->is_dwm))
+        connection->is_consumer = 1;
+    return connection->is_consumer;
+}
+
+static struct dcomp_connection *find_dcomp_consumer_connection( unsigned int session_id )
 {
     struct dcomp_connection *connection;
 
     LIST_FOR_EACH_ENTRY( connection, &dcomp_connections, struct dcomp_connection, entry )
-        if (connection->owner->session_id == session_id && connection->is_dwm) return connection;
+        if (connection->owner->session_id == session_id && is_dcomp_consumer_connection( connection ))
+            return connection;
     return NULL;
 }
 
@@ -249,12 +264,13 @@ static int queue_dcomp_record( struct dcomp_connection *connection, unsigned int
     return 1;
 }
 
-static int session_has_dwm_connection( unsigned int session_id )
+static int session_has_dcomp_consumer_connection( unsigned int session_id )
 {
     struct dcomp_connection *connection;
 
     LIST_FOR_EACH_ENTRY( connection, &dcomp_connections, struct dcomp_connection, entry )
-        if (connection->owner->session_id == session_id && connection->is_dwm) return 1;
+        if (connection->owner->session_id == session_id && is_dcomp_consumer_connection( connection ))
+            return 1;
     return 0;
 }
 
@@ -291,15 +307,16 @@ static void dcomp_connection_destroy( struct object *obj )
     list_remove( &connection->entry );
     release_object( connection->owner );
     if (connection->work_event) release_object( connection->work_event );
-    if (connection->is_dwm && !session_has_dwm_connection( session_id )) release_token_manager( session_id );
+    if (connection->is_consumer && !session_has_dcomp_consumer_connection( session_id ))
+        release_token_manager( session_id );
 }
 
-static int process_has_dwm_connection( const struct process *process )
+static int process_has_dcomp_consumer_connection( const struct process *process )
 {
     struct dcomp_connection *connection;
 
     LIST_FOR_EACH_ENTRY( connection, &dcomp_connections, struct dcomp_connection, entry )
-        if (connection->owner == process && connection->is_dwm) return 1;
+        if (connection->owner == process && is_dcomp_consumer_connection( connection )) return 1;
     return 0;
 }
 
@@ -345,6 +362,12 @@ DECL_HANDLER(create_dcomp_connection)
     connection->work_event = event;
     connection->owner = (struct process *)grab_object( current->process );
     connection->is_dwm = !!req->is_dwm;
+    connection->is_consumer = current->process->native_dwm_owner ||
+                              (!is_native_machine() && connection->is_dwm);
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server dcomp-connection winpid=%04x session=%u flag=%u consumer=%u\n",
+                 current->process->id, current->process->session_id,
+                 connection->is_dwm, connection->is_consumer );
     list_init( &connection->records );
     list_add_tail( &dcomp_connections, &connection->entry );
     reply->handle = alloc_handle_no_access_check( current->process, connection, 0, 0 );
@@ -367,7 +390,7 @@ DECL_HANDLER(open_token_manager)
 {
     struct token_manager *manager;
 
-    if (!process_has_dwm_connection( current->process ))
+    if (!process_has_dcomp_consumer_connection( current->process ))
     {
         set_error( STATUS_ACCESS_DENIED );
         return;
@@ -461,8 +484,13 @@ DECL_HANDLER(set_dcomp_channel_connection)
     struct dcomp_batch *batch, *next;
 
     if (!(channel = get_dcomp_channel( req->channel ))) return;
-    if (!(connection = find_dwm_connection( current->process->session_id )))
+    if (!(connection = find_dcomp_consumer_connection( current->process->session_id )))
     {
+        if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+            fprintf( stderr, "linuxnt: server dcomp-bind winpid=%04x session=%u channel=%#x "
+                     "slot=%d connection=%#llx status=%#x\n", current->process->id,
+                     current->process->session_id, req->channel, req->connection_id,
+                     (unsigned long long)req->connection, STATUS_ACCESS_DENIED );
         set_error( STATUS_ACCESS_DENIED );
         goto done;
     }
@@ -475,6 +503,11 @@ DECL_HANDLER(set_dcomp_channel_connection)
                              req->connection, 0, NULL, 0 )) goto done;
     channel->connection = (struct dcomp_connection *)grab_object( connection );
     channel->connection_id = req->connection_id;
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server dcomp-bind winpid=%04x session=%u channel=%#x "
+                 "slot=%d connection=%#llx consumer=%04x status=0\n", current->process->id,
+                 current->process->session_id, channel->id, channel->connection_id,
+                 (unsigned long long)req->connection, connection->owner->id );
     LIST_FOR_EACH_ENTRY_SAFE( batch, next, &channel->batches, struct dcomp_batch, entry )
     {
         if (!queue_dcomp_record( connection, DCOMP_RECORD_BATCH, channel->id, batch->size,
@@ -495,7 +528,7 @@ DECL_HANDLER(get_dcomp_connection_batch)
 
     if (!(connection = (struct dcomp_connection *)get_handle_obj( current->process, req->connection,
                                                                    0, &dcomp_connection_ops ))) return;
-    if (!connection->is_dwm)
+    if (!is_dcomp_consumer_connection( connection ))
     {
         set_error( STATUS_ACCESS_DENIED );
         goto done;

@@ -196,6 +196,9 @@ static void test_connection_queue(void)
     event = CreateEventW( NULL, FALSE, FALSE, NULL );
     ok( !!event, "failed to create event, error %lu\n", GetLastError() );
     if (!event) return;
+    /* In regular Wine mode TRUE remains the built-in compositor adapter hint.
+     * Native startup identifies genuine DWM through its registered session
+     * port; genuine DWM itself passes FALSE for the reached startup call. */
     status = NtDCompositionCreateConnection( TRUE, event, &connection );
     ok( status == STATUS_SUCCESS, "got connection status %#lx\n", status );
     status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0x90 );
