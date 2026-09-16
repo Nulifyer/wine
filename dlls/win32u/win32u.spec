@@ -699,7 +699,7 @@
 @ stub -syscall NtMITPrepareSendInputMessage
 @ stub -syscall NtMITProcessDelegateCapturedPointers
 @ stub -syscall NtMITSetForegroundRoutingInfo
-@ stub -syscall NtMITSetInputCallbacks
+@ stdcall -syscall NtMITSetInputCallbacks(ptr)
 @ stub -syscall NtMITSetInputDelegationMode
 @ stub -syscall NtMITSetInputObservationState
 @ stub -syscall NtMITSetKeyboardInputRoutingPolicy
@@ -1269,7 +1269,7 @@
 @ stdcall -syscall NtUserRegisterHotKey(long long long long)
 @ stub -syscall NtUserRegisterLPK
 @ stdcall -syscall NtUserRegisterLogonProcess(long long)
-@ stub -syscall NtUserRegisterManipulationThread
+@ stdcall -syscall NtUserRegisterManipulationThread(ptr)
 @ stub -syscall NtUserRegisterPointerDeviceNotifications
 @ stub -syscall NtUserRegisterPointerInputTarget
 @ stub -syscall NtUserRegisterPrecisionTouchpadWindow

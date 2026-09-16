@@ -43,12 +43,63 @@ WINE_DECLARE_DEBUG_CHANNEL(keyboard);
 #define HIMETRIC_PER_INCH 2540
 
 static const struct ratio no_dpi;
+static void *input_callbacks;
 
 struct core_messaging_window
 {
     struct list entry;
     HWND hwnd;
 };
+
+/***********************************************************************
+ *           NtMITSetInputCallbacks    (win32u.@)
+ *
+ * Genuine ISM installs a process callback which receives typed device
+ * notifications.  Keep the executable callback address in the owning
+ * process; future server-side input sources must marshal a notification
+ * back to this client rather than attempting to retain the pointer.
+ */
+BOOL WINAPI NtMITSetInputCallbacks( void *callback )
+{
+    BOOL ret;
+
+    TRACE( "callback %p\n", callback );
+
+    SERVER_START_REQ( set_mit_input_callbacks )
+    {
+        req->enabled = !!callback;
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    if (ret) InterlockedExchangePointer( &input_callbacks, callback );
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserRegisterManipulationThread    (win32u.@)
+ *
+ * Registration belongs to the calling thread.  Genuine DWM performs this
+ * from CGlobalManipulationManager::ManipulationThreadMain and passes NULL;
+ * ISM retains the actual callback and context in process-local state.
+ */
+BOOL WINAPI NtUserRegisterManipulationThread( void *registration )
+{
+    struct user_thread_info *info = get_user_thread_info();
+    BOOL ret;
+
+    TRACE( "registration %p\n", registration );
+
+    SERVER_START_REQ( register_manipulation_thread )
+    {
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    if (!ret) return FALSE;
+
+    info->manipulation_registration = registration;
+    info->manipulation_registered = TRUE;
+    return TRUE;
+}
 
 static const WCHAR keyboard_layouts_keyW[] =
 {

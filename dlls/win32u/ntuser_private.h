@@ -136,6 +136,8 @@ struct user_thread_info
     HANDLE                        core_messaging_iocp;     /* CoreMessaging completion port */
     HANDLE                        kst_events[2];           /* KST stop and MMCSS-update events */
     BOOL                          kst_initialized;         /* KST state belongs to this thread */
+    void                         *manipulation_registration; /* private manipulation-thread state */
+    BOOL                          manipulation_registered; /* current thread accepts manipulation input */
     struct list                   core_messaging_windows; /* registered CoreMessaging windows */
     struct list                   known_pointers;         /* list of known pointers */
 };

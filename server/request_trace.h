@@ -4146,6 +4146,15 @@ static void dump_initialize_kst_request( const struct initialize_kst_request *re
     fprintf( stderr, ", update_event=%04x", req->update_event );
 }
 
+static void dump_set_mit_input_callbacks_request( const struct set_mit_input_callbacks_request *req )
+{
+    fprintf( stderr, " enabled=%d", req->enabled );
+}
+
+static void dump_register_manipulation_thread_request( const struct register_manipulation_thread_request *req )
+{
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4516,6 +4525,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_d3dkmt_process_scheduling_priority_class_request,
     (dump_func)dump_set_d3dkmt_process_scheduling_priority_class_request,
     (dump_func)dump_initialize_kst_request,
+    (dump_func)dump_set_mit_input_callbacks_request,
+    (dump_func)dump_register_manipulation_thread_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4884,6 +4895,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_dcomp_channel_batch_id_reply,
     (dump_func)dump_commit_dcomp_channel_reply,
     (dump_func)dump_get_d3dkmt_process_scheduling_priority_class_reply,
+    NULL,
+    NULL,
     NULL,
     NULL,
 };
@@ -5256,6 +5269,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "get_d3dkmt_process_scheduling_priority_class",
     "set_d3dkmt_process_scheduling_priority_class",
     "initialize_kst",
+    "set_mit_input_callbacks",
+    "register_manipulation_thread",
 };
 
 static const struct

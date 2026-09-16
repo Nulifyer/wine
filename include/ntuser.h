@@ -750,6 +750,8 @@ typedef enum _USERTHREADSTATECLASS
 W32KAPI NTSTATUS WINAPI NtDCompositionCreateConnection( BOOL is_dwm, HANDLE event, HANDLE *connection );
 W32KAPI BOOL WINAPI NtKSTInitialize( HANDLE stop_event, HANDLE update_event );
 W32KAPI UINT WINAPI NtKSTWait(void);
+W32KAPI BOOL WINAPI NtMITSetInputCallbacks( void *callback );
+W32KAPI BOOL WINAPI NtUserRegisterManipulationThread( void *registration );
 W32KAPI NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection );
 W32KAPI NTSTATUS WINAPI NtDCompositionCreateChannel( UINT *channel, UINT *section_size,
                                                       void **mapped_address, UINT flags );

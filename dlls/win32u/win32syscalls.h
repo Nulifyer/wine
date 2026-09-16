@@ -701,7 +701,7 @@
     SYSCALL_ENTRY( 0x12b9, NtMITPrepareSendInputMessage, 0 ) \
     SYSCALL_ENTRY( 0x12ba, NtMITProcessDelegateCapturedPointers, 0 ) \
     SYSCALL_ENTRY( 0x12bb, NtMITSetForegroundRoutingInfo, 0 ) \
-    SYSCALL_ENTRY( 0x12bc, NtMITSetInputCallbacks, 0 ) \
+    SYSCALL_ENTRY( 0x12bc, NtMITSetInputCallbacks, 4 ) \
     SYSCALL_ENTRY( 0x12bd, NtMITSetInputDelegationMode, 0 ) \
     SYSCALL_ENTRY( 0x12be, NtMITSetInputObservationState, 0 ) \
     SYSCALL_ENTRY( 0x12bf, NtMITSetKeyboardInputRoutingPolicy, 0 ) \
@@ -1271,7 +1271,7 @@
     SYSCALL_ENTRY( 0x14f3, NtUserRegisterHotKey, 16 ) \
     SYSCALL_ENTRY( 0x14f4, NtUserRegisterLPK, 0 ) \
     SYSCALL_ENTRY( 0x14f5, NtUserRegisterLogonProcess, 8 ) \
-    SYSCALL_ENTRY( 0x14f6, NtUserRegisterManipulationThread, 0 ) \
+    SYSCALL_ENTRY( 0x14f6, NtUserRegisterManipulationThread, 4 ) \
     SYSCALL_ENTRY( 0x14f7, NtUserRegisterPointerDeviceNotifications, 0 ) \
     SYSCALL_ENTRY( 0x14f8, NtUserRegisterPointerInputTarget, 0 ) \
     SYSCALL_ENTRY( 0x14f9, NtUserRegisterPrecisionTouchpadWindow, 0 ) \
@@ -2243,7 +2243,7 @@
     SYSCALL_ENTRY( 0x12b9, NtMITPrepareSendInputMessage, 0 ) \
     SYSCALL_ENTRY( 0x12ba, NtMITProcessDelegateCapturedPointers, 0 ) \
     SYSCALL_ENTRY( 0x12bb, NtMITSetForegroundRoutingInfo, 0 ) \
-    SYSCALL_ENTRY( 0x12bc, NtMITSetInputCallbacks, 0 ) \
+    SYSCALL_ENTRY( 0x12bc, NtMITSetInputCallbacks, 8 ) \
     SYSCALL_ENTRY( 0x12bd, NtMITSetInputDelegationMode, 0 ) \
     SYSCALL_ENTRY( 0x12be, NtMITSetInputObservationState, 0 ) \
     SYSCALL_ENTRY( 0x12bf, NtMITSetKeyboardInputRoutingPolicy, 0 ) \
@@ -2813,7 +2813,7 @@
     SYSCALL_ENTRY( 0x14f3, NtUserRegisterHotKey, 32 ) \
     SYSCALL_ENTRY( 0x14f4, NtUserRegisterLPK, 0 ) \
     SYSCALL_ENTRY( 0x14f5, NtUserRegisterLogonProcess, 16 ) \
-    SYSCALL_ENTRY( 0x14f6, NtUserRegisterManipulationThread, 0 ) \
+    SYSCALL_ENTRY( 0x14f6, NtUserRegisterManipulationThread, 8 ) \
     SYSCALL_ENTRY( 0x14f7, NtUserRegisterPointerDeviceNotifications, 0 ) \
     SYSCALL_ENTRY( 0x14f8, NtUserRegisterPointerInputTarget, 0 ) \
     SYSCALL_ENTRY( 0x14f9, NtUserRegisterPrecisionTouchpadWindow, 0 ) \
@@ -3556,7 +3556,6 @@
     SYSCALL_STUB( NtMITPrepareSendInputMessage ) \
     SYSCALL_STUB( NtMITProcessDelegateCapturedPointers ) \
     SYSCALL_STUB( NtMITSetForegroundRoutingInfo ) \
-    SYSCALL_STUB( NtMITSetInputCallbacks ) \
     SYSCALL_STUB( NtMITSetInputDelegationMode ) \
     SYSCALL_STUB( NtMITSetInputObservationState ) \
     SYSCALL_STUB( NtMITSetKeyboardInputRoutingPolicy ) \
@@ -3928,7 +3927,6 @@
     SYSCALL_STUB( NtUserRegisterForTooltipDismissNotification ) \
     SYSCALL_STUB( NtUserRegisterGhostWindow ) \
     SYSCALL_STUB( NtUserRegisterLPK ) \
-    SYSCALL_STUB( NtUserRegisterManipulationThread ) \
     SYSCALL_STUB( NtUserRegisterPointerDeviceNotifications ) \
     SYSCALL_STUB( NtUserRegisterPointerInputTarget ) \
     SYSCALL_STUB( NtUserRegisterPrecisionTouchpadWindow ) \

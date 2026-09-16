@@ -35,6 +35,49 @@ struct kst_test
     UINT stop_reason;
 };
 
+static BOOL WINAPI input_notification_callback( void *message )
+{
+    return message != NULL;
+}
+
+static DWORD WINAPI manipulation_thread( void *arg )
+{
+    SetLastError( 0xdeadbeef );
+    if (!NtUserRegisterManipulationThread( arg )) return 1;
+    return GetLastError() == 0xdeadbeef ? 0 : 2;
+}
+
+static void test_input_registration(void)
+{
+    HANDLE thread;
+    DWORD exit_code;
+
+    if (!winetest_platform_is_wine)
+    {
+        win_skip( "private ISM/WIN32U registration behavior is Wine-specific\n" );
+        return;
+    }
+
+    SetLastError( 0xdeadbeef );
+    ok( NtMITSetInputCallbacks( input_notification_callback ), "failed to register input callback\n" );
+    ok( GetLastError() == 0xdeadbeef, "input callback registration changed last error to %lu\n",
+        GetLastError() );
+    ok( NtMITSetInputCallbacks( NULL ), "failed to clear input callback\n" );
+
+    SetLastError( 0xdeadbeef );
+    ok( NtUserRegisterManipulationThread( NULL ), "failed to register current manipulation thread\n" );
+    ok( GetLastError() == 0xdeadbeef, "manipulation registration changed last error to %lu\n",
+        GetLastError() );
+
+    thread = CreateThread( NULL, 0, manipulation_thread, (void *)0x1234, 0, NULL );
+    ok( !!thread, "failed to create manipulation thread, error %lu\n", GetLastError() );
+    if (!thread) return;
+    ok( WaitForSingleObject( thread, 5000 ) == WAIT_OBJECT_0, "manipulation thread did not exit\n" );
+    ok( GetExitCodeThread( thread, &exit_code ) && !exit_code,
+        "got manipulation thread exit code %lu\n", exit_code );
+    CloseHandle( thread );
+}
+
 static DWORD WINAPI kst_thread( void *arg )
 {
     struct kst_test *test = arg;
@@ -466,6 +509,7 @@ static void test_token_manager_lifetime(void)
 
 START_TEST(dcomp)
 {
+    test_input_registration();
     test_kst();
     test_frame_statistics();
     test_channel_lifetime();

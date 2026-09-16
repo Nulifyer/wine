@@ -650,3 +650,30 @@ DECL_HANDLER(initialize_kst)
     release_object( update_event );
     release_object( stop_event );
 }
+
+DECL_HANDLER(set_mit_input_callbacks)
+{
+    if (is_native_machine() && !current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    current->process->mit_input_callbacks = !!req->enabled;
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server mit-input-callbacks winpid=%04x enabled=%u session=%u\n",
+                 current->process->id, current->process->mit_input_callbacks,
+                 current->process->session_id );
+}
+
+DECL_HANDLER(register_manipulation_thread)
+{
+    if (is_native_machine() && !current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    current->manipulation_registered = 1;
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server manipulation-thread winpid=%04x wintid=%04x session=%u\n",
+                 current->process->id, current->id, current->process->session_id );
+}

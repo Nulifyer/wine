@@ -4881,3 +4881,12 @@ struct alpc_message_info
     obj_handle_t stop_event;           /* worker shutdown event */
     obj_handle_t update_event;         /* MMCSS update event */
 @END
+
+/* Register process-local ISM device notification callbacks. */
+@REQ(set_mit_input_callbacks)
+    int enabled;                       /* callback installed in client process */
+@END
+
+/* Register the current thread as the DWM manipulation input consumer. */
+@REQ(register_manipulation_thread)
+@END
