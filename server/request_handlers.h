@@ -358,6 +358,8 @@ DECL_HANDLER(delete_wnf_state_data);
 DECL_HANDLER(alpc_query_information);
 DECL_HANDLER(notify_change_session);
 DECL_HANDLER(create_dcomp_connection);
+DECL_HANDLER(register_dwm_session_port);
+DECL_HANDLER(start_dwm_kernel);
 DECL_HANDLER(destroy_dcomp_connection);
 DECL_HANDLER(open_token_manager);
 DECL_HANDLER(create_dcomp_channel);
@@ -725,6 +727,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_alpc_query_information,
     (req_handler)req_notify_change_session,
     (req_handler)req_create_dcomp_connection,
+    (req_handler)req_register_dwm_session_port,
+    (req_handler)req_start_dwm_kernel,
     (req_handler)req_destroy_dcomp_connection,
     (req_handler)req_open_token_manager,
     (req_handler)req_create_dcomp_channel,
@@ -2767,6 +2771,9 @@ C_ASSERT( offsetof(struct create_dcomp_connection_request, event) == 16 );
 C_ASSERT( sizeof(struct create_dcomp_connection_request) == 24 );
 C_ASSERT( offsetof(struct create_dcomp_connection_reply, handle) == 8 );
 C_ASSERT( sizeof(struct create_dcomp_connection_reply) == 16 );
+C_ASSERT( offsetof(struct register_dwm_session_port_request, handle) == 12 );
+C_ASSERT( sizeof(struct register_dwm_session_port_request) == 16 );
+C_ASSERT( sizeof(struct start_dwm_kernel_request) == 16 );
 C_ASSERT( offsetof(struct destroy_dcomp_connection_request, handle) == 12 );
 C_ASSERT( sizeof(struct destroy_dcomp_connection_request) == 16 );
 C_ASSERT( sizeof(struct open_token_manager_request) == 16 );

@@ -69,7 +69,16 @@ enum alpc_port_status
 enum alpc_kernel_port
 {
     ALPC_KERNEL_PORT_NONE,
-    ALPC_KERNEL_POWER_PORT
+    ALPC_KERNEL_POWER_PORT,
+    ALPC_KERNEL_DWM_SESSION_PORT
+};
+
+enum dwm_session_port_phase
+{
+    DWM_SESSION_PORT_REGISTERED,
+    DWM_SESSION_PORT_INITIALIZING,
+    DWM_SESSION_PORT_STARTED,
+    DWM_SESSION_PORT_READY
 };
 
 struct alpc_port
@@ -107,6 +116,9 @@ struct alpc_port
     enum alpc_port_enum_type type;                  /* communication port or connection port */
     enum alpc_port_status    status;                /* port status */
     enum alpc_kernel_port    kernel_port;            /* server-owned kernel compatibility endpoint */
+    struct list             kernel_session_entry;   /* weak entry in the live session-port registry */
+    unsigned int            kernel_session_id;
+    enum dwm_session_port_phase kernel_session_phase;
     struct token            *client_token;          /* captured connecting security */
     int                      impersonation_level, tracking_mode;
     struct thread           *thread;                /* thread owning the port */
@@ -264,6 +276,9 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     port->max_msg_len = data->max_msg_len;
     port->status      = UNINITIALIZED;
     port->kernel_port = ALPC_KERNEL_PORT_NONE;
+    list_init( &port->kernel_session_entry );
+    port->kernel_session_id = 0;
+    port->kernel_session_phase = DWM_SESSION_PORT_REGISTERED;
     port->thread      = (struct thread *)grab_object( current );
     list_init( &port->messages );
     list_init( &port->receive_waiters );
@@ -319,6 +334,7 @@ static void alpc_port_destroy( struct object *obj )
     struct alpc_message *message, *next;
 
     assert( obj->ops == &alpc_port_ops );
+    if (!list_empty( &port->kernel_session_entry )) list_remove( &port->kernel_session_entry );
     assert( !port->completion_lease );
     if (port->completion) release_object( port->completion );
 
@@ -343,6 +359,75 @@ static void alpc_port_destroy( struct object *obj )
 static unsigned int next_message_id;
 static unsigned __int64 next_work_ticket;
 static struct list connecting_ports = LIST_INIT(connecting_ports);
+static struct list dwm_session_ports = LIST_INIT(dwm_session_ports);
+
+static const WCHAR dwm_api_port_name[] = {'D','w','m','A','p','i','P','o','r','t'};
+
+static struct alpc_port *find_dwm_session_port( unsigned int session_id )
+{
+    struct alpc_port *port;
+
+    LIST_FOR_EACH_ENTRY( port, &dwm_session_ports, struct alpc_port, kernel_session_entry )
+        if (port->kernel_session_id == session_id) return port;
+    return NULL;
+}
+
+/* USER session-port messages are consumed by win32k on Windows.  Keep the
+ * observed startup protocol in the session owner instead of treating every
+ * synchronous send on a connection port as a successful ALPC exchange. */
+static void handle_dwm_session_message( struct alpc_port *port, const struct alpc_send_receive_request *req,
+                                        struct alpc_send_receive_reply *reply, data_size_t capacity )
+{
+    const unsigned int *message = get_req_data();
+    unsigned int response[4];
+    data_size_t size = get_req_data_size();
+
+    if (!req->send || size < sizeof(*message))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+
+    if (req->flags == 0x10000)
+    {
+        if (size != 2 * sizeof(*message) || message[1])
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
+        if (message[0] == 0x40000025 && port->kernel_session_phase == DWM_SESSION_PORT_REGISTERED)
+            port->kernel_session_phase = DWM_SESSION_PORT_INITIALIZING;
+        else if (message[0] == 0x40000026 && port->kernel_session_phase == DWM_SESSION_PORT_STARTED)
+            port->kernel_session_phase = DWM_SESSION_PORT_READY;
+        else set_error( STATUS_INVALID_DEVICE_STATE );
+        return;
+    }
+
+    if (req->flags != 0x20000 || !req->receive || size != sizeof(response) ||
+        message[0] != 0x8000000a)
+    {
+        set_error( STATUS_NOT_IMPLEMENTED );
+        return;
+    }
+    if (port->kernel_session_phase != DWM_SESSION_PORT_READY)
+    {
+        set_error( STATUS_INVALID_DEVICE_STATE );
+        return;
+    }
+    if (capacity < size)
+    {
+        reply->info.size = size;
+        set_error( STATUS_BUFFER_TOO_SMALL );
+        return;
+    }
+
+    memcpy( response, message, sizeof(response) );
+    response[1] = 0;
+    memset( &reply->info, 0, sizeof(reply->info) );
+    reply->info.type = ALPC_MESSAGE_TYPE_REPLY;
+    reply->info.size = sizeof(response);
+    if (!set_reply_data( response, sizeof(response) )) return;
+}
 
 static void finish_connect_operation( struct alpc_port *port )
 {
@@ -1128,6 +1213,11 @@ DECL_HANDLER(alpc_send_receive)
         set_error( STATUS_INVALID_PARAMETER_2 );
         goto done;
     }
+    if (port->kernel_port == ALPC_KERNEL_DWM_SESSION_PORT)
+    {
+        handle_dwm_session_message( port, req, reply, capacity );
+        goto done;
+    }
     if (req->flags & ~(1 | 0x10000 | 0x20000) ||
         ((req->flags & 0x20000) && (!req->receive || port->type == CONNECTION_PORT)))
     {
@@ -1558,6 +1648,63 @@ DECL_HANDLER(alpc_disconnect_port)
         dispatch_all_receives();
     }
     release_object( port );
+}
+
+DECL_HANDLER(register_dwm_session_port)
+{
+    struct alpc_port *port, *registered;
+    const WCHAR *name;
+    data_size_t name_len;
+    unsigned int session_id = current->process->session_id;
+
+    /* Native rejects session-zero registration before it reveals handle
+     * validity.  Admit only a server-authenticated child of the session owner,
+     * a process-trust bearer, or a caller holding enabled TCB privilege. */
+    if (!session_id ||
+        (!current->process->native_session_delegate &&
+         !token_has_process_trust( current->process->token ) &&
+         !thread_single_check_privilege( current, SeTcbPrivilege )))
+    {
+        set_error( STATUS_PRIVILEGE_NOT_HELD );
+        return;
+    }
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                     ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
+    name = get_object_name( &port->obj, &name_len );
+    if (port->thread->process != current->process)
+        set_error( STATUS_ACCESS_DENIED );
+    else if (port->type != CONNECTION_PORT || port->status != UNINITIALIZED ||
+             port->flags != 0x60000 || port->max_msg_len != 0x200 ||
+             !name || name_len != sizeof(dwm_api_port_name) ||
+             memcmp( name, dwm_api_port_name, sizeof(dwm_api_port_name) ))
+        set_error( STATUS_INVALID_PARAMETER );
+    else if ((registered = find_dwm_session_port( session_id )) && registered != port)
+        set_error( STATUS_ALREADY_REGISTERED );
+    else if (!registered)
+    {
+        port->kernel_port = ALPC_KERNEL_DWM_SESSION_PORT;
+        port->kernel_session_id = session_id;
+        port->kernel_session_phase = DWM_SESSION_PORT_REGISTERED;
+        list_add_tail( &dwm_session_ports, &port->kernel_session_entry );
+    }
+    release_object( port );
+}
+
+DECL_HANDLER(start_dwm_kernel)
+{
+    struct alpc_port *port = find_dwm_session_port( current->process->session_id );
+
+    if (!port || port->thread->process != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (port->kernel_session_phase != DWM_SESSION_PORT_INITIALIZING)
+    {
+        set_error( STATUS_INVALID_DEVICE_STATE );
+        return;
+    }
+    port->kernel_session_phase = DWM_SESSION_PORT_STARTED;
 }
 
 /* Handle access precedes message lookup. The caller supplies identity only;

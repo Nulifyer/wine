@@ -4774,6 +4774,15 @@ struct alpc_message_info
     obj_handle_t handle;       /* connection handle */
 @END
 
+/* Register the ALPC endpoint owned by the desktop compositor for this session. */
+@REQ(register_dwm_session_port)
+    obj_handle_t handle;       /* named DwmApiPort connection port */
+@END
+
+/* Advance the registered DWM session endpoint through kernel startup. */
+@REQ(start_dwm_kernel)
+@END
+
 /* Destroy a DirectComposition connection. Keep new requests appended. */
 @REQ(destroy_dcomp_connection)
     obj_handle_t handle;       /* connection handle to consume */

@@ -927,7 +927,7 @@
 @ stub -syscall NtUserDwmGetRemoteSessionOcclusionEvent
 @ stub -syscall NtUserDwmGetRemoteSessionOcclusionState
 @ stub -syscall NtUserDwmKernelShutdown
-@ stub -syscall NtUserDwmKernelStartup
+@ stdcall -syscall NtUserDwmKernelStartup()
 @ stdcall -syscall NtUserDwmLockScreenUpdates(long)
 @ stub -syscall NtUserDwmValidateWindow
 @ stub -syscall NtUserDwmWindowNotificationsEnabled
@@ -1275,7 +1275,7 @@
 @ stub -syscall NtUserRegisterPrecisionTouchpadWindow
 @ stdcall -syscall NtUserRegisterRawInputDevices(ptr long long)
 @ stub -syscall NtUserRegisterServicesProcess
-@ stub -syscall NtUserRegisterSessionPort
+@ stdcall -syscall NtUserRegisterSessionPort(long)
 @ stub -syscall NtUserRegisterShellHookWindow
 @ stub -syscall NtUserRegisterShellPTPListener
 @ stub -syscall NtUserRegisterSiblingFrostWindow

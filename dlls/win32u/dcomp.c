@@ -91,6 +91,33 @@ static UINT get_composition_refresh_rate(void)
     return 60;
 }
 
+BOOL WINAPI NtUserRegisterSessionPort( HANDLE port )
+{
+    BOOL ret;
+
+    TRACE( "port %p\n", port );
+    SERVER_START_REQ( register_dwm_session_port )
+    {
+        req->handle = wine_server_obj_handle( port );
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+BOOL WINAPI NtUserDwmKernelStartup(void)
+{
+    BOOL ret;
+
+    TRACE( "\n" );
+    SERVER_START_REQ( start_dwm_kernel )
+    {
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
 NTSTATUS WINAPI NtDCompositionCreateConnection( BOOL is_dwm, HANDLE event, HANDLE *connection )
 {
     NTSTATUS status;

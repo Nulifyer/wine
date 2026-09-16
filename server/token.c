@@ -1380,6 +1380,11 @@ const struct sid *token_get_user( struct token *token )
     return token->user;
 }
 
+int token_has_process_trust( struct token *token )
+{
+    return token->trust_level != NULL;
+}
+
 const struct sid *token_get_owner( struct token *token )
 {
     return token->owner;

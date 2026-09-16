@@ -630,6 +630,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->disable_boost   = 0;
     process->handle_checking_mode = 0;
     process->native_session_owner = 0;
+    process->native_session_delegate = 0;
     process->subsystem_process = 0;
     process->ui_context_initialized = 0;
     process->critical        = 0;
@@ -1266,6 +1267,7 @@ DECL_HANDLER(new_process)
     unsigned int i, job_handle_count;
     int native_session_id = -1;
     int native_session_owner = 0;
+    int native_session_delegate = 0;
     int preserve_trust = 0;
     struct job *job;
 
@@ -1305,6 +1307,14 @@ DECL_HANDLER(new_process)
         parent_thread = NULL;
     }
     else parent = (struct process *)grab_object( current->process );
+
+    /* The admitted session lineage may launch graphical delegates such as
+     * Winlogon, DWM and LogonUI.  Do not accept an explicit parent handle as
+     * proof of lineage; a member itself must issue the creation request. */
+    if (is_native_machine() && parent == current->process &&
+        (parent->native_session_owner || parent->native_session_delegate) &&
+        parent->session_id)
+        native_session_delegate = 1;
 
     if (req->native_session)
     {
@@ -1446,6 +1456,7 @@ DECL_HANDLER(new_process)
                                     native_session_id, preserve_trust )))
         goto done;
     process->native_session_owner = native_session_owner;
+    process->native_session_delegate = native_session_delegate;
     if (req->flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS)
     {
         if (!is_native_machine() ||

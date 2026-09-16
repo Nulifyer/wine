@@ -278,8 +278,7 @@ BOOL WINAPI DeregisterShellHookWindow(HWND hWnd)
  */
 BOOL WINAPI DwmKernelStartup(void)
 {
-    FIXME("stub\n");
-    return TRUE;
+    return NtUserDwmKernelStartup();
 }
 
 
@@ -288,8 +287,7 @@ BOOL WINAPI DwmKernelStartup(void)
  */
 BOOL WINAPI RegisterSessionPort(HANDLE port)
 {
-    FIXME("(%p): stub\n", port);
-    return TRUE;
+    return NtUserRegisterSessionPort( port );
 }
 
 

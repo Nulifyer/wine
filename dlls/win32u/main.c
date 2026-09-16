@@ -1469,6 +1469,11 @@ NTSTATUS SYSCALL_API NtUserDwmLockScreenUpdates( BOOL lock )
     SYSCALL_FUNC( NtUserDwmLockScreenUpdates );
 }
 
+BOOL SYSCALL_API NtUserDwmKernelStartup(void)
+{
+    SYSCALL_FUNC( NtUserDwmKernelStartup );
+}
+
 BOOL SYSCALL_API NtUserEmptyClipboard(void)
 {
     SYSCALL_FUNC( NtUserEmptyClipboard );
@@ -2169,6 +2174,11 @@ BOOL SYSCALL_API NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT v
 BOOL SYSCALL_API NtUserRegisterLogonProcess( DWORD process_id, BOOL secure )
 {
     SYSCALL_FUNC( NtUserRegisterLogonProcess );
+}
+
+BOOL SYSCALL_API NtUserRegisterSessionPort( HANDLE port )
+{
+    SYSCALL_FUNC( NtUserRegisterSessionPort );
 }
 
 BOOL SYSCALL_API NtUserRegisterRawInputDevices( const RAWINPUTDEVICE *devices, UINT device_count, UINT device_size )

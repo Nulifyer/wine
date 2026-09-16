@@ -1277,7 +1277,7 @@
     SYSCALL_ENTRY( 0x14f9, NtUserRegisterPrecisionTouchpadWindow, 0 ) \
     SYSCALL_ENTRY( 0x14fa, NtUserRegisterRawInputDevices, 12 ) \
     SYSCALL_ENTRY( 0x14fb, NtUserRegisterServicesProcess, 0 ) \
-    SYSCALL_ENTRY( 0x14fc, NtUserRegisterSessionPort, 0 ) \
+    SYSCALL_ENTRY( 0x14fc, NtUserRegisterSessionPort, 4 ) \
     SYSCALL_ENTRY( 0x14fd, NtUserRegisterShellHookWindow, 0 ) \
     SYSCALL_ENTRY( 0x14fe, NtUserRegisterShellPTPListener, 0 ) \
     SYSCALL_ENTRY( 0x14ff, NtUserRegisterSiblingFrostWindow, 0 ) \
@@ -2819,7 +2819,7 @@
     SYSCALL_ENTRY( 0x14f9, NtUserRegisterPrecisionTouchpadWindow, 0 ) \
     SYSCALL_ENTRY( 0x14fa, NtUserRegisterRawInputDevices, 24 ) \
     SYSCALL_ENTRY( 0x14fb, NtUserRegisterServicesProcess, 0 ) \
-    SYSCALL_ENTRY( 0x14fc, NtUserRegisterSessionPort, 0 ) \
+    SYSCALL_ENTRY( 0x14fc, NtUserRegisterSessionPort, 8 ) \
     SYSCALL_ENTRY( 0x14fd, NtUserRegisterShellHookWindow, 0 ) \
     SYSCALL_ENTRY( 0x14fe, NtUserRegisterShellPTPListener, 0 ) \
     SYSCALL_ENTRY( 0x14ff, NtUserRegisterSiblingFrostWindow, 0 ) \
@@ -3729,7 +3729,6 @@
     SYSCALL_STUB( NtUserDwmGetRemoteSessionOcclusionEvent ) \
     SYSCALL_STUB( NtUserDwmGetRemoteSessionOcclusionState ) \
     SYSCALL_STUB( NtUserDwmKernelShutdown ) \
-    SYSCALL_STUB( NtUserDwmKernelStartup ) \
     SYSCALL_STUB( NtUserDwmValidateWindow ) \
     SYSCALL_STUB( NtUserDwmWindowNotificationsEnabled ) \
     SYSCALL_STUB( NtUserEnableChildWindowDpiMessage ) \
@@ -3936,7 +3935,6 @@
     SYSCALL_STUB( NtUserRegisterPointerInputTarget ) \
     SYSCALL_STUB( NtUserRegisterPrecisionTouchpadWindow ) \
     SYSCALL_STUB( NtUserRegisterServicesProcess ) \
-    SYSCALL_STUB( NtUserRegisterSessionPort ) \
     SYSCALL_STUB( NtUserRegisterShellHookWindow ) \
     SYSCALL_STUB( NtUserRegisterShellPTPListener ) \
     SYSCALL_STUB( NtUserRegisterSiblingFrostWindow ) \

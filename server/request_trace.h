@@ -4014,6 +4014,15 @@ static void dump_create_dcomp_connection_reply( const struct create_dcomp_connec
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_register_dwm_session_port_request( const struct register_dwm_session_port_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_start_dwm_kernel_request( const struct start_dwm_kernel_request *req )
+{
+}
+
 static void dump_destroy_dcomp_connection_request( const struct destroy_dcomp_connection_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -4486,6 +4495,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_query_information_request,
     (dump_func)dump_notify_change_session_request,
     (dump_func)dump_create_dcomp_connection_request,
+    (dump_func)dump_register_dwm_session_port_request,
+    (dump_func)dump_start_dwm_kernel_request,
     (dump_func)dump_destroy_dcomp_connection_request,
     (dump_func)dump_open_token_manager_request,
     (dump_func)dump_create_dcomp_channel_request,
@@ -4854,6 +4865,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_create_dcomp_connection_reply,
     NULL,
+    NULL,
+    NULL,
     (dump_func)dump_open_token_manager_reply,
     (dump_func)dump_create_dcomp_channel_reply,
     NULL,
@@ -5220,6 +5233,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "alpc_query_information",
     "notify_change_session",
     "create_dcomp_connection",
+    "register_dwm_session_port",
+    "start_dwm_kernel",
     "destroy_dcomp_connection",
     "open_token_manager",
     "create_dcomp_channel",
@@ -5302,6 +5317,7 @@ static const struct
     { "INVALID_CID",                 STATUS_INVALID_CID },
     { "INVALID_CONNECTION",          STATUS_INVALID_CONNECTION },
     { "INVALID_DEVICE_REQUEST",      STATUS_INVALID_DEVICE_REQUEST },
+    { "INVALID_DEVICE_STATE",        STATUS_INVALID_DEVICE_STATE },
     { "INVALID_FILE_FOR_SECTION",    STATUS_INVALID_FILE_FOR_SECTION },
     { "INVALID_HANDLE",              STATUS_INVALID_HANDLE },
     { "INVALID_IMAGE_FORMAT",        STATUS_INVALID_IMAGE_FORMAT },

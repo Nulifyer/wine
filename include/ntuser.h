@@ -881,6 +881,7 @@ W32KAPI BOOL    WINAPI NtUserDrawIconEx( HDC hdc, INT x0, INT y0, HICON icon, IN
 W32KAPI BOOL    WINAPI NtUserDrawMenuBar( HWND hwnd );
 W32KAPI DWORD   WINAPI NtUserDrawMenuBarTemp( HWND hwnd, HDC hdc, RECT *rect, HMENU handle, HFONT font );
 W32KAPI NTSTATUS WINAPI NtUserDwmLockScreenUpdates( BOOL lock );
+W32KAPI BOOL     WINAPI NtUserDwmKernelStartup(void);
 W32KAPI BOOL    WINAPI NtUserEmptyClipboard(void);
 W32KAPI BOOL    WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointer( BOOL );
@@ -1044,6 +1045,7 @@ W32KAPI BOOL    WINAPI NtUserRegisterDManipHook(void);
 W32KAPI BOOL    WINAPI NtUserRegisterBSDRWindow( HWND hwnd, DWORD flags );
 W32KAPI BOOL    WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk );
 W32KAPI BOOL    WINAPI NtUserRegisterLogonProcess( DWORD process_id, BOOL secure );
+W32KAPI BOOL    WINAPI NtUserRegisterSessionPort( HANDLE port );
 W32KAPI BOOL    WINAPI NtUserRegisterRawInputDevices( const RAWINPUTDEVICE *devices, UINT device_count, UINT size );
 W32KAPI BOOL    WINAPI NtUserRegisterTouchPadCapable( BOOL capable );
 W32KAPI ATOM    WINAPI NtUserRegisterWindowMessage( UNICODE_STRING *name );

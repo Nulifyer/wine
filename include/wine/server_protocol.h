@@ -6955,6 +6955,28 @@ struct create_dcomp_connection_reply
 };
 
 
+struct register_dwm_session_port_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct register_dwm_session_port_reply
+{
+    struct reply_header __header;
+};
+
+
+struct start_dwm_kernel_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct start_dwm_kernel_reply
+{
+    struct reply_header __header;
+};
+
+
 struct destroy_dcomp_connection_request
 {
     struct request_header __header;
@@ -7479,6 +7501,8 @@ enum request
     REQ_alpc_query_information,
     REQ_notify_change_session,
     REQ_create_dcomp_connection,
+    REQ_register_dwm_session_port,
+    REQ_start_dwm_kernel,
     REQ_destroy_dcomp_connection,
     REQ_open_token_manager,
     REQ_create_dcomp_channel,
@@ -7849,6 +7873,8 @@ union generic_request
     struct alpc_query_information_request alpc_query_information_request;
     struct notify_change_session_request notify_change_session_request;
     struct create_dcomp_connection_request create_dcomp_connection_request;
+    struct register_dwm_session_port_request register_dwm_session_port_request;
+    struct start_dwm_kernel_request start_dwm_kernel_request;
     struct destroy_dcomp_connection_request destroy_dcomp_connection_request;
     struct open_token_manager_request open_token_manager_request;
     struct create_dcomp_channel_request create_dcomp_channel_request;
@@ -8217,6 +8243,8 @@ union generic_reply
     struct alpc_query_information_reply alpc_query_information_reply;
     struct notify_change_session_reply notify_change_session_reply;
     struct create_dcomp_connection_reply create_dcomp_connection_reply;
+    struct register_dwm_session_port_reply register_dwm_session_port_reply;
+    struct start_dwm_kernel_reply start_dwm_kernel_reply;
     struct destroy_dcomp_connection_reply destroy_dcomp_connection_reply;
     struct open_token_manager_reply open_token_manager_reply;
     struct create_dcomp_channel_reply create_dcomp_channel_reply;
@@ -8231,6 +8259,6 @@ union generic_reply
     struct set_d3dkmt_process_scheduling_priority_class_reply set_d3dkmt_process_scheduling_priority_class_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1011
+#define SERVER_PROTOCOL_VERSION 1012
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
