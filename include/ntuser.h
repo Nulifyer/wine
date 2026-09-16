@@ -783,6 +783,9 @@ struct dcomposition_connection_batch
 };
 W32KAPI NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *batch_id,
                                                            struct dcomposition_connection_batch **batch );
+W32KAPI NTSTATUS WINAPI NtDCompositionGetDeletedResources( UINT channel, UINT capacity,
+                                                            void **resources, UINT *count );
+W32KAPI NTSTATUS WINAPI NtDCompositionReleaseAllResources( UINT channel, BYTE *result );
 W32KAPI NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *buffer,
                                                       ULONG length, HANDLE resource,
                                                       const void *resource_data, const UINT *resources,

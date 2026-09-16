@@ -7042,6 +7042,34 @@ struct get_dcomp_connection_batch_reply
 };
 
 
+struct release_all_dcomp_resources_request
+{
+    struct request_header __header;
+    unsigned int channel;
+};
+struct release_all_dcomp_resources_reply
+{
+    struct reply_header __header;
+    unsigned int result;
+    char __pad_12[4];
+};
+
+
+struct get_deleted_dcomp_resources_request
+{
+    struct request_header __header;
+    unsigned int channel;
+    unsigned int capacity;
+    char __pad_20[4];
+};
+struct get_deleted_dcomp_resources_reply
+{
+    struct reply_header __header;
+    unsigned int count;
+    char __pad_12[4];
+};
+
+
 struct get_dcomp_channel_batch_id_request
 {
     struct request_header __header;
@@ -7431,6 +7459,8 @@ enum request
     REQ_destroy_dcomp_channel,
     REQ_set_dcomp_channel_connection,
     REQ_get_dcomp_connection_batch,
+    REQ_release_all_dcomp_resources,
+    REQ_get_deleted_dcomp_resources,
     REQ_get_dcomp_channel_batch_id,
     REQ_commit_dcomp_channel,
     REQ_NB_REQUESTS
@@ -7797,6 +7827,8 @@ union generic_request
     struct destroy_dcomp_channel_request destroy_dcomp_channel_request;
     struct set_dcomp_channel_connection_request set_dcomp_channel_connection_request;
     struct get_dcomp_connection_batch_request get_dcomp_connection_batch_request;
+    struct release_all_dcomp_resources_request release_all_dcomp_resources_request;
+    struct get_deleted_dcomp_resources_request get_deleted_dcomp_resources_request;
     struct get_dcomp_channel_batch_id_request get_dcomp_channel_batch_id_request;
     struct commit_dcomp_channel_request commit_dcomp_channel_request;
 };
@@ -8161,10 +8193,12 @@ union generic_reply
     struct destroy_dcomp_channel_reply destroy_dcomp_channel_reply;
     struct set_dcomp_channel_connection_reply set_dcomp_channel_connection_reply;
     struct get_dcomp_connection_batch_reply get_dcomp_connection_batch_reply;
+    struct release_all_dcomp_resources_reply release_all_dcomp_resources_reply;
+    struct get_deleted_dcomp_resources_reply get_deleted_dcomp_resources_reply;
     struct get_dcomp_channel_batch_id_reply get_dcomp_channel_batch_id_reply;
     struct commit_dcomp_channel_reply commit_dcomp_channel_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1008
+#define SERVER_PROTOCOL_VERSION 1010
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

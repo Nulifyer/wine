@@ -4822,6 +4822,21 @@ struct alpc_message_info
     VARARG(data,bytes);        /* stable command-batch bytes */
 @END
 
+/* Release all resources retained by an owner DirectComposition channel. */
+@REQ(release_all_dcomp_resources)
+    unsigned int channel;      /* owner channel ID */
+@REPLY
+    unsigned int result;       /* observed release output byte */
+@END
+
+/* Query deleted resources retained by an owner DirectComposition channel. */
+@REQ(get_deleted_dcomp_resources)
+    unsigned int channel;      /* owner channel ID */
+    unsigned int capacity;     /* caller result capacity */
+@REPLY
+    unsigned int count;        /* returned resource count */
+@END
+
 /* Query one of the channel's batch counters. */
 @REQ(get_dcomp_channel_batch_id)
     unsigned int channel;      /* owner channel ID */

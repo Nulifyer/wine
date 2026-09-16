@@ -33,7 +33,7 @@
 @ stdcall -syscall NtDCompositionGetBatchId(long long ptr)
 @ stub -syscall NtDCompositionGetChannels
 @ stdcall -syscall NtDCompositionGetConnectionBatch(long ptr ptr)
-@ stub -syscall NtDCompositionGetDeletedResources
+@ stdcall -syscall NtDCompositionGetDeletedResources(long long ptr ptr)
 @ stub -syscall NtDCompositionGetFrameId
 @ stub -syscall NtDCompositionGetFrameIdFromBatchId
 @ stub -syscall NtDCompositionGetFrameLegacyTokens
@@ -47,7 +47,7 @@
 @ stub -syscall NtDCompositionReferenceSharedResourceOnDwmChannel
 @ stub -syscall NtDCompositionRegisterThumbnailVisual
 @ stub -syscall NtDCompositionRegisterVirtualDesktopVisual
-@ stub -syscall NtDCompositionReleaseAllResources
+@ stdcall -syscall NtDCompositionReleaseAllResources(long ptr)
 @ stub -syscall NtDCompositionRemoveCrossDeviceVisualChild
 @ stub -syscall NtDCompositionRetireFrame
 @ stub -syscall NtDCompositionSetBlurredWallpaperSurface

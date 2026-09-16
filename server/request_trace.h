@@ -4071,6 +4071,27 @@ static void dump_get_dcomp_connection_batch_reply( const struct get_dcomp_connec
     dump_varargs_bytes( ", data=", cur_size );
 }
 
+static void dump_release_all_dcomp_resources_request( const struct release_all_dcomp_resources_request *req )
+{
+    fprintf( stderr, " channel=%08x", req->channel );
+}
+
+static void dump_release_all_dcomp_resources_reply( const struct release_all_dcomp_resources_reply *req )
+{
+    fprintf( stderr, " result=%08x", req->result );
+}
+
+static void dump_get_deleted_dcomp_resources_request( const struct get_deleted_dcomp_resources_request *req )
+{
+    fprintf( stderr, " channel=%08x", req->channel );
+    fprintf( stderr, ", capacity=%08x", req->capacity );
+}
+
+static void dump_get_deleted_dcomp_resources_reply( const struct get_deleted_dcomp_resources_reply *req )
+{
+    fprintf( stderr, " count=%08x", req->count );
+}
+
 static void dump_get_dcomp_channel_batch_id_request( const struct get_dcomp_channel_batch_id_request *req )
 {
     fprintf( stderr, " channel=%08x", req->channel );
@@ -4455,6 +4476,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_destroy_dcomp_channel_request,
     (dump_func)dump_set_dcomp_channel_connection_request,
     (dump_func)dump_get_dcomp_connection_batch_request,
+    (dump_func)dump_release_all_dcomp_resources_request,
+    (dump_func)dump_get_deleted_dcomp_resources_request,
     (dump_func)dump_get_dcomp_channel_batch_id_request,
     (dump_func)dump_commit_dcomp_channel_request,
 };
@@ -4818,6 +4841,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     (dump_func)dump_get_dcomp_connection_batch_reply,
+    (dump_func)dump_release_all_dcomp_resources_reply,
+    (dump_func)dump_get_deleted_dcomp_resources_reply,
     (dump_func)dump_get_dcomp_channel_batch_id_reply,
     (dump_func)dump_commit_dcomp_channel_reply,
 };
@@ -5181,6 +5206,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "destroy_dcomp_channel",
     "set_dcomp_channel_connection",
     "get_dcomp_connection_batch",
+    "release_all_dcomp_resources",
+    "get_deleted_dcomp_resources",
     "get_dcomp_channel_batch_id",
     "commit_dcomp_channel",
 };

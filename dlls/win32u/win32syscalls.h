@@ -35,7 +35,7 @@
     SYSCALL_ENTRY( 0x101f, NtDCompositionGetBatchId, 12 ) \
     SYSCALL_ENTRY( 0x1020, NtDCompositionGetChannels, 0 ) \
     SYSCALL_ENTRY( 0x1021, NtDCompositionGetConnectionBatch, 12 ) \
-    SYSCALL_ENTRY( 0x1022, NtDCompositionGetDeletedResources, 0 ) \
+    SYSCALL_ENTRY( 0x1022, NtDCompositionGetDeletedResources, 16 ) \
     SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 0 ) \
     SYSCALL_ENTRY( 0x1024, NtDCompositionGetFrameIdFromBatchId, 0 ) \
     SYSCALL_ENTRY( 0x1025, NtDCompositionGetFrameLegacyTokens, 0 ) \
@@ -49,7 +49,7 @@
     SYSCALL_ENTRY( 0x102d, NtDCompositionReferenceSharedResourceOnDwmChannel, 0 ) \
     SYSCALL_ENTRY( 0x102e, NtDCompositionRegisterThumbnailVisual, 0 ) \
     SYSCALL_ENTRY( 0x102f, NtDCompositionRegisterVirtualDesktopVisual, 0 ) \
-    SYSCALL_ENTRY( 0x1030, NtDCompositionReleaseAllResources, 0 ) \
+    SYSCALL_ENTRY( 0x1030, NtDCompositionReleaseAllResources, 8 ) \
     SYSCALL_ENTRY( 0x1031, NtDCompositionRemoveCrossDeviceVisualChild, 0 ) \
     SYSCALL_ENTRY( 0x1032, NtDCompositionRetireFrame, 0 ) \
     SYSCALL_ENTRY( 0x1033, NtDCompositionSetBlurredWallpaperSurface, 0 ) \
@@ -1577,7 +1577,7 @@
     SYSCALL_ENTRY( 0x101f, NtDCompositionGetBatchId, 24 ) \
     SYSCALL_ENTRY( 0x1020, NtDCompositionGetChannels, 0 ) \
     SYSCALL_ENTRY( 0x1021, NtDCompositionGetConnectionBatch, 24 ) \
-    SYSCALL_ENTRY( 0x1022, NtDCompositionGetDeletedResources, 0 ) \
+    SYSCALL_ENTRY( 0x1022, NtDCompositionGetDeletedResources, 32 ) \
     SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 0 ) \
     SYSCALL_ENTRY( 0x1024, NtDCompositionGetFrameIdFromBatchId, 0 ) \
     SYSCALL_ENTRY( 0x1025, NtDCompositionGetFrameLegacyTokens, 0 ) \
@@ -1591,7 +1591,7 @@
     SYSCALL_ENTRY( 0x102d, NtDCompositionReferenceSharedResourceOnDwmChannel, 0 ) \
     SYSCALL_ENTRY( 0x102e, NtDCompositionRegisterThumbnailVisual, 0 ) \
     SYSCALL_ENTRY( 0x102f, NtDCompositionRegisterVirtualDesktopVisual, 0 ) \
-    SYSCALL_ENTRY( 0x1030, NtDCompositionReleaseAllResources, 0 ) \
+    SYSCALL_ENTRY( 0x1030, NtDCompositionReleaseAllResources, 16 ) \
     SYSCALL_ENTRY( 0x1031, NtDCompositionRemoveCrossDeviceVisualChild, 0 ) \
     SYSCALL_ENTRY( 0x1032, NtDCompositionRetireFrame, 0 ) \
     SYSCALL_ENTRY( 0x1033, NtDCompositionSetBlurredWallpaperSurface, 0 ) \
@@ -3114,7 +3114,6 @@
     SYSCALL_STUB( NtDCompositionDuplicateSwapchainHandleToDwm ) \
     SYSCALL_STUB( NtDCompositionEnableMMCSS ) \
     SYSCALL_STUB( NtDCompositionGetChannels ) \
-    SYSCALL_STUB( NtDCompositionGetDeletedResources ) \
     SYSCALL_STUB( NtDCompositionGetFrameId ) \
     SYSCALL_STUB( NtDCompositionGetFrameIdFromBatchId ) \
     SYSCALL_STUB( NtDCompositionGetFrameLegacyTokens ) \
@@ -3127,7 +3126,6 @@
     SYSCALL_STUB( NtDCompositionReferenceSharedResourceOnDwmChannel ) \
     SYSCALL_STUB( NtDCompositionRegisterThumbnailVisual ) \
     SYSCALL_STUB( NtDCompositionRegisterVirtualDesktopVisual ) \
-    SYSCALL_STUB( NtDCompositionReleaseAllResources ) \
     SYSCALL_STUB( NtDCompositionRemoveCrossDeviceVisualChild ) \
     SYSCALL_STUB( NtDCompositionRetireFrame ) \
     SYSCALL_STUB( NtDCompositionSetBlurredWallpaperSurface ) \

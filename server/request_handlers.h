@@ -364,6 +364,8 @@ DECL_HANDLER(create_dcomp_channel);
 DECL_HANDLER(destroy_dcomp_channel);
 DECL_HANDLER(set_dcomp_channel_connection);
 DECL_HANDLER(get_dcomp_connection_batch);
+DECL_HANDLER(release_all_dcomp_resources);
+DECL_HANDLER(get_deleted_dcomp_resources);
 DECL_HANDLER(get_dcomp_channel_batch_id);
 DECL_HANDLER(commit_dcomp_channel);
 
@@ -727,6 +729,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_destroy_dcomp_channel,
     (req_handler)req_set_dcomp_channel_connection,
     (req_handler)req_get_dcomp_connection_batch,
+    (req_handler)req_release_all_dcomp_resources,
+    (req_handler)req_get_deleted_dcomp_resources,
     (req_handler)req_get_dcomp_channel_batch_id,
     (req_handler)req_commit_dcomp_channel,
 };
@@ -2788,6 +2792,15 @@ C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, value) == 16 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, connection) == 24 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, object) == 32 );
 C_ASSERT( sizeof(struct get_dcomp_connection_batch_reply) == 40 );
+C_ASSERT( offsetof(struct release_all_dcomp_resources_request, channel) == 12 );
+C_ASSERT( sizeof(struct release_all_dcomp_resources_request) == 16 );
+C_ASSERT( offsetof(struct release_all_dcomp_resources_reply, result) == 8 );
+C_ASSERT( sizeof(struct release_all_dcomp_resources_reply) == 16 );
+C_ASSERT( offsetof(struct get_deleted_dcomp_resources_request, channel) == 12 );
+C_ASSERT( offsetof(struct get_deleted_dcomp_resources_request, capacity) == 16 );
+C_ASSERT( sizeof(struct get_deleted_dcomp_resources_request) == 24 );
+C_ASSERT( offsetof(struct get_deleted_dcomp_resources_reply, count) == 8 );
+C_ASSERT( sizeof(struct get_deleted_dcomp_resources_reply) == 16 );
 C_ASSERT( offsetof(struct get_dcomp_channel_batch_id_request, channel) == 12 );
 C_ASSERT( offsetof(struct get_dcomp_channel_batch_id_request, selector) == 16 );
 C_ASSERT( sizeof(struct get_dcomp_channel_batch_id_request) == 24 );

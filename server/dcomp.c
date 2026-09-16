@@ -527,6 +527,29 @@ done:
     release_object( connection );
 }
 
+DECL_HANDLER(release_all_dcomp_resources)
+{
+    struct dcomp_channel *channel;
+
+    if (!(channel = get_dcomp_channel( req->channel ))) return;
+    reply->result = 0;
+    release_object( channel );
+}
+
+DECL_HANDLER(get_deleted_dcomp_resources)
+{
+    struct dcomp_channel *channel;
+
+    if (!req->capacity)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(channel = get_dcomp_channel( req->channel ))) return;
+    reply->count = 0;
+    release_object( channel );
+}
+
 DECL_HANDLER(get_dcomp_channel_batch_id)
 {
     struct dcomp_channel *channel;

@@ -262,6 +262,62 @@ done:
     CloseHandle( event );
 }
 
+static void test_resource_retirement(void)
+{
+    void *resources = (void *)0xcccccccc;
+    BYTE *buffer = (BYTE *)0xdeadbeef, released;
+    UINT channel = 0xcccccccc, size = 0x1000, count;
+    NTSTATUS status;
+
+    count = 0xcccccccc;
+    status = NtDCompositionGetDeletedResources( 0xdeadbeef, 0, &resources, &count );
+    ok( status == STATUS_INVALID_PARAMETER, "got invalid zero-capacity status %#lx\n", status );
+    ok( resources == (void *)0xcccccccc, "invalid zero-capacity resources changed to %p\n", resources );
+    ok( count == 0xcccccccc, "invalid zero-capacity count changed to %#x\n", count );
+
+    released = 0xcc;
+    status = NtDCompositionReleaseAllResources( 0xdeadbeef, &released );
+    ok( status == STATUS_ACCESS_DENIED, "got invalid release status %#lx\n", status );
+    ok( released == 0xcc, "invalid release byte changed to %#x\n", released );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got channel status %#lx\n", status );
+    if (status) return;
+
+    resources = (void *)0xcccccccc;
+    count = 0xcccccccc;
+    status = NtDCompositionGetDeletedResources( channel, 0, &resources, &count );
+    ok( status == STATUS_INVALID_PARAMETER, "got zero-capacity status %#lx\n", status );
+    ok( resources == (void *)0xcccccccc, "zero-capacity resources changed to %p\n", resources );
+    ok( count == 0xcccccccc, "zero-capacity count changed to %#x\n", count );
+    status = NtDCompositionGetDeletedResources( channel, 1, &resources, &count );
+    ok( status == STATUS_SUCCESS, "got empty deleted-resource status %#lx\n", status );
+    ok( !resources, "got empty deleted resources %p\n", resources );
+    ok( !count, "got empty deleted-resource count %#x\n", count );
+
+    released = 0xcc;
+    status = NtDCompositionReleaseAllResources( channel, &released );
+    ok( status == STATUS_SUCCESS, "got release status %#lx\n", status );
+    ok( !released, "got release byte %#x\n", released );
+    released = 0x55;
+    status = NtDCompositionReleaseAllResources( channel, &released );
+    ok( status == STATUS_SUCCESS, "got repeated release status %#lx\n", status );
+    ok( !released, "got repeated release byte %#x\n", released );
+
+    status = NtDCompositionDestroyChannel( channel );
+    ok( status == STATUS_SUCCESS, "got destroy status %#lx\n", status );
+    buffer = NULL;
+    released = 0xcc;
+    status = NtDCompositionReleaseAllResources( channel, &released );
+    ok( status == STATUS_ACCESS_DENIED, "got stale release status %#lx\n", status );
+    ok( released == 0xcc, "stale release byte changed to %#x\n", released );
+    resources = (void *)0xcccccccc;
+    count = 0xcccccccc;
+    status = NtDCompositionGetDeletedResources( channel, 1, &resources, &count );
+    ok( status == STATUS_ACCESS_DENIED, "got stale deleted-resource status %#lx\n", status );
+    ok( resources == (void *)0xcccccccc, "stale deleted resources changed to %p\n", resources );
+    ok( count == 0xcccccccc, "stale deleted-resource count changed to %#x\n", count );
+}
+
 static void test_token_manager_lifetime(void)
 {
     HANDLE work_event, ordinary_connection = NULL, dwm_connection = NULL;
@@ -327,6 +383,7 @@ START_TEST(dcomp)
     test_frame_statistics();
     test_channel_lifetime();
     test_connection_queue();
+    test_resource_retirement();
     test_connection_lifetime();
     test_token_manager_lifetime();
 }

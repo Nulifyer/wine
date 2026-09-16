@@ -354,6 +354,47 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
     return status;
 }
 
+NTSTATUS WINAPI NtDCompositionReleaseAllResources( UINT channel, BYTE *result )
+{
+    NTSTATUS status;
+
+    TRACE( "channel %#x, result %p\n", channel, result );
+
+    if (!result) return STATUS_INVALID_PARAMETER;
+    SERVER_START_REQ( release_all_dcomp_resources )
+    {
+        req->channel = channel;
+        status = wine_server_call( req );
+        if (!status) *result = reply->result;
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionGetDeletedResources( UINT channel, UINT capacity,
+                                                     void **resources, UINT *count )
+{
+    NTSTATUS status;
+
+    TRACE( "channel %#x, capacity %u, resources %p, count %p\n",
+           channel, capacity, resources, count );
+
+    if (!capacity || !resources || !count) return STATUS_INVALID_PARAMETER;
+    SERVER_START_REQ( get_deleted_dcomp_resources )
+    {
+        req->channel = channel;
+        req->capacity = capacity;
+        status = wine_server_call( req );
+        if (!status)
+        {
+            *resources = NULL;
+            *count = reply->count;
+        }
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *buffer,
                                               ULONG length, HANDLE resource,
                                               const void *resource_data, const UINT *resources,
