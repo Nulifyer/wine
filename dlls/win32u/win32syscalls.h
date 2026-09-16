@@ -95,7 +95,7 @@
     SYSCALL_ENTRY( 0x105b, NtDxgkGetProcessList, 0 ) \
     SYSCALL_ENTRY( 0x105c, NtDxgkGetProperties, 0 ) \
     SYSCALL_ENTRY( 0x105d, NtDxgkGetTrackedWorkloadStatistics, 0 ) \
-    SYSCALL_ENTRY( 0x105e, NtDxgkIsFeatureEnabled, 0 ) \
+    SYSCALL_ENTRY( 0x105e, NtDxgkIsFeatureEnabled, 4 ) \
     SYSCALL_ENTRY( 0x105f, NtDxgkNotifyWorkSubmission, 0 ) \
     SYSCALL_ENTRY( 0x1060, NtDxgkOpenNativeFenceFromNtHandle, 0 ) \
     SYSCALL_ENTRY( 0x1061, NtDxgkOutputDuplPresentToHwQueue, 0 ) \
@@ -1637,7 +1637,7 @@
     SYSCALL_ENTRY( 0x105b, NtDxgkGetProcessList, 0 ) \
     SYSCALL_ENTRY( 0x105c, NtDxgkGetProperties, 0 ) \
     SYSCALL_ENTRY( 0x105d, NtDxgkGetTrackedWorkloadStatistics, 0 ) \
-    SYSCALL_ENTRY( 0x105e, NtDxgkIsFeatureEnabled, 0 ) \
+    SYSCALL_ENTRY( 0x105e, NtDxgkIsFeatureEnabled, 8 ) \
     SYSCALL_ENTRY( 0x105f, NtDxgkNotifyWorkSubmission, 0 ) \
     SYSCALL_ENTRY( 0x1060, NtDxgkOpenNativeFenceFromNtHandle, 0 ) \
     SYSCALL_ENTRY( 0x1061, NtDxgkOutputDuplPresentToHwQueue, 0 ) \
@@ -3179,7 +3179,6 @@
     SYSCALL_STUB( NtDxgkGetProcessList ) \
     SYSCALL_STUB( NtDxgkGetProperties ) \
     SYSCALL_STUB( NtDxgkGetTrackedWorkloadStatistics ) \
-    SYSCALL_STUB( NtDxgkIsFeatureEnabled ) \
     SYSCALL_STUB( NtDxgkNotifyWorkSubmission ) \
     SYSCALL_STUB( NtDxgkOpenNativeFenceFromNtHandle ) \
     SYSCALL_STUB( NtDxgkOutputDuplPresentToHwQueue ) \

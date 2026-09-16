@@ -700,6 +700,94 @@ static void test_D3DKMTOpenAdapterFromHdc(void)
     }
 }
 
+static void test_D3DKMTIsFeatureEnabled(void)
+{
+    NTSTATUS (WINAPI *pD3DKMTIsFeatureEnabled)( D3DKMT_ISFEATUREENABLED *desc );
+    D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME open_adapter = {0};
+    D3DKMT_ISFEATUREENABLED query;
+    D3DKMT_CLOSEADAPTER close_adapter;
+    NTSTATUS status;
+
+    pD3DKMTIsFeatureEnabled = (void *)GetProcAddress( GetModuleHandleA( "gdi32.dll" ),
+                                                     "D3DKMTIsFeatureEnabled" );
+    if (!pD3DKMTIsFeatureEnabled)
+    {
+        win_skip( "D3DKMTIsFeatureEnabled is unavailable.\n" );
+        return;
+    }
+
+    if (!get_primary_adapter_name( open_adapter.DeviceName ))
+    {
+        skip( "No primary display adapter.\n" );
+        return;
+    }
+    status = D3DKMTOpenAdapterFromGdiDisplayName( &open_adapter );
+    ok_nt( STATUS_SUCCESS, status );
+    if (status) return;
+
+    memset( &query, 0xcc, sizeof(query) );
+    query.hAdapter = open_adapter.hAdapter;
+    query.FeatureId = DXGK_FEATURE_QUERYSTATISTICS_EXTENSIONS;
+    status = pD3DKMTIsFeatureEnabled( &query );
+    ok_nt( STATUS_SUCCESS, status );
+    ok_x4( query.hAdapter, ==, open_adapter.hAdapter );
+    ok_x4( query.FeatureId, ==, DXGK_FEATURE_QUERYSTATISTICS_EXTENSIONS );
+    ok_u4( query.Result.KnownFeature, ==, TRUE );
+    ok_u4( query.Result.Reserved, ==, 0 );
+    if (winetest_platform_is_wine)
+    {
+        ok_u4( query.Result.Enabled, ==, FALSE );
+        ok_u4( query.Result.Available, ==, FALSE );
+        ok_u4( query.Result.Version, ==, 0 );
+        ok_x4( query.Result.Value, ==, 2 );
+    }
+
+    memset( &query, 0xcc, sizeof(query) );
+    query.hAdapter = 0;
+    query.FeatureId = DXGK_FEATURE_GPUVAIOMMU;
+    status = pD3DKMTIsFeatureEnabled( &query );
+    ok_nt( STATUS_SUCCESS, status );
+    ok_u4( query.Result.KnownFeature, ==, TRUE );
+    if (winetest_platform_is_wine) ok_x4( query.Result.Value, ==, 2 );
+
+    memset( &query, 0xcc, sizeof(query) );
+    query.hAdapter = open_adapter.hAdapter;
+    query.FeatureId = 0x0fffffff;
+    status = pD3DKMTIsFeatureEnabled( &query );
+    ok_nt( STATUS_SUCCESS, status );
+    if (winetest_platform_is_wine)
+    {
+        ok_x4( query.Result.Version, ==, 0 );
+        ok_x4( query.Result.Value, ==, 0 );
+    }
+
+    memset( &query, 0xcc, sizeof(query) );
+    query.hAdapter = 0xdeadbeef;
+    query.FeatureId = DXGK_FEATURE_QUERYSTATISTICS_EXTENSIONS;
+    status = pD3DKMTIsFeatureEnabled( &query );
+    ok_nt( STATUS_INVALID_PARAMETER, status );
+    if (winetest_platform_is_wine)
+    {
+        ok_x4( query.Result.Version, ==, 0xcccc );
+        ok_x4( query.Result.Value, ==, 0xcccc );
+    }
+
+    close_adapter.hAdapter = open_adapter.hAdapter;
+    status = D3DKMTCloseAdapter( &close_adapter );
+    ok_nt( STATUS_SUCCESS, status );
+
+    memset( &query, 0xcc, sizeof(query) );
+    query.hAdapter = open_adapter.hAdapter;
+    query.FeatureId = DXGK_FEATURE_QUERYSTATISTICS_EXTENSIONS;
+    status = pD3DKMTIsFeatureEnabled( &query );
+    ok_nt( STATUS_INVALID_PARAMETER, status );
+    if (winetest_platform_is_wine)
+    {
+        ok_x4( query.Result.Version, ==, 0xcccc );
+        ok_x4( query.Result.Value, ==, 0xcccc );
+    }
+}
+
 static void test_D3DKMTEnumAdapters2(void)
 {
     D3DKMT_ENUMADAPTERS2 enum_adapters_2_desc = {0};
@@ -6767,6 +6855,7 @@ START_TEST( d3dkmt )
 
     test_D3DKMTOpenAdapterFromGdiDisplayName();
     test_D3DKMTOpenAdapterFromHdc();
+    test_D3DKMTIsFeatureEnabled();
     test_D3DKMTEnumAdapters2();
     test_D3DKMTCloseAdapter();
     test_D3DKMTCreateDevice();

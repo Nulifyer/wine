@@ -493,6 +493,40 @@ NTSTATUS WINAPI NtGdiDdDDICloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
     return STATUS_SUCCESS;
 }
 
+static BOOL is_known_dxgk_feature( DXGK_FEATURE_ID feature_id )
+{
+    switch (feature_id)
+    {
+    case DXGK_FEATURE_HWSCH:
+    case DXGK_FEATURE_GPUVAIOMMU:
+    case DXGK_FEATURE_QUERYSTATISTICS_EXTENSIONS:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+/******************************************************************************
+ *           NtDxgkIsFeatureEnabled    (win32u.@)
+ *
+ * Wine does not currently implement the backing behavior for any of the
+ * advertised WDDM feature IDs. Report them as known but disabled until their
+ * owning D3DKMT paths can provide the corresponding capability.
+ */
+NTSTATUS WINAPI NtDxgkIsFeatureEnabled( D3DKMT_ISFEATUREENABLED *desc )
+{
+    TRACE( "(%p) adapter %#x, feature %#x\n", desc, desc ? desc->hAdapter : 0,
+           desc ? desc->FeatureId : 0 );
+
+    if (!desc) return STATUS_INVALID_PARAMETER;
+    if (desc->hAdapter && !get_d3dkmt_object( desc->hAdapter, D3DKMT_ADAPTER ))
+        return STATUS_INVALID_PARAMETER;
+
+    memset( &desc->Result, 0, sizeof(desc->Result) );
+    desc->Result.KnownFeature = is_known_dxgk_feature( desc->FeatureId );
+    return STATUS_SUCCESS;
+}
+
 static struct vulkan_physical_device *get_vulkan_physical_device( struct vulkan_instance *instance, const LUID *luid )
 {
     GUID uuid;
