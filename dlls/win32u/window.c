@@ -1596,6 +1596,15 @@ static LONG_PTR set_window_long_internal( HWND hwnd, INT offset, UINT size,
         return send_message( hwnd, WM_WINE_SETWINDOWLONG, MAKEWPARAM( offset, size ), newval );
     }
 
+    if (offset == GWLP_WINDOW_SERVICES)
+    {
+        retval = !!(win->flags & WIN_HAS_WINDOW_SERVICES);
+        if (newval) win->flags |= WIN_HAS_WINDOW_SERVICES;
+        else win->flags &= ~WIN_HAS_WINDOW_SERVICES;
+        release_win_ptr( win );
+        return retval;
+    }
+
     /* first some special cases */
     switch( offset )
     {
@@ -5406,6 +5415,7 @@ HICON WINAPI NtUserInternalGetWindowIcon( HWND hwnd, UINT type )
 static void send_destroy_message( HWND hwnd, BOOL winevent )
 {
     GUITHREADINFO info;
+    WND *win;
 
     info.cbSize = sizeof(info);
     if (NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ))
@@ -5418,6 +5428,22 @@ static void send_destroy_message( HWND hwnd, BOOL winevent )
 
     if (winevent)
         NtUserNotifyWinEvent( EVENT_OBJECT_DESTROY, hwnd, OBJID_WINDOW, 0 );
+
+    if ((win = get_win_ptr( hwnd )) && win != WND_DESKTOP && win != WND_OTHER_PROCESS)
+    {
+        BOOL has_window_services = !!(win->flags & WIN_HAS_WINDOW_SERVICES);
+
+        release_win_ptr( win );
+        if (has_window_services)
+        {
+            send_message( hwnd, WM_WINDOW_SERVICES_DESTROY, 0, 0 );
+            if ((win = get_win_ptr( hwnd )) && win != WND_DESKTOP && win != WND_OTHER_PROCESS)
+            {
+                win->flags &= ~WIN_HAS_WINDOW_SERVICES;
+                release_win_ptr( win );
+            }
+        }
+    }
 
     send_message( hwnd, WM_DESTROY, 0, 0);
 

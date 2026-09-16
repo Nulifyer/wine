@@ -179,6 +179,8 @@ HWND *WIN_ListChildren( HWND hwnd );
 void MDI_CalcDefaultChildPos( HWND hwndClient, INT total, LPPOINT lpPos, INT delta, UINT *id );
 HDESK open_winstation_desktop( HWINSTA hwinsta, LPCWSTR name, DWORD flags, BOOL inherit,
                                ACCESS_MASK access );
+void call_window_services_destroy_callback( HWND hwnd );
+void window_services_process_detach( BOOL process_terminating );
 
 static inline void mirror_rect( const RECT *window_rect, RECT *rect )
 {

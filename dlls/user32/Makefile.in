@@ -66,6 +66,7 @@ SOURCES = \
 	user32.rc \
 	user_main.c \
 	win.c \
+	window_services.c \
 	winhelp.c \
 	winproc.c \
 	winstation.c \

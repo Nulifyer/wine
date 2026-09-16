@@ -23,9 +23,186 @@ typedef BOOL (WINAPI *is_current_process_gdi_scaled_fn)(void);
 typedef BOOL (WINAPI *enable_mouse_in_pointer_for_thread_fn)(void);
 typedef BOOL (WINAPI *get_process_ui_context_information_fn)(HANDLE, void *);
 typedef BOOL (WINAPI *is_immersive_process_fn)(HANDLE);
+typedef void (CDECL *window_services_destroy_callback)(HWND);
+typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 
 static get_process_ui_context_information_fn pGetProcessUIContextInformation;
 static is_immersive_process_fn pIsImmersiveProcess;
+static set_window_services_destroy_callback_fn pSetWindowServicesDestroyCallback;
+
+#define WM_WINDOW_SERVICES_DESTROY 0x0272
+
+static const WCHAR window_services_class[] = L"WineWindowServicesDestroy";
+static unsigned int window_services_events[16], window_services_event_count;
+static unsigned int callback_a_count, callback_b_count;
+static HWND callback_target, thread_window;
+static BOOL callback_window_matches = TRUE, callback_window_valid = TRUE;
+static BOOL thread_registration_ret;
+static DWORD thread_registration_error;
+
+static void record_window_services_event(unsigned int event)
+{
+    if (window_services_event_count < ARRAY_SIZE(window_services_events))
+        window_services_events[window_services_event_count++] = event;
+}
+
+static void callback_common(HWND hwnd, unsigned int event)
+{
+    record_window_services_event(event);
+    callback_window_matches = callback_window_matches && hwnd == callback_target;
+    callback_window_valid = callback_window_valid && IsWindow(hwnd);
+}
+
+static void CDECL window_services_callback_a(HWND hwnd)
+{
+    callback_a_count++;
+    callback_common(hwnd, 2);
+}
+
+static void CDECL window_services_callback_b(HWND hwnd)
+{
+    callback_b_count++;
+    callback_common(hwnd, 6);
+}
+
+static LRESULT WINAPI window_services_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    LRESULT ret;
+
+    if (message == WM_WINDOW_SERVICES_DESTROY)
+    {
+        record_window_services_event(1);
+        ret = DefWindowProcW(hwnd, message, wparam, lparam);
+        record_window_services_event(3);
+        return ret;
+    }
+    if (message == WM_DESTROY) record_window_services_event(4);
+    if (message == WM_NCDESTROY) record_window_services_event(5);
+    return DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
+static HWND create_window_services_window(void)
+{
+    return CreateWindowExW(0, window_services_class, NULL, WS_POPUP, 0, 0, 32, 32,
+                           NULL, NULL, GetModuleHandleW(NULL), NULL);
+}
+
+static void check_window_services_events(const unsigned int *expected, unsigned int count,
+                                         const char *description)
+{
+    unsigned int i;
+
+    ok(window_services_event_count == count, "%s produced %u events, expected %u\n",
+       description, window_services_event_count, count);
+    for (i = 0; i < min(window_services_event_count, count); i++)
+        ok(window_services_events[i] == expected[i], "%s event %u is %u, expected %u\n",
+           description, i, window_services_events[i], expected[i]);
+    window_services_event_count = 0;
+}
+
+static DWORD WINAPI window_services_thread(void *param)
+{
+    thread_window = create_window_services_window();
+    if (!thread_window) return 1;
+    callback_target = thread_window;
+    SetLastError(0x13579bdf);
+    thread_registration_ret = pSetWindowServicesDestroyCallback(
+        thread_window, window_services_callback_a);
+    thread_registration_error = GetLastError();
+    return 0;
+}
+
+static void test_window_services_destroy(HMODULE module)
+{
+    static const unsigned int cleared_events[] = {4, 5};
+    static const unsigned int callback_a_events[] = {1, 2, 3, 4, 5};
+    static const unsigned int callback_b_events[] = {1, 6, 3, 4, 5};
+    WNDCLASSW class = {0};
+    HWND first, second, third, fourth;
+    HANDLE thread;
+    DWORD wait;
+    BOOL ret;
+
+    pSetWindowServicesDestroyCallback = (void *)GetProcAddress(module, (const char *)2536);
+    ok(!!pSetWindowServicesDestroyCallback, "Ordinal 2536 is unavailable.\n");
+    if (!pSetWindowServicesDestroyCallback) return;
+
+    class.lpfnWndProc = window_services_proc;
+    class.hInstance = GetModuleHandleW(NULL);
+    class.lpszClassName = window_services_class;
+    ok(RegisterClassW(&class), "RegisterClassW failed, error %lu.\n", GetLastError());
+
+    first = create_window_services_window();
+    second = create_window_services_window();
+    third = create_window_services_window();
+    fourth = create_window_services_window();
+    ok(!!first && !!second && !!third && !!fourth,
+       "failed to create window-services test windows, error %lu.\n", GetLastError());
+    if (!first || !second || !third || !fourth) return;
+    window_services_event_count = 0;
+
+    SetLastError(0x13579bdf);
+    ret = pSetWindowServicesDestroyCallback(NULL, window_services_callback_a);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "null HWND returned %d, error %lu.\n", ret, GetLastError());
+
+    SetLastError(0x13579bdf);
+    ret = pSetWindowServicesDestroyCallback(first, window_services_callback_a);
+    ok(ret && GetLastError() == ERROR_SUCCESS,
+       "first registration returned %d, error %lu.\n", ret, GetLastError());
+    ret = pSetWindowServicesDestroyCallback(first, window_services_callback_a);
+    ok(ret && GetLastError() == ERROR_SUCCESS,
+       "repeated registration returned %d, error %lu.\n", ret, GetLastError());
+    ret = pSetWindowServicesDestroyCallback(second, window_services_callback_a);
+    ok(ret && GetLastError() == ERROR_SUCCESS,
+       "second registration returned %d, error %lu.\n", ret, GetLastError());
+
+    SetLastError(0x13579bdf);
+    ret = pSetWindowServicesDestroyCallback(third, window_services_callback_b);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "conflicting registration returned %d, error %lu.\n", ret, GetLastError());
+    ret = pSetWindowServicesDestroyCallback(third, NULL);
+    ok(ret && GetLastError() == ERROR_SUCCESS,
+       "unregistered clear returned %d, error %lu.\n", ret, GetLastError());
+    ret = pSetWindowServicesDestroyCallback(second, NULL);
+    ok(ret && GetLastError() == ERROR_SUCCESS,
+       "registered clear returned %d, error %lu.\n", ret, GetLastError());
+
+    ok(DestroyWindow(second), "DestroyWindow(second) failed, error %lu.\n", GetLastError());
+    check_window_services_events(cleared_events, ARRAY_SIZE(cleared_events), "cleared destroy");
+
+    callback_target = first;
+    ok(DestroyWindow(first), "DestroyWindow(first) failed, error %lu.\n", GetLastError());
+    check_window_services_events(callback_a_events, ARRAY_SIZE(callback_a_events),
+                                 "callback A destroy");
+    ok(callback_a_count == 1, "callback A ran %u times.\n", callback_a_count);
+
+    ret = pSetWindowServicesDestroyCallback(fourth, window_services_callback_b);
+    ok(ret && GetLastError() == ERROR_SUCCESS,
+       "post-cleanup registration returned %d, error %lu.\n", ret, GetLastError());
+    callback_target = fourth;
+    ok(DestroyWindow(fourth), "DestroyWindow(fourth) failed, error %lu.\n", GetLastError());
+    check_window_services_events(callback_b_events, ARRAY_SIZE(callback_b_events),
+                                 "callback B destroy");
+    ok(callback_b_count == 1, "callback B ran %u times.\n", callback_b_count);
+    ok(DestroyWindow(third), "DestroyWindow(third) failed, error %lu.\n", GetLastError());
+    window_services_event_count = 0;
+
+    thread = CreateThread(NULL, 0, window_services_thread, NULL, 0, NULL);
+    ok(!!thread, "CreateThread failed, error %lu.\n", GetLastError());
+    if (!thread) return;
+    wait = WaitForSingleObject(thread, 10000);
+    ok(wait == WAIT_OBJECT_0, "window-services thread wait returned %#lx.\n", wait);
+    CloseHandle(thread);
+    ok(thread_registration_ret && thread_registration_error == ERROR_SUCCESS,
+       "thread registration returned %d, error %lu.\n",
+       thread_registration_ret, thread_registration_error);
+    ok(!IsWindow(thread_window), "thread window %p remains valid.\n", thread_window);
+    check_window_services_events(NULL, 0, "thread exit");
+    ok(callback_a_count == 1, "callback A ran during thread exit, count %u.\n", callback_a_count);
+    ok(callback_window_matches, "a callback received the wrong HWND.\n");
+    ok(callback_window_valid, "a callback received an invalid HWND.\n");
+}
 
 struct guarded_ui_context_information
 {
@@ -214,9 +391,10 @@ START_TEST(native_ordinals)
         return;
     }
 
+    module = GetModuleHandleW(L"user32.dll");
+    test_window_services_destroy(module);
     test_gdi_scaled_process();
 
-    module = GetModuleHandleW(L"user32.dll");
     pGetProcessUIContextInformation = (void *)GetProcAddress(module,
                                                              "GetProcessUIContextInformation");
     pIsImmersiveProcess = (void *)GetProcAddress(module, "IsImmersiveProcess");

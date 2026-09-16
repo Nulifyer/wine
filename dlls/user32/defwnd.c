@@ -101,6 +101,10 @@ LRESULT WINAPI DefWindowProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 
     switch(msg)
     {
+    case WM_WINDOW_SERVICES_DESTROY:
+        call_window_services_destroy_callback( hwnd );
+        break;
+
     case WM_SYSCOMMAND:
         result = NC_HandleSysCommand( hwnd, wParam, lParam );
         break;
@@ -166,6 +170,10 @@ LRESULT WINAPI DefWindowProcW(
 
     switch(msg)
     {
+    case WM_WINDOW_SERVICES_DESTROY:
+        call_window_services_destroy_callback( hwnd );
+        break;
+
     case WM_SYSCOMMAND:
         result = NC_HandleSysCommand( hwnd, wParam, lParam );
         break;

@@ -78,6 +78,7 @@ typedef struct tagWND
 #define WIN_NEED_SIZE             0x0002 /* Internal WM_SIZE is needed */
 #define WIN_NCACTIVATED           0x0004 /* last WM_NCACTIVATE was positive */
 #define WIN_ISMDICLIENT           0x0008 /* Window is an MDIClient */
+#define WIN_HAS_WINDOW_SERVICES   0x0010 /* send window-services callback before WM_DESTROY */
 #define WIN_NEEDS_SHOW_OWNEDPOPUP 0x0020 /* WM_SHOWWINDOW:SC_SHOW must be sent in the next ShowOwnedPopup call */
 #define WIN_CHILDREN_MOVED        0x0040 /* children may have moved, ignore stored positions */
 #define WIN_HAS_IME_WIN           0x0080 /* the window has been registered with imm32 */

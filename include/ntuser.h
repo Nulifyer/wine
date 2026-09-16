@@ -26,6 +26,9 @@
 #include <shellapi.h>
 #include <winternl.h>
 
+#define WM_WINDOW_SERVICES_DESTROY 0x0272
+#define GWLP_WINDOW_SERVICES       (-40)
+
 #ifndef W32KAPI
 # if defined(_WIN32U_) || defined(WINE_UNIX_LIB)
 #  define W32KAPI DECLSPEC_EXPORT

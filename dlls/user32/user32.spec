@@ -47,7 +47,7 @@
 2533 stub -noname CanBrokerForceForeground  # NtUserCanBrokerForceForeground
 2534 stub @
 2535 stub @
-2536 stub @
+2536 stdcall -noname SetWindowServicesDestroyCallback(ptr ptr)
 2537 stub -noname SendEventMessage  # NtUserSendEventMessage
 2538 stub -noname LayoutCompleted  # NtUserLayoutCompleted
 2539 stub -noname HidePointerContactVisualization  # NtUserHidePointerContactVisualization
