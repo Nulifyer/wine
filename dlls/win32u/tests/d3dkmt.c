@@ -6900,6 +6900,96 @@ static void test_escape(void)
     ok_nt( STATUS_INVALID_PARAMETER, D3DKMTEscape( &escape ) );
 }
 
+static void test_process_scheduling_priority_class(void)
+{
+    NTSTATUS (WINAPI *pD3DKMTGetProcessSchedulingPriorityClass)( HANDLE process,
+                                                                 D3DKMT_SCHEDULINGPRIORITYCLASS *priority_class );
+    NTSTATUS (WINAPI *pD3DKMTSetProcessSchedulingPriorityClass)( HANDLE process,
+                                                                 D3DKMT_SCHEDULINGPRIORITYCLASS priority_class );
+    D3DKMT_SCHEDULINGPRIORITYCLASS priority_class, initial_class;
+    HANDLE query_handle, set_handle;
+    NTSTATUS status;
+    unsigned int i;
+
+    pD3DKMTGetProcessSchedulingPriorityClass = (void *)GetProcAddress( GetModuleHandleA( "gdi32.dll" ),
+                                                                      "D3DKMTGetProcessSchedulingPriorityClass" );
+    pD3DKMTSetProcessSchedulingPriorityClass = (void *)GetProcAddress( GetModuleHandleA( "gdi32.dll" ),
+                                                                      "D3DKMTSetProcessSchedulingPriorityClass" );
+    if (!pD3DKMTGetProcessSchedulingPriorityClass || !pD3DKMTSetProcessSchedulingPriorityClass)
+    {
+        win_skip( "D3DKMT process scheduling priority functions are unavailable.\n" );
+        return;
+    }
+
+    priority_class = 0xcccccccc;
+    SetLastError( 0xdeadbeef );
+    status = pD3DKMTGetProcessSchedulingPriorityClass( GetCurrentProcess(), &priority_class );
+    ok_nt( STATUS_SUCCESS, status );
+    ok_u4( priority_class, ==, D3DKMT_SCHEDULINGPRIORITYCLASS_NORMAL );
+    ok_u4( GetLastError(), ==, 0xdeadbeef );
+    initial_class = priority_class;
+
+    for (i = D3DKMT_SCHEDULINGPRIORITYCLASS_IDLE; i <= D3DKMT_SCHEDULINGPRIORITYCLASS_REALTIME; ++i)
+    {
+        status = pD3DKMTSetProcessSchedulingPriorityClass( GetCurrentProcess(), i );
+        ok_nt( STATUS_SUCCESS, status );
+        priority_class = 0xcccccccc;
+        status = pD3DKMTGetProcessSchedulingPriorityClass( GetCurrentProcess(), &priority_class );
+        ok_nt( STATUS_SUCCESS, status );
+        ok_u4( priority_class, ==, i );
+    }
+
+    status = pD3DKMTSetProcessSchedulingPriorityClass( GetCurrentProcess(), 6 );
+    ok_nt( STATUS_INVALID_PARAMETER, status );
+    priority_class = 0xcccccccc;
+    status = pD3DKMTGetProcessSchedulingPriorityClass( GetCurrentProcess(), &priority_class );
+    ok_nt( STATUS_SUCCESS, status );
+    ok_u4( priority_class, ==, D3DKMT_SCHEDULINGPRIORITYCLASS_REALTIME );
+
+    status = pD3DKMTSetProcessSchedulingPriorityClass( GetCurrentProcess(), initial_class );
+    ok_nt( STATUS_SUCCESS, status );
+
+    priority_class = 0xcccccccc;
+    status = pD3DKMTGetProcessSchedulingPriorityClass( NULL, &priority_class );
+    ok_nt( STATUS_INVALID_HANDLE, status );
+    ok_u4( priority_class, ==, 0xcccccccc );
+    status = pD3DKMTSetProcessSchedulingPriorityClass( NULL, D3DKMT_SCHEDULINGPRIORITYCLASS_NORMAL );
+    ok_nt( STATUS_INVALID_HANDLE, status );
+
+    priority_class = 0xcccccccc;
+    status = pD3DKMTGetProcessSchedulingPriorityClass( UlongToHandle(0xdeadbeef), &priority_class );
+    ok_nt( STATUS_INVALID_HANDLE, status );
+    ok_u4( priority_class, ==, 0xcccccccc );
+    status = pD3DKMTSetProcessSchedulingPriorityClass( UlongToHandle(0xdeadbeef), 6 );
+    ok_nt( STATUS_INVALID_HANDLE, status );
+
+    query_handle = OpenProcess( PROCESS_QUERY_INFORMATION, FALSE, GetCurrentProcessId() );
+    ok( !!query_handle, "OpenProcess(PROCESS_QUERY_INFORMATION) failed, error %lu.\n", GetLastError() );
+    if (query_handle)
+    {
+        priority_class = 0xcccccccc;
+        status = pD3DKMTGetProcessSchedulingPriorityClass( query_handle, &priority_class );
+        ok_nt( STATUS_ACCESS_DENIED, status );
+        ok_u4( priority_class, ==, 0xcccccccc );
+        status = pD3DKMTSetProcessSchedulingPriorityClass( query_handle, 6 );
+        ok_nt( STATUS_ACCESS_DENIED, status );
+        CloseHandle( query_handle );
+    }
+
+    set_handle = OpenProcess( PROCESS_SET_INFORMATION, FALSE, GetCurrentProcessId() );
+    ok( !!set_handle, "OpenProcess(PROCESS_SET_INFORMATION) failed, error %lu.\n", GetLastError() );
+    if (set_handle)
+    {
+        priority_class = 0xcccccccc;
+        status = pD3DKMTGetProcessSchedulingPriorityClass( set_handle, &priority_class );
+        ok_nt( STATUS_SUCCESS, status );
+        ok_u4( priority_class, ==, initial_class );
+        status = pD3DKMTSetProcessSchedulingPriorityClass( set_handle, initial_class );
+        ok_nt( STATUS_SUCCESS, status );
+        CloseHandle( set_handle );
+    }
+}
+
 START_TEST( d3dkmt )
 {
     char **argv;
@@ -6935,5 +7025,6 @@ START_TEST( d3dkmt )
     test_D3DKMTShareObjects();
     test_shared_resources();
     test_shared_fences();
+    test_process_scheduling_priority_class();
     test_escape();
 }

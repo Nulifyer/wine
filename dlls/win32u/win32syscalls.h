@@ -277,7 +277,7 @@
     SYSCALL_ENTRY( 0x1111, NtGdiDdDDIGetPresentQueueEvent, 0 ) \
     SYSCALL_ENTRY( 0x1112, NtGdiDdDDIGetProcessDeviceRemovalSupport, 0 ) \
     SYSCALL_ENTRY( 0x1113, NtGdiDdDDIGetProcessSchedulingPriorityBand, 0 ) \
-    SYSCALL_ENTRY( 0x1114, NtGdiDdDDIGetProcessSchedulingPriorityClass, 0 ) \
+    SYSCALL_ENTRY( 0x1114, NtGdiDdDDIGetProcessSchedulingPriorityClass, 8 ) \
     SYSCALL_ENTRY( 0x1115, NtGdiDdDDIGetResourcePresentPrivateDriverData, 0 ) \
     SYSCALL_ENTRY( 0x1116, NtGdiDdDDIGetRuntimeData, 0 ) \
     SYSCALL_ENTRY( 0x1117, NtGdiDdDDIGetScanLine, 0 ) \
@@ -362,7 +362,7 @@
     SYSCALL_ENTRY( 0x1166, NtGdiDdDDISetMonitorColorSpaceTransform, 0 ) \
     SYSCALL_ENTRY( 0x1167, NtGdiDdDDISetProcessDeviceRemovalSupport, 4 ) \
     SYSCALL_ENTRY( 0x1168, NtGdiDdDDISetProcessSchedulingPriorityBand, 0 ) \
-    SYSCALL_ENTRY( 0x1169, NtGdiDdDDISetProcessSchedulingPriorityClass, 0 ) \
+    SYSCALL_ENTRY( 0x1169, NtGdiDdDDISetProcessSchedulingPriorityClass, 8 ) \
     SYSCALL_ENTRY( 0x116a, NtGdiDdDDISetQueuedLimit, 4 ) \
     SYSCALL_ENTRY( 0x116b, NtGdiDdDDISetStablePowerState, 0 ) \
     SYSCALL_ENTRY( 0x116c, NtGdiDdDDISetStereoEnabled, 0 ) \
@@ -1819,7 +1819,7 @@
     SYSCALL_ENTRY( 0x1111, NtGdiDdDDIGetPresentQueueEvent, 0 ) \
     SYSCALL_ENTRY( 0x1112, NtGdiDdDDIGetProcessDeviceRemovalSupport, 0 ) \
     SYSCALL_ENTRY( 0x1113, NtGdiDdDDIGetProcessSchedulingPriorityBand, 0 ) \
-    SYSCALL_ENTRY( 0x1114, NtGdiDdDDIGetProcessSchedulingPriorityClass, 0 ) \
+    SYSCALL_ENTRY( 0x1114, NtGdiDdDDIGetProcessSchedulingPriorityClass, 16 ) \
     SYSCALL_ENTRY( 0x1115, NtGdiDdDDIGetResourcePresentPrivateDriverData, 0 ) \
     SYSCALL_ENTRY( 0x1116, NtGdiDdDDIGetRuntimeData, 0 ) \
     SYSCALL_ENTRY( 0x1117, NtGdiDdDDIGetScanLine, 0 ) \
@@ -1904,7 +1904,7 @@
     SYSCALL_ENTRY( 0x1166, NtGdiDdDDISetMonitorColorSpaceTransform, 0 ) \
     SYSCALL_ENTRY( 0x1167, NtGdiDdDDISetProcessDeviceRemovalSupport, 8 ) \
     SYSCALL_ENTRY( 0x1168, NtGdiDdDDISetProcessSchedulingPriorityBand, 0 ) \
-    SYSCALL_ENTRY( 0x1169, NtGdiDdDDISetProcessSchedulingPriorityClass, 0 ) \
+    SYSCALL_ENTRY( 0x1169, NtGdiDdDDISetProcessSchedulingPriorityClass, 16 ) \
     SYSCALL_ENTRY( 0x116a, NtGdiDdDDISetQueuedLimit, 8 ) \
     SYSCALL_ENTRY( 0x116b, NtGdiDdDDISetStablePowerState, 0 ) \
     SYSCALL_ENTRY( 0x116c, NtGdiDdDDISetStereoEnabled, 0 ) \
@@ -3297,7 +3297,6 @@
     SYSCALL_STUB( NtGdiDdDDIGetPresentQueueEvent ) \
     SYSCALL_STUB( NtGdiDdDDIGetProcessDeviceRemovalSupport ) \
     SYSCALL_STUB( NtGdiDdDDIGetProcessSchedulingPriorityBand ) \
-    SYSCALL_STUB( NtGdiDdDDIGetProcessSchedulingPriorityClass ) \
     SYSCALL_STUB( NtGdiDdDDIGetResourcePresentPrivateDriverData ) \
     SYSCALL_STUB( NtGdiDdDDIGetRuntimeData ) \
     SYSCALL_STUB( NtGdiDdDDIGetScanLine ) \
@@ -3360,7 +3359,6 @@
     SYSCALL_STUB( NtGdiDdDDISetMemoryBudgetTarget ) \
     SYSCALL_STUB( NtGdiDdDDISetMonitorColorSpaceTransform ) \
     SYSCALL_STUB( NtGdiDdDDISetProcessSchedulingPriorityBand ) \
-    SYSCALL_STUB( NtGdiDdDDISetProcessSchedulingPriorityClass ) \
     SYSCALL_STUB( NtGdiDdDDISetStablePowerState ) \
     SYSCALL_STUB( NtGdiDdDDISetStereoEnabled ) \
     SYSCALL_STUB( NtGdiDdDDISetSyncRefreshCountWaitTarget ) \

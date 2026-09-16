@@ -66,6 +66,7 @@ struct process
     affinity_t           affinity;        /* process affinity mask */
     int                  priority;        /* priority class */
     int                  base_priority;   /* base priority to calculate thread priority */
+    unsigned int         d3dkmt_scheduling_class; /* process GPU scheduling priority class */
     unsigned int         protection;      /* host-admitted process protection, zero for ordinary creation */
     unsigned int         ui_context;      /* USER process context */
     unsigned int         ui_context_flags;/* USER process context flags */

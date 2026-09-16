@@ -7100,6 +7100,32 @@ struct commit_dcomp_channel_reply
 };
 
 
+struct get_d3dkmt_process_scheduling_priority_class_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_d3dkmt_process_scheduling_priority_class_reply
+{
+    struct reply_header __header;
+    unsigned int priority_class;
+    char __pad_12[4];
+};
+
+
+struct set_d3dkmt_process_scheduling_priority_class_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int priority_class;
+    char __pad_20[4];
+};
+struct set_d3dkmt_process_scheduling_priority_class_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -7463,6 +7489,8 @@ enum request
     REQ_get_deleted_dcomp_resources,
     REQ_get_dcomp_channel_batch_id,
     REQ_commit_dcomp_channel,
+    REQ_get_d3dkmt_process_scheduling_priority_class,
+    REQ_set_d3dkmt_process_scheduling_priority_class,
     REQ_NB_REQUESTS
 };
 
@@ -7831,6 +7859,8 @@ union generic_request
     struct get_deleted_dcomp_resources_request get_deleted_dcomp_resources_request;
     struct get_dcomp_channel_batch_id_request get_dcomp_channel_batch_id_request;
     struct commit_dcomp_channel_request commit_dcomp_channel_request;
+    struct get_d3dkmt_process_scheduling_priority_class_request get_d3dkmt_process_scheduling_priority_class_request;
+    struct set_d3dkmt_process_scheduling_priority_class_request set_d3dkmt_process_scheduling_priority_class_request;
 };
 union generic_reply
 {
@@ -8197,8 +8227,10 @@ union generic_reply
     struct get_deleted_dcomp_resources_reply get_deleted_dcomp_resources_reply;
     struct get_dcomp_channel_batch_id_reply get_dcomp_channel_batch_id_reply;
     struct commit_dcomp_channel_reply commit_dcomp_channel_reply;
+    struct get_d3dkmt_process_scheduling_priority_class_reply get_d3dkmt_process_scheduling_priority_class_reply;
+    struct set_d3dkmt_process_scheduling_priority_class_reply set_d3dkmt_process_scheduling_priority_class_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1010
+#define SERVER_PROTOCOL_VERSION 1011
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

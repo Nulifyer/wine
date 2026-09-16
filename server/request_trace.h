@@ -4115,6 +4115,22 @@ static void dump_commit_dcomp_channel_reply( const struct commit_dcomp_channel_r
     fprintf( stderr, " batch_id=%08x", req->batch_id );
 }
 
+static void dump_get_d3dkmt_process_scheduling_priority_class_request( const struct get_d3dkmt_process_scheduling_priority_class_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_d3dkmt_process_scheduling_priority_class_reply( const struct get_d3dkmt_process_scheduling_priority_class_reply *req )
+{
+    fprintf( stderr, " priority_class=%08x", req->priority_class );
+}
+
+static void dump_set_d3dkmt_process_scheduling_priority_class_request( const struct set_d3dkmt_process_scheduling_priority_class_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", priority_class=%08x", req->priority_class );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4480,6 +4496,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_deleted_dcomp_resources_request,
     (dump_func)dump_get_dcomp_channel_batch_id_request,
     (dump_func)dump_commit_dcomp_channel_request,
+    (dump_func)dump_get_d3dkmt_process_scheduling_priority_class_request,
+    (dump_func)dump_set_d3dkmt_process_scheduling_priority_class_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4845,6 +4863,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_deleted_dcomp_resources_reply,
     (dump_func)dump_get_dcomp_channel_batch_id_reply,
     (dump_func)dump_commit_dcomp_channel_reply,
+    (dump_func)dump_get_d3dkmt_process_scheduling_priority_class_reply,
+    NULL,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -5210,6 +5230,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "get_deleted_dcomp_resources",
     "get_dcomp_channel_batch_id",
     "commit_dcomp_channel",
+    "get_d3dkmt_process_scheduling_priority_class",
+    "set_d3dkmt_process_scheduling_priority_class",
 };
 
 static const struct

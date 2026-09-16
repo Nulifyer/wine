@@ -626,6 +626,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->user_threads    = 0;
     process->priority        = PROCESS_PRIOCLASS_NORMAL;
     process->base_priority   = 8;
+    process->d3dkmt_scheduling_class = 2;
     process->disable_boost   = 0;
     process->handle_checking_mode = 0;
     process->native_session_owner = 0;
@@ -1979,6 +1980,29 @@ DECL_HANDLER(set_process_info)
                 release_object( token );
             }
         }
+        release_object( process );
+    }
+}
+
+DECL_HANDLER(get_d3dkmt_process_scheduling_priority_class)
+{
+    struct process *process;
+
+    if ((process = get_process_from_handle( req->handle, PROCESS_SET_INFORMATION )))
+    {
+        reply->priority_class = process->d3dkmt_scheduling_class;
+        release_object( process );
+    }
+}
+
+DECL_HANDLER(set_d3dkmt_process_scheduling_priority_class)
+{
+    struct process *process;
+
+    if ((process = get_process_from_handle( req->handle, PROCESS_SET_INFORMATION )))
+    {
+        if (req->priority_class > 5) set_error( STATUS_INVALID_PARAMETER );
+        else process->d3dkmt_scheduling_class = req->priority_class;
         release_object( process );
     }
 }

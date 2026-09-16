@@ -368,6 +368,8 @@ DECL_HANDLER(release_all_dcomp_resources);
 DECL_HANDLER(get_deleted_dcomp_resources);
 DECL_HANDLER(get_dcomp_channel_batch_id);
 DECL_HANDLER(commit_dcomp_channel);
+DECL_HANDLER(get_d3dkmt_process_scheduling_priority_class);
+DECL_HANDLER(set_d3dkmt_process_scheduling_priority_class);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -733,6 +735,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_deleted_dcomp_resources,
     (req_handler)req_get_dcomp_channel_batch_id,
     (req_handler)req_commit_dcomp_channel,
+    (req_handler)req_get_d3dkmt_process_scheduling_priority_class,
+    (req_handler)req_set_d3dkmt_process_scheduling_priority_class,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -2811,3 +2815,10 @@ C_ASSERT( offsetof(struct commit_dcomp_channel_request, length) == 16 );
 C_ASSERT( sizeof(struct commit_dcomp_channel_request) == 24 );
 C_ASSERT( offsetof(struct commit_dcomp_channel_reply, batch_id) == 8 );
 C_ASSERT( sizeof(struct commit_dcomp_channel_reply) == 16 );
+C_ASSERT( offsetof(struct get_d3dkmt_process_scheduling_priority_class_request, handle) == 12 );
+C_ASSERT( sizeof(struct get_d3dkmt_process_scheduling_priority_class_request) == 16 );
+C_ASSERT( offsetof(struct get_d3dkmt_process_scheduling_priority_class_reply, priority_class) == 8 );
+C_ASSERT( sizeof(struct get_d3dkmt_process_scheduling_priority_class_reply) == 16 );
+C_ASSERT( offsetof(struct set_d3dkmt_process_scheduling_priority_class_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_d3dkmt_process_scheduling_priority_class_request, priority_class) == 16 );
+C_ASSERT( sizeof(struct set_d3dkmt_process_scheduling_priority_class_request) == 24 );

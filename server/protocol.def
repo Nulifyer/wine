@@ -4853,3 +4853,16 @@ struct alpc_message_info
 @REPLY
     unsigned int batch_id;
 @END
+
+/* Get process GPU scheduling policy after validating PROCESS_SET_INFORMATION access. */
+@REQ(get_d3dkmt_process_scheduling_priority_class)
+    obj_handle_t handle;              /* process handle */
+@REPLY
+    unsigned int priority_class;      /* D3DKMT_SCHEDULINGPRIORITYCLASS */
+@END
+
+/* Set process GPU scheduling policy after validating the process handle first. */
+@REQ(set_d3dkmt_process_scheduling_priority_class)
+    obj_handle_t handle;              /* process handle */
+    unsigned int priority_class;      /* D3DKMT_SCHEDULINGPRIORITYCLASS */
+@END

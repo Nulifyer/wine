@@ -750,6 +750,47 @@ NTSTATUS WINAPI NtGdiDdDDISetProcessDeviceRemovalSupport( BOOLEAN *support )
 }
 
 /******************************************************************************
+ *           NtGdiDdDDIGetProcessSchedulingPriorityClass    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDIGetProcessSchedulingPriorityClass( HANDLE process,
+                                                             D3DKMT_SCHEDULINGPRIORITYCLASS *priority_class )
+{
+    NTSTATUS status;
+
+    TRACE( "process %p, priority_class %p\n", process, priority_class );
+
+    if (!priority_class) return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( get_d3dkmt_process_scheduling_priority_class )
+    {
+        req->handle = wine_server_obj_handle( process );
+        if (!(status = wine_server_call( req ))) *priority_class = reply->priority_class;
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+/******************************************************************************
+ *           NtGdiDdDDISetProcessSchedulingPriorityClass    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDISetProcessSchedulingPriorityClass( HANDLE process,
+                                                             D3DKMT_SCHEDULINGPRIORITYCLASS priority_class )
+{
+    NTSTATUS status;
+
+    TRACE( "process %p, priority_class %u\n", process, priority_class );
+
+    SERVER_START_REQ( set_d3dkmt_process_scheduling_priority_class )
+    {
+        req->handle = wine_server_obj_handle( process );
+        req->priority_class = priority_class;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+/******************************************************************************
  *           NtGdiDdDDISetQueuedLimit    (win32u.@)
  */
 NTSTATUS WINAPI NtGdiDdDDISetQueuedLimit( D3DKMT_SETQUEUEDLIMIT *desc )

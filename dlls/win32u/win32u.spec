@@ -275,7 +275,7 @@
 @ stub -syscall NtGdiDdDDIGetPresentQueueEvent
 @ stub -syscall NtGdiDdDDIGetProcessDeviceRemovalSupport
 @ stub -syscall NtGdiDdDDIGetProcessSchedulingPriorityBand
-@ stub -syscall NtGdiDdDDIGetProcessSchedulingPriorityClass
+@ stdcall -syscall NtGdiDdDDIGetProcessSchedulingPriorityClass(ptr ptr)
 @ stub -syscall NtGdiDdDDIGetResourcePresentPrivateDriverData
 @ stub -syscall NtGdiDdDDIGetRuntimeData
 @ stub -syscall NtGdiDdDDIGetScanLine
@@ -360,7 +360,7 @@
 @ stub -syscall NtGdiDdDDISetMonitorColorSpaceTransform
 @ stdcall -syscall NtGdiDdDDISetProcessDeviceRemovalSupport(ptr)
 @ stub -syscall NtGdiDdDDISetProcessSchedulingPriorityBand
-@ stub -syscall NtGdiDdDDISetProcessSchedulingPriorityClass
+@ stdcall -syscall NtGdiDdDDISetProcessSchedulingPriorityClass(ptr long)
 @ stdcall -syscall NtGdiDdDDISetQueuedLimit(ptr)
 @ stub -syscall NtGdiDdDDISetStablePowerState
 @ stub -syscall NtGdiDdDDISetStereoEnabled
