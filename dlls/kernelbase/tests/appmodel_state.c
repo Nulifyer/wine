@@ -16,6 +16,8 @@
 #include "winerror.h"
 #include "wine/test.h"
 
+typedef LONG (WINAPI *token_identity_query)(HANDLE, UINT32 *, WCHAR *);
+
 static void test_open_state_unpackaged_identity(void)
 {
     void *(WINAPI *open_state)(void);
@@ -50,7 +52,82 @@ static void test_open_state_unpackaged_identity(void)
     }
 }
 
+static void test_token_package_identity(void)
+{
+    static const struct
+    {
+        const char *name;
+        LONG no_identity;
+    }
+    functions[] =
+    {
+        { "GetPackageFamilyNameFromToken", APPMODEL_ERROR_NO_PACKAGE },
+        { "GetPackageFullNameFromToken", APPMODEL_ERROR_NO_PACKAGE },
+        { "GetApplicationUserModelIdFromToken", APPMODEL_ERROR_NO_APPLICATION },
+    };
+    HANDLE process_token, impersonation_token;
+    WCHAR buffer[4];
+    UINT32 length;
+    unsigned int i;
+    LONG status;
+    BOOL ret;
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &process_token);
+    ok(ret, "OpenProcessToken failed, error %lu.\n", GetLastError());
+    if (!ret) return;
+    ret = DuplicateToken(process_token, SecurityImpersonation, &impersonation_token);
+    ok(ret, "DuplicateToken failed, error %lu.\n", GetLastError());
+    if (!ret)
+    {
+        CloseHandle(process_token);
+        return;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(functions); ++i)
+    {
+        token_identity_query query = (void *)GetProcAddress(GetModuleHandleA("kernelbase.dll"), functions[i].name);
+        if (!query)
+        {
+            win_skip("%s is not available.\n", functions[i].name);
+            continue;
+        }
+
+        length = 0;
+        SetLastError(0x13579bdf);
+        status = query(process_token, &length, NULL);
+        ok(status == functions[i].no_identity, "%s returned %#lx.\n", functions[i].name, status);
+        ok(!length, "%s changed length to %u.\n", functions[i].name, length);
+        ok(GetLastError() == 0x13579bdf, "%s changed last error to %lu.\n",
+           functions[i].name, GetLastError());
+
+        memset(buffer, 0xcc, sizeof(buffer));
+        length = ARRAY_SIZE(buffer);
+        status = query(process_token, &length, buffer);
+        ok(status == functions[i].no_identity, "%s returned %#lx.\n", functions[i].name, status);
+        ok(length == ARRAY_SIZE(buffer), "%s changed length to %u.\n", functions[i].name, length);
+        ok(buffer[0] == 0xcccc && buffer[3] == 0xcccc, "%s changed the output buffer.\n", functions[i].name);
+
+        length = ARRAY_SIZE(buffer);
+        status = query(process_token, &length, NULL);
+        ok(status == ERROR_INVALID_PARAMETER, "%s returned %#lx.\n", functions[i].name, status);
+
+        length = 0;
+        status = query(impersonation_token, &length, NULL);
+        ok(status == functions[i].no_identity, "%s returned %#lx.\n", functions[i].name, status);
+        status = query((HANDLE)0xdead, &length, NULL);
+        ok(status == ERROR_INVALID_HANDLE, "%s returned %#lx.\n", functions[i].name, status);
+        status = query(NULL, &length, NULL);
+        ok(status == ERROR_INVALID_PARAMETER, "%s returned %#lx.\n", functions[i].name, status);
+        status = query(process_token, NULL, NULL);
+        ok(status == ERROR_INVALID_PARAMETER, "%s returned %#lx.\n", functions[i].name, status);
+    }
+
+    CloseHandle(impersonation_token);
+    CloseHandle(process_token);
+}
+
 START_TEST(appmodel_state)
 {
     test_open_state_unpackaged_identity();
+    test_token_package_identity();
 }

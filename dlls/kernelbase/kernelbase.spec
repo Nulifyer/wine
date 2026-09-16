@@ -427,7 +427,7 @@
 # @ stub GetApplicationRecoveryCallback
 @ stdcall GetApplicationRestartSettings(long ptr ptr ptr)
 # @ stub GetApplicationUserModelId
-# @ stub GetApplicationUserModelIdFromToken
+@ stdcall GetApplicationUserModelIdFromToken(long ptr ptr)
 @ stdcall GetAppliedGPOListInternalA() gpapi.GetAppliedGPOListInternalAWorker
 @ stdcall GetAppliedGPOListInternalW() gpapi.GetAppliedGPOListInternalWWorker
 @ stub GetCPFileNameFromRegistry
@@ -636,9 +636,9 @@
 # @ stub GetPackageApplicationResourcesContext
 # @ stub GetPackageContext
 @ stdcall GetPackageFamilyName(long ptr ptr)
-# @ stub GetPackageFamilyNameFromToken
+@ stdcall GetPackageFamilyNameFromToken(long ptr ptr)
 @ stdcall GetPackageFullName(long ptr ptr)
-# @ stub GetPackageFullNameFromToken
+@ stdcall GetPackageFullNameFromToken(long ptr ptr)
 # @ stub GetPackageId
 # @ stub GetPackageInfo
 # @ stub GetPackageInstallTime

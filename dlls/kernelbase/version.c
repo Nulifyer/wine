@@ -1556,6 +1556,45 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentApplicationUserModelId( UINT32 *le
     return APPMODEL_ERROR_NO_APPLICATION;
 }
 
+struct token_security_attributes_information
+{
+    USHORT version;
+    USHORT reserved;
+    ULONG count;
+    void *attributes;
+};
+
+static LONG query_token_package_identity( HANDLE token, UINT32 *length, WCHAR *name, LONG no_identity )
+{
+    struct token_security_attributes_information attributes;
+    NTSTATUS last_status, status;
+    LONG result;
+    ULONG size;
+
+    if (!token || !length || (*length && !name)) return ERROR_INVALID_PARAMETER;
+
+    last_status = RtlGetLastNtStatus();
+    status = NtQueryInformationToken( token, TokenSecurityAttributes, &attributes, sizeof(attributes), &size );
+    if (status) result = RtlNtStatusToDosError( status );
+    else
+    {
+        result = no_identity;
+        if (attributes.count)
+            FIXME( "packaged token identity is not supported.\n" );
+    }
+    NtCurrentTeb()->LastStatusValue = last_status;
+    return result;
+}
+
+/***********************************************************************
+ *         GetApplicationUserModelIdFromToken   (kernelbase.@)
+ */
+LONG WINAPI GetApplicationUserModelIdFromToken( HANDLE token, UINT32 *length, WCHAR *id )
+{
+    TRACE( "(%p %p %p)\n", token, length, id );
+    return query_token_package_identity( token, length, id, APPMODEL_ERROR_NO_APPLICATION );
+}
+
 /***********************************************************************
  *         GetCurrentPackageFamilyName   (kernelbase.@)
  */
@@ -1630,6 +1669,24 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetPackageFamilyName( HANDLE process, UINT32
 {
     FIXME( "(%p %p %p): stub\n", process, length, name );
     return APPMODEL_ERROR_NO_PACKAGE;
+}
+
+/***********************************************************************
+ *         GetPackageFamilyNameFromToken   (kernelbase.@)
+ */
+LONG WINAPI GetPackageFamilyNameFromToken( HANDLE token, UINT32 *length, WCHAR *name )
+{
+    TRACE( "(%p %p %p)\n", token, length, name );
+    return query_token_package_identity( token, length, name, APPMODEL_ERROR_NO_PACKAGE );
+}
+
+/***********************************************************************
+ *         GetPackageFullNameFromToken   (kernelbase.@)
+ */
+LONG WINAPI GetPackageFullNameFromToken( HANDLE token, UINT32 *length, WCHAR *name )
+{
+    TRACE( "(%p %p %p)\n", token, length, name );
+    return query_token_package_identity( token, length, name, APPMODEL_ERROR_NO_PACKAGE );
 }
 
 /***********************************************************************
