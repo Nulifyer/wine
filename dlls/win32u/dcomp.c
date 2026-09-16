@@ -64,3 +64,32 @@ NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection )
     SERVER_END_REQ;
     return status;
 }
+
+NTSTATUS WINAPI NtTokenManagerOpenSectionAndEvents( HANDLE *section, SIZE_T *section_size,
+                                                     HANDLE *event_a, HANDLE *event_b )
+{
+    NTSTATUS status;
+
+    TRACE( "section %p, section_size %p, event_a %p, event_b %p\n",
+           section, section_size, event_a, event_b );
+
+    if (!section || !section_size || !event_a || !event_b) return STATUS_INVALID_PARAMETER;
+    *section = INVALID_HANDLE_VALUE;
+    *section_size = 0;
+    *event_a = INVALID_HANDLE_VALUE;
+    *event_b = INVALID_HANDLE_VALUE;
+
+    SERVER_START_REQ( open_token_manager )
+    {
+        status = wine_server_call( req );
+        if (!status)
+        {
+            *section = wine_server_ptr_handle( reply->section );
+            *section_size = reply->section_size;
+            *event_a = wine_server_ptr_handle( reply->event_a );
+            *event_b = wine_server_ptr_handle( reply->event_b );
+        }
+    }
+    SERVER_END_REQ;
+    return status;
+}

@@ -786,7 +786,7 @@
 @ stub -syscall NtTokenManagerCreateFlipObjectTokenHandle
 @ stub -syscall NtTokenManagerGetAnalogExclusiveSurfaceUpdates
 @ stub -syscall NtTokenManagerGetAnalogExclusiveTokenEvent
-@ stub -syscall NtTokenManagerOpenSectionAndEvents
+@ stdcall -syscall NtTokenManagerOpenSectionAndEvents(ptr ptr ptr ptr)
 @ stub -syscall NtTokenManagerThread
 @ stub -syscall NtUnBindCompositionSurface
 @ stub -syscall NtUpdateInputSinkTransforms

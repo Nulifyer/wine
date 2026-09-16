@@ -4019,6 +4019,18 @@ static void dump_destroy_dcomp_connection_request( const struct destroy_dcomp_co
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_open_token_manager_request( const struct open_token_manager_request *req )
+{
+}
+
+static void dump_open_token_manager_reply( const struct open_token_manager_reply *req )
+{
+    fprintf( stderr, " section=%04x", req->section );
+    dump_uint64( ", section_size=", &req->section_size );
+    fprintf( stderr, ", event_a=%04x", req->event_a );
+    fprintf( stderr, ", event_b=%04x", req->event_b );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4375,6 +4387,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_notify_change_session_request,
     (dump_func)dump_create_dcomp_connection_request,
     (dump_func)dump_destroy_dcomp_connection_request,
+    (dump_func)dump_open_token_manager_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4731,6 +4744,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_create_dcomp_connection_reply,
     NULL,
+    (dump_func)dump_open_token_manager_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -5087,6 +5101,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "notify_change_session",
     "create_dcomp_connection",
     "destroy_dcomp_connection",
+    "open_token_manager",
 };
 
 static const struct

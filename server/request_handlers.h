@@ -359,6 +359,7 @@ DECL_HANDLER(alpc_query_information);
 DECL_HANDLER(notify_change_session);
 DECL_HANDLER(create_dcomp_connection);
 DECL_HANDLER(destroy_dcomp_connection);
+DECL_HANDLER(open_token_manager);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -715,6 +716,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_notify_change_session,
     (req_handler)req_create_dcomp_connection,
     (req_handler)req_destroy_dcomp_connection,
+    (req_handler)req_open_token_manager,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -2747,3 +2749,9 @@ C_ASSERT( offsetof(struct create_dcomp_connection_reply, handle) == 8 );
 C_ASSERT( sizeof(struct create_dcomp_connection_reply) == 16 );
 C_ASSERT( offsetof(struct destroy_dcomp_connection_request, handle) == 12 );
 C_ASSERT( sizeof(struct destroy_dcomp_connection_request) == 16 );
+C_ASSERT( sizeof(struct open_token_manager_request) == 16 );
+C_ASSERT( offsetof(struct open_token_manager_reply, section) == 8 );
+C_ASSERT( offsetof(struct open_token_manager_reply, section_size) == 16 );
+C_ASSERT( offsetof(struct open_token_manager_reply, event_a) == 24 );
+C_ASSERT( offsetof(struct open_token_manager_reply, event_b) == 28 );
+C_ASSERT( sizeof(struct open_token_manager_reply) == 32 );

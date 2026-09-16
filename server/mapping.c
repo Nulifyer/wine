@@ -1378,6 +1378,15 @@ size_t get_page_size(void)
     return host_page_mask + 1;
 }
 
+struct mapping *create_anonymous_mapping( mem_size_t size, unsigned int file_access )
+{
+    struct mapping_init_data data = { .size = round_size( size, host_page_mask ), .flags = SEC_COMMIT,
+                                      .file_access = file_access };
+    struct object_params params = { .ops = &mapping_ops, .name = empty_str, .init_data = &data };
+
+    return create_named_object( &params );
+}
+
 struct mapping *create_session_mapping( struct object *root, struct unicode_str name,
                                         unsigned int attr, const struct security_descriptor *sd )
 {

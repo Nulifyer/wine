@@ -6966,6 +6966,22 @@ struct destroy_dcomp_connection_reply
 };
 
 
+struct open_token_manager_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct open_token_manager_reply
+{
+    struct reply_header __header;
+    obj_handle_t section;
+    char __pad_12[4];
+    mem_size_t   section_size;
+    obj_handle_t event_a;
+    obj_handle_t event_b;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -7320,6 +7336,7 @@ enum request
     REQ_notify_change_session,
     REQ_create_dcomp_connection,
     REQ_destroy_dcomp_connection,
+    REQ_open_token_manager,
     REQ_NB_REQUESTS
 };
 
@@ -7679,6 +7696,7 @@ union generic_request
     struct notify_change_session_request notify_change_session_request;
     struct create_dcomp_connection_request create_dcomp_connection_request;
     struct destroy_dcomp_connection_request destroy_dcomp_connection_request;
+    struct open_token_manager_request open_token_manager_request;
 };
 union generic_reply
 {
@@ -8036,8 +8054,9 @@ union generic_reply
     struct notify_change_session_reply notify_change_session_reply;
     struct create_dcomp_connection_reply create_dcomp_connection_reply;
     struct destroy_dcomp_connection_reply destroy_dcomp_connection_reply;
+    struct open_token_manager_reply open_token_manager_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1004
+#define SERVER_PROTOCOL_VERSION 1005
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -182,6 +182,7 @@ extern void free_mapped_views( struct process *process );
 extern size_t get_page_size(void);
 extern struct mapping *create_fd_mapping( struct object *root, struct unicode_str name, struct fd *fd,
                                           unsigned int attr, const struct security_descriptor *sd );
+extern struct mapping *create_anonymous_mapping( mem_size_t size, unsigned int file_access );
 extern struct object *create_user_data_mapping( struct object *root, struct unicode_str name,
                                                 unsigned int attr, const struct security_descriptor *sd );
 extern struct mapping *create_session_mapping( struct object *root, struct unicode_str name,

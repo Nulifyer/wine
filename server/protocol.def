@@ -4778,3 +4778,12 @@ struct alpc_message_info
 @REQ(destroy_dcomp_connection)
     obj_handle_t handle;       /* connection handle to consume */
 @END
+
+/* Open the session token-manager section and notification events. */
+@REQ(open_token_manager)
+@REPLY
+    obj_handle_t section;      /* read-only shared token section */
+    mem_size_t   section_size; /* shared section size */
+    obj_handle_t event_a;      /* first session notification event */
+    obj_handle_t event_b;      /* second session notification event */
+@END

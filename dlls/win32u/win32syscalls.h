@@ -788,7 +788,7 @@
     SYSCALL_ENTRY( 0x1310, NtTokenManagerCreateFlipObjectTokenHandle, 0 ) \
     SYSCALL_ENTRY( 0x1311, NtTokenManagerGetAnalogExclusiveSurfaceUpdates, 0 ) \
     SYSCALL_ENTRY( 0x1312, NtTokenManagerGetAnalogExclusiveTokenEvent, 0 ) \
-    SYSCALL_ENTRY( 0x1313, NtTokenManagerOpenSectionAndEvents, 0 ) \
+    SYSCALL_ENTRY( 0x1313, NtTokenManagerOpenSectionAndEvents, 16 ) \
     SYSCALL_ENTRY( 0x1314, NtTokenManagerThread, 0 ) \
     SYSCALL_ENTRY( 0x1315, NtUnBindCompositionSurface, 0 ) \
     SYSCALL_ENTRY( 0x1316, NtUpdateInputSinkTransforms, 0 ) \
@@ -2330,7 +2330,7 @@
     SYSCALL_ENTRY( 0x1310, NtTokenManagerCreateFlipObjectTokenHandle, 0 ) \
     SYSCALL_ENTRY( 0x1311, NtTokenManagerGetAnalogExclusiveSurfaceUpdates, 0 ) \
     SYSCALL_ENTRY( 0x1312, NtTokenManagerGetAnalogExclusiveTokenEvent, 0 ) \
-    SYSCALL_ENTRY( 0x1313, NtTokenManagerOpenSectionAndEvents, 0 ) \
+    SYSCALL_ENTRY( 0x1313, NtTokenManagerOpenSectionAndEvents, 32 ) \
     SYSCALL_ENTRY( 0x1314, NtTokenManagerThread, 0 ) \
     SYSCALL_ENTRY( 0x1315, NtUnBindCompositionSurface, 0 ) \
     SYSCALL_ENTRY( 0x1316, NtUpdateInputSinkTransforms, 0 ) \
@@ -3658,7 +3658,6 @@
     SYSCALL_STUB( NtTokenManagerCreateFlipObjectTokenHandle ) \
     SYSCALL_STUB( NtTokenManagerGetAnalogExclusiveSurfaceUpdates ) \
     SYSCALL_STUB( NtTokenManagerGetAnalogExclusiveTokenEvent ) \
-    SYSCALL_STUB( NtTokenManagerOpenSectionAndEvents ) \
     SYSCALL_STUB( NtTokenManagerThread ) \
     SYSCALL_STUB( NtUnBindCompositionSurface ) \
     SYSCALL_STUB( NtUpdateInputSinkTransforms ) \
