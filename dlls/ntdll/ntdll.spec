@@ -559,6 +559,7 @@
 @ stdcall RtlAssert(ptr ptr long str)
 @ stdcall RtlBarrier(ptr long)
 # @ stub RtlCancelTimer
+@ stdcall RtlCapabilityCheck(long ptr ptr)
 @ stdcall -norelay RtlCaptureContext(ptr)
 @ stdcall RtlCaptureStackBackTrace(long long ptr ptr)
 # @ stub RtlCaptureStackContext

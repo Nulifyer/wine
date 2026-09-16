@@ -151,6 +151,7 @@ static NTSTATUS  (WINAPI *pRtlCreateUserSecurityObject)(PRTL_ACE_DATA,ULONG,PSID
 static NTSTATUS  (WINAPI *pRtlGetAcesBufferSize)(PACL,PULONG);
 static NTSTATUS  (WINAPI *pRtlCreateServiceSid)(PUNICODE_STRING, PSID, PULONG);
 static NTSTATUS  (WINAPI *pRtlDeriveCapabilitySidsFromName)(UNICODE_STRING *, PSID, PSID);
+static NTSTATUS  (WINAPI *pRtlCapabilityCheck)(HANDLE, UNICODE_STRING *, BOOLEAN *);
 static NTSTATUS  (WINAPI *pRtlSidHashInitialize)(SID_AND_ATTRIBUTES *, ULONG, SID_AND_ATTRIBUTES_HASH *);
 static SID_AND_ATTRIBUTES * (WINAPI *pRtlSidHashLookup)(SID_AND_ATTRIBUTES_HASH *, PSID);
 static BOOLEAN   (WINAPI *pRtlTestProtectedAccess)(UCHAR, UCHAR);
@@ -238,6 +239,7 @@ static void InitFunctionPtrs(void)
         pLdrUnregisterDllNotification = (void *)GetProcAddress(hntdll, "LdrUnregisterDllNotification");
         pRtlCreateServiceSid = (void *)GetProcAddress(hntdll, "RtlCreateServiceSid");
         pRtlDeriveCapabilitySidsFromName = (void *)GetProcAddress(hntdll, "RtlDeriveCapabilitySidsFromName");
+        pRtlCapabilityCheck = (void *)GetProcAddress(hntdll, "RtlCapabilityCheck");
         pRtlSidHashInitialize = (void *)GetProcAddress(hntdll, "RtlSidHashInitialize");
         pRtlSidHashLookup = (void *)GetProcAddress(hntdll, "RtlSidHashLookup");
         pRtlTestProtectedAccess = (void *)GetProcAddress(hntdll, "RtlTestProtectedAccess");
@@ -6275,6 +6277,62 @@ static void test_RtlDeriveCapabilitySidsFromName(void)
     free( group_sid );
 }
 
+static void test_RtlCapabilityCheck(void)
+{
+    HANDLE process_token, impersonation_token;
+    UNICODE_STRING cap_name;
+    BOOLEAN result;
+    NTSTATUS status;
+    BOOL ret;
+
+    if (!pRtlCapabilityCheck)
+    {
+        win_skip( "RtlCapabilityCheck is not available.\n" );
+        return;
+    }
+
+    RtlInitUnicodeString( &cap_name, L"packageContents" );
+
+    result = 0xcc;
+    SetLastError( 0x13579bdf );
+    status = pRtlCapabilityCheck( NULL, &cap_name, &result );
+    ok( status == STATUS_SUCCESS, "got %#lx.\n", status );
+    ok( result == TRUE, "got %u.\n", result );
+    ok( GetLastError() == 0x13579bdf, "got error %lu.\n", GetLastError() );
+
+    ret = OpenProcessToken( GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &process_token );
+    ok( ret, "OpenProcessToken failed, error %lu.\n", GetLastError() );
+
+    result = 0xcc;
+    SetLastError( 0x13579bdf );
+    status = pRtlCapabilityCheck( process_token, &cap_name, &result );
+    ok( status == STATUS_NO_IMPERSONATION_TOKEN, "got %#lx.\n", status );
+    ok( result == FALSE, "got %u.\n", result );
+    ok( GetLastError() == 0x13579bdf, "got error %lu.\n", GetLastError() );
+
+    ret = DuplicateToken( process_token, SecurityImpersonation, &impersonation_token );
+    ok( ret, "DuplicateToken failed, error %lu.\n", GetLastError() );
+    result = 0xcc;
+    SetLastError( 0x13579bdf );
+    status = pRtlCapabilityCheck( impersonation_token, &cap_name, &result );
+    ok( status == STATUS_SUCCESS, "got %#lx.\n", status );
+    ok( result == TRUE, "got %u.\n", result );
+    ok( GetLastError() == 0x13579bdf, "got error %lu.\n", GetLastError() );
+
+    result = 0xcc;
+    status = pRtlCapabilityCheck( (HANDLE)0xdead, &cap_name, &result );
+    ok( status == STATUS_INVALID_HANDLE, "got %#lx.\n", status );
+    ok( result == FALSE, "got %u.\n", result );
+
+    result = 0xcc;
+    status = pRtlCapabilityCheck( process_token, NULL, &result );
+    ok( status == STATUS_INVALID_PARAMETER, "got %#lx.\n", status );
+    ok( result == 0xcc, "got %u.\n", result );
+
+    CloseHandle( impersonation_token );
+    CloseHandle( process_token );
+}
+
 static ULONG_PTR rotate_bits_right( ULONG_PTR v, ULONG count )
 {
     static const unsigned int bits = sizeof(v) * 8;
@@ -6456,5 +6514,6 @@ START_TEST(rtl)
     test_RtlGetElementGenericTable();
     test_RtlCreateServiceSid();
     test_RtlDeriveCapabilitySidsFromName();
+    test_RtlCapabilityCheck();
     test_pointer_encoding();
 }

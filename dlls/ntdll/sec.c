@@ -2525,6 +2525,48 @@ NTSTATUS WINAPI RtlDeriveCapabilitySidsFromName( UNICODE_STRING *cap_name, PSID 
 }
 
 /******************************************************************************
+ * RtlCapabilityCheck (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlCapabilityCheck( HANDLE token, UNICODE_STRING *cap_name, BOOLEAN *has_capability )
+{
+    BYTE cap_group_buffer[SECURITY_MAX_SID_SIZE], cap_buffer[SECURITY_MAX_SID_SIZE];
+    HANDLE effective_token = token;
+    DWORD is_appcontainer;
+    TOKEN_TYPE type;
+    NTSTATUS status;
+    ULONG size;
+
+    TRACE( "token %p, cap_name %s, has_capability %p.\n",
+           token, debugstr_us(cap_name), has_capability );
+
+    if (!cap_name) return STATUS_INVALID_PARAMETER;
+    if (!has_capability) return STATUS_ACCESS_VIOLATION;
+    *has_capability = FALSE;
+
+    status = RtlDeriveCapabilitySidsFromName( cap_name, cap_group_buffer, cap_buffer );
+    if (status) return status;
+
+    if (!effective_token) effective_token = GetCurrentThreadEffectiveToken();
+    else
+    {
+        status = NtQueryInformationToken( effective_token, TokenType, &type, sizeof(type), &size );
+        if (status) return status;
+        if (type == TokenPrimary) return STATUS_NO_IMPERSONATION_TOKEN;
+    }
+
+    status = NtQueryInformationToken( effective_token, TokenIsAppContainer,
+                                      &is_appcontainer, sizeof(is_appcontainer), &size );
+    if (status) return status;
+    if (!is_appcontainer)
+    {
+        *has_capability = TRUE;
+        return STATUS_SUCCESS;
+    }
+
+    return RtlCheckTokenCapability( effective_token, cap_buffer, has_capability );
+}
+
+/******************************************************************************
  * RtlCheckTokenCapability (NTDLL.@)
  */
 NTSTATUS WINAPI RtlCheckTokenCapability( HANDLE token, PSID capability_sid, BOOLEAN *has_capability )
