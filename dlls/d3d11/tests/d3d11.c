@@ -2731,6 +2731,123 @@ static void test_native_xaml_device_contract(void)
     ok(!refcount, "Device has %lu references left.\n", refcount);
 }
 
+static void test_shader_resource_view1(void)
+{
+    D3D11_SHADER_RESOURCE_VIEW_DESC1 desc1, returned_desc1;
+    D3D11_SHADER_RESOURCE_VIEW_DESC returned_desc;
+    D3D11_TEXTURE2D_DESC texture_desc = {0};
+    ID3D11ShaderResourceView1 *view1, *queried_view1;
+    ID3D11ShaderResourceView *view;
+    IUnknown *identity, *identity1;
+    ID3D11Resource *resource;
+    ID3D11Texture2D *texture;
+    ID3D11Device3 *device3;
+    ID3D11Device *device;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(device = create_device(NULL)))
+    {
+        skip("Failed to create device.\n");
+        return;
+    }
+
+    hr = ID3D11Device_QueryInterface(device, &IID_ID3D11Device3, (void **)&device3);
+    if (FAILED(hr))
+    {
+        win_skip("ID3D11Device3 is not supported.\n");
+        ID3D11Device_Release(device);
+        return;
+    }
+
+    texture_desc.Width = 16;
+    texture_desc.Height = 16;
+    texture_desc.MipLevels = 1;
+    texture_desc.ArraySize = 1;
+    texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.Usage = D3D11_USAGE_DEFAULT;
+    texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    hr = ID3D11Device_CreateTexture2D(device, &texture_desc, NULL, &texture);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    view1 = (void *)0xdeadbeef;
+    hr = ID3D11Device3_CreateShaderResourceView1(device3, NULL, NULL, &view1);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!view1, "Got unexpected view %p.\n", view1);
+
+    hr = ID3D11Device3_CreateShaderResourceView1(device3, (ID3D11Resource *)texture, NULL, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID3D11Device3_CreateShaderResourceView1(device3,
+            (ID3D11Resource *)texture, NULL, &view1);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    memset(&returned_desc1, 0xcc, sizeof(returned_desc1));
+    ID3D11ShaderResourceView1_GetDesc1(view1, &returned_desc1);
+    ok(returned_desc1.Format == DXGI_FORMAT_B8G8R8A8_UNORM,
+            "Got unexpected format %#x.\n", returned_desc1.Format);
+    ok(returned_desc1.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D,
+            "Got unexpected dimension %#x.\n", returned_desc1.ViewDimension);
+    ok(!returned_desc1.Texture2D.MostDetailedMip,
+            "Got unexpected first mip %u.\n", returned_desc1.Texture2D.MostDetailedMip);
+    ok(returned_desc1.Texture2D.MipLevels == 1,
+            "Got unexpected mip count %u.\n", returned_desc1.Texture2D.MipLevels);
+    ok(!returned_desc1.Texture2D.PlaneSlice,
+            "Got unexpected plane slice %u.\n", returned_desc1.Texture2D.PlaneSlice);
+
+    ID3D11ShaderResourceView1_GetDesc(view1, &returned_desc);
+    ok(returned_desc.Format == returned_desc1.Format, "Got different formats %#x and %#x.\n",
+            returned_desc.Format, returned_desc1.Format);
+    ok(returned_desc.ViewDimension == returned_desc1.ViewDimension,
+            "Got different dimensions %#x and %#x.\n",
+            returned_desc.ViewDimension, returned_desc1.ViewDimension);
+
+    hr = ID3D11ShaderResourceView1_QueryInterface(view1, &IID_ID3D11ShaderResourceView, (void **)&view);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D11ShaderResourceView1_QueryInterface(view1, &IID_IUnknown, (void **)&identity1);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D11ShaderResourceView_QueryInterface(view, &IID_IUnknown, (void **)&identity);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(identity == identity1, "Got different identities %p and %p.\n", identity, identity1);
+    IUnknown_Release(identity);
+    IUnknown_Release(identity1);
+
+    ID3D11ShaderResourceView1_GetResource(view1, &resource);
+    ok(resource == (ID3D11Resource *)texture, "Got unexpected resource %p.\n", resource);
+    ID3D11Resource_Release(resource);
+    ID3D11ShaderResourceView_Release(view);
+    ID3D11ShaderResourceView1_Release(view1);
+
+    memset(&desc1, 0, sizeof(desc1));
+    desc1.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc1.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    desc1.Texture2D.MipLevels = 1;
+    desc1.Texture2D.PlaneSlice = 1;
+    view1 = (void *)0xdeadbeef;
+    hr = ID3D11Device3_CreateShaderResourceView1(device3,
+            (ID3D11Resource *)texture, &desc1, &view1);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!view1, "Got unexpected view %p.\n", view1);
+
+    hr = ID3D11Device_CreateShaderResourceView(device,
+            (ID3D11Resource *)texture, NULL, &view);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D11ShaderResourceView_QueryInterface(view,
+            &IID_ID3D11ShaderResourceView1, (void **)&queried_view1);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ID3D11ShaderResourceView1_GetDesc1(queried_view1, &returned_desc1);
+    ok(!returned_desc1.Texture2D.PlaneSlice,
+            "Got unexpected plane slice %u.\n", returned_desc1.Texture2D.PlaneSlice);
+    ID3D11ShaderResourceView1_Release(queried_view1);
+    ID3D11ShaderResourceView_Release(view);
+
+    ID3D11Texture2D_Release(texture);
+    ID3D11Device3_Release(device3);
+    refcount = ID3D11Device_Release(device);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+}
+
 static void test_immediate_context(void)
 {
     ID3D11DeviceContext *immediate_context, *previous_immediate_context;
@@ -38023,6 +38140,7 @@ START_TEST(d3d11)
     queue_for_each_feature_level(test_device_interfaces);
     queue_test(test_native_d2d_device_contracts);
     queue_test(test_native_xaml_device_contract);
+    queue_test(test_shader_resource_view1);
     queue_test(test_immediate_context);
     queue_test(test_create_deferred_context);
     queue_test(test_create_texture1d);

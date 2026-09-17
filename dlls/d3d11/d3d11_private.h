@@ -234,18 +234,22 @@ struct d3d_rendertarget_view *unsafe_impl_from_ID3D10RenderTargetView(ID3D10Rend
 struct d3d_shader_resource_view
 {
     ID3D11ShaderResourceView ID3D11ShaderResourceView_iface;
+    ID3D11ShaderResourceView1 ID3D11ShaderResourceView1_iface;
     ID3D10ShaderResourceView1 ID3D10ShaderResourceView1_iface;
     LONG refcount;
 
     struct wined3d_private_store private_store;
     struct wined3d_shader_resource_view *wined3d_view;
     D3D11_SHADER_RESOURCE_VIEW_DESC desc;
+    D3D11_SHADER_RESOURCE_VIEW_DESC1 desc1;
     ID3D11Resource *resource;
     ID3D11Device5 *device;
 };
 
 HRESULT d3d_shader_resource_view_create(struct d3d_device *device, ID3D11Resource *resource,
         const D3D11_SHADER_RESOURCE_VIEW_DESC *desc, struct d3d_shader_resource_view **view);
+HRESULT d3d_shader_resource_view_create1(struct d3d_device *device, ID3D11Resource *resource,
+        const D3D11_SHADER_RESOURCE_VIEW_DESC1 *desc, struct d3d_shader_resource_view **view);
 struct d3d_shader_resource_view *unsafe_impl_from_ID3D11ShaderResourceView(
         ID3D11ShaderResourceView *iface);
 struct d3d_shader_resource_view *unsafe_impl_from_ID3D10ShaderResourceView(

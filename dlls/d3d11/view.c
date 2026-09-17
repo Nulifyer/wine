@@ -1806,6 +1806,13 @@ static HRESULT STDMETHODCALLTYPE d3d11_shader_resource_view_QueryInterface(ID3D1
 
     TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), object);
 
+    if (IsEqualGUID(riid, &IID_ID3D11ShaderResourceView1))
+    {
+        ID3D11ShaderResourceView_AddRef(iface);
+        *object = &view->ID3D11ShaderResourceView1_iface;
+        return S_OK;
+    }
+
     if (IsEqualGUID(riid, &IID_ID3D11ShaderResourceView)
             || IsEqualGUID(riid, &IID_ID3D11View)
             || IsEqualGUID(riid, &IID_ID3D11DeviceChild)
@@ -1942,6 +1949,110 @@ static const struct ID3D11ShaderResourceViewVtbl d3d11_shader_resource_view_vtbl
     d3d11_shader_resource_view_GetResource,
     /* ID3D11ShaderResourceView methods */
     d3d11_shader_resource_view_GetDesc,
+};
+
+/* ID3D11ShaderResourceView1 methods */
+
+static inline struct d3d_shader_resource_view *impl_from_ID3D11ShaderResourceView1(
+        ID3D11ShaderResourceView1 *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d_shader_resource_view, ID3D11ShaderResourceView1_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_shader_resource_view1_QueryInterface(ID3D11ShaderResourceView1 *iface,
+        REFIID riid, void **object)
+{
+    struct d3d_shader_resource_view *view = impl_from_ID3D11ShaderResourceView1(iface);
+
+    return ID3D11ShaderResourceView_QueryInterface(&view->ID3D11ShaderResourceView_iface, riid, object);
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_shader_resource_view1_AddRef(ID3D11ShaderResourceView1 *iface)
+{
+    struct d3d_shader_resource_view *view = impl_from_ID3D11ShaderResourceView1(iface);
+
+    return ID3D11ShaderResourceView_AddRef(&view->ID3D11ShaderResourceView_iface);
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_shader_resource_view1_Release(ID3D11ShaderResourceView1 *iface)
+{
+    struct d3d_shader_resource_view *view = impl_from_ID3D11ShaderResourceView1(iface);
+
+    return ID3D11ShaderResourceView_Release(&view->ID3D11ShaderResourceView_iface);
+}
+
+static void STDMETHODCALLTYPE d3d11_shader_resource_view1_GetDevice(ID3D11ShaderResourceView1 *iface,
+        ID3D11Device **device)
+{
+    struct d3d_shader_resource_view *view = impl_from_ID3D11ShaderResourceView1(iface);
+
+    ID3D11ShaderResourceView_GetDevice(&view->ID3D11ShaderResourceView_iface, device);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_shader_resource_view1_GetPrivateData(ID3D11ShaderResourceView1 *iface,
+        REFGUID guid, UINT *data_size, void *data)
+{
+    struct d3d_shader_resource_view *view = impl_from_ID3D11ShaderResourceView1(iface);
+
+    return ID3D11ShaderResourceView_GetPrivateData(&view->ID3D11ShaderResourceView_iface,
+            guid, data_size, data);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_shader_resource_view1_SetPrivateData(ID3D11ShaderResourceView1 *iface,
+        REFGUID guid, UINT data_size, const void *data)
+{
+    struct d3d_shader_resource_view *view = impl_from_ID3D11ShaderResourceView1(iface);
+
+    return ID3D11ShaderResourceView_SetPrivateData(&view->ID3D11ShaderResourceView_iface,
+            guid, data_size, data);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_shader_resource_view1_SetPrivateDataInterface(
+        ID3D11ShaderResourceView1 *iface, REFGUID guid, const IUnknown *data)
+{
+    struct d3d_shader_resource_view *view = impl_from_ID3D11ShaderResourceView1(iface);
+
+    return ID3D11ShaderResourceView_SetPrivateDataInterface(&view->ID3D11ShaderResourceView_iface, guid, data);
+}
+
+static void STDMETHODCALLTYPE d3d11_shader_resource_view1_GetResource(ID3D11ShaderResourceView1 *iface,
+        ID3D11Resource **resource)
+{
+    struct d3d_shader_resource_view *view = impl_from_ID3D11ShaderResourceView1(iface);
+
+    ID3D11ShaderResourceView_GetResource(&view->ID3D11ShaderResourceView_iface, resource);
+}
+
+static void STDMETHODCALLTYPE d3d11_shader_resource_view1_GetDesc(ID3D11ShaderResourceView1 *iface,
+        D3D11_SHADER_RESOURCE_VIEW_DESC *desc)
+{
+    struct d3d_shader_resource_view *view = impl_from_ID3D11ShaderResourceView1(iface);
+
+    ID3D11ShaderResourceView_GetDesc(&view->ID3D11ShaderResourceView_iface, desc);
+}
+
+static void STDMETHODCALLTYPE d3d11_shader_resource_view1_GetDesc1(ID3D11ShaderResourceView1 *iface,
+        D3D11_SHADER_RESOURCE_VIEW_DESC1 *desc)
+{
+    struct d3d_shader_resource_view *view = impl_from_ID3D11ShaderResourceView1(iface);
+
+    TRACE("iface %p, desc %p.\n", iface, desc);
+
+    *desc = view->desc1;
+}
+
+static const struct ID3D11ShaderResourceView1Vtbl d3d11_shader_resource_view1_vtbl =
+{
+    d3d11_shader_resource_view1_QueryInterface,
+    d3d11_shader_resource_view1_AddRef,
+    d3d11_shader_resource_view1_Release,
+    d3d11_shader_resource_view1_GetDevice,
+    d3d11_shader_resource_view1_GetPrivateData,
+    d3d11_shader_resource_view1_SetPrivateData,
+    d3d11_shader_resource_view1_SetPrivateDataInterface,
+    d3d11_shader_resource_view1_GetResource,
+    d3d11_shader_resource_view1_GetDesc,
+    d3d11_shader_resource_view1_GetDesc1,
 };
 
 /* ID3D10ShaderResourceView methods */
@@ -2101,6 +2212,110 @@ static unsigned int wined3d_view_flags_from_d3d11_bufferex_flags(unsigned int d3
     return wined3d_flags;
 }
 
+static void d3d11_shader_resource_view_desc1_from_desc(D3D11_SHADER_RESOURCE_VIEW_DESC1 *dst,
+        const D3D11_SHADER_RESOURCE_VIEW_DESC *src, unsigned int plane_slice)
+{
+    memset(dst, 0, sizeof(*dst));
+    dst->Format = src->Format;
+    dst->ViewDimension = src->ViewDimension;
+
+    switch (src->ViewDimension)
+    {
+        case D3D11_SRV_DIMENSION_BUFFER:
+            dst->Buffer = src->Buffer;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE1D:
+            dst->Texture1D = src->Texture1D;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE1DARRAY:
+            dst->Texture1DArray = src->Texture1DArray;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE2D:
+            dst->Texture2D.MostDetailedMip = src->Texture2D.MostDetailedMip;
+            dst->Texture2D.MipLevels = src->Texture2D.MipLevels;
+            dst->Texture2D.PlaneSlice = plane_slice;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE2DARRAY:
+            dst->Texture2DArray.MostDetailedMip = src->Texture2DArray.MostDetailedMip;
+            dst->Texture2DArray.MipLevels = src->Texture2DArray.MipLevels;
+            dst->Texture2DArray.FirstArraySlice = src->Texture2DArray.FirstArraySlice;
+            dst->Texture2DArray.ArraySize = src->Texture2DArray.ArraySize;
+            dst->Texture2DArray.PlaneSlice = plane_slice;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE2DMS:
+            dst->Texture2DMS = src->Texture2DMS;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE2DMSARRAY:
+            dst->Texture2DMSArray = src->Texture2DMSArray;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE3D:
+            dst->Texture3D = src->Texture3D;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURECUBE:
+            dst->TextureCube = src->TextureCube;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURECUBEARRAY:
+            dst->TextureCubeArray = src->TextureCubeArray;
+            break;
+        case D3D11_SRV_DIMENSION_BUFFEREX:
+            dst->BufferEx = src->BufferEx;
+            break;
+        default:
+            break;
+    }
+}
+
+static void d3d11_shader_resource_view_desc_from_desc1(D3D11_SHADER_RESOURCE_VIEW_DESC *dst,
+        const D3D11_SHADER_RESOURCE_VIEW_DESC1 *src)
+{
+    memset(dst, 0, sizeof(*dst));
+    dst->Format = src->Format;
+    dst->ViewDimension = src->ViewDimension;
+
+    switch (src->ViewDimension)
+    {
+        case D3D11_SRV_DIMENSION_BUFFER:
+            dst->Buffer = src->Buffer;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE1D:
+            dst->Texture1D = src->Texture1D;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE1DARRAY:
+            dst->Texture1DArray = src->Texture1DArray;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE2D:
+            dst->Texture2D.MostDetailedMip = src->Texture2D.MostDetailedMip;
+            dst->Texture2D.MipLevels = src->Texture2D.MipLevels;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE2DARRAY:
+            dst->Texture2DArray.MostDetailedMip = src->Texture2DArray.MostDetailedMip;
+            dst->Texture2DArray.MipLevels = src->Texture2DArray.MipLevels;
+            dst->Texture2DArray.FirstArraySlice = src->Texture2DArray.FirstArraySlice;
+            dst->Texture2DArray.ArraySize = src->Texture2DArray.ArraySize;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE2DMS:
+            dst->Texture2DMS = src->Texture2DMS;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE2DMSARRAY:
+            dst->Texture2DMSArray = src->Texture2DMSArray;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURE3D:
+            dst->Texture3D = src->Texture3D;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURECUBE:
+            dst->TextureCube = src->TextureCube;
+            break;
+        case D3D11_SRV_DIMENSION_TEXTURECUBEARRAY:
+            dst->TextureCubeArray = src->TextureCubeArray;
+            break;
+        case D3D11_SRV_DIMENSION_BUFFEREX:
+            dst->BufferEx = src->BufferEx;
+            break;
+        default:
+            break;
+    }
+}
+
 static HRESULT wined3d_shader_resource_view_desc_from_d3d11(struct wined3d_view_desc *wined3d_desc,
         const D3D11_SHADER_RESOURCE_VIEW_DESC *desc)
 {
@@ -2196,16 +2411,62 @@ static HRESULT wined3d_shader_resource_view_desc_from_d3d11(struct wined3d_view_
     return S_OK;
 }
 
-static HRESULT d3d_shader_resource_view_init(struct d3d_shader_resource_view *view, struct d3d_device *device,
-        ID3D11Resource *resource, const D3D11_SHADER_RESOURCE_VIEW_DESC *desc)
+static unsigned int d3d11_shader_resource_view_plane_slice(ID3D11Resource *resource,
+        const D3D11_SHADER_RESOURCE_VIEW_DESC *desc)
 {
+    D3D11_TEXTURE2D_DESC texture_desc;
+    ID3D11Texture2D *texture;
+    HRESULT hr;
+
+    if (desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D
+            && desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2DARRAY)
+        return 0;
+
+    switch (desc->Format)
+    {
+        case DXGI_FORMAT_R8G8_TYPELESS:
+        case DXGI_FORMAT_R8G8_UNORM:
+        case DXGI_FORMAT_R8G8_UINT:
+        case DXGI_FORMAT_R8G8_SNORM:
+        case DXGI_FORMAT_R8G8_SINT:
+            break;
+        default:
+            return 0;
+    }
+
+    if (FAILED(hr = ID3D11Resource_QueryInterface(resource, &IID_ID3D11Texture2D, (void **)&texture)))
+        return 0;
+
+    ID3D11Texture2D_GetDesc(texture, &texture_desc);
+    ID3D11Texture2D_Release(texture);
+
+    return texture_desc.Format == DXGI_FORMAT_NV12;
+}
+
+static HRESULT d3d_shader_resource_view_init(struct d3d_shader_resource_view *view, struct d3d_device *device,
+        ID3D11Resource *resource, const D3D11_SHADER_RESOURCE_VIEW_DESC *desc,
+        const D3D11_SHADER_RESOURCE_VIEW_DESC1 *desc1)
+{
+    D3D11_SHADER_RESOURCE_VIEW_DESC converted_desc;
     struct wined3d_resource *wined3d_resource;
     struct wined3d_view_desc wined3d_desc;
+    unsigned int plane_slice, requested_plane_slice = 0;
     HRESULT hr;
 
     view->ID3D11ShaderResourceView_iface.lpVtbl = &d3d11_shader_resource_view_vtbl;
+    view->ID3D11ShaderResourceView1_iface.lpVtbl = &d3d11_shader_resource_view1_vtbl;
     view->ID3D10ShaderResourceView1_iface.lpVtbl = &d3d10_shader_resource_view_vtbl;
     view->refcount = 1;
+
+    if (desc1)
+    {
+        d3d11_shader_resource_view_desc_from_desc1(&converted_desc, desc1);
+        desc = &converted_desc;
+        if (desc1->ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D)
+            requested_plane_slice = desc1->Texture2D.PlaneSlice;
+        else if (desc1->ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2DARRAY)
+            requested_plane_slice = desc1->Texture2DArray.PlaneSlice;
+    }
 
     if (!desc)
     {
@@ -2218,6 +2479,14 @@ static HRESULT d3d_shader_resource_view_init(struct d3d_shader_resource_view *vi
     }
     if (FAILED(hr))
         return hr;
+
+    plane_slice = d3d11_shader_resource_view_plane_slice(resource, &view->desc);
+    if (desc1 && requested_plane_slice != plane_slice)
+    {
+        WARN("Invalid plane slice %u for resource view plane %u.\n", requested_plane_slice, plane_slice);
+        return E_INVALIDARG;
+    }
+    d3d11_shader_resource_view_desc1_from_desc(&view->desc1, &view->desc, plane_slice);
 
     if (FAILED(hr = wined3d_shader_resource_view_desc_from_d3d11(&wined3d_desc, &view->desc)))
         return hr;
@@ -2255,7 +2524,29 @@ HRESULT d3d_shader_resource_view_create(struct d3d_device *device, ID3D11Resourc
     if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = d3d_shader_resource_view_init(object, device, resource, desc)))
+    if (FAILED(hr = d3d_shader_resource_view_init(object, device, resource, desc, NULL)))
+    {
+        WARN("Failed to initialise shader resource view, hr %#lx.\n", hr);
+        free(object);
+        return hr;
+    }
+
+    TRACE("Created shader resource view %p.\n", object);
+    *view = object;
+
+    return S_OK;
+}
+
+HRESULT d3d_shader_resource_view_create1(struct d3d_device *device, ID3D11Resource *resource,
+        const D3D11_SHADER_RESOURCE_VIEW_DESC1 *desc, struct d3d_shader_resource_view **view)
+{
+    struct d3d_shader_resource_view *object;
+    HRESULT hr;
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    if (FAILED(hr = d3d_shader_resource_view_init(object, device, resource, NULL, desc)))
     {
         WARN("Failed to initialise shader resource view, hr %#lx.\n", hr);
         free(object);

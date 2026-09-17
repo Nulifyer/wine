@@ -5404,9 +5404,29 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateShaderResourceView1(ID3D11De
         ID3D11Resource *resource, const D3D11_SHADER_RESOURCE_VIEW_DESC1 *desc,
         ID3D11ShaderResourceView1 **view)
 {
-    FIXME("iface %p, resource %p, desc %p, view %p stub!\n", iface, resource, desc, view);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
+    struct d3d_shader_resource_view *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
+
+    if (view)
+        *view = NULL;
+
+    if (!resource)
+        return E_INVALIDARG;
+
+    if (FAILED(hr = d3d_shader_resource_view_create1(device, resource, desc, &object)))
+        return hr;
+
+    if (!view)
+    {
+        ID3D11ShaderResourceView_Release(&object->ID3D11ShaderResourceView_iface);
+        return S_FALSE;
+    }
+
+    *view = &object->ID3D11ShaderResourceView1_iface;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateUnorderedAccessView1(ID3D11Device5 *iface,
