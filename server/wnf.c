@@ -32,6 +32,9 @@
 #define WNF_NAME_KEY 0x41c64e6da3bc0074ULL
 #define WNF_FT_LAST_PROCESS_PROMOTION_TRIGGER 0x41c61a2ba3bc2875ULL
 #define WNF_GPOL_SYSTEM_CHANGES 0x0d891e2aa3bc0875ULL
+#define WNF_SPI_LOGICALDPIOVERRIDE 0x418f1e3ea3bc0835ULL
+#define WNF_DX_MODE_CHANGE_NOTIFICATION 0x41c61629a3bc1035ULL
+#define WNF_DX_MONITOR_CHANGE_NOTIFICATION 0x41c61629a3bc2835ULL
 #define WNF_PNPA_DEVNODES_CHANGED 0x0096003da3bc0875ULL
 #define WNF_PNPA_DEVNODES_CHANGED_SESSION 0x0096003da3bc1035ULL
 #define WNF_PNPA_VOLUMES_CHANGED 0x0096003da3bc1875ULL
@@ -47,21 +50,30 @@
 static const struct sid network_service_sid =
     { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_NETWORK_SERVICE_RID } };
 
-static const unsigned __int64 well_known_states[] =
+struct well_known_state
 {
-    WNF_FT_LAST_PROCESS_PROMOTION_TRIGGER,
-    WNF_GPOL_SYSTEM_CHANGES,
-    WNF_PNPA_DEVNODES_CHANGED,
-    WNF_PNPA_DEVNODES_CHANGED_SESSION,
-    WNF_PNPA_VOLUMES_CHANGED,
-    WNF_PNPA_VOLUMES_CHANGED_SESSION,
-    WNF_PNPA_HARDWAREPROFILES_CHANGED,
-    WNF_PNPA_HARDWAREPROFILES_CHANGED_SESSION,
-    WNF_PNPA_PORTS_CHANGED,
-    WNF_PNPA_PORTS_CHANGED_SESSION,
-    WNF_PO_SCENARIO_CHANGE,
-    WNF_RPCF_FWMAN_RUNNING,
-    WNF_SHEL_LOCKSCREEN_ACTIVE,
+    unsigned __int64 name;
+    unsigned int maximum, initial_size, initial_stamp;
+};
+
+static const struct well_known_state well_known_states[] =
+{
+    { WNF_FT_LAST_PROCESS_PROMOTION_TRIGGER },
+    { WNF_GPOL_SYSTEM_CHANGES },
+    { WNF_SPI_LOGICALDPIOVERRIDE, sizeof(unsigned int) },
+    { WNF_DX_MODE_CHANGE_NOTIFICATION },
+    { WNF_DX_MONITOR_CHANGE_NOTIFICATION, 16, 16, 1 },
+    { WNF_PNPA_DEVNODES_CHANGED },
+    { WNF_PNPA_DEVNODES_CHANGED_SESSION },
+    { WNF_PNPA_VOLUMES_CHANGED },
+    { WNF_PNPA_VOLUMES_CHANGED_SESSION },
+    { WNF_PNPA_HARDWAREPROFILES_CHANGED },
+    { WNF_PNPA_HARDWAREPROFILES_CHANGED_SESSION },
+    { WNF_PNPA_PORTS_CHANGED },
+    { WNF_PNPA_PORTS_CHANGED_SESSION },
+    { WNF_PO_SCENARIO_CHANGE, 20 },
+    { WNF_RPCF_FWMAN_RUNNING, sizeof(unsigned int) },
+    { WNF_SHEL_LOCKSCREEN_ACTIVE, sizeof(unsigned int) },
 };
 
 static const WCHAR wnf_name[] = {'W','n','f','S','t','a','t','e'};
@@ -111,26 +123,30 @@ static const struct object_ops wnf_ops =
     .dump = wnf_dump, .destroy = wnf_destroy,
 };
 
-static struct wnf_state *create_well_known_state( unsigned __int64 name, unsigned int session )
+static struct wnf_state *create_well_known_state( const struct well_known_state *definition,
+                                                  unsigned int session )
 {
     struct wnf_state *state;
 
     if (!(state = alloc_object( &wnf_ops ))) return NULL;
     list_init( &state->process_entry );
     list_init( &state->subscriptions );
+    state->data = NULL;
     state->creator = NULL;
-    state->name = name;
+    state->name = definition->name;
     state->type_low = state->type_high = 0;
-    if (name == WNF_PO_SCENARIO_CHANGE) state->maximum = 20;
-    else if (name == WNF_RPCF_FWMAN_RUNNING || name == WNF_SHEL_LOCKSCREEN_ACTIVE)
-        state->maximum = sizeof(unsigned int);
-    else state->maximum = 0;
-    state->size = state->stamp = 0;
+    state->maximum = definition->maximum;
+    state->size = definition->initial_size;
+    state->stamp = definition->initial_stamp;
     state->session = session;
     state->has_type = 0;
     state->well_known = 1;
     state->deleted = 0;
-    state->data = NULL;
+    if (state->size)
+    {
+        if (!(state->data = mem_alloc( state->size ))) { release_object( state ); return NULL; }
+        memset( state->data, 0, state->size );
+    }
     list_add_tail( &states, &state->entry );
     return state;
 }
@@ -218,7 +234,8 @@ static struct wnf_state *find_state( unsigned __int64 name, int explicit_scope,
     LIST_FOR_EACH_ENTRY( state, &states, struct wnf_state, entry )
         if (state->name == name && (scope != 1 || state->session == session)) return state;
     for (i = 0; i < sizeof(well_known_states) / sizeof(well_known_states[0]); i++)
-        if (name == well_known_states[i]) return create_well_known_state( name, scope == 1 ? session : 0 );
+        if (name == well_known_states[i].name)
+            return create_well_known_state( &well_known_states[i], scope == 1 ? session : 0 );
     set_error( STATUS_OBJECT_NAME_NOT_FOUND );
     return NULL;
 }

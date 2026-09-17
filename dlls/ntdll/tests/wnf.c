@@ -22,6 +22,9 @@
 
 #define WNF_FT_LAST_PROCESS_PROMOTION_TRIGGER 0x41c61a2ba3bc2875ULL
 #define WNF_GPOL_SYSTEM_CHANGES 0x0d891e2aa3bc0875ULL
+#define WNF_SPI_LOGICALDPIOVERRIDE 0x418f1e3ea3bc0835ULL
+#define WNF_DX_MODE_CHANGE_NOTIFICATION 0x41c61629a3bc1035ULL
+#define WNF_DX_MONITOR_CHANGE_NOTIFICATION 0x41c61629a3bc2835ULL
 #define WNF_PNPA_DEVNODES_CHANGED 0x0096003da3bc0875ULL
 #define WNF_PNPA_DEVNODES_CHANGED_SESSION 0x0096003da3bc1035ULL
 #define WNF_PNPA_VOLUMES_CHANGED 0x0096003da3bc1875ULL
@@ -161,6 +164,29 @@ static NTSTATUS WINAPI query_callback( ULONGLONG name, ULONG stamp, const GUID *
     ok( !!data, "expected a query buffer\n" );
     ok( !size, "expected size 0, got %lu\n", size );
     return STATUS_RETRY;
+}
+
+struct display_scaling_query
+{
+    ULONGLONG name;
+    ULONG stamp, size, calls;
+    BYTE data[16];
+};
+
+static NTSTATUS WINAPI display_scaling_query_callback( ULONGLONG name, ULONG stamp, const GUID *type,
+                                                       void *context, const void *data, ULONG size )
+{
+    struct display_scaling_query *query = context;
+
+    query->calls++;
+    query->stamp = stamp;
+    query->size = size;
+    ok( name == query->name, "expected state name %#I64x, got %#I64x\n", query->name, name );
+    ok( !type, "expected no type, got %p\n", type );
+    ok( size <= sizeof(query->data), "expected at most %Iu bytes, got %lu\n",
+        sizeof(query->data), size );
+    if (size && size <= sizeof(query->data)) memcpy( query->data, data, size );
+    return STATUS_SUCCESS;
 }
 
 START_TEST(wnf)
@@ -348,6 +374,9 @@ START_TEST(wnf)
         const ULONGLONG well_known_names[] =
         {
             WNF_GPOL_SYSTEM_CHANGES,
+            WNF_SPI_LOGICALDPIOVERRIDE,
+            WNF_DX_MODE_CHANGE_NOTIFICATION,
+            WNF_DX_MONITOR_CHANGE_NOTIFICATION,
             WNF_PNPA_DEVNODES_CHANGED,
             WNF_PNPA_DEVNODES_CHANGED_SESSION,
             WNF_PNPA_VOLUMES_CHANGED,
@@ -377,6 +406,57 @@ START_TEST(wnf)
                 ok( status == STATUS_SUCCESS, "%#I64x: expected STATUS_SUCCESS, got %#lx\n",
                     well_known_names[i], status );
             }
+        }
+    }
+
+    {
+        static const struct
+        {
+            ULONGLONG name;
+            ULONG stamp, size;
+        }
+        display_scaling_states[] =
+        {
+            { WNF_SPI_LOGICALDPIOVERRIDE, 0, 0 },
+            { WNF_DX_MODE_CHANGE_NOTIFICATION, 0, 0 },
+            { WNF_DX_MONITOR_CHANGE_NOTIFICATION, 1, 16 },
+        };
+        unsigned int i;
+
+        for (i = 0; i < ARRAY_SIZE(display_scaling_states); i++)
+        {
+            struct display_scaling_query query = { .name = display_scaling_states[i].name };
+            BYTE data[16];
+
+            memset( data, 0xcc, sizeof(data) );
+            stamp = 0xdeadbeef;
+            size = sizeof(data);
+            status = pNtQueryWnfStateData( &query.name, NULL, NULL, &stamp, data, &size );
+            ok( status == STATUS_SUCCESS, "%#I64x: expected STATUS_SUCCESS, got %#lx\n",
+                query.name, status );
+            ok( stamp == display_scaling_states[i].stamp, "%#I64x: expected stamp %lu, got %lu\n",
+                query.name, display_scaling_states[i].stamp, stamp );
+            ok( size == display_scaling_states[i].size, "%#I64x: expected size %lu, got %lu\n",
+                query.name, display_scaling_states[i].size, size );
+            if (size) ok( !memcmp( data, (BYTE[16]){0}, size ), "%#I64x: expected zero data\n", query.name );
+
+            stamp = 0xdeadbeef;
+            status = pRtlQueryWnfStateData( &stamp, query.name, display_scaling_query_callback,
+                                            &query, NULL );
+            ok( status == STATUS_SUCCESS, "%#I64x: expected STATUS_SUCCESS, got %#lx\n",
+                query.name, status );
+            ok( stamp == display_scaling_states[i].stamp, "%#I64x: expected stamp %lu, got %lu\n",
+                query.name, display_scaling_states[i].stamp, stamp );
+            ok( query.calls == 1, "%#I64x: expected one callback, got %lu\n", query.name, query.calls );
+            ok( query.stamp == display_scaling_states[i].stamp,
+                "%#I64x: expected callback stamp %lu, got %lu\n",
+                query.name, display_scaling_states[i].stamp, query.stamp );
+            ok( query.size == display_scaling_states[i].size,
+                "%#I64x: expected callback size %lu, got %lu\n",
+                query.name, display_scaling_states[i].size, query.size );
+            if (query.size)
+                ok( !memcmp( query.data, (BYTE[16]){0}, query.size ),
+                    "%#I64x: expected zero callback data\n", query.name );
         }
     }
 }
