@@ -1469,6 +1469,11 @@ NTSTATUS SYSCALL_API NtUserDwmLockScreenUpdates( BOOL lock )
     SYSCALL_FUNC( NtUserDwmLockScreenUpdates );
 }
 
+BOOL SYSCALL_API NtUserDwmKernelShutdown(void)
+{
+    SYSCALL_FUNC( NtUserDwmKernelShutdown );
+}
+
 BOOL SYSCALL_API NtUserDwmKernelStartup(void)
 {
     SYSCALL_FUNC( NtUserDwmKernelStartup );

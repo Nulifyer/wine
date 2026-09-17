@@ -3718,7 +3718,6 @@
     SYSCALL_STUB( NtUserDrawCaption ) \
     SYSCALL_STUB( NtUserDwmGetRemoteSessionOcclusionEvent ) \
     SYSCALL_STUB( NtUserDwmGetRemoteSessionOcclusionState ) \
-    SYSCALL_STUB( NtUserDwmKernelShutdown ) \
     SYSCALL_STUB( NtUserDwmValidateWindow ) \
     SYSCALL_STUB( NtUserDwmWindowNotificationsEnabled ) \
     SYSCALL_STUB( NtUserEnableChildWindowDpiMessage ) \

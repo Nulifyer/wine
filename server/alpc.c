@@ -38,6 +38,7 @@
 #include "security.h"
 #include "request.h"
 #include "unicode.h"
+#include "user.h"
 
 static const WCHAR alpc_port_name[] = {'A','L','P','C',' ','P','o','r','t'};
 
@@ -123,6 +124,7 @@ struct alpc_port
     struct list             kernel_session_entry;   /* weak entry in the live session-port registry */
     unsigned int            kernel_session_id;
     enum dwm_session_port_phase kernel_session_phase;
+    struct winstation       *composited_winstation; /* strong while this DWM owns composition */
     struct coremsg_client_port *coremsg_client;      /* owned virtual-kernel client record */
     struct token            *client_token;          /* captured connecting security */
     int                      impersonation_level, tracking_mode;
@@ -285,6 +287,7 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     list_init( &port->kernel_session_entry );
     port->kernel_session_id = 0;
     port->kernel_session_phase = DWM_SESSION_PORT_REGISTERED;
+    port->composited_winstation = NULL;
     port->coremsg_client = NULL;
     port->thread      = (struct thread *)grab_object( current );
     list_init( &port->messages );
@@ -351,6 +354,11 @@ static void alpc_port_destroy( struct object *obj )
         if (port->kernel_port == ALPC_KERNEL_DWM_SESSION_PORT)
             port->thread->process->native_dwm_owner = 0;
         list_remove( &port->kernel_session_entry );
+    }
+    if (port->composited_winstation)
+    {
+        set_winstation_composited( port->composited_winstation, 0 );
+        release_object( port->composited_winstation );
     }
     assert( !port->completion_lease );
     if (port->completion) release_object( port->completion );
@@ -2202,18 +2210,43 @@ DECL_HANDLER(register_dwm_session_port)
 DECL_HANDLER(start_dwm_kernel)
 {
     struct alpc_port *port = find_dwm_session_port( current->process->session_id );
+    struct winstation *winstation;
 
     if (!port || port->thread->process != current->process)
     {
         set_error( STATUS_ACCESS_DENIED );
         return;
     }
-    if (port->kernel_session_phase != DWM_SESSION_PORT_INITIALIZING)
+    if (port->kernel_session_phase == DWM_SESSION_PORT_REGISTERED)
     {
         set_error( STATUS_INVALID_DEVICE_STATE );
         return;
     }
-    port->kernel_session_phase = DWM_SESSION_PORT_STARTED;
+    if (!(winstation = get_process_winstation( current->process, 0 ))) return;
+    if (port->composited_winstation && port->composited_winstation != winstation)
+    {
+        release_object( winstation );
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!port->composited_winstation) port->composited_winstation = winstation;
+    else release_object( winstation );
+    set_winstation_composited( port->composited_winstation, 1 );
+    if (port->kernel_session_phase == DWM_SESSION_PORT_INITIALIZING)
+        port->kernel_session_phase = DWM_SESSION_PORT_STARTED;
+}
+
+DECL_HANDLER(stop_dwm_kernel)
+{
+    struct alpc_port *port = find_dwm_session_port( current->process->session_id );
+
+    if (!port || port->thread->process != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (port->composited_winstation)
+        set_winstation_composited( port->composited_winstation, 0 );
 }
 
 DECL_HANDLER(open_coremsg_kernel_connection)

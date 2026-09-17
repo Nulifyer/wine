@@ -54,6 +54,7 @@ struct winstation
     unsigned int       monitor_count;      /* number of monitors */
     struct monitor_info *monitors;         /* window station monitors */
     unsigned __int64   monitor_serial;     /* winstation monitor update counter */
+    int                composited;         /* desktops are owned by the session compositor */
 };
 
 struct key_repeat
@@ -176,6 +177,8 @@ extern struct process *get_top_window_owner( struct desktop *desktop );
 extern void get_virtual_screen_rect( struct desktop *desktop, struct rectangle *rect, int is_raw );
 extern void post_desktop_message( struct desktop *desktop, unsigned int message,
                                   lparam_t wparam, lparam_t lparam );
+extern void broadcast_desktop_message( struct desktop *desktop, unsigned int message,
+                                       lparam_t wparam, lparam_t lparam );
 extern void free_window_handle( struct window *win );
 extern void destroy_thread_windows( struct thread *thread );
 extern int is_child_window( user_handle_t parent, user_handle_t child );
@@ -209,6 +212,7 @@ extern client_ptr_t get_class_client_ptr( struct window_class *class );
 extern struct winstation *get_visible_winstation(void);
 extern struct desktop *get_input_desktop( struct winstation *winstation );
 extern int set_input_desktop( struct winstation *winstation, struct desktop *new_desktop );
+extern void set_winstation_composited( struct winstation *winstation, int composited );
 extern struct desktop *get_desktop_obj( struct process *process, obj_handle_t handle, unsigned int access );
 extern struct winstation *get_process_winstation( struct process *process, unsigned int access );
 extern struct desktop *get_thread_desktop( struct thread *thread, unsigned int access );

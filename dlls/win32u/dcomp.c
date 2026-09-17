@@ -126,6 +126,19 @@ BOOL WINAPI NtUserDwmKernelStartup(void)
     return ret;
 }
 
+BOOL WINAPI NtUserDwmKernelShutdown(void)
+{
+    BOOL ret;
+
+    TRACE( "\n" );
+    SERVER_START_REQ( stop_dwm_kernel )
+    {
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
 BOOL WINAPI NtKSTInitialize( HANDLE stop_event, HANDLE update_event )
 {
     struct user_thread_info *info = get_user_thread_info();

@@ -152,6 +152,7 @@ static bool winstation_init( struct object *obj, const void *init_data )
     winstation->monitors = NULL;
     winstation->monitor_count = 0;
     winstation->monitor_serial = 1;
+    winstation->composited = 0;
     list_init( &winstation->desktops );
     list_add_tail( &winstation_list, &winstation->entry );
     return true;
@@ -305,6 +306,27 @@ int set_input_desktop( struct winstation *winstation, struct desktop *new_deskto
     return 1;
 }
 
+/* update the composition state shared by every desktop of a window station */
+void set_winstation_composited( struct winstation *winstation, int composited )
+{
+    struct desktop *desktop;
+
+    composited = !!composited;
+    if (winstation->composited == composited) return;
+    winstation->composited = composited;
+
+    LIST_FOR_EACH_ENTRY( desktop, &winstation->desktops, struct desktop, entry )
+    {
+        SHARED_WRITE_BEGIN( desktop->shared, desktop_shm_t )
+        {
+            if (composited) shared->flags |= DF_WINE_COMPOSITED_DESKTOP;
+            else shared->flags &= ~DF_WINE_COMPOSITED_DESKTOP;
+        }
+        SHARED_WRITE_END;
+        broadcast_desktop_message( desktop, WM_DWMCOMPOSITIONCHANGED, 0, 0 );
+    }
+}
+
 /* retrieve a pointer to a desktop object */
 struct desktop *get_desktop_obj( struct process *process, obj_handle_t handle, unsigned int access )
 {
@@ -326,6 +348,8 @@ static bool desktop_init( struct object *obj, const void *init_data )
     const struct desktop_init_data *data = init_data;
     unsigned int flags = data->flags;
     struct desktop *current_desktop;
+
+    if (winstation->composited) flags |= DF_WINE_COMPOSITED_DESKTOP;
 
     /* inherit DF_WINE_*_DESKTOP flags if none of them are specified */
     if (!(flags & (DF_WINE_ROOT_DESKTOP | DF_WINE_VIRTUAL_DESKTOP)) &&

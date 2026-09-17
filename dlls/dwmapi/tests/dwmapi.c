@@ -19,6 +19,38 @@
 #include "dwmapi.h"
 #include "wine/test.h"
 
+typedef HRESULT (WINAPI *dwmp_dxgi_is_thread_desktop_composited_fn)(BOOL *enabled);
+typedef BOOL (WINAPI *is_thread_desktop_composited_fn)(void);
+
+static void test_DwmpDxgiIsThreadDesktopComposited(void)
+{
+    dwmp_dxgi_is_thread_desktop_composited_fn function;
+    is_thread_desktop_composited_fn query;
+    BOOL actual, expected;
+    HRESULT hr;
+
+    function = (void *)GetProcAddress(GetModuleHandleW(L"dwmapi.dll"), (const char *)128);
+    ok(!!function, "ordinal 128 is unavailable\n");
+    if (!function) return;
+
+    query = (void *)GetProcAddress(GetModuleHandleW(L"user32.dll"),
+                                   "IsThreadDesktopComposited");
+    ok(!!query, "USER32 composition query is unavailable\n");
+    if (!query) return;
+
+    hr = function(NULL);
+    ok(hr == E_INVALIDARG, "null output returned %#lx\n", hr);
+
+    expected = query();
+
+    actual = !expected;
+    SetLastError(0x13579bdf);
+    hr = function(&actual);
+    ok(hr == S_OK, "ordinal 128 returned %#lx\n", hr);
+    ok(actual == expected, "ordinal 128 returned %d, expected %d\n", actual, expected);
+    ok(GetLastError() == 0x13579bdf, "ordinal 128 changed last error to %#lx\n", GetLastError());
+}
+
 static void test_DwmIsCompositionEnabled(void)
 {
     BOOL enabled;
@@ -65,6 +97,11 @@ static void test_DwmGetCompositionTimingInfo(void)
     result = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &mode);
     ok(!!result, "Failed to get display mode %#lx.\n", GetLastError());
     display_frequency = mode.dmDisplayFrequency;
+    if (!display_frequency)
+    {
+        skip("Display frequency is unavailable.\n");
+        return;
+    }
     ok(!!QueryPerformanceFrequency(&performance_frequency), "Failed to get performance counter frequency.\n");
     refresh_period = performance_frequency.QuadPart / display_frequency;
 
@@ -172,6 +209,7 @@ static void test_DwmFlush(void)
 
 START_TEST(dwmapi)
 {
+    test_DwmpDxgiIsThreadDesktopComposited();
     test_DwmIsCompositionEnabled();
     test_DwmGetCompositionTimingInfo();
     test_DWMWA_EXTENDED_FRAME_BOUNDS();

@@ -1243,6 +1243,9 @@ ULONG_PTR WINAPI NtUserGetThreadState( USERTHREADSTATECLASS cls )
     case UserThreadStateMessageTime:
         return get_user_thread_info()->message_time;
 
+    case UserThreadStateDesktopComposited:
+        return is_thread_desktop_composited();
+
     case UserThreadStateIsForeground:
     default:
         WARN( "unsupported class %u\n", cls );

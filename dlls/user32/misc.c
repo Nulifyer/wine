@@ -274,11 +274,29 @@ BOOL WINAPI DeregisterShellHookWindow(HWND hWnd)
 
 
 /***********************************************************************
+ *           DwmKernelShutdown                       [USER32.@]
+ */
+BOOL WINAPI DwmKernelShutdown(void)
+{
+    return NtUserDwmKernelShutdown();
+}
+
+
+/***********************************************************************
  *           DwmKernelStartup                        [USER32.@]
  */
 BOOL WINAPI DwmKernelStartup(void)
 {
     return NtUserDwmKernelStartup();
+}
+
+
+/***********************************************************************
+ *           IsThreadDesktopComposited                [USER32.@]
+ */
+BOOL WINAPI IsThreadDesktopComposited(void)
+{
+    return NtUserGetThreadState( UserThreadStateDesktopComposited );
 }
 
 

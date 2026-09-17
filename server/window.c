@@ -617,6 +617,17 @@ void post_desktop_message( struct desktop *desktop, unsigned int message,
     if (win && win->thread) post_message( win->handle, message, wparam, lparam );
 }
 
+/* send a notification message to every top-level window on a desktop */
+void broadcast_desktop_message( struct desktop *desktop, unsigned int message,
+                                lparam_t wparam, lparam_t lparam )
+{
+    struct window *win;
+
+    if (!desktop->top_window) return;
+    LIST_FOR_EACH_ENTRY( win, &desktop->top_window->children, struct window, entry )
+        send_notify_message( win->handle, message, wparam, lparam );
+}
+
 /* create a new window structure (note: the window is not linked in the window tree) */
 static struct window *create_window( struct window *parent, struct window *owner, atom_t atom,
                                      mod_handle_t class_instance, bool ansi, unsigned int dpi_context,

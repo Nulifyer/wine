@@ -926,7 +926,7 @@
 @ stdcall -syscall NtUserDrawMenuBarTemp(long long ptr long long)
 @ stub -syscall NtUserDwmGetRemoteSessionOcclusionEvent
 @ stub -syscall NtUserDwmGetRemoteSessionOcclusionState
-@ stub -syscall NtUserDwmKernelShutdown
+@ stdcall -syscall NtUserDwmKernelShutdown()
 @ stdcall -syscall NtUserDwmKernelStartup()
 @ stdcall -syscall NtUserDwmLockScreenUpdates(long)
 @ stub -syscall NtUserDwmValidateWindow

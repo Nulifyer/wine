@@ -4023,6 +4023,10 @@ static void dump_start_dwm_kernel_request( const struct start_dwm_kernel_request
 {
 }
 
+static void dump_stop_dwm_kernel_request( const struct stop_dwm_kernel_request *req )
+{
+}
+
 static void dump_destroy_dcomp_connection_request( const struct destroy_dcomp_connection_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -4587,6 +4591,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_connection_request,
     (dump_func)dump_register_dwm_session_port_request,
     (dump_func)dump_start_dwm_kernel_request,
+    (dump_func)dump_stop_dwm_kernel_request,
     (dump_func)dump_destroy_dcomp_connection_request,
     (dump_func)dump_begin_dcomp_frame_request,
     (dump_func)dump_confirm_dcomp_frame_request,
@@ -4966,6 +4971,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_query_information_reply,
     NULL,
     (dump_func)dump_create_dcomp_connection_reply,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -5349,6 +5355,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "create_dcomp_connection",
     "register_dwm_session_port",
     "start_dwm_kernel",
+    "stop_dwm_kernel",
     "destroy_dcomp_connection",
     "begin_dcomp_frame",
     "confirm_dcomp_frame",

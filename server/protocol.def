@@ -4783,6 +4783,10 @@ struct alpc_message_info
 @REQ(start_dwm_kernel)
 @END
 
+/* Stop desktop composition owned by the registered DWM session endpoint. */
+@REQ(stop_dwm_kernel)
+@END
+
 /* Destroy a DirectComposition connection. Keep new requests appended. */
 @REQ(destroy_dcomp_connection)
     obj_handle_t handle;       /* connection handle to consume */

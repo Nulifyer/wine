@@ -360,6 +360,7 @@ DECL_HANDLER(notify_change_session);
 DECL_HANDLER(create_dcomp_connection);
 DECL_HANDLER(register_dwm_session_port);
 DECL_HANDLER(start_dwm_kernel);
+DECL_HANDLER(stop_dwm_kernel);
 DECL_HANDLER(destroy_dcomp_connection);
 DECL_HANDLER(begin_dcomp_frame);
 DECL_HANDLER(confirm_dcomp_frame);
@@ -741,6 +742,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_create_dcomp_connection,
     (req_handler)req_register_dwm_session_port,
     (req_handler)req_start_dwm_kernel,
+    (req_handler)req_stop_dwm_kernel,
     (req_handler)req_destroy_dcomp_connection,
     (req_handler)req_begin_dcomp_frame,
     (req_handler)req_confirm_dcomp_frame,
@@ -2798,6 +2800,7 @@ C_ASSERT( sizeof(struct create_dcomp_connection_reply) == 16 );
 C_ASSERT( offsetof(struct register_dwm_session_port_request, handle) == 12 );
 C_ASSERT( sizeof(struct register_dwm_session_port_request) == 16 );
 C_ASSERT( sizeof(struct start_dwm_kernel_request) == 16 );
+C_ASSERT( sizeof(struct stop_dwm_kernel_request) == 16 );
 C_ASSERT( offsetof(struct destroy_dcomp_connection_request, handle) == 12 );
 C_ASSERT( sizeof(struct destroy_dcomp_connection_request) == 16 );
 C_ASSERT( offsetof(struct begin_dcomp_frame_request, connection) == 12 );

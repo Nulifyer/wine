@@ -6977,6 +6977,17 @@ struct start_dwm_kernel_reply
 };
 
 
+struct stop_dwm_kernel_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct stop_dwm_kernel_reply
+{
+    struct reply_header __header;
+};
+
+
 struct destroy_dcomp_connection_request
 {
     struct request_header __header;
@@ -7652,6 +7663,7 @@ enum request
     REQ_create_dcomp_connection,
     REQ_register_dwm_session_port,
     REQ_start_dwm_kernel,
+    REQ_stop_dwm_kernel,
     REQ_destroy_dcomp_connection,
     REQ_begin_dcomp_frame,
     REQ_confirm_dcomp_frame,
@@ -8036,6 +8048,7 @@ union generic_request
     struct create_dcomp_connection_request create_dcomp_connection_request;
     struct register_dwm_session_port_request register_dwm_session_port_request;
     struct start_dwm_kernel_request start_dwm_kernel_request;
+    struct stop_dwm_kernel_request stop_dwm_kernel_request;
     struct destroy_dcomp_connection_request destroy_dcomp_connection_request;
     struct begin_dcomp_frame_request begin_dcomp_frame_request;
     struct confirm_dcomp_frame_request confirm_dcomp_frame_request;
@@ -8418,6 +8431,7 @@ union generic_reply
     struct create_dcomp_connection_reply create_dcomp_connection_reply;
     struct register_dwm_session_port_reply register_dwm_session_port_reply;
     struct start_dwm_kernel_reply start_dwm_kernel_reply;
+    struct stop_dwm_kernel_reply stop_dwm_kernel_reply;
     struct destroy_dcomp_connection_reply destroy_dcomp_connection_reply;
     struct begin_dcomp_frame_reply begin_dcomp_frame_reply;
     struct confirm_dcomp_frame_reply confirm_dcomp_frame_reply;
@@ -8444,6 +8458,6 @@ union generic_reply
     struct register_manipulation_thread_reply register_manipulation_thread_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1019
+#define SERVER_PROTOCOL_VERSION 1020
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

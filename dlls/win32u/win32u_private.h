@@ -271,6 +271,7 @@ extern BOOL shared_object_release_seqlock( const shared_object_t *object, UINT64
  */
 extern const session_shm_t *shared_session;
 extern NTSTATUS get_shared_desktop( struct object_lock *lock, const desktop_shm_t **desktop_shm );
+extern BOOL is_thread_desktop_composited(void);
 extern NTSTATUS get_shared_queue( struct object_lock *lock, const queue_shm_t **queue_shm );
 extern NTSTATUS get_shared_input( UINT tid, struct object_lock *lock, const input_shm_t **input_shm );
 

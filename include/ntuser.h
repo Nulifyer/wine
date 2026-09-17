@@ -396,6 +396,7 @@ C_ASSERT( sizeof(struct drag_drop_post_params) == offsetof(struct drag_drop_post
 #define SPY_RESULT_DEFWND  0x0002
 
 /* CreateDesktop wine specific flag */
+#define DF_WINE_COMPOSITED_DESKTOP 0x20000000
 #define DF_WINE_ROOT_DESKTOP      0x40000000
 #define DF_WINE_VIRTUAL_DESKTOP   0x80000000
 
@@ -746,7 +747,8 @@ typedef enum _USERTHREADSTATECLASS
     UserThreadStateExtraInfo,
     UserThreadStateInSendMessage,
     UserThreadStateMessageTime,
-    UserThreadStateIsForeground
+    UserThreadStateIsForeground,
+    UserThreadStateDesktopComposited = 0x10000 /* Wine internal */
 } USERTHREADSTATECLASS;
 
 W32KAPI NTSTATUS WINAPI NtDCompositionCreateConnection( BOOL is_dwm, HANDLE event, HANDLE *connection );
@@ -925,6 +927,7 @@ W32KAPI BOOL    WINAPI NtUserDrawMenuBar( HWND hwnd );
 W32KAPI DWORD   WINAPI NtUserDrawMenuBarTemp( HWND hwnd, HDC hdc, RECT *rect, HMENU handle, HFONT font );
 W32KAPI NTSTATUS WINAPI NtUserDwmLockScreenUpdates( BOOL lock );
 W32KAPI BOOL     WINAPI NtUserDwmKernelStartup(void);
+W32KAPI BOOL     WINAPI NtUserDwmKernelShutdown(void);
 W32KAPI BOOL    WINAPI NtUserEmptyClipboard(void);
 W32KAPI BOOL    WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointer( BOOL );

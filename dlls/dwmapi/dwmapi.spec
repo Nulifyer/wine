@@ -21,7 +21,7 @@
 125 stub DwmpDxBindSwapChain
 126 stub DwmpDxUnbindSwapChain
 127 stdcall -noname DwmpGetColorizationParameters(ptr)
-128 stub DwmpDxgiIsThreadDesktopComposited
+128 stdcall DwmpDxgiIsThreadDesktopComposited(ptr)
 129 stub -noname DwmpDxgiDisableRedirection
 130 stub -noname DwmpDxgiEnableRedirection
 131 stub -noname DwmpSetColorizationParameters

@@ -32,6 +32,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dwmapi);
 
+BOOL WINAPI IsThreadDesktopComposited(void);
+
 /* Windows DWM transition transactions are not implemented by Wine's host
  * presentation path. Reject requests without claiming animation state. */
 HRESULT WINAPI DwmpBeginTransitionRequest( UINT transition )
@@ -78,6 +80,18 @@ HRESULT WINAPI DwmIsCompositionEnabled(BOOL *enabled)
     if (!RtlGetVersion(&version))
         *enabled = (version.dwMajorVersion > 6 || (version.dwMajorVersion == 6 && version.dwMinorVersion >= 3));
 
+    return S_OK;
+}
+
+/**********************************************************************
+ *           DwmpDxgiIsThreadDesktopComposited         (DWMAPI.128)
+ */
+HRESULT WINAPI DwmpDxgiIsThreadDesktopComposited( BOOL *enabled )
+{
+    TRACE( "%p\n", enabled );
+
+    if (!enabled) return E_INVALIDARG;
+    *enabled = IsThreadDesktopComposited();
     return S_OK;
 }
 

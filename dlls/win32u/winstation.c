@@ -407,6 +407,19 @@ BOOL is_virtual_desktop(void)
     return ret;
 }
 
+BOOL is_thread_desktop_composited(void)
+{
+    struct object_lock lock = OBJECT_LOCK_INIT;
+    const desktop_shm_t *desktop_shm;
+    BOOL ret = FALSE;
+    UINT status;
+
+    while ((status = get_shared_desktop( &lock, &desktop_shm )) == STATUS_PENDING)
+        ret = !!(desktop_shm->flags & DF_WINE_COMPOSITED_DESKTOP);
+    if (status) ret = FALSE;
+    return ret;
+}
+
 BOOL is_service_process(void)
 {
     static const WCHAR wine_service_station_name[] = {'_','_','w','i','n','e','s','e','r','v','i','c','e','_','w','i','n','s','t','a','t','i','o','n',0};

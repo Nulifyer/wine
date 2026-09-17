@@ -25,6 +25,7 @@ typedef BOOL (WINAPI *get_process_ui_context_information_fn)(HANDLE, void *);
 typedef BOOL (WINAPI *is_immersive_process_fn)(HANDLE);
 typedef BOOL (WINAPI *get_current_dpi_info_for_window_fn)(HWND, void *);
 typedef BOOL (WINAPI *get_current_dpi_info_fn)(HMONITOR, void *);
+typedef BOOL (WINAPI *is_thread_desktop_composited_fn)(void);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 
@@ -376,6 +377,21 @@ static void test_gdi_scaled_process(void)
     ok(ret, "GDI-scaled process does not report GDI scaling.\n");
 }
 
+static void test_thread_desktop_composited(HMODULE module)
+{
+    is_thread_desktop_composited_fn function;
+    BOOL ret;
+
+    function = (void *)GetProcAddress(module, "IsThreadDesktopComposited");
+    ok(!!function, "IsThreadDesktopComposited is unavailable.\n");
+    if (!function) return;
+
+    SetLastError(0x13579bdf);
+    ret = function();
+    ok(!ret, "desktop without a DWM owner is unexpectedly composited.\n");
+    ok(GetLastError() == 0x13579bdf, "call changed last error to %#lx.\n", GetLastError());
+}
+
 struct current_dpi_info
 {
     UINT values[24];
@@ -478,6 +494,7 @@ START_TEST(native_ordinals)
     module = GetModuleHandleW(L"user32.dll");
     test_window_services_destroy(module);
     test_gdi_scaled_process();
+    test_thread_desktop_composited(module);
     test_current_dpi_info_for_window(module);
 
     pGetProcessUIContextInformation = (void *)GetProcAddress(module,
