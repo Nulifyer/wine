@@ -2876,10 +2876,10 @@ static NTSTATUS alloc_rsa_key( struct key *key, ULONG bitlen )
 static NTSTATUS import_rsa_key( enum alg_id alg, const UCHAR *input, ULONG input_len, struct key **ret_key )
 {
     const BCRYPT_RSAKEY_BLOB *blob = (const BCRYPT_RSAKEY_BLOB *)input;
-    const UCHAR *mod, *primes[2] = {}, *exp = (const UCHAR *)(blob + 1);
+    const UCHAR *mod, *mod_start, *primes[2] = {}, *exp = (const UCHAR *)(blob + 1);
     SIZE_T primes_sizes[2] = {};
     UINT64 exp64 = 0;
-    ULONG key_flags = 0, set_flags = SYMCRYPT_FLAG_KEY_NO_FIPS, size, i, num_primes = 0;
+    ULONG key_flags = 0, key_size, set_flags = SYMCRYPT_FLAG_KEY_NO_FIPS, size, i, num_primes = 0;
     NTSTATUS status;
     struct key *key = NULL;
 
@@ -2899,7 +2899,15 @@ static NTSTATUS import_rsa_key( enum alg_id alg, const UCHAR *input, ULONG input
     if (blob->Magic == BCRYPT_RSAFULLPRIVATE_MAGIC) size += blob->cbPrime1 * 2 + blob->cbPrime2 + blob->cbModulus;
     if (size != input_len) return NTE_BAD_DATA;
 
-    if ((status = alloc_key( alg, key_flags, &key )) || (status = alloc_rsa_key( key, blob->cbModulus * 8 )))
+    key_size = len_from_bitlen( blob->BitLength );
+    if (!key_size || key_size > blob->cbModulus) return NTE_BAD_DATA;
+
+    mod = mod_start = exp + blob->cbPublicExp;
+    for (i = 0; i < blob->cbModulus - key_size; i++)
+        if (mod[i]) return NTE_BAD_DATA;
+    mod += blob->cbModulus - key_size;
+
+    if ((status = alloc_key( alg, key_flags, &key )) || (status = alloc_rsa_key( key, blob->BitLength )))
     {
         destroy_key( key );
         return status;
@@ -2908,20 +2916,18 @@ static NTSTATUS import_rsa_key( enum alg_id alg, const UCHAR *input, ULONG input
     if (alg == ALG_ID_RSA) set_flags |= SYMCRYPT_FLAG_RSAKEY_ENCRYPT | SYMCRYPT_FLAG_RSAKEY_SIGN;
     else if (alg == ALG_ID_RSA_SIGN) set_flags |= SYMCRYPT_FLAG_RSAKEY_SIGN;
 
-    mod = exp + blob->cbPublicExp;
-
     if (key_flags & KEY_FLAG_PRIVATE)
     {
         num_primes = 2;
 
-        primes[0] = mod + blob->cbModulus;
+        primes[0] = mod_start + blob->cbModulus;
         primes[1] = primes[0] + blob->cbPrime1;
 
         primes_sizes[0] = blob->cbPrime1;
         primes_sizes[1] = blob->cbPrime2;
     }
 
-    if (SymCryptRsakeySetValue( mod, blob->cbModulus, &exp64, 1, primes, primes_sizes, num_primes,
+    if (SymCryptRsakeySetValue( mod, key_size, &exp64, 1, primes, primes_sizes, num_primes,
                                 SYMCRYPT_NUMBER_FORMAT_MSB_FIRST, set_flags, key->a.rsa.handle ))
     {
         destroy_key( key );
@@ -3996,18 +4002,19 @@ static NTSTATUS verify_signature_rsa( const struct key *key, const void *padding
 
     if (!padding || signature_len != len_from_bitlen( key->a.bitlen )) return STATUS_INVALID_PARAMETER;
 
-    if (flags == BCRYPT_PAD_PKCS1)
+    if (flags == BCRYPT_PAD_PKCS1 || flags == BCRYPT_PAD_PKCS1_OPTIONAL_HASH_OID)
     {
         const BCRYPT_PKCS1_PADDING_INFO *pad = padding;
-        UINT32 flags = 0, hash_oid_count;
+        UINT32 hash_oid_count, symcrypt_flags = 0;
         const SYMCRYPT_OID *hash_oid;
 
         if (!pad) return STATUS_INVALID_PARAMETER;
         if ((status = get_hash_oid( pad->pszAlgId, &hash_oid, &hash_oid_count ))) return status;
-        if (!hash_oid) flags = SYMCRYPT_FLAG_RSA_PKCS1_OPTIONAL_HASH_OID;
+        if (!hash_oid || flags == BCRYPT_PAD_PKCS1_OPTIONAL_HASH_OID)
+            symcrypt_flags = SYMCRYPT_FLAG_RSA_PKCS1_OPTIONAL_HASH_OID;
 
         error = SymCryptRsaPkcs1Verify( key->a.rsa.handle, hash, hash_len, signature, signature_len,
-                                        SYMCRYPT_NUMBER_FORMAT_MSB_FIRST, hash_oid, hash_oid_count, flags );
+                                        SYMCRYPT_NUMBER_FORMAT_MSB_FIRST, hash_oid, hash_oid_count, symcrypt_flags );
     }
     else if (flags == BCRYPT_PAD_PSS)
     {

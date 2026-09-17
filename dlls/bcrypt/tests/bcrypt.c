@@ -3105,9 +3105,9 @@ static void test_RSA(void)
     BCRYPT_PKCS1_PADDING_INFO pad;
     BCRYPT_PSS_PADDING_INFO pad_pss;
     BCRYPT_ALG_HANDLE alg;
-    BCRYPT_KEY_HANDLE key;
+    BCRYPT_KEY_HANDLE key, padded_key;
     BCRYPT_RSAKEY_BLOB *rsablob;
-    UCHAR sig[256], sig_pss[256];
+    UCHAR padded_blob[sizeof(rsaPublicBlob) + 8], sig[256], sig_pss[256];
     ULONG len, size, size2, schemes;
     NTSTATUS ret;
     BYTE *buf;
@@ -3144,6 +3144,32 @@ static void test_RSA(void)
     pad.pszAlgId = BCRYPT_SHA1_ALGORITHM;
     ret = BCryptVerifySignature(key, &pad, rsaHash, sizeof(rsaHash), rsaSignature, sizeof(rsaSignature), BCRYPT_PAD_PKCS1);
     ok(!ret, "BCryptVerifySignature failed: %#lx\n", ret);
+
+    ret = BCryptVerifySignature(key, &pad, rsaHash, sizeof(rsaHash), rsaSignature,
+                                sizeof(rsaSignature), BCRYPT_PAD_PKCS1_OPTIONAL_HASH_OID);
+    ok(!ret, "BCryptVerifySignature failed: %#lx\n", ret);
+
+    rsablob = (BCRYPT_RSAKEY_BLOB *)rsaPublicBlob;
+    memcpy(padded_blob, rsaPublicBlob, sizeof(*rsablob) + rsablob->cbPublicExp);
+    memset(padded_blob + sizeof(*rsablob) + rsablob->cbPublicExp, 0, 8);
+    memcpy(padded_blob + sizeof(*rsablob) + rsablob->cbPublicExp + 8,
+           rsaPublicBlob + sizeof(*rsablob) + rsablob->cbPublicExp, rsablob->cbModulus);
+    ((BCRYPT_RSAKEY_BLOB *)padded_blob)->cbModulus += 8;
+
+    ret = BCryptImportKeyPair(alg, NULL, BCRYPT_RSAPUBLIC_BLOB, &padded_key, padded_blob, sizeof(padded_blob), 0);
+    ok(!ret, "BCryptImportKeyPair failed: %#lx\n", ret);
+    if (!ret)
+    {
+        size = keylen = 0;
+        ret = BCryptGetProperty(padded_key, BCRYPT_KEY_STRENGTH, (UCHAR *)&keylen, sizeof(keylen), &size, 0);
+        ok(!ret, "got %#lx\n", ret);
+        ok(keylen == 2048, "got %lu\n", keylen);
+
+        ret = BCryptVerifySignature(padded_key, &pad, rsaHash, sizeof(rsaHash), rsaSignature,
+                                    sizeof(rsaSignature), BCRYPT_PAD_PKCS1);
+        ok(!ret, "BCryptVerifySignature failed: %#lx\n", ret);
+        BCryptDestroyKey(padded_key);
+    }
 
     ret = BCryptVerifySignature(key, NULL, rsaHash, sizeof(rsaHash), rsaSignature, sizeof(rsaSignature), BCRYPT_PAD_PKCS1);
     ok(ret == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got %#lx\n", ret);
