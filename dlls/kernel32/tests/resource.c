@@ -670,6 +670,12 @@ static const struct mui_message_resource
      {'M','U','I',' ','m','e','s','s','a','g','e','\r','\n',0}}
 };
 
+static const WORD mui_string_table[] =
+{
+    3, 'M', 'U', 'I',
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
 static void test_mui(void)
 {
     static const WCHAR ln_dll[] = L"test_mui.dll";
@@ -681,6 +687,8 @@ static void test_mui(void)
     DWORD size, *id;
     HMODULE module;
     HANDLE res;
+    HGLOBAL resource;
+    HRSRC rsrc;
     WCHAR message[32];
     DWORD ret;
     BOOL r;
@@ -800,6 +808,10 @@ static void test_mui(void)
                          MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
                          (void *)&mui_messages, sizeof(mui_messages) );
     ok( r, "UpdateResource failed: %ld\n", GetLastError() );
+    r = UpdateResourceW( res, MAKEINTRESOURCEW(6), MAKEINTRESOURCEW(7),
+                         MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
+                         (void *)mui_string_table, sizeof(mui_string_table) );
+    ok( r, "UpdateResource failed: %ld\n", GetLastError() );
     r = EndUpdateResourceW( res, FALSE );
     ok( r, "EndUpdateResourceW failed: %ld\n", GetLastError() );
 
@@ -832,6 +844,42 @@ static void test_mui(void)
     ok( !wcscmp(str, L"MUI"), "type name MUI[0] = %s\n", wine_dbgstr_w(str) );
     str += wcslen(str) + 1;
     ok( !str[0], "string list is not NULL terminated: %s\n", wine_dbgstr_w(str) );
+
+    module = LoadLibraryExW( ln_dll, NULL, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE );
+    ok( module != NULL, "LoadLibraryExW failed: %ld\n", GetLastError() );
+    if (module)
+    {
+        SetLastError( 0xdeadbeef );
+        rsrc = FindResourceExW( module, MAKEINTRESOURCEW(6), MAKEINTRESOURCEW(7), 0 );
+        ok( rsrc != NULL, "neutral FindResourceExW failed: %ld\n", GetLastError() );
+        ok( GetLastError() == 0xdeadbeef, "last error %lu\n", GetLastError() );
+        if (rsrc)
+        {
+            ok( SizeofResource( module, rsrc ) == sizeof(mui_string_table),
+                "unexpected resource size %lu\n", SizeofResource( module, rsrc ) );
+            resource = LoadResource( module, rsrc );
+            ok( resource != NULL, "LoadResource failed: %ld\n", GetLastError() );
+            if (resource)
+                ok( !memcmp( LockResource(resource), mui_string_table, sizeof(mui_string_table) ),
+                    "unexpected string-table contents\n" );
+        }
+
+        SetLastError( 0xdeadbeef );
+        rsrc = FindResourceExW( module, MAKEINTRESOURCEW(6), MAKEINTRESOURCEW(7),
+                                MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US) );
+        ok( rsrc != NULL, "explicit FindResourceExW failed: %ld\n", GetLastError() );
+        ok( GetLastError() == 0xdeadbeef, "last error %lu\n", GetLastError() );
+        FreeLibrary( module );
+    }
+
+    module = LoadLibraryExW( ln_dll, NULL, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE );
+    ok( module != NULL, "second LoadLibraryExW failed: %ld\n", GetLastError() );
+    if (module)
+    {
+        rsrc = FindResourceExW( module, MAKEINTRESOURCEW(6), MAKEINTRESOURCEW(7), 0 );
+        ok( rsrc != NULL, "FindResourceExW after reload failed: %ld\n", GetLastError() );
+        FreeLibrary( module );
+    }
 
     module = LoadLibraryW( ln_dll );
     ok( module != NULL, "LoadLibraryW failed: %ld\n", GetLastError() );

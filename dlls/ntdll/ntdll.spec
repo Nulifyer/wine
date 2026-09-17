@@ -97,7 +97,7 @@
 @ stdcall LdrFindResourceDirectory_U(long ptr long ptr)
 # @ stub LdrFindResourceEx_U
 @ stdcall LdrFindResource_U(long ptr long ptr)
-@ stub LdrFlushAlternateResourceModules
+@ stdcall LdrFlushAlternateResourceModules()
 @ stdcall LdrGetDllDirectory(ptr)
 @ stdcall LdrGetDllFullName(long ptr)
 @ stdcall LdrGetDllHandle(wstr long ptr ptr)
@@ -124,7 +124,7 @@
 @ stdcall LdrShutdownProcess()
 @ stdcall LdrShutdownThread()
 @ extern LdrSystemDllInitBlock
-@ stub LdrUnloadAlternateResourceModule
+@ stdcall LdrUnloadAlternateResourceModule(long)
 @ stdcall LdrUnloadDll(ptr)
 @ stdcall LdrUnlockLoaderLock(long long)
 @ stdcall LdrUnregisterDllNotification(ptr)

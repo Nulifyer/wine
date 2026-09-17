@@ -261,6 +261,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH FreeLibrary( HINSTANCE module )
             }
             RtlLeaveCriticalSection( &exclusive_datafile_list_section );
         }
+        LdrUnloadAlternateResourceModule( module );
         return UnmapViewOfFile( ptr );
     }
 
