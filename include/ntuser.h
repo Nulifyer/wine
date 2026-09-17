@@ -49,6 +49,8 @@ typedef enum MONITOR_DPI_TYPE
 typedef NTSTATUS (WINAPI *ntuser_callback)( void *args, ULONG len );
 NTSYSAPI NTSTATUS KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len );
 
+struct ntgdi_current_dpi_info;
+
 struct user_entry
 {
     ULONG64 offset;   /* shared user object offset */
@@ -960,6 +962,8 @@ W32KAPI INT     WINAPI NtUserGetClipboardFormatName( UINT format, WCHAR *buffer,
 W32KAPI HWND    WINAPI NtUserGetClipboardOwner(void);
 W32KAPI DWORD   WINAPI NtUserGetClipboardSequenceNumber(void);
 W32KAPI HWND    WINAPI NtUserGetClipboardViewer(void);
+W32KAPI BOOL    WINAPI NtUserGetCurrentDpiInfoForWindow( HWND hwnd,
+                                                         struct ntgdi_current_dpi_info *info );
 W32KAPI BOOL    WINAPI NtUserGetCurrentInputMessageSource( INPUT_MESSAGE_SOURCE *source );
 W32KAPI HCURSOR WINAPI NtUserGetCursor(void);
 W32KAPI HCURSOR WINAPI NtUserGetCursorFrameInfo( HCURSOR hCursor, DWORD istep, DWORD *rate_jiffies,

@@ -23,6 +23,8 @@ typedef BOOL (WINAPI *is_current_process_gdi_scaled_fn)(void);
 typedef BOOL (WINAPI *enable_mouse_in_pointer_for_thread_fn)(void);
 typedef BOOL (WINAPI *get_process_ui_context_information_fn)(HANDLE, void *);
 typedef BOOL (WINAPI *is_immersive_process_fn)(HANDLE);
+typedef BOOL (WINAPI *get_current_dpi_info_for_window_fn)(HWND, void *);
+typedef BOOL (WINAPI *get_current_dpi_info_fn)(HMONITOR, void *);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 
@@ -374,6 +376,88 @@ static void test_gdi_scaled_process(void)
     ok(ret, "GDI-scaled process does not report GDI scaling.\n");
 }
 
+struct current_dpi_info
+{
+    UINT values[24];
+};
+
+static void check_current_dpi_info_for_window(get_current_dpi_info_for_window_fn get_window_info,
+                                              get_current_dpi_info_fn get_monitor_info, HWND hwnd,
+                                              const char *description)
+{
+    struct current_dpi_info actual, expected;
+    HMONITOR monitor;
+    BOOL ret;
+
+    monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    ok(!!monitor, "%s has no monitor, error %lu.\n", description, GetLastError());
+    if (!monitor) return;
+
+    memset(&expected, 0xcc, sizeof(expected));
+    ret = get_monitor_info(monitor, &expected);
+    ok(ret, "GetCurrentDpiInfo failed for %s, error %lu.\n", description, GetLastError());
+    if (!ret) return;
+
+    memset(&actual, 0xcc, sizeof(actual));
+    SetLastError(0x13579bdf);
+    ret = get_window_info(hwnd, &actual);
+    ok(ret, "%s returned %d, error %lu.\n", description, ret, GetLastError());
+    ok(GetLastError() == 0x13579bdf, "%s changed last error to %#lx.\n",
+       description, GetLastError());
+    ok(!memcmp(&actual, &expected, sizeof(actual)), "%s returned a different DPI record.\n",
+       description);
+}
+
+static void test_current_dpi_info_for_window(HMODULE module)
+{
+    get_current_dpi_info_for_window_fn get_window_info;
+    get_current_dpi_info_fn get_monitor_info;
+    struct current_dpi_info info, unchanged;
+    HWND popup, child;
+    HMODULE gdi32;
+    BOOL ret;
+
+    get_window_info = (void *)GetProcAddress(module, (const char *)2636);
+    gdi32 = GetModuleHandleW(L"gdi32.dll");
+    get_monitor_info = gdi32 ? (void *)GetProcAddress(gdi32, "GetCurrentDpiInfo") : NULL;
+    ok(!!get_window_info, "Ordinal 2636 is unavailable.\n");
+    ok(!!get_monitor_info, "GetCurrentDpiInfo is unavailable.\n");
+    if (!get_window_info || !get_monitor_info) return;
+
+    memset(&info, 0, sizeof(info));
+    unchanged = info;
+    SetLastError(0x13579bdf);
+    ret = get_window_info(NULL, &info);
+    ok(!ret, "null HWND returned %d.\n", ret);
+    ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "null HWND set error %#lx.\n", GetLastError());
+    ok(!memcmp(&info, &unchanged, sizeof(info)), "null HWND changed the output record.\n");
+
+    memset(&info, 0xcc, sizeof(info));
+    unchanged = info;
+    SetLastError(0x13579bdf);
+    ret = get_window_info((HWND)(UINT_PTR)0xdeadbeef, &info);
+    ok(!ret, "invalid HWND returned %d.\n", ret);
+    ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "invalid HWND set error %#lx.\n",
+       GetLastError());
+    ok(!memcmp(&info, &unchanged, sizeof(info)), "invalid HWND changed the output record.\n");
+
+    popup = CreateWindowExW(0, L"Static", NULL, WS_POPUP, 0, 0, 32, 32,
+                            NULL, NULL, GetModuleHandleW(NULL), NULL);
+    child = popup ? CreateWindowExW(0, L"Static", NULL, WS_CHILD, 0, 0, 16, 16,
+                                    popup, NULL, GetModuleHandleW(NULL), NULL) : NULL;
+    ok(!!popup && !!child, "failed to create DPI test windows, error %lu.\n", GetLastError());
+
+    check_current_dpi_info_for_window(get_window_info, get_monitor_info, GetDesktopWindow(),
+                                      "desktop window");
+    if (popup) check_current_dpi_info_for_window(get_window_info, get_monitor_info, popup,
+                                                 "popup window");
+    if (child) check_current_dpi_info_for_window(get_window_info, get_monitor_info, child,
+                                                 "child window");
+
+    if (child) DestroyWindow(child);
+    if (popup) DestroyWindow(popup);
+}
+
 START_TEST(native_ordinals)
 {
     char **argv;
@@ -394,6 +478,7 @@ START_TEST(native_ordinals)
     module = GetModuleHandleW(L"user32.dll");
     test_window_services_destroy(module);
     test_gdi_scaled_process();
+    test_current_dpi_info_for_window(module);
 
     pGetProcessUIContextInformation = (void *)GetProcAddress(module,
                                                              "GetProcessUIContextInformation");

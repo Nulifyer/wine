@@ -998,7 +998,7 @@
     SYSCALL_ENTRY( 0x13e2, NtUserGetComboBoxInfo, 0 ) \
     SYSCALL_ENTRY( 0x13e3, NtUserGetControlBrush, 0 ) \
     SYSCALL_ENTRY( 0x13e4, NtUserGetControlColor, 0 ) \
-    SYSCALL_ENTRY( 0x13e5, NtUserGetCurrentDpiInfoForWindow, 0 ) \
+    SYSCALL_ENTRY( 0x13e5, NtUserGetCurrentDpiInfoForWindow, 8 ) \
     SYSCALL_ENTRY( 0x13e6, NtUserGetCurrentInputMessageSource, 4 ) \
     SYSCALL_ENTRY( 0x13e7, NtUserGetCursor, 0 ) \
     SYSCALL_ENTRY( 0x13e8, NtUserGetCursorFrameInfo, 16 ) \
@@ -2540,7 +2540,7 @@
     SYSCALL_ENTRY( 0x13e2, NtUserGetComboBoxInfo, 0 ) \
     SYSCALL_ENTRY( 0x13e3, NtUserGetControlBrush, 0 ) \
     SYSCALL_ENTRY( 0x13e4, NtUserGetControlColor, 0 ) \
-    SYSCALL_ENTRY( 0x13e5, NtUserGetCurrentDpiInfoForWindow, 0 ) \
+    SYSCALL_ENTRY( 0x13e5, NtUserGetCurrentDpiInfoForWindow, 16 ) \
     SYSCALL_ENTRY( 0x13e6, NtUserGetCurrentInputMessageSource, 8 ) \
     SYSCALL_ENTRY( 0x13e7, NtUserGetCursor, 0 ) \
     SYSCALL_ENTRY( 0x13e8, NtUserGetCursorFrameInfo, 32 ) \
@@ -3753,7 +3753,6 @@
     SYSCALL_STUB( NtUserGetComboBoxInfo ) \
     SYSCALL_STUB( NtUserGetControlBrush ) \
     SYSCALL_STUB( NtUserGetControlColor ) \
-    SYSCALL_STUB( NtUserGetCurrentDpiInfoForWindow ) \
     SYSCALL_STUB( NtUserGetDCompositionHwndBitmap ) \
     SYSCALL_STUB( NtUserGetDManipHookInitFunction ) \
     SYSCALL_STUB( NtUserGetDesktopID ) \

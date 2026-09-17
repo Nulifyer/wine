@@ -996,7 +996,7 @@
 @ stub -syscall NtUserGetComboBoxInfo
 @ stub -syscall NtUserGetControlBrush
 @ stub -syscall NtUserGetControlColor
-@ stub -syscall NtUserGetCurrentDpiInfoForWindow
+@ stdcall -syscall NtUserGetCurrentDpiInfoForWindow(long ptr)
 @ stdcall -syscall NtUserGetCurrentInputMessageSource(ptr)
 @ stdcall -syscall NtUserGetCursor()
 @ stdcall -syscall NtUserGetCursorFrameInfo(long long ptr ptr)

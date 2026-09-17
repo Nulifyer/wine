@@ -4888,6 +4888,24 @@ HMONITOR monitor_from_window( HWND hwnd, UINT flags, struct ratio dpi )
     return monitor_from_rect( &rect, flags, dpi );
 }
 
+/***********************************************************************
+ *           NtUserGetCurrentDpiInfoForWindow   (win32u.@)
+ */
+BOOL WINAPI NtUserGetCurrentDpiInfoForWindow( HWND hwnd, struct ntgdi_current_dpi_info *info )
+{
+    HMONITOR monitor;
+    RECT rect;
+
+    TRACE( "hwnd %p info %p\n", hwnd, info );
+
+    /* Validate the window before selecting a default monitor.  MonitorFromWindow's
+     * nearest-monitor fallback would otherwise turn an invalid HWND into success. */
+    if (!get_window_rect( hwnd, &rect, no_dpi )) return FALSE;
+    if (!(monitor = monitor_from_rect( &rect, MONITOR_DEFAULTTONEAREST, no_dpi ))) return FALSE;
+
+    return NtGdiGetCurrentDpiInfo( monitor, info ) == STATUS_SUCCESS;
+}
+
 MONITORINFO monitor_info_from_window( HWND hwnd, UINT flags )
 {
     MONITORINFO info = {.cbSize = sizeof(info)};

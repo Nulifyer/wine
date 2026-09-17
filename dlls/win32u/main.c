@@ -1632,6 +1632,11 @@ HWND SYSCALL_API NtUserGetClipboardViewer(void)
     SYSCALL_FUNC( NtUserGetClipboardViewer );
 }
 
+BOOL SYSCALL_API NtUserGetCurrentDpiInfoForWindow( HWND hwnd, struct ntgdi_current_dpi_info *info )
+{
+    SYSCALL_FUNC( NtUserGetCurrentDpiInfoForWindow );
+}
+
 BOOL SYSCALL_API NtUserGetCurrentInputMessageSource( INPUT_MESSAGE_SOURCE *source )
 {
     SYSCALL_FUNC( NtUserGetCurrentInputMessageSource );
