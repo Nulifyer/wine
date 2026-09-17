@@ -21,6 +21,18 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
+static const GUID IID_IDXGIDeviceXAML =
+        {0xf898b024, 0xb5c8, 0x42cd, {0xa1, 0x4f, 0xac, 0x5a, 0xdb, 0xf4, 0xbe, 0x22}};
+
+struct dxgi_device_xaml_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(IUnknown *iface, REFIID iid, void **out);
+    ULONG (STDMETHODCALLTYPE *AddRef)(IUnknown *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(IUnknown *iface);
+    HRESULT (STDMETHODCALLTYPE *SetInProcessGPUPriority)(IUnknown *iface, INT priority);
+    HRESULT (STDMETHODCALLTYPE *GetInProcessGPUPriority)(IUnknown *iface, INT *priority);
+};
+
 static void STDMETHODCALLTYPE dxgi_null_wined3d_object_destroyed(void *parent) {}
 
 static const struct wined3d_parent_ops dxgi_null_wined3d_parent_ops =
@@ -51,6 +63,13 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_QueryInterface(IWineDXGIDevice *ifa
     {
         IUnknown_AddRef(iface);
         *object = iface;
+        return S_OK;
+    }
+
+    if (IsEqualGUID(riid, &IID_IDXGIDeviceXAML))
+    {
+        IUnknown_AddRef(iface);
+        *object = &device->IDXGIDeviceXAML_iface;
         return S_OK;
     }
 
@@ -391,6 +410,72 @@ static const struct IWineDXGIDeviceVtbl dxgi_device_vtbl =
     dxgi_device_create_resource,
 };
 
+/* Private device contract used by Windows.UI.Xaml. Native D3D11 applies this
+ * priority to each kernel graphics context and caches it on the device. Wine's
+ * host backends do not expose an equivalent mutable queue priority, so retain
+ * the Windows-visible, device-scoped state for current and future contexts. */
+
+static inline struct dxgi_device *impl_from_IDXGIDeviceXAML(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_device, IDXGIDeviceXAML_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_device_xaml_QueryInterface(IUnknown *iface, REFIID iid, void **out)
+{
+    struct dxgi_device *device = impl_from_IDXGIDeviceXAML(iface);
+
+    return IWineDXGIDevice_QueryInterface(&device->IWineDXGIDevice_iface, iid, out);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_device_xaml_AddRef(IUnknown *iface)
+{
+    struct dxgi_device *device = impl_from_IDXGIDeviceXAML(iface);
+
+    return IWineDXGIDevice_AddRef(&device->IWineDXGIDevice_iface);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_device_xaml_Release(IUnknown *iface)
+{
+    struct dxgi_device *device = impl_from_IDXGIDeviceXAML(iface);
+
+    return IWineDXGIDevice_Release(&device->IWineDXGIDevice_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_device_xaml_SetInProcessGPUPriority(IUnknown *iface, INT priority)
+{
+    struct dxgi_device *device = impl_from_IDXGIDeviceXAML(iface);
+
+    TRACE("iface %p, priority %d.\n", iface, priority);
+
+    if (priority < -7 || priority > 7)
+        return E_INVALIDARG;
+
+    InterlockedExchange(&device->in_process_gpu_priority, priority);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_device_xaml_GetInProcessGPUPriority(IUnknown *iface, INT *priority)
+{
+    struct dxgi_device *device = impl_from_IDXGIDeviceXAML(iface);
+
+    TRACE("iface %p, priority %p.\n", iface, priority);
+
+    if (!priority)
+        return E_INVALIDARG;
+
+    *priority = InterlockedCompareExchange(&device->in_process_gpu_priority, 0, 0);
+    return S_OK;
+}
+
+static const struct dxgi_device_xaml_vtbl dxgi_device_xaml_vtbl =
+{
+    dxgi_device_xaml_QueryInterface,
+    dxgi_device_xaml_AddRef,
+    dxgi_device_xaml_Release,
+    dxgi_device_xaml_SetInProcessGPUPriority,
+    dxgi_device_xaml_GetInProcessGPUPriority,
+};
+
 static inline struct dxgi_device *impl_from_IWineDXGISwapChainFactory(IWineDXGISwapChainFactory *iface)
 {
     return CONTAINING_RECORD(iface, struct dxgi_device, IWineDXGISwapChainFactory_iface);
@@ -513,7 +598,9 @@ HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *l
 
     device->IWineDXGIDevice_iface.lpVtbl = &dxgi_device_vtbl;
     device->IWineDXGISwapChainFactory_iface.lpVtbl = &dxgi_swapchain_factory_vtbl;
+    device->IDXGIDeviceXAML_iface.lpVtbl = (const IUnknownVtbl *)&dxgi_device_xaml_vtbl;
     device->refcount = 1;
+    device->in_process_gpu_priority = 0;
     wined3d_mutex_lock();
     wined3d_private_store_init(&device->private_store);
 

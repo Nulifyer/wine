@@ -131,8 +131,10 @@ struct dxgi_device
 {
     IWineDXGIDevice IWineDXGIDevice_iface;
     IWineDXGISwapChainFactory IWineDXGISwapChainFactory_iface;
+    IUnknown IDXGIDeviceXAML_iface;
     IUnknown *child_layer;
     LONG refcount;
+    LONG in_process_gpu_priority;
     struct wined3d_private_store private_store;
     struct wined3d_device *wined3d_device;
     struct wined3d_swapchain *implicit_swapchain;

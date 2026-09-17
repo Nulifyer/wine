@@ -52,6 +52,8 @@ static const GUID IID_ID3D11DeviceInternal =
         {0x26c5dc23, 0xe49c, 0x4b0a, {0x8f, 0x79, 0xe7, 0xb1, 0xac, 0x80, 0x4d, 0x32}};
 static const GUID IID_ID3D11DeviceFlushCount =
         {0xb79cc8da, 0x337f, 0x400f, {0xb0, 0x9d, 0xb2, 0xed, 0xf8, 0xa8, 0x4e, 0x47}};
+static const GUID IID_IDXGIDeviceXAML =
+        {0xf898b024, 0xb5c8, 0x42cd, {0xa1, 0x4f, 0xac, 0x5a, 0xdb, 0xf4, 0xbe, 0x22}};
 
 struct device_internal;
 
@@ -95,6 +97,22 @@ struct device_flush_count_vtbl
 struct device_flush_count
 {
     const struct device_flush_count_vtbl *lpVtbl;
+};
+
+struct dxgi_device_xaml;
+
+struct dxgi_device_xaml_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(struct dxgi_device_xaml *iface, REFIID iid, void **out);
+    ULONG (STDMETHODCALLTYPE *AddRef)(struct dxgi_device_xaml *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(struct dxgi_device_xaml *iface);
+    HRESULT (STDMETHODCALLTYPE *SetInProcessGPUPriority)(struct dxgi_device_xaml *iface, INT priority);
+    HRESULT (STDMETHODCALLTYPE *GetInProcessGPUPriority)(struct dxgi_device_xaml *iface, INT *priority);
+};
+
+struct dxgi_device_xaml
+{
+    const struct dxgi_device_xaml_vtbl *lpVtbl;
 };
 
 static struct test_entry
@@ -2637,6 +2655,80 @@ static void test_native_d2d_device_contracts(void)
 
 done:
     ID3D11Device_Release(device);
+}
+
+static void test_native_xaml_device_contract(void)
+{
+    struct dxgi_device_xaml *xaml_device, *xaml_device_from_dxgi;
+    IUnknown *device_identity, *xaml_identity;
+    IDXGIDevice *dxgi_device;
+    ID3D11Device *device;
+    ULONG refcount;
+    HRESULT hr;
+    INT priority;
+
+    if (!(device = create_device(NULL)))
+    {
+        skip("Failed to create device.\n");
+        return;
+    }
+
+    hr = ID3D11Device_QueryInterface(device, &IID_IDXGIDeviceXAML, (void **)&xaml_device);
+    if (FAILED(hr))
+    {
+        win_skip("Private XAML DXGI device interface is not supported.\n");
+        ID3D11Device_Release(device);
+        return;
+    }
+
+    priority = 0xdeadbeef;
+    hr = xaml_device->lpVtbl->GetInProcessGPUPriority(xaml_device, &priority);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!priority, "Got unexpected initial priority %d.\n", priority);
+
+    hr = xaml_device->lpVtbl->GetInProcessGPUPriority(xaml_device, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    hr = xaml_device->lpVtbl->SetInProcessGPUPriority(xaml_device, -8);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = xaml_device->lpVtbl->SetInProcessGPUPriority(xaml_device, 8);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    hr = xaml_device->lpVtbl->SetInProcessGPUPriority(xaml_device, 1);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    priority = 0xdeadbeef;
+    hr = xaml_device->lpVtbl->GetInProcessGPUPriority(xaml_device, &priority);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(priority == 1, "Got unexpected priority %d.\n", priority);
+
+    hr = xaml_device->lpVtbl->SetInProcessGPUPriority(xaml_device, -7);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = xaml_device->lpVtbl->SetInProcessGPUPriority(xaml_device, 7);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = xaml_device->lpVtbl->SetInProcessGPUPriority(xaml_device, 0);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID3D11Device_QueryInterface(device, &IID_IDXGIDevice, (void **)&dxgi_device);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IDXGIDevice_QueryInterface(dxgi_device, &IID_IDXGIDeviceXAML, (void **)&xaml_device_from_dxgi);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(xaml_device_from_dxgi == xaml_device, "Got different XAML interfaces %p and %p.\n",
+            xaml_device_from_dxgi, xaml_device);
+
+    hr = ID3D11Device_QueryInterface(device, &IID_IUnknown, (void **)&device_identity);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = xaml_device->lpVtbl->QueryInterface(xaml_device, &IID_IUnknown, (void **)&xaml_identity);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(xaml_identity == device_identity, "Got different device identities %p and %p.\n",
+            xaml_identity, device_identity);
+
+    IUnknown_Release(xaml_identity);
+    IUnknown_Release(device_identity);
+    xaml_device_from_dxgi->lpVtbl->Release(xaml_device_from_dxgi);
+    IDXGIDevice_Release(dxgi_device);
+    xaml_device->lpVtbl->Release(xaml_device);
+    refcount = ID3D11Device_Release(device);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
 }
 
 static void test_immediate_context(void)
@@ -37930,6 +38022,7 @@ START_TEST(d3d11)
     queue_test(test_create_device);
     queue_for_each_feature_level(test_device_interfaces);
     queue_test(test_native_d2d_device_contracts);
+    queue_test(test_native_xaml_device_contract);
     queue_test(test_immediate_context);
     queue_test(test_create_deferred_context);
     queue_test(test_create_texture1d);
