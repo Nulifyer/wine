@@ -29,6 +29,26 @@
 #include "wine/alpc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(alpc);
+WINE_DECLARE_DEBUG_CHANNEL(alpcpayload);
+
+static void trace_message_data( const char *direction, HANDLE port_handle,
+                                const ALPC_PORT_MESSAGE *message )
+{
+    const char *data;
+    unsigned int offset;
+
+    if (!TRACE_ON(alpcpayload) || !message) return;
+    data = (const char *)(message + 1);
+    TRACE_(alpcpayload)( "%s port %p id %#x type %#x total %u data %u.\n", direction, port_handle,
+                         message->MessageId, message->Type, message->TotalLength, message->DataLength );
+    for (offset = 0; offset < message->DataLength; offset += 64)
+    {
+        unsigned int size = message->DataLength - offset;
+        if (size > 64) size = 64;
+        TRACE_(alpcpayload)( "%s port %p +%04x %s\n", direction, port_handle, offset,
+                             debugstr_an( data + offset, size ) );
+    }
+}
 
 /* Resource-bearing input attributes remain outside the current contract. */
 static NTSTATUS validate_message_attributes( const ALPC_MESSAGE_ATTRIBUTES *send,
@@ -454,6 +474,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
     if (capacity > ~(data_size_t)0) return STATUS_INVALID_PARAMETER;
     if (send_msg && send_msg->TotalLength != sizeof(*send_msg) + send_msg->DataLength)
         return STATUS_INVALID_PARAMETER;
+    trace_message_data( "send", port_handle, send_msg );
 
     SERVER_START_REQ( alpc_send_receive )
     {
@@ -495,6 +516,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         SERVER_END_REQ;
         NtClose( wait_handle );
     }
+    if (!status) trace_message_data( "receive", port_handle, recv_msg );
     return status;
 }
 
