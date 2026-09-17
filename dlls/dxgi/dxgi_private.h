@@ -115,6 +115,8 @@ struct dxgi_factory
     IWineDXGIFactory IWineDXGIFactory_iface;
     LONG refcount;
     struct wined3d_private_store private_store;
+    CRITICAL_SECTION adapter_change_cs;
+    struct list adapter_change_notifications;
     struct wined3d *wined3d;
     BOOL extended;
     HWND device_window;

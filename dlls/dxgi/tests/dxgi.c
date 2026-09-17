@@ -7732,6 +7732,69 @@ static void test_factory_check_feature_support(void)
     ok(!ref_count, "Factory has %lu references left.\n", ref_count);
 }
 
+static void test_adapter_change_notification(void)
+{
+    IDXGIFactory7 *factory;
+    DWORD cookie, cookie2, cookie3;
+    HANDLE event, event2;
+    BOOL ret;
+    HRESULT hr;
+
+    if (!pCreateDXGIFactory2)
+    {
+        win_skip("CreateDXGIFactory2 not available.\n");
+        return;
+    }
+    if (FAILED(hr = pCreateDXGIFactory2(0, &IID_IDXGIFactory7, (void **)&factory)))
+    {
+        win_skip("IDXGIFactory7 not available, hr %#lx.\n", hr);
+        return;
+    }
+
+    event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    ok(!!event, "Failed to create event, error %lu.\n", GetLastError());
+
+    cookie = 0xdeadbeef;
+    hr = IDXGIFactory7_RegisterAdaptersChangedEvent(factory, NULL, &cookie);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#lx.\n", hr);
+    ok(cookie == 0xdeadbeef, "Cookie changed to %#lx.\n", cookie);
+    hr = IDXGIFactory7_RegisterAdaptersChangedEvent(factory, event, NULL);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#lx.\n", hr);
+
+    hr = IDXGIFactory7_RegisterAdaptersChangedEvent(factory, event, &cookie);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    cookie2 = 0xdeadbeef;
+    hr = IDXGIFactory7_RegisterAdaptersChangedEvent(factory, event, &cookie2);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#lx.\n", hr);
+    ok(cookie2 == 0xdeadbeef, "Cookie changed to %#lx.\n", cookie2);
+
+    ret = DuplicateHandle(GetCurrentProcess(), event, GetCurrentProcess(), &event2,
+            0, FALSE, DUPLICATE_SAME_ACCESS);
+    ok(ret, "Failed to duplicate event, error %lu.\n", GetLastError());
+    hr = IDXGIFactory7_RegisterAdaptersChangedEvent(factory, event2, &cookie2);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(cookie != cookie2, "Got duplicate cookie %#lx.\n", cookie);
+    ok(WaitForSingleObject(event, 0) == WAIT_TIMEOUT, "Event was unexpectedly signaled.\n");
+
+    CloseHandle(event2);
+
+    hr = IDXGIFactory7_UnregisterAdaptersChangedEvent(factory, cookie);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IDXGIFactory7_UnregisterAdaptersChangedEvent(factory, cookie);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#lx.\n", hr);
+    hr = IDXGIFactory7_UnregisterAdaptersChangedEvent(factory, cookie2);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = IDXGIFactory7_RegisterAdaptersChangedEvent(factory, event, &cookie3);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(cookie3 == cookie, "Expected reused cookie %#lx, got %#lx.\n", cookie, cookie3);
+    hr = IDXGIFactory7_UnregisterAdaptersChangedEvent(factory, cookie3);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    CloseHandle(event);
+    IDXGIFactory7_Release(factory);
+}
+
 static void test_frame_latency_event(IUnknown *device, BOOL is_d3d12)
 {
     static const struct
@@ -9087,6 +9150,7 @@ START_TEST(dxgi)
     queue_test(test_output_desc);
     queue_test(test_object_wrapping);
     queue_test(test_factory_check_feature_support);
+    queue_test(test_adapter_change_notification);
     queue_test(test_video_memory_budget_notification);
 
     run_queued_tests();

@@ -21,6 +21,14 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
+struct dxgi_adapter_change_notification
+{
+    struct list entry;
+    HANDLE source_event;
+    HANDLE event;
+    DWORD cookie;
+};
+
 static inline struct dxgi_factory *impl_from_IWineDXGIFactory(IWineDXGIFactory *iface)
 {
     return CONTAINING_RECORD(iface, struct dxgi_factory, IWineDXGIFactory_iface);
@@ -74,8 +82,21 @@ static ULONG STDMETHODCALLTYPE dxgi_factory_Release(IWineDXGIFactory *iface)
 
     if (!refcount)
     {
+        struct dxgi_adapter_change_notification *notification, *next;
+
         if (factory->device_window)
             DestroyWindow(factory->device_window);
+
+        EnterCriticalSection(&factory->adapter_change_cs);
+        LIST_FOR_EACH_ENTRY_SAFE(notification, next, &factory->adapter_change_notifications,
+                struct dxgi_adapter_change_notification, entry)
+        {
+            list_remove(&notification->entry);
+            CloseHandle(notification->event);
+            free(notification);
+        }
+        LeaveCriticalSection(&factory->adapter_change_cs);
+        DeleteCriticalSection(&factory->adapter_change_cs);
 
         wined3d_decref(factory->wined3d);
         wined3d_private_store_cleanup(&factory->private_store);
@@ -508,17 +529,81 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_EnumAdapterByGpuPreference(IWineDX
 static HRESULT STDMETHODCALLTYPE dxgi_factory_RegisterAdaptersChangedEvent(IWineDXGIFactory *iface,
         HANDLE event, DWORD *cookie)
 {
-    FIXME("iface %p, event %p, cookie %p stub!\n", iface, event, cookie);
+    struct dxgi_factory *factory = impl_from_IWineDXGIFactory(iface);
+    struct dxgi_adapter_change_notification *notification, *cursor;
+    struct list *insert_before = &factory->adapter_change_notifications;
+    DWORD next_cookie = 1;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, event %p, cookie %p.\n", iface, event, cookie);
+
+    if (!event || !cookie)
+        return DXGI_ERROR_INVALID_CALL;
+    if (!(notification = malloc(sizeof(*notification))))
+        return E_OUTOFMEMORY;
+
+    EnterCriticalSection(&factory->adapter_change_cs);
+
+    if (list_count(&factory->adapter_change_notifications) >= 0xffff)
+        goto failed;
+
+    LIST_FOR_EACH_ENTRY(cursor, &factory->adapter_change_notifications,
+            struct dxgi_adapter_change_notification, entry)
+    {
+        if (cursor->source_event == event)
+        {
+            LeaveCriticalSection(&factory->adapter_change_cs);
+            free(notification);
+            return DXGI_ERROR_INVALID_CALL;
+        }
+        if (cursor->cookie == next_cookie)
+            ++next_cookie;
+        else if (cursor->cookie > next_cookie && insert_before == &factory->adapter_change_notifications)
+            insert_before = &cursor->entry;
+    }
+
+    /* The registration owns a duplicate so the caller may close its handle before unregistering. */
+    if (!DuplicateHandle(GetCurrentProcess(), event, GetCurrentProcess(), &notification->event,
+            0, FALSE, DUPLICATE_SAME_ACCESS))
+        goto failed;
+
+    notification->source_event = event;
+    notification->cookie = next_cookie;
+    list_add_before(insert_before, &notification->entry);
+    *cookie = next_cookie;
+    LeaveCriticalSection(&factory->adapter_change_cs);
+
+    return S_OK;
+
+failed:
+    LeaveCriticalSection(&factory->adapter_change_cs);
+    free(notification);
+    return E_OUTOFMEMORY;
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_factory_UnregisterAdaptersChangedEvent(IWineDXGIFactory *iface,
         DWORD cookie)
 {
-    FIXME("iface %p, cookie %#lx stub!\n", iface, cookie);
+    struct dxgi_factory *factory = impl_from_IWineDXGIFactory(iface);
+    struct dxgi_adapter_change_notification *notification;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, cookie %#lx.\n", iface, cookie);
+
+    EnterCriticalSection(&factory->adapter_change_cs);
+    LIST_FOR_EACH_ENTRY(notification, &factory->adapter_change_notifications,
+            struct dxgi_adapter_change_notification, entry)
+    {
+        if (notification->cookie != cookie)
+            continue;
+
+        list_remove(&notification->entry);
+        LeaveCriticalSection(&factory->adapter_change_cs);
+        CloseHandle(notification->event);
+        free(notification);
+        return S_OK;
+    }
+    LeaveCriticalSection(&factory->adapter_change_cs);
+
+    return DXGI_ERROR_INVALID_CALL;
 }
 
 static const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl =
@@ -588,12 +673,15 @@ static HRESULT dxgi_factory_init(struct dxgi_factory *factory, BOOL extended)
     factory->IWineDXGIFactory_iface.lpVtbl = &dxgi_factory_vtbl;
     factory->refcount = 1;
     wined3d_private_store_init(&factory->private_store);
+    InitializeCriticalSection(&factory->adapter_change_cs);
+    list_init(&factory->adapter_change_notifications);
 
     wined3d_mutex_lock();
     factory->wined3d = wined3d_create(0);
     wined3d_mutex_unlock();
     if (!factory->wined3d)
     {
+        DeleteCriticalSection(&factory->adapter_change_cs);
         wined3d_private_store_cleanup(&factory->private_store);
         return DXGI_ERROR_UNSUPPORTED;
     }
