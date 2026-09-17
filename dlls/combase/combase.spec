@@ -298,7 +298,7 @@
 @ stub InternalStubInvoke
 @ stdcall InternalTlsAllocData(ptr)
 @ stub InternalUnmarshalObjRef
-@ stub IsErrorPropagationEnabled
+@ stdcall IsErrorPropagationEnabled()
 @ stub NdrExtStubInitialize
 @ stub NdrOleDllGetClassObject
 @ stub NdrpFindInterface

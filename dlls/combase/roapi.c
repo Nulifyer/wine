@@ -53,6 +53,15 @@ struct activatable_class_data
 };
 
 HRESULT package_get_class_path(const WCHAR *classid, WCHAR **path);
+BOOL WINAPI QuirkIsEnabled(void *quirk);
+
+/***********************************************************************
+ *      IsErrorPropagationEnabled (combase.@)
+ */
+BOOL WINAPI IsErrorPropagationEnabled(void)
+{
+    return !QuirkIsEnabled((void *)(ULONG_PTR)0x30000);
+}
 
 static HRESULT get_library_for_classid(const WCHAR *classid, WCHAR **out)
 {

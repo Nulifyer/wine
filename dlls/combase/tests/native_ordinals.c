@@ -24,6 +24,8 @@ typedef HRESULT (WINAPI *marshal_restricted_error_fn)(void *, void **);
 typedef HRESULT (WINAPI *unmarshal_restricted_error_fn)(void *, void *);
 typedef HRESULT (WINAPI *get_registration_store_context_fn)(UINT32, void *, UINT32, REFIID, void **);
 typedef HRESULT (WINAPI *ro_initialize_strict_fn)(UINT32);
+typedef BOOL (WINAPI *is_error_propagation_enabled_fn)(void);
+typedef BOOL (WINAPI *quirk_is_enabled_fn)(void *);
 
 struct apartment_test
 {
@@ -87,7 +89,10 @@ static void test_native_ordinals(void)
     unmarshal_restricted_error_fn unmarshal_error;
     get_registration_store_context_fn get_registration_store_context;
     ro_initialize_strict_fn ro_initialize_strict;
+    is_error_propagation_enabled_fn is_error_propagation_enabled;
+    quirk_is_enabled_fn quirk_is_enabled;
     HMODULE module = GetModuleHandleW(L"combase.dll");
+    HMODULE kernelbase = GetModuleHandleW(L"kernelbase.dll");
     FARPROC co_unmarshal_hresult, co_unmarshal_interface;
     FARPROC windows_inspect_string, windows_inspect_string2, windows_is_string_empty;
     void *output;
@@ -109,6 +114,8 @@ static void test_native_ordinals(void)
     windows_inspect_string = GetProcAddress(module, "WindowsInspectString");
     windows_inspect_string2 = GetProcAddress(module, "WindowsInspectString2");
     windows_is_string_empty = GetProcAddress(module, "WindowsIsStringEmpty");
+    is_error_propagation_enabled = (void *)GetProcAddress(module, "IsErrorPropagationEnabled");
+    quirk_is_enabled = kernelbase ? (void *)GetProcAddress(kernelbase, "QuirkIsEnabled") : NULL;
 
     ok(!!originate, "Ordinal 176 is unavailable.\n");
     ok(!!set_chain, "Ordinal 177 is unavailable.\n");
@@ -118,6 +125,8 @@ static void test_native_ordinals(void)
     ok(!!unmarshal_error, "Ordinal 166 is unavailable.\n");
     ok(!!get_registration_store_context, "Ordinal 153 is unavailable.\n");
     ok(!!ro_initialize_strict, "Ordinal 179 is unavailable.\n");
+    ok(!!is_error_propagation_enabled, "IsErrorPropagationEnabled is unavailable.\n");
+    ok(!!quirk_is_enabled, "QuirkIsEnabled is unavailable.\n");
     ok((void *)originate != (void *)GetProcAddress(module, "CoVrfReleaseThreadState"),
             "Ordinal 176 still resolves to CoVrfReleaseThreadState.\n");
     ok((void *)set_chain != (void *)GetProcAddress(module, "CoWaitForMultipleHandles"),
@@ -136,6 +145,10 @@ static void test_native_ordinals(void)
             "Ordinal 599 does not resolve to WindowsInspectString2.\n");
     ok(GetProcAddress(module, (const char *)600) == windows_is_string_empty,
             "Ordinal 600 does not resolve to WindowsIsStringEmpty.\n");
+
+    if (is_error_propagation_enabled && quirk_is_enabled)
+        ok(is_error_propagation_enabled() == !quirk_is_enabled((void *)(ULONG_PTR)0x30000),
+                "Error propagation state does not match quirk 0x30000.\n");
 
     if (ro_initialize_strict)
     {
