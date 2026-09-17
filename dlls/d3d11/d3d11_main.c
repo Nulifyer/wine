@@ -138,6 +138,9 @@ HRESULT WINAPI D3D11CoreCreateDevice(IDXGIFactory *factory, IDXGIAdapter *adapte
         return E_FAIL;
     }
     d3d_device->d3d11_only = TRUE;
+    d3d_device->d3d11_device = TRUE;
+    d3d_device->creation_flags = flags;
+    d3d_device->immediate_context.multithread_protected = FALSE;
 
     return S_OK;
 }

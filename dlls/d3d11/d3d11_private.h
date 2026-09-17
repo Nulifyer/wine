@@ -556,6 +556,7 @@ struct d3d11_device_context
     ID3D11VideoContext ID3D11VideoContext_iface;
     ID3DUserDefinedAnnotation ID3DUserDefinedAnnotation_iface;
     LONG refcount;
+    LONG multithread_protected;
 
     D3D11_DEVICE_CONTEXT_TYPE type;
     struct wined3d_device_context *wined3d_context;
@@ -571,12 +572,18 @@ struct d3d_device
     ID3D11Device5 ID3D11Device5_iface;
     ID3D10Device1 ID3D10Device1_iface;
     ID3D10Multithread ID3D10Multithread_iface;
+    IUnknown ID3D11DeviceInternal_iface;
+    IUnknown ID3D11DeviceFlushCount_iface;
     IWineDXGIDeviceParent IWineDXGIDeviceParent_iface;
     ID3D11VideoDevice1 ID3D11VideoDevice1_iface;
     IUnknown *outer_unk;
     LONG refcount;
 
     BOOL d3d11_only;
+    BOOL d3d11_device;
+    UINT creation_flags;
+    LONG guard_rectangle_support_count;
+    LONG64 conservative_flush_count;
 
     struct d3d_device_context_state *state;
     struct d3d11_device_context immediate_context;

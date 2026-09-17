@@ -48,6 +48,55 @@ static BOOL enable_debug_layer;
 static BOOL use_warp_adapter;
 static BOOL use_mt = TRUE;
 
+static const GUID IID_ID3D11DeviceInternal =
+        {0x26c5dc23, 0xe49c, 0x4b0a, {0x8f, 0x79, 0xe7, 0xb1, 0xac, 0x80, 0x4d, 0x32}};
+static const GUID IID_ID3D11DeviceFlushCount =
+        {0xb79cc8da, 0x337f, 0x400f, {0xb0, 0x9d, 0xb2, 0xed, 0xf8, 0xa8, 0x4e, 0x47}};
+
+struct device_internal;
+
+struct device_internal_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(struct device_internal *iface, REFIID iid, void **out);
+    ULONG (STDMETHODCALLTYPE *AddRef)(struct device_internal *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(struct device_internal *iface);
+    HRESULT (STDMETHODCALLTYPE *BeginGuardRectangleSupport)(struct device_internal *iface);
+    void (STDMETHODCALLTYPE *EndGuardRectangleSupport)(struct device_internal *iface);
+    HRESULT (STDMETHODCALLTYPE *CreateGuardableTexture2D)(struct device_internal *iface,
+            const D3D11_TEXTURE2D_DESC *desc, const D3D11_SUBRESOURCE_DATA *data, ID3D11Texture2D **texture);
+    void (STDMETHODCALLTYPE *SetGuardRect)(struct device_internal *iface,
+            ID3D11Texture2D *texture, const RECT *rect);
+    void (STDMETHODCALLTYPE *SetEmptyGuardRect)(struct device_internal *iface, ID3D11Texture2D *texture);
+    void (STDMETHODCALLTYPE *SetUnguarded)(struct device_internal *iface, ID3D11Texture2D *texture);
+    void *OfferResourcesInternal;
+    void *ReclaimResourcesInternal;
+    void *GetPartnerCaps;
+    void *CreateCompositionBuffer;
+    void *PresentCompositionBuffers;
+    void (STDMETHODCALLTYPE *GetGuardRect)(struct device_internal *iface,
+            ID3D11Texture2D *texture, BOOL *guarded, RECT *rect);
+};
+
+struct device_internal
+{
+    const struct device_internal_vtbl *lpVtbl;
+};
+
+struct device_flush_count;
+
+struct device_flush_count_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(struct device_flush_count *iface, REFIID iid, void **out);
+    ULONG (STDMETHODCALLTYPE *AddRef)(struct device_flush_count *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(struct device_flush_count *iface);
+    UINT64 (STDMETHODCALLTYPE *ConservativeFlushCount)(struct device_flush_count *iface);
+};
+
+struct device_flush_count
+{
+    const struct device_flush_count_vtbl *lpVtbl;
+};
+
 static struct test_entry
 {
     union
@@ -2355,7 +2404,7 @@ static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
     HRESULT hr;
 
     device_desc.feature_level = &feature_level;
-    device_desc.flags = 0;
+    device_desc.flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
     if (!(device = create_device(&device_desc)))
     {
         skip("Failed to create device.\n");
@@ -2375,6 +2424,11 @@ static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
     check_interface(device, &IID_ID3D10Device, FALSE, FALSE);
     check_interface(device, &IID_ID3D10Device1, FALSE, FALSE);
     check_interface(device, &IID_ID3D11InfoQueue, enable_debug_layer, FALSE);
+    check_interface(device, &IID_ID3D11Multithread, TRUE, TRUE); /* Not available on all Windows versions. */
+    check_interface(device, &IID_ID3D11DeviceInternal, TRUE, TRUE); /* Private and version-dependent. */
+    check_interface(device, &IID_ID3D11DeviceFlushCount, TRUE, TRUE); /* Private and version-dependent. */
+    ok(ID3D11Device_GetCreationFlags(device) == device_desc.flags, "Got unexpected creation flags %#x.\n",
+            ID3D11Device_GetCreationFlags(device));
 
     hr = ID3D11Device_QueryInterface(device, &IID_IDXGIDevice, (void **)&dxgi_device);
     ok(SUCCEEDED(hr), "Device should implement IDXGIDevice.\n");
@@ -2407,6 +2461,182 @@ static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
 
     refcount = ID3D11Device_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
+}
+
+static void test_native_d2d_device_contracts(void)
+{
+    ID3D11Multithread *device_multithread, *context_multithread;
+    D3D11_TEXTURE2D_DESC texture_desc = {0};
+    struct device_flush_count *flush_count;
+    struct device_internal *device_internal;
+    IUnknown *device_identity, *private_identity;
+    ID3DDeviceContextState *context_state;
+    ID3D11Texture2D *texture;
+    ID3D11DeviceContext *context;
+    D3D_FEATURE_LEVEL feature_level;
+    ID3D11Device1 *device1;
+    ID3D11Device *device;
+    RECT rect, returned_rect;
+    UINT64 count, new_count;
+    BOOL enabled, guarded;
+    HRESULT hr;
+
+    if (!(device = create_device(NULL)))
+    {
+        skip("Failed to create device.\n");
+        return;
+    }
+
+    hr = ID3D11Device_QueryInterface(device, &IID_ID3D11DeviceInternal, (void **)&device_internal);
+    if (FAILED(hr))
+    {
+        win_skip("Private D3D11 device interface is not supported.\n");
+        goto done;
+    }
+
+    hr = ID3D11Device_QueryInterface(device, &IID_IUnknown, (void **)&device_identity);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = device_internal->lpVtbl->QueryInterface(device_internal, &IID_IUnknown, (void **)&private_identity);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(private_identity == device_identity, "Got different device identities %p and %p.\n",
+            private_identity, device_identity);
+    IUnknown_Release(private_identity);
+    IUnknown_Release(device_identity);
+
+    texture_desc.Width = 16;
+    texture_desc.Height = 16;
+    texture_desc.MipLevels = 1;
+    texture_desc.ArraySize = 1;
+    texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.Usage = D3D11_USAGE_DEFAULT;
+    texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    texture = (ID3D11Texture2D *)0xdeadbeef;
+    hr = device_internal->lpVtbl->CreateGuardableTexture2D(device_internal,
+            &texture_desc, NULL, &texture);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!texture, "Got unexpected texture %p.\n", texture);
+
+    hr = device_internal->lpVtbl->BeginGuardRectangleSupport(device_internal);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = device_internal->lpVtbl->BeginGuardRectangleSupport(device_internal);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    device_internal->lpVtbl->EndGuardRectangleSupport(device_internal);
+
+    texture_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    texture = (ID3D11Texture2D *)0xdeadbeef;
+    hr = device_internal->lpVtbl->CreateGuardableTexture2D(device_internal,
+            &texture_desc, NULL, &texture);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!texture, "Got unexpected texture %p.\n", texture);
+    texture_desc.CPUAccessFlags = 0;
+
+    hr = device_internal->lpVtbl->CreateGuardableTexture2D(device_internal,
+            &texture_desc, NULL, &texture);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        SetRect(&rect, 0, 0, 16, 4);
+        device_internal->lpVtbl->SetGuardRect(device_internal, texture, &rect);
+        guarded = FALSE;
+        SetRectEmpty(&returned_rect);
+        device_internal->lpVtbl->GetGuardRect(device_internal, texture, &guarded, &returned_rect);
+        ok(guarded, "Expected a guarded texture.\n");
+        ok(EqualRect(&returned_rect, &rect), "Got unexpected guard rect %s.\n",
+                wine_dbgstr_rect(&returned_rect));
+
+        device_internal->lpVtbl->SetEmptyGuardRect(device_internal, texture);
+        guarded = TRUE;
+        SetRect(&returned_rect, 1, 1, 2, 2);
+        device_internal->lpVtbl->GetGuardRect(device_internal, texture, &guarded, &returned_rect);
+        ok(!guarded, "Expected an empty guard rect to be reported as unguarded.\n");
+        ok(IsRectEmpty(&returned_rect), "Got unexpected guard rect %s.\n",
+                wine_dbgstr_rect(&returned_rect));
+
+        device_internal->lpVtbl->SetGuardRect(device_internal, texture, &rect);
+        device_internal->lpVtbl->SetUnguarded(device_internal, texture);
+        guarded = TRUE;
+        device_internal->lpVtbl->GetGuardRect(device_internal, texture, &guarded, NULL);
+        ok(!guarded, "Expected an unguarded texture.\n");
+        ID3D11Texture2D_Release(texture);
+    }
+    device_internal->lpVtbl->EndGuardRectangleSupport(device_internal);
+
+    texture = (ID3D11Texture2D *)0xdeadbeef;
+    hr = device_internal->lpVtbl->CreateGuardableTexture2D(device_internal,
+            &texture_desc, NULL, &texture);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!texture, "Got unexpected texture %p.\n", texture);
+    device_internal->lpVtbl->Release(device_internal);
+
+    hr = ID3D11Device_QueryInterface(device, &IID_ID3D11Device1, (void **)&device1);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        feature_level = ID3D11Device_GetFeatureLevel(device);
+        hr = ID3D11Device1_CreateDeviceContextState(device1, 0, &feature_level, 1,
+                D3D11_SDK_VERSION, &IID_ID3D11Device3, NULL, &context_state);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        if (SUCCEEDED(hr))
+        {
+            hr = ID3D11Device_QueryInterface(device, &IID_ID3D11DeviceInternal,
+                    (void **)&device_internal);
+            ok(hr == S_OK, "Private interface disappeared after context-state creation, hr %#lx.\n", hr);
+            if (SUCCEEDED(hr))
+                IUnknown_Release(device_internal);
+            hr = ID3D11Device_QueryInterface(device, &IID_ID3D11DeviceFlushCount,
+                    (void **)&flush_count);
+            ok(hr == S_OK, "Flush-count interface disappeared after context-state creation, hr %#lx.\n", hr);
+            if (SUCCEEDED(hr))
+                flush_count->lpVtbl->Release(flush_count);
+            ID3DDeviceContextState_Release(context_state);
+        }
+        ID3D11Device1_Release(device1);
+    }
+
+    hr = ID3D11Device_QueryInterface(device, &IID_ID3D11Multithread, (void **)&device_multithread);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        hr = ID3D11Multithread_QueryInterface(device_multithread, &IID_IUnknown, (void **)&private_identity);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID3D11Device_QueryInterface(device, &IID_IUnknown, (void **)&device_identity);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(private_identity == device_identity, "Got different multithread identities %p and %p.\n",
+                private_identity, device_identity);
+        IUnknown_Release(device_identity);
+        IUnknown_Release(private_identity);
+
+        ID3D11Device_GetImmediateContext(device, &context);
+        hr = ID3D11DeviceContext_QueryInterface(context, &IID_ID3D11Multithread,
+                (void **)&context_multithread);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        enabled = ID3D11Multithread_SetMultithreadProtected(device_multithread, TRUE);
+        ok(!enabled, "Got unexpected previous multithread state %#x.\n", enabled);
+        enabled = ID3D11Multithread_GetMultithreadProtected(context_multithread);
+        ok(enabled, "Multithread state was not shared with the immediate context.\n");
+        enabled = ID3D11Multithread_SetMultithreadProtected(context_multithread, FALSE);
+        ok(enabled, "Got unexpected previous multithread state %#x.\n", enabled);
+        ID3D11Multithread_Release(context_multithread);
+        ID3D11DeviceContext_Release(context);
+        ID3D11Multithread_Release(device_multithread);
+    }
+
+    hr = ID3D11Device_QueryInterface(device, &IID_ID3D11DeviceFlushCount, (void **)&flush_count);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        count = flush_count->lpVtbl->ConservativeFlushCount(flush_count);
+        ID3D11Device_GetImmediateContext(device, &context);
+        ID3D11DeviceContext_Flush(context);
+        new_count = flush_count->lpVtbl->ConservativeFlushCount(flush_count);
+        ok(new_count > count, "Flush count did not advance from %s.\n", wine_dbgstr_longlong(count));
+        ID3D11DeviceContext_Release(context);
+        flush_count->lpVtbl->Release(flush_count);
+    }
+
+done:
+    ID3D11Device_Release(device);
 }
 
 static void test_immediate_context(void)
@@ -2532,7 +2762,7 @@ static void test_immediate_context(void)
     ok(refcount == expected_refcount, "Got refcount %lu, expected %lu.\n", refcount, expected_refcount);
 
     enabled = ID3D11Multithread_GetMultithreadProtected(multithread);
-    todo_wine ok(!enabled, "Multithread protection is %#x.\n", enabled);
+    ok(!enabled, "Multithread protection is %#x.\n", enabled);
 
     ID3D11Multithread_Release(multithread);
 
@@ -37699,6 +37929,7 @@ START_TEST(d3d11)
 
     queue_test(test_create_device);
     queue_for_each_feature_level(test_device_interfaces);
+    queue_test(test_native_d2d_device_contracts);
     queue_test(test_immediate_context);
     queue_test(test_create_deferred_context);
     queue_test(test_create_texture1d);

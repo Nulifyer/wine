@@ -21,6 +21,63 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d11);
 
+static const GUID IID_ID3D11DeviceInternal =
+        {0x26c5dc23, 0xe49c, 0x4b0a, {0x8f, 0x79, 0xe7, 0xb1, 0xac, 0x80, 0x4d, 0x32}};
+static const GUID IID_ID3D11DeviceFlushCount =
+        {0xb79cc8da, 0x337f, 0x400f, {0xb0, 0x9d, 0xb2, 0xed, 0xf8, 0xa8, 0x4e, 0x47}};
+static const GUID d3d11_guard_rect_state_guid =
+        {0x9c84b616, 0x366a, 0x4f7b, {0xb0, 0x0b, 0x9a, 0x35, 0x2c, 0xc7, 0x90, 0x4e}};
+
+struct d3d11_guard_rect_state
+{
+    BOOL guarded;
+    RECT rect;
+};
+
+struct d3d11_device_internal_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(IUnknown *iface, REFIID iid, void **out);
+    ULONG (STDMETHODCALLTYPE *AddRef)(IUnknown *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(IUnknown *iface);
+    HRESULT (STDMETHODCALLTYPE *BeginGuardRectangleSupport)(IUnknown *iface);
+    void (STDMETHODCALLTYPE *EndGuardRectangleSupport)(IUnknown *iface);
+    HRESULT (STDMETHODCALLTYPE *CreateGuardableTexture2D)(IUnknown *iface,
+            const D3D11_TEXTURE2D_DESC *desc, const D3D11_SUBRESOURCE_DATA *data, ID3D11Texture2D **texture);
+    void (STDMETHODCALLTYPE *SetGuardRect)(IUnknown *iface, ID3D11Texture2D *texture, const RECT *rect);
+    void (STDMETHODCALLTYPE *SetEmptyGuardRect)(IUnknown *iface, ID3D11Texture2D *texture);
+    void (STDMETHODCALLTYPE *SetUnguarded)(IUnknown *iface, ID3D11Texture2D *texture);
+    HRESULT (STDMETHODCALLTYPE *OfferResourcesInternal)(IUnknown *iface, UINT resource_count,
+            IDXGIResource *const *resources, DXGI_OFFER_RESOURCE_PRIORITY priority, UINT flags);
+    HRESULT (STDMETHODCALLTYPE *ReclaimResourcesInternal)(IUnknown *iface, UINT resource_count,
+            IDXGIResource *const *resources, void *results);
+    UINT (STDMETHODCALLTYPE *GetPartnerCaps)(IUnknown *iface);
+    HRESULT (STDMETHODCALLTYPE *CreateCompositionBuffer)(IUnknown *iface, UINT width, UINT height,
+            DXGI_FORMAT format, BOOL stereo, UINT buffer_count, UINT flags, REFIID iid,
+            void **buffer, void **resource);
+    HRESULT (STDMETHODCALLTYPE *PresentCompositionBuffers)(IUnknown *iface,
+            void *present_data, IUnknown **buffers, UINT buffer_count);
+    void (STDMETHODCALLTYPE *GetGuardRect)(IUnknown *iface, ID3D11Texture2D *texture,
+            BOOL *guarded, RECT *rect);
+    HRESULT (STDMETHODCALLTYPE *CreateSynchronizedChannel)(IUnknown *iface, void **channel);
+    HRESULT (STDMETHODCALLTYPE *OpenSynchronizedChannel)(IUnknown *iface, void *handle, void **channel);
+    HRESULT (STDMETHODCALLTYPE *PresentFlipManagerToken)(IUnknown *iface, void *token,
+            UINT64 present_id, UINT64 target_time, UINT flags, UINT sync_interval,
+            IUnknown **present, UINT present_count);
+    HRESULT (STDMETHODCALLTYPE *CancelFlipManagerPresent)(IUnknown *iface,
+            LUID adapter_luid, UINT64 present_id, UINT64 target_time);
+    HRESULT (STDMETHODCALLTYPE *EnableVariableRefreshForProcess)(IUnknown *iface);
+    HRESULT (STDMETHODCALLTYPE *FlushCompletedPresents)(IUnknown *iface,
+            LUID adapter_luid, void *completion_data);
+};
+
+struct d3d11_device_flush_count_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(IUnknown *iface, REFIID iid, void **out);
+    ULONG (STDMETHODCALLTYPE *AddRef)(IUnknown *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(IUnknown *iface);
+    UINT64 (STDMETHODCALLTYPE *ConservativeFlushCount)(IUnknown *iface);
+};
+
 static BOOL d3d_array_reserve(void **elements, SIZE_T *capacity, SIZE_T count, SIZE_T size)
 {
     SIZE_T max_capacity, new_capacity;
@@ -2676,6 +2733,7 @@ static void STDMETHODCALLTYPE d3d11_device_context_Flush(ID3D11DeviceContext4 *i
     TRACE("iface %p.\n", iface);
 
     wined3d_device_context_flush(context->wined3d_context);
+    InterlockedIncrement64(&context->device->conservative_flush_count);
 }
 
 static D3D11_DEVICE_CONTEXT_TYPE STDMETHODCALLTYPE d3d11_device_context_GetType(ID3D11DeviceContext4 *iface)
@@ -3056,7 +3114,12 @@ static void STDMETHODCALLTYPE d3d11_device_context_EndEvent(ID3D11DeviceContext4
 static void STDMETHODCALLTYPE d3d11_device_context_Flush1(ID3D11DeviceContext4 *iface,
         D3D11_CONTEXT_TYPE type, HANDLE event)
 {
-    FIXME("iface %p, type %d, event %p stub!\n", iface, type, event);
+    struct d3d11_device_context *context = impl_from_ID3D11DeviceContext4(iface);
+
+    FIXME("iface %p, type %d, event %p semi-stub!\n", iface, type, event);
+
+    wined3d_device_context_flush(context->wined3d_context);
+    InterlockedIncrement64(&context->device->conservative_flush_count);
 }
 
 static void STDMETHODCALLTYPE d3d11_device_context_SetHardwareProtectionState(ID3D11DeviceContext4 *iface,
@@ -3901,16 +3964,20 @@ static void STDMETHODCALLTYPE d3d11_multithread_Leave(ID3D11Multithread *iface)
 static BOOL STDMETHODCALLTYPE d3d11_multithread_SetMultithreadProtected(
         ID3D11Multithread *iface, BOOL enable)
 {
-    FIXME("iface %p, enable %#x stub!\n", iface, enable);
+    struct d3d11_device_context *context = impl_from_ID3D11Multithread(iface);
 
-    return TRUE;
+    TRACE("iface %p, enable %#x.\n", iface, enable);
+
+    return InterlockedExchange(&context->multithread_protected, !!enable);
 }
 
 static BOOL STDMETHODCALLTYPE d3d11_multithread_GetMultithreadProtected(ID3D11Multithread *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d11_device_context *context = impl_from_ID3D11Multithread(iface);
 
-    return TRUE;
+    TRACE("iface %p.\n", iface);
+
+    return InterlockedCompareExchange(&context->multithread_protected, 0, 0);
 }
 
 static const struct ID3D11MultithreadVtbl d3d11_multithread_vtbl =
@@ -4006,6 +4073,7 @@ static void d3d11_device_context_init(struct d3d11_device_context *context, stru
     context->ID3D11VideoContext_iface.lpVtbl = &d3d11_video_context_vtbl;
     context->ID3DUserDefinedAnnotation_iface.lpVtbl = &d3d11_user_defined_annotation_vtbl;
     context->refcount = 1;
+    context->multithread_protected = FALSE;
     context->type = type;
 
     context->device = device;
@@ -5079,9 +5147,11 @@ static D3D_FEATURE_LEVEL STDMETHODCALLTYPE d3d11_device_GetFeatureLevel(ID3D11De
 
 static UINT STDMETHODCALLTYPE d3d11_device_GetCreationFlags(ID3D11Device5 *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    return device->creation_flags;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_GetDeviceRemovedReason(ID3D11Device5 *iface)
@@ -5514,6 +5584,329 @@ static const struct ID3D11Device5Vtbl d3d11_device_vtbl =
     d3d11_device_CreateFence,
 };
 
+/* Private device contracts used by native Direct2D. The interface layout is
+ * present in current Windows d3d11 symbols, but guard rectangles, composition
+ * buffers, and flip-manager operations do not have wined3d implementations. */
+
+static inline struct d3d_device *impl_from_ID3D11DeviceInternal(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d_device, ID3D11DeviceInternal_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_QueryInterface(IUnknown *iface,
+        REFIID iid, void **out)
+{
+    struct d3d_device *device = impl_from_ID3D11DeviceInternal(iface);
+
+    return IUnknown_QueryInterface(device->outer_unk, iid, out);
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_device_internal_AddRef(IUnknown *iface)
+{
+    struct d3d_device *device = impl_from_ID3D11DeviceInternal(iface);
+
+    return IUnknown_AddRef(device->outer_unk);
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_device_internal_Release(IUnknown *iface)
+{
+    struct d3d_device *device = impl_from_ID3D11DeviceInternal(iface);
+
+    return IUnknown_Release(device->outer_unk);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_BeginGuardRectangleSupport(IUnknown *iface)
+{
+    struct d3d_device *device = impl_from_ID3D11DeviceInternal(iface);
+
+    TRACE("iface %p.\n", iface);
+
+    InterlockedIncrement(&device->guard_rectangle_support_count);
+    return S_OK;
+}
+
+static void STDMETHODCALLTYPE d3d11_device_internal_EndGuardRectangleSupport(IUnknown *iface)
+{
+    struct d3d_device *device = impl_from_ID3D11DeviceInternal(iface);
+    LONG count;
+
+    TRACE("iface %p.\n", iface);
+
+    do
+    {
+        if (!(count = InterlockedCompareExchange(&device->guard_rectangle_support_count, 0, 0)))
+        {
+            WARN("Unbalanced EndGuardRectangleSupport call.\n");
+            return;
+        }
+    } while (InterlockedCompareExchange(&device->guard_rectangle_support_count, count - 1, count) != count);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_CreateGuardableTexture2D(IUnknown *iface,
+        const D3D11_TEXTURE2D_DESC *desc, const D3D11_SUBRESOURCE_DATA *data, ID3D11Texture2D **texture)
+{
+    struct d3d_device *device = impl_from_ID3D11DeviceInternal(iface);
+    struct d3d11_guard_rect_state state = {0};
+    HRESULT hr;
+
+    TRACE("iface %p, desc %p, data %p, texture %p.\n", iface, desc, data, texture);
+
+    if (!desc || !texture)
+        return E_INVALIDARG;
+    *texture = NULL;
+
+    /* Windows only admits default-usage textures without CPU access, decoder,
+     * or video-encoder bindings. Its guard rectangles alter driver rasterizer
+     * state; Wine keeps equivalent per-texture metadata and uses a normal
+     * texture until wined3d has a native guard-rectangle mechanism. */
+    if (desc->Usage != D3D11_USAGE_DEFAULT || desc->CPUAccessFlags
+            || (desc->BindFlags & (D3D11_BIND_DECODER | D3D11_BIND_VIDEO_ENCODER)))
+        return E_INVALIDARG;
+    if (InterlockedCompareExchange(&device->guard_rectangle_support_count, 0, 0) <= 0)
+        return E_INVALIDARG;
+
+    if (FAILED(hr = ID3D11Device5_CreateTexture2D(&device->ID3D11Device5_iface, desc, data, texture)))
+        return hr;
+
+    if (FAILED(hr = ID3D11Texture2D_SetPrivateData(*texture,
+            &d3d11_guard_rect_state_guid, sizeof(state), &state)))
+    {
+        ID3D11Texture2D_Release(*texture);
+        *texture = NULL;
+        return hr;
+    }
+
+    return S_OK;
+}
+
+static void STDMETHODCALLTYPE d3d11_device_internal_SetGuardRect(IUnknown *iface,
+        ID3D11Texture2D *texture, const RECT *rect)
+{
+    struct d3d11_guard_rect_state state;
+
+    TRACE("iface %p, texture %p, rect %s.\n", iface, texture, wine_dbgstr_rect(rect));
+
+    if (!texture || !rect)
+        return;
+
+    state.guarded = TRUE;
+    state.rect = *rect;
+    ID3D11Texture2D_SetPrivateData(texture, &d3d11_guard_rect_state_guid, sizeof(state), &state);
+}
+
+static void STDMETHODCALLTYPE d3d11_device_internal_SetEmptyGuardRect(IUnknown *iface,
+        ID3D11Texture2D *texture)
+{
+    struct d3d11_guard_rect_state state = {0};
+
+    TRACE("iface %p, texture %p.\n", iface, texture);
+
+    if (texture)
+        ID3D11Texture2D_SetPrivateData(texture, &d3d11_guard_rect_state_guid, sizeof(state), &state);
+}
+
+static void STDMETHODCALLTYPE d3d11_device_internal_SetUnguarded(IUnknown *iface,
+        ID3D11Texture2D *texture)
+{
+    struct d3d11_guard_rect_state state = {0};
+
+    TRACE("iface %p, texture %p.\n", iface, texture);
+
+    if (texture)
+        ID3D11Texture2D_SetPrivateData(texture, &d3d11_guard_rect_state_guid, sizeof(state), &state);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_OfferResourcesInternal(IUnknown *iface,
+        UINT resource_count, IDXGIResource *const *resources, DXGI_OFFER_RESOURCE_PRIORITY priority, UINT flags)
+{
+    FIXME("iface %p, resource_count %u, resources %p, priority %u, flags %#x stub!\n",
+            iface, resource_count, resources, priority, flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_ReclaimResourcesInternal(IUnknown *iface,
+        UINT resource_count, IDXGIResource *const *resources, void *results)
+{
+    FIXME("iface %p, resource_count %u, resources %p, results %p stub!\n",
+            iface, resource_count, resources, results);
+
+    return E_NOTIMPL;
+}
+
+static UINT STDMETHODCALLTYPE d3d11_device_internal_GetPartnerCaps(IUnknown *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+
+    return 0;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_CreateCompositionBuffer(IUnknown *iface,
+        UINT width, UINT height, DXGI_FORMAT format, BOOL stereo, UINT buffer_count, UINT flags,
+        REFIID iid, void **buffer, void **resource)
+{
+    FIXME("iface %p, width %u, height %u, format %s, stereo %#x, buffer_count %u, flags %#x, "
+            "iid %s, buffer %p, resource %p stub!\n", iface, width, height, debug_dxgi_format(format),
+            stereo, buffer_count, flags, debugstr_guid(iid), buffer, resource);
+
+    if (buffer)
+        *buffer = NULL;
+    if (resource)
+        *resource = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_PresentCompositionBuffers(IUnknown *iface,
+        void *present_data, IUnknown **buffers, UINT buffer_count)
+{
+    FIXME("iface %p, present_data %p, buffers %p, buffer_count %u stub!\n",
+            iface, present_data, buffers, buffer_count);
+
+    return E_NOTIMPL;
+}
+
+static void STDMETHODCALLTYPE d3d11_device_internal_GetGuardRect(IUnknown *iface,
+        ID3D11Texture2D *texture, BOOL *guarded, RECT *rect)
+{
+    struct d3d11_guard_rect_state state = {0};
+    UINT size = sizeof(state);
+
+    TRACE("iface %p, texture %p, guarded %p, rect %p.\n", iface, texture, guarded, rect);
+
+    if (texture)
+        ID3D11Texture2D_GetPrivateData(texture, &d3d11_guard_rect_state_guid, &size, &state);
+    if (guarded)
+        *guarded = state.guarded;
+    if (rect)
+        *rect = state.rect;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_CreateSynchronizedChannel(IUnknown *iface,
+        void **channel)
+{
+    FIXME("iface %p, channel %p stub!\n", iface, channel);
+
+    if (channel)
+        *channel = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_OpenSynchronizedChannel(IUnknown *iface,
+        void *handle, void **channel)
+{
+    FIXME("iface %p, handle %p, channel %p stub!\n", iface, handle, channel);
+
+    if (channel)
+        *channel = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_PresentFlipManagerToken(IUnknown *iface,
+        void *token, UINT64 present_id, UINT64 target_time, UINT flags, UINT sync_interval,
+        IUnknown **present, UINT present_count)
+{
+    FIXME("iface %p, token %p, present_id %s, target_time %s, flags %#x, sync_interval %u, "
+            "present %p, present_count %u stub!\n", iface, token, wine_dbgstr_longlong(present_id),
+            wine_dbgstr_longlong(target_time), flags, sync_interval, present, present_count);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_CancelFlipManagerPresent(IUnknown *iface,
+        LUID adapter_luid, UINT64 present_id, UINT64 target_time)
+{
+    FIXME("iface %p, adapter_luid %08lx:%08lx, present_id %s, target_time %s stub!\n",
+            iface, adapter_luid.HighPart, adapter_luid.LowPart, wine_dbgstr_longlong(present_id),
+            wine_dbgstr_longlong(target_time));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_EnableVariableRefreshForProcess(IUnknown *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_internal_FlushCompletedPresents(IUnknown *iface,
+        LUID adapter_luid, void *completion_data)
+{
+    FIXME("iface %p, adapter_luid %08lx:%08lx, completion_data %p stub!\n",
+            iface, adapter_luid.HighPart, adapter_luid.LowPart, completion_data);
+
+    return E_NOTIMPL;
+}
+
+static const struct d3d11_device_internal_vtbl d3d11_device_internal_vtbl =
+{
+    d3d11_device_internal_QueryInterface,
+    d3d11_device_internal_AddRef,
+    d3d11_device_internal_Release,
+    d3d11_device_internal_BeginGuardRectangleSupport,
+    d3d11_device_internal_EndGuardRectangleSupport,
+    d3d11_device_internal_CreateGuardableTexture2D,
+    d3d11_device_internal_SetGuardRect,
+    d3d11_device_internal_SetEmptyGuardRect,
+    d3d11_device_internal_SetUnguarded,
+    d3d11_device_internal_OfferResourcesInternal,
+    d3d11_device_internal_ReclaimResourcesInternal,
+    d3d11_device_internal_GetPartnerCaps,
+    d3d11_device_internal_CreateCompositionBuffer,
+    d3d11_device_internal_PresentCompositionBuffers,
+    d3d11_device_internal_GetGuardRect,
+    d3d11_device_internal_CreateSynchronizedChannel,
+    d3d11_device_internal_OpenSynchronizedChannel,
+    d3d11_device_internal_PresentFlipManagerToken,
+    d3d11_device_internal_CancelFlipManagerPresent,
+    d3d11_device_internal_EnableVariableRefreshForProcess,
+    d3d11_device_internal_FlushCompletedPresents,
+};
+
+static inline struct d3d_device *impl_from_ID3D11DeviceFlushCount(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d_device, ID3D11DeviceFlushCount_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_device_flush_count_QueryInterface(IUnknown *iface,
+        REFIID iid, void **out)
+{
+    struct d3d_device *device = impl_from_ID3D11DeviceFlushCount(iface);
+
+    return IUnknown_QueryInterface(device->outer_unk, iid, out);
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_device_flush_count_AddRef(IUnknown *iface)
+{
+    struct d3d_device *device = impl_from_ID3D11DeviceFlushCount(iface);
+
+    return IUnknown_AddRef(device->outer_unk);
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_device_flush_count_Release(IUnknown *iface)
+{
+    struct d3d_device *device = impl_from_ID3D11DeviceFlushCount(iface);
+
+    return IUnknown_Release(device->outer_unk);
+}
+
+static UINT64 STDMETHODCALLTYPE d3d11_device_flush_count_ConservativeFlushCount(IUnknown *iface)
+{
+    struct d3d_device *device = impl_from_ID3D11DeviceFlushCount(iface);
+
+    TRACE("iface %p.\n", iface);
+
+    return InterlockedCompareExchange64(&device->conservative_flush_count, 0, 0);
+}
+
+static const struct d3d11_device_flush_count_vtbl d3d11_device_flush_count_vtbl =
+{
+    d3d11_device_flush_count_QueryInterface,
+    d3d11_device_flush_count_AddRef,
+    d3d11_device_flush_count_Release,
+    d3d11_device_flush_count_ConservativeFlushCount,
+};
+
 /* Inner IUnknown methods */
 
 static inline struct d3d_device *impl_from_IUnknown(IUnknown *iface)
@@ -5546,6 +5939,14 @@ static HRESULT STDMETHODCALLTYPE d3d_device_inner_QueryInterface(IUnknown *iface
     else if (IsEqualGUID(riid, &IID_ID3D10Multithread))
     {
         *out = &device->ID3D10Multithread_iface;
+    }
+    else if (device->d3d11_device && IsEqualGUID(riid, &IID_ID3D11DeviceInternal))
+    {
+        *out = &device->ID3D11DeviceInternal_iface;
+    }
+    else if (device->d3d11_device && IsEqualGUID(riid, &IID_ID3D11DeviceFlushCount))
+    {
+        *out = &device->ID3D11DeviceFlushCount_iface;
     }
     else if (IsEqualGUID(riid, &IID_IWineDXGIDeviceParent))
     {
@@ -7705,16 +8106,20 @@ static void STDMETHODCALLTYPE d3d10_multithread_Leave(ID3D10Multithread *iface)
 
 static BOOL STDMETHODCALLTYPE d3d10_multithread_SetMultithreadProtected(ID3D10Multithread *iface, BOOL enable)
 {
-    FIXME("iface %p, enable %#x stub!\n", iface, enable);
+    struct d3d_device *device = impl_from_ID3D10Multithread(iface);
 
-    return TRUE;
+    TRACE("iface %p, enable %#x.\n", iface, enable);
+
+    return InterlockedExchange(&device->immediate_context.multithread_protected, !!enable);
 }
 
 static BOOL STDMETHODCALLTYPE d3d10_multithread_GetMultithreadProtected(ID3D10Multithread *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_device *device = impl_from_ID3D10Multithread(iface);
 
-    return TRUE;
+    TRACE("iface %p.\n", iface);
+
+    return InterlockedCompareExchange(&device->immediate_context.multithread_protected, 0, 0);
 }
 
 static const struct ID3D10MultithreadVtbl d3d10_multithread_vtbl =
@@ -8170,6 +8575,8 @@ void d3d_device_init(struct d3d_device *device, void *outer_unknown)
     device->ID3D11Device5_iface.lpVtbl = &d3d11_device_vtbl;
     device->ID3D10Device1_iface.lpVtbl = &d3d10_device1_vtbl;
     device->ID3D10Multithread_iface.lpVtbl = &d3d10_multithread_vtbl;
+    device->ID3D11DeviceInternal_iface.lpVtbl = (const IUnknownVtbl *)&d3d11_device_internal_vtbl;
+    device->ID3D11DeviceFlushCount_iface.lpVtbl = (const IUnknownVtbl *)&d3d11_device_flush_count_vtbl;
     device->ID3D11VideoDevice1_iface.lpVtbl = &d3d11_video_device1_vtbl;
     device->IWineDXGIDeviceParent_iface.lpVtbl = &d3d_dxgi_device_parent_vtbl;
     device->device_parent.ops = &d3d_wined3d_device_parent_ops;
@@ -8177,9 +8584,14 @@ void d3d_device_init(struct d3d_device *device, void *outer_unknown)
     /* COM aggregation always takes place */
     device->outer_unk = outer_unknown;
     device->d3d11_only = FALSE;
+    device->d3d11_device = FALSE;
+    device->creation_flags = 0;
+    device->guard_rectangle_support_count = 0;
+    device->conservative_flush_count = 0;
     device->state = NULL;
 
     d3d11_device_context_init(&device->immediate_context, device, D3D11_DEVICE_CONTEXT_IMMEDIATE);
+    device->immediate_context.multithread_protected = TRUE;
     ID3D11DeviceContext4_Release(&device->immediate_context.ID3D11DeviceContext4_iface);
 
     wine_rb_init(&device->blend_states, d3d_blend_state_compare);
