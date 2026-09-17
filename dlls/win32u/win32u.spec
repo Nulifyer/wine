@@ -1083,7 +1083,7 @@
 @ stub -syscall NtUserGetProp2
 @ stub -syscall NtUserGetQueueIocp
 @ stdcall -syscall NtUserGetQueueStatus(long)
-@ stub -syscall NtUserGetQueueStatusReadonly
+@ stdcall -syscall NtUserGetQueueStatusReadonly(long)
 @ stdcall -syscall NtUserGetRawInputBuffer(ptr ptr long)
 @ stdcall -syscall NtUserGetRawInputData(ptr long ptr ptr long)
 @ stdcall -syscall NtUserGetRawInputDeviceInfo(ptr long ptr ptr)

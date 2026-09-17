@@ -3052,6 +3052,13 @@ NTSTATUS WINAPI wow64_NtUserGetQueueStatus( UINT *args )
     return NtUserGetQueueStatus( flags );
 }
 
+NTSTATUS WINAPI wow64_NtUserGetQueueStatusReadonly( UINT *args )
+{
+    UINT flags = get_ulong( &args );
+
+    return NtUserGetQueueStatusReadonly( flags );
+}
+
 NTSTATUS WINAPI wow64_NtUserGetRawInputBuffer( UINT *args )
 {
     RAWINPUT *data = get_ptr( &args );

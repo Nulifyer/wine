@@ -1020,6 +1020,7 @@ W32KAPI BOOL    WINAPI NtUserGetProcessUIContextInformation(
 W32KAPI HWINSTA WINAPI NtUserGetProcessWindowStation(void);
 W32KAPI HANDLE  WINAPI NtUserGetProp( HWND hwnd, const WCHAR *str );
 W32KAPI DWORD   WINAPI NtUserGetQueueStatus( UINT flags );
+W32KAPI DWORD   WINAPI NtUserGetQueueStatusReadonly( UINT flags );
 W32KAPI UINT    WINAPI NtUserGetRawInputBuffer( RAWINPUT *data, UINT *data_size, UINT header_size );
 W32KAPI UINT    WINAPI NtUserGetRawInputData( HRAWINPUT rawinput, UINT command, void *data, UINT *data_size, UINT header_size );
 W32KAPI UINT    WINAPI NtUserGetRawInputDeviceInfo( HANDLE handle, UINT command, void *data, UINT *data_size );

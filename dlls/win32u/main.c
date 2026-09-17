@@ -1860,6 +1860,11 @@ DWORD SYSCALL_API NtUserGetQueueStatus( UINT flags )
     SYSCALL_FUNC( NtUserGetQueueStatus );
 }
 
+DWORD SYSCALL_API NtUserGetQueueStatusReadonly( UINT flags )
+{
+    SYSCALL_FUNC( NtUserGetQueueStatusReadonly );
+}
+
 UINT SYSCALL_API NtUserGetRawInputBuffer( RAWINPUT *data, UINT *data_size, UINT header_size )
 {
     SYSCALL_FUNC( NtUserGetRawInputBuffer );

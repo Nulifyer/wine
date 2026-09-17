@@ -52,7 +52,7 @@
 2538 stub -noname LayoutCompleted  # NtUserLayoutCompleted
 2539 stub -noname HidePointerContactVisualization  # NtUserHidePointerContactVisualization
 2540 stub -noname SetCancelRotationDelayHintWindow  # NtUserSetCancelRotationDelayHintWindow
-2541 stub -noname GetQueueStatusReadonly  # NtUserGetQueueStatusReadonly
+2541 stdcall -noname GetQueueStatusReadonly(long) NtUserGetQueueStatusReadonly
 2542 stub SetCoveredWindowStates  # NtUserSetCoveredWindowStates
 
 2544 stub -noname EnableTouchPad  # NtUserEnableTouchPad

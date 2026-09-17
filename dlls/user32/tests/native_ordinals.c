@@ -29,6 +29,7 @@ typedef BOOL (WINAPI *is_thread_desktop_composited_fn)(void);
 typedef void (WINAPI *internal_enum_desktop_windows_fn)(HDESK, WNDENUMPROC, LPARAM);
 typedef void (WINAPI *internal_enum_child_windows_fn)(HWND, WNDENUMPROC, LPARAM);
 typedef BOOL (WINAPI *broadcast_theme_change_event_fn)(DWORD, LONG);
+typedef DWORD (WINAPI *get_queue_status_readonly_fn)(UINT);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 
@@ -51,6 +52,49 @@ static BOOL enum_saw_target, enum_saw_child, enum_saw_grandchild;
 static unsigned int theme_change_count;
 static WPARAM theme_change_wparam;
 static LPARAM theme_change_lparam;
+
+static void test_queue_status_readonly(HMODULE module)
+{
+    get_queue_status_readonly_fn function;
+    DWORD first, second, cleared, after_clear;
+    MSG message;
+    BOOL ret;
+
+    function = (void *)GetProcAddress(module, (const char *)2541);
+    ok(!!function, "Ordinal 2541 is unavailable.\n");
+    if (!function) return;
+
+    PeekMessageW(&message, NULL, 0, 0, PM_NOREMOVE);
+    while (PeekMessageW(&message, NULL, WM_APP, WM_APP, PM_REMOVE)) /* nothing */;
+    GetQueueStatus(QS_ALLINPUT);
+
+    ret = PostThreadMessageW(GetCurrentThreadId(), WM_APP, 0, 0);
+    ok(ret, "PostThreadMessageW failed, error %lu.\n", GetLastError());
+    if (!ret) return;
+
+    SetLastError(0x13579bdf);
+    first = function(QS_POSTMESSAGE);
+    ok(first == MAKELONG(QS_POSTMESSAGE, QS_POSTMESSAGE),
+       "first read returned %#lx.\n", first);
+    ok(GetLastError() == 0x13579bdf, "first read changed last error to %#lx.\n",
+       GetLastError());
+
+    second = function(QS_POSTMESSAGE);
+    ok(second == first, "repeated read returned %#lx after %#lx.\n", second, first);
+    ok(!function(QS_TIMER), "unmatched filter returned nonzero.\n");
+
+    cleared = GetQueueStatus(QS_POSTMESSAGE);
+    ok(cleared == first, "GetQueueStatus returned %#lx after readonly result %#lx.\n",
+       cleared, first);
+    after_clear = function(QS_POSTMESSAGE);
+    ok(after_clear == MAKELONG(0, QS_POSTMESSAGE),
+       "post-clear read returned %#lx.\n", after_clear);
+
+    ret = PeekMessageW(&message, NULL, WM_APP, WM_APP, PM_REMOVE);
+    ok(ret && message.message == WM_APP, "failed to remove posted message, ret %d message %#x.\n",
+       ret, message.message);
+    ok(!function(QS_POSTMESSAGE), "empty queue returned nonzero.\n");
+}
 
 static LRESULT WINAPI theme_change_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
@@ -635,6 +679,7 @@ START_TEST(native_ordinals)
     }
 
     module = GetModuleHandleW(L"user32.dll");
+    test_queue_status_readonly(module);
     test_broadcast_theme_change_event(module);
     test_internal_window_enumeration(module);
     test_window_services_destroy(module);

@@ -1085,7 +1085,7 @@
     SYSCALL_ENTRY( 0x1439, NtUserGetProp2, 0 ) \
     SYSCALL_ENTRY( 0x143a, NtUserGetQueueIocp, 0 ) \
     SYSCALL_ENTRY( 0x143b, NtUserGetQueueStatus, 4 ) \
-    SYSCALL_ENTRY( 0x143c, NtUserGetQueueStatusReadonly, 0 ) \
+    SYSCALL_ENTRY( 0x143c, NtUserGetQueueStatusReadonly, 4 ) \
     SYSCALL_ENTRY( 0x143d, NtUserGetRawInputBuffer, 12 ) \
     SYSCALL_ENTRY( 0x143e, NtUserGetRawInputData, 20 ) \
     SYSCALL_ENTRY( 0x143f, NtUserGetRawInputDeviceInfo, 16 ) \
@@ -2627,7 +2627,7 @@
     SYSCALL_ENTRY( 0x1439, NtUserGetProp2, 0 ) \
     SYSCALL_ENTRY( 0x143a, NtUserGetQueueIocp, 0 ) \
     SYSCALL_ENTRY( 0x143b, NtUserGetQueueStatus, 8 ) \
-    SYSCALL_ENTRY( 0x143c, NtUserGetQueueStatusReadonly, 0 ) \
+    SYSCALL_ENTRY( 0x143c, NtUserGetQueueStatusReadonly, 8 ) \
     SYSCALL_ENTRY( 0x143d, NtUserGetRawInputBuffer, 24 ) \
     SYSCALL_ENTRY( 0x143e, NtUserGetRawInputData, 40 ) \
     SYSCALL_ENTRY( 0x143f, NtUserGetRawInputDeviceInfo, 32 ) \
@@ -3795,7 +3795,6 @@
     SYSCALL_STUB( NtUserGetPrecisionTouchPadConfiguration ) \
     SYSCALL_STUB( NtUserGetProp2 ) \
     SYSCALL_STUB( NtUserGetQueueIocp ) \
-    SYSCALL_STUB( NtUserGetQueueStatusReadonly ) \
     SYSCALL_STUB( NtUserGetRawPointerDeviceData ) \
     SYSCALL_STUB( NtUserGetRequiredCursorSizes ) \
     SYSCALL_STUB( NtUserGetResizeDCompositionSynchronizationObject ) \

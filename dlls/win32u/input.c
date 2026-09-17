@@ -1067,6 +1067,18 @@ DWORD WINAPI NtUserGetQueueStatus( UINT flags )
 }
 
 /***********************************************************************
+ *           NtUserGetQueueStatusReadonly (win32u.@)
+ */
+DWORD WINAPI NtUserGetQueueStatusReadonly( UINT flags )
+{
+    UINT wake_bits, changed_bits;
+
+    flags &= 0xffff;
+    if (!get_shared_queue_bits( &wake_bits, &changed_bits )) return 0;
+    return MAKELONG( changed_bits & flags, wake_bits & flags );
+}
+
+/***********************************************************************
  *           NtUserInitThreadCoreMessagingIocp2 (win32u.@)
  */
 HANDLE WINAPI NtUserInitThreadCoreMessagingIocp2( HWND hwnd, DWORD *mode )
