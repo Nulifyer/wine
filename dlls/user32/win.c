@@ -65,7 +65,7 @@ static inline LRESULT enum_callback_wrapper( WNDENUMPROC proc, HWND hwnd, LPARAM
  *           enum_windows
  */
 static BOOL enum_windows( HDESK desktop, HWND hwnd, DWORD tid, BOOL children,
-                          WNDENUMPROC proc, LPARAM param )
+                          BOOL non_immersive, WNDENUMPROC proc, LPARAM param )
 {
     HWND *list;
     ULONG i, size = 128;
@@ -75,7 +75,7 @@ static BOOL enum_windows( HDESK desktop, HWND hwnd, DWORD tid, BOOL children,
     for (;;)
     {
         if (!(list = HeapAlloc( GetProcessHeap(), 0, size * sizeof(HWND) ))) return FALSE;
-        status = NtUserBuildHwndList( desktop, hwnd, children, TRUE, tid, size, list, &size );
+        status = NtUserBuildHwndList( desktop, hwnd, children, non_immersive, tid, size, list, &size );
         if (!status) break;
         HeapFree( GetProcessHeap(), 0, list );
         if (status != STATUS_BUFFER_TOO_SMALL)
@@ -1386,7 +1386,7 @@ HWND *WIN_ListChildren( HWND hwnd )
  */
 BOOL WINAPI EnumWindows( WNDENUMPROC lpEnumFunc, LPARAM lParam )
 {
-    return enum_windows( 0, 0, 0, FALSE, lpEnumFunc, lParam );
+    return enum_windows( 0, 0, 0, FALSE, TRUE, lpEnumFunc, lParam );
 }
 
 
@@ -1395,7 +1395,7 @@ BOOL WINAPI EnumWindows( WNDENUMPROC lpEnumFunc, LPARAM lParam )
  */
 BOOL WINAPI EnumThreadWindows( DWORD id, WNDENUMPROC func, LPARAM lParam )
 {
-    return enum_windows( 0, 0, id, FALSE, func, lParam );
+    return enum_windows( 0, 0, id, FALSE, TRUE, func, lParam );
 }
 
 
@@ -1404,7 +1404,25 @@ BOOL WINAPI EnumThreadWindows( DWORD id, WNDENUMPROC func, LPARAM lParam )
  */
 BOOL WINAPI EnumDesktopWindows( HDESK desktop, WNDENUMPROC func, LPARAM lparam )
 {
-    return enum_windows( desktop, 0, 0, FALSE, func, lparam );
+    return enum_windows( desktop, 0, 0, FALSE, TRUE, func, lparam );
+}
+
+
+/***********************************************************************
+ *              InternalEnumDesktopWindows   (USER32.2527)
+ */
+void WINAPI InternalEnumDesktopWindows( HDESK desktop, WNDENUMPROC func, LPARAM lparam )
+{
+    enum_windows( desktop, 0, 0, FALSE, FALSE, func, lparam );
+}
+
+
+/***********************************************************************
+ *              InternalEnumChildWindows   (USER32.2525)
+ */
+void WINAPI InternalEnumChildWindows( HWND parent, WNDENUMPROC func, LPARAM lparam )
+{
+    enum_windows( 0, parent, 0, TRUE, FALSE, func, lparam );
 }
 
 
@@ -1413,7 +1431,7 @@ BOOL WINAPI EnumDesktopWindows( HDESK desktop, WNDENUMPROC func, LPARAM lparam )
  */
 BOOL WINAPI EnumChildWindows( HWND parent, WNDENUMPROC func, LPARAM lParam )
 {
-    return enum_windows( 0, parent, 0, TRUE, func, lParam );
+    return enum_windows( 0, parent, 0, TRUE, TRUE, func, lParam );
 }
 
 

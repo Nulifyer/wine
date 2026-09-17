@@ -36,9 +36,9 @@
 2522 stdcall -noname SetBrokeredForeground(long) NtUserSetBrokeredForeground
 2523 stub @
 2524 stub @
-2525 stub @
+2525 stdcall -noname InternalEnumChildWindows(long ptr long)
 2526 stub @
-2527 stub @
+2527 stdcall -noname InternalEnumDesktopWindows(long ptr long)
 2528 stub IsThreadMessageQueueAttached  # NtUserThreadMessageQueueAttached
 2529 stub -noname DisableImmersiveOwner  # NtUserDisableImmersiveOwner
 2530 stub -noname WaitAvailableMessageEx  # NtUserWaitAvailableMessageEx

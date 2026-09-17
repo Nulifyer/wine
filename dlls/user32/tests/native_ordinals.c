@@ -26,6 +26,8 @@ typedef BOOL (WINAPI *is_immersive_process_fn)(HANDLE);
 typedef BOOL (WINAPI *get_current_dpi_info_for_window_fn)(HWND, void *);
 typedef BOOL (WINAPI *get_current_dpi_info_fn)(HMONITOR, void *);
 typedef BOOL (WINAPI *is_thread_desktop_composited_fn)(void);
+typedef void (WINAPI *internal_enum_desktop_windows_fn)(HDESK, WNDENUMPROC, LPARAM);
+typedef void (WINAPI *internal_enum_child_windows_fn)(HWND, WNDENUMPROC, LPARAM);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 
@@ -42,6 +44,85 @@ static HWND callback_target, thread_window;
 static BOOL callback_window_matches = TRUE, callback_window_valid = TRUE;
 static BOOL thread_registration_ret;
 static DWORD thread_registration_error;
+static HWND enum_target, enum_child, enum_grandchild;
+static unsigned int enum_count;
+static BOOL enum_saw_target, enum_saw_child, enum_saw_grandchild;
+
+static BOOL CALLBACK record_desktop_window(HWND hwnd, LPARAM stop_after_first)
+{
+    enum_count++;
+    if (hwnd == enum_target) enum_saw_target = TRUE;
+    if (hwnd == enum_child) enum_saw_child = TRUE;
+    if (hwnd == enum_grandchild) enum_saw_grandchild = TRUE;
+    return !stop_after_first;
+}
+
+static void test_internal_window_enumeration(HMODULE module)
+{
+    internal_enum_desktop_windows_fn function;
+    internal_enum_child_windows_fn child_function;
+    HDESK desktop;
+
+    function = (void *)GetProcAddress(module, (const char *)2527);
+    child_function = (void *)GetProcAddress(module, (const char *)2525);
+    ok(!!function, "Ordinal 2527 is unavailable.\n");
+    ok(!!child_function, "Ordinal 2525 is unavailable.\n");
+    if (!function || !child_function) return;
+
+    enum_target = CreateWindowExW(0, L"Static", NULL, WS_POPUP, 0, 0, 32, 32,
+                                  NULL, NULL, GetModuleHandleW(NULL), NULL);
+    enum_child = enum_target ? CreateWindowExW(0, L"Static", NULL, WS_CHILD, 0, 0, 16, 16,
+                                               enum_target, NULL, GetModuleHandleW(NULL), NULL) : NULL;
+    enum_grandchild = enum_child ? CreateWindowExW(0, L"Static", NULL, WS_CHILD, 0, 0, 8, 8,
+                                                   enum_child, NULL, GetModuleHandleW(NULL), NULL) : NULL;
+    ok(!!enum_target && !!enum_child && !!enum_grandchild,
+       "failed to create enumeration windows, error %lu.\n", GetLastError());
+    if (!enum_target || !enum_child || !enum_grandchild) goto done;
+
+    desktop = GetThreadDesktop(GetCurrentThreadId());
+    ok(!!desktop, "GetThreadDesktop failed, error %lu.\n", GetLastError());
+    if (!desktop) goto done;
+
+    enum_count = 0;
+    enum_saw_target = enum_saw_child = enum_saw_grandchild = FALSE;
+    function(desktop, record_desktop_window, FALSE);
+    ok(enum_count != 0, "desktop enumeration returned no windows.\n");
+    ok(enum_saw_target, "desktop enumeration did not return the top-level test window.\n");
+    ok(!enum_saw_child, "desktop enumeration returned child window %p.\n", enum_child);
+    ok(!enum_saw_grandchild, "desktop enumeration returned grandchild window %p.\n",
+       enum_grandchild);
+
+    enum_count = 0;
+    function(desktop, record_desktop_window, TRUE);
+    ok(enum_count == 1, "stopped enumeration invoked %u callbacks.\n", enum_count);
+
+    enum_count = 0;
+    function((HDESK)(UINT_PTR)0xdeadbeef, record_desktop_window, FALSE);
+    ok(enum_count == 0, "invalid desktop invoked %u callbacks.\n", enum_count);
+
+    enum_count = 0;
+    enum_saw_target = enum_saw_child = enum_saw_grandchild = FALSE;
+    child_function(enum_target, record_desktop_window, FALSE);
+    ok(enum_count >= 2, "child enumeration invoked only %u callbacks.\n", enum_count);
+    ok(!enum_saw_target, "child enumeration returned parent window %p.\n", enum_target);
+    ok(enum_saw_child, "child enumeration did not return child window %p.\n", enum_child);
+    ok(enum_saw_grandchild, "child enumeration did not return grandchild window %p.\n",
+       enum_grandchild);
+
+    enum_count = 0;
+    child_function(enum_target, record_desktop_window, TRUE);
+    ok(enum_count == 1, "stopped child enumeration invoked %u callbacks.\n", enum_count);
+
+    enum_count = 0;
+    child_function((HWND)(UINT_PTR)0xdeadbeef, record_desktop_window, FALSE);
+    ok(enum_count == 0, "invalid parent invoked %u callbacks.\n", enum_count);
+
+done:
+    if (enum_grandchild) DestroyWindow(enum_grandchild);
+    if (enum_child) DestroyWindow(enum_child);
+    if (enum_target) DestroyWindow(enum_target);
+    enum_grandchild = enum_child = enum_target = NULL;
+}
 
 static void record_window_services_event(unsigned int event)
 {
@@ -492,6 +573,7 @@ START_TEST(native_ordinals)
     }
 
     module = GetModuleHandleW(L"user32.dll");
+    test_internal_window_enumeration(module);
     test_window_services_destroy(module);
     test_gdi_scaled_process();
     test_thread_desktop_composited(module);
