@@ -388,6 +388,7 @@ extern HGDIOBJ GDI_inc_ref_count( HGDIOBJ handle );
 extern BOOL GDI_dec_ref_count( HGDIOBJ handle );
 extern DWORD get_gdi_object_type( HGDIOBJ obj );
 extern void make_gdi_object_system( HGDIOBJ handle, BOOL set );
+extern HBITMAP set_bitmap_stock( HBITMAP bitmap, BOOL stock );
 
 /* mapping.c */
 extern BOOL dp_to_lp( DC *dc, POINT *points, INT count );

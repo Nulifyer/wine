@@ -156,6 +156,22 @@ HBITMAP SYSCALL_API NtGdiCreateDIBSection( HDC hdc, HANDLE section, DWORD offset
     SYSCALL_FUNC( NtGdiCreateDIBSection );
 }
 
+HBITMAP SYSCALL_API NtGdiCreateSessionMappedDIBSection( HDC hdc, HANDLE section, DWORD offset,
+                                                        const BITMAPINFO *bmi )
+{
+    SYSCALL_FUNC( NtGdiCreateSessionMappedDIBSection );
+}
+
+HBITMAP SYSCALL_API NtGdiSetBitmapAttributes( HBITMAP bitmap, UINT flags )
+{
+    SYSCALL_FUNC( NtGdiSetBitmapAttributes );
+}
+
+HBITMAP SYSCALL_API NtGdiClearBitmapAttributes( HBITMAP bitmap, UINT flags )
+{
+    SYSCALL_FUNC( NtGdiClearBitmapAttributes );
+}
+
 HBITMAP SYSCALL_API NtGdiCreateDIBitmapInternal( HDC hdc, INT width, INT height, DWORD init,
                                                  const void *bits, const BITMAPINFO *data,
                                                  UINT coloruse, UINT max_info, UINT max_bits,

@@ -860,6 +860,42 @@ HBITMAP WINAPI DECLSPEC_HOTPATCH CreateDIBSection( HDC hdc, const BITMAPINFO *bm
     return NtGdiCreateDIBSection( hdc, section, offset, bmi, usage, 0, 0, 0, bits );
 }
 
+
+/***********************************************************************
+ *           CreateSessionMappedDIBSection    (GDI32.@)
+ */
+HBITMAP WINAPI CreateSessionMappedDIBSection( HDC hdc, const BITMAPINFO *bmi, UINT usage,
+                                              HANDLE section, DWORD offset )
+{
+    if (!section)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    return NtGdiCreateDIBSection( hdc, section, offset, bmi, usage, 0, 0, 0, NULL );
+}
+
+
+/***********************************************************************
+ *           SetBitmapAttributes    (GDI32.@)
+ */
+HBITMAP WINAPI SetBitmapAttributes( HBITMAP bitmap, UINT flags )
+{
+    if (flags & ~1) return 0;
+    return NtGdiSetBitmapAttributes( bitmap, flags );
+}
+
+
+/***********************************************************************
+ *           ClearBitmapAttributes    (GDI32.@)
+ */
+HBITMAP WINAPI ClearBitmapAttributes( HBITMAP bitmap, UINT flags )
+{
+    if (flags & ~1) return 0;
+    return NtGdiClearBitmapAttributes( bitmap, flags );
+}
+
 /***********************************************************************
  *           GetDIBits    (win32u.@)
  */

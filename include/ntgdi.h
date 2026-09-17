@@ -328,6 +328,10 @@ W32KAPI HBRUSH   WINAPI NtGdiCreateDIBBrush( const void *data, UINT coloruse, UI
 W32KAPI HBITMAP  WINAPI NtGdiCreateDIBSection( HDC hdc, HANDLE section, DWORD offset, const BITMAPINFO *bmi,
                                                UINT usage, UINT header_size, ULONG flags,
                                                ULONG_PTR color_space, void **bits );
+W32KAPI HBITMAP  WINAPI NtGdiCreateSessionMappedDIBSection( HDC hdc, HANDLE section, DWORD offset,
+                                                            const BITMAPINFO *bmi );
+W32KAPI HBITMAP  WINAPI NtGdiSetBitmapAttributes( HBITMAP bitmap, UINT flags );
+W32KAPI HBITMAP  WINAPI NtGdiClearBitmapAttributes( HBITMAP bitmap, UINT flags );
 W32KAPI HBITMAP  WINAPI NtGdiCreateDIBitmapInternal( HDC hdc, INT width, INT height, DWORD init,
                                                      const void *bits, const BITMAPINFO *data,
                                                      UINT coloruse, UINT max_info, UINT max_bits,

@@ -36,6 +36,24 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(bitmap);
 
+/***********************************************************************
+ *           NtGdiSetBitmapAttributes    (win32u.@)
+ */
+HBITMAP WINAPI NtGdiSetBitmapAttributes( HBITMAP bitmap, UINT flags )
+{
+    if (!(flags & 1)) return 0;
+    return set_bitmap_stock( bitmap, TRUE );
+}
+
+/***********************************************************************
+ *           NtGdiClearBitmapAttributes    (win32u.@)
+ */
+HBITMAP WINAPI NtGdiClearBitmapAttributes( HBITMAP bitmap, UINT flags )
+{
+    if (!(flags & 1)) return 0;
+    return set_bitmap_stock( bitmap, FALSE );
+}
+
 
 static INT BITMAP_GetObject( HGDIOBJ handle, INT count, LPVOID buffer );
 static BOOL BITMAP_DeleteObject( HGDIOBJ handle );

@@ -458,6 +458,36 @@ void make_gdi_object_system( HGDIOBJ handle, BOOL set)
     pthread_mutex_unlock( &gdi_lock );
 }
 
+HBITMAP set_bitmap_stock( HBITMAP handle, BOOL stock )
+{
+    HBITMAP ret = 0;
+    GDI_HANDLE_ENTRY *entry;
+    BITMAPOBJ *bitmap;
+
+    pthread_mutex_lock( &gdi_lock );
+    if (!(entry = handle_entry( handle )) || entry->ExtType << NTGDI_HANDLE_TYPE_SHIFT != NTGDI_OBJ_BITMAP)
+        goto done;
+
+    bitmap = (BITMAPOBJ *)entry_obj( entry );
+    if (stock)
+    {
+        if (entry->StockFlag || (is_bitmapobj_dib( bitmap ) && !bitmap->dib.dshSection)) goto done;
+        entry->StockFlag = 1;
+        bitmap->obj.system = TRUE;
+    }
+    else
+    {
+        if (!entry->StockFlag) goto done;
+        entry->StockFlag = 0;
+        bitmap->obj.system = FALSE;
+    }
+    ret = entry_to_handle( entry );
+
+done:
+    pthread_mutex_unlock( &gdi_lock );
+    return ret;
+}
+
 /******************************************************************************
  *      get_default_fonts
  */

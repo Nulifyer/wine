@@ -32,6 +32,7 @@
 #include "winuser.h"
 #include "mmsystem.h"
 #include "winternl.h"
+#include "ntgdi.h"
 #include "ddk/d3dkmthk.h"
 
 #include "wine/test.h"
@@ -40,6 +41,9 @@ static NTSTATUS (WINAPI *pD3DKMTCreateDCFromMemory)( D3DKMT_CREATEDCFROMMEMORY *
 static NTSTATUS (WINAPI *pD3DKMTDestroyDCFromMemory)( const D3DKMT_DESTROYDCFROMMEMORY *desc );
 static BOOL (WINAPI *pGdiAlphaBlend)(HDC,int,int,int,int,HDC,int,int,int,int,BLENDFUNCTION);
 static BOOL (WINAPI *pGdiGradientFill)(HDC,TRIVERTEX*,ULONG,void*,ULONG,ULONG);
+static HBITMAP (WINAPI *pCreateSessionMappedDIBSection)(HDC,const BITMAPINFO*,UINT,HANDLE,DWORD);
+static HBITMAP (WINAPI *pSetBitmapAttributes)(HBITMAP,UINT);
+static HBITMAP (WINAPI *pClearBitmapAttributes)(HBITMAP,UINT);
 
 static inline int get_bitmap_stride( int width, int bpp )
 {
@@ -55,6 +59,98 @@ static inline int get_dib_image_size( const BITMAPINFO *info )
 {
     return get_dib_stride( info->bmiHeader.biWidth, info->bmiHeader.biBitCount )
         * abs( info->bmiHeader.biHeight );
+}
+
+static void test_CreateSessionMappedDIBSection(void)
+{
+    static const DWORD offset = 64;
+    BITMAPINFO bmi = {{sizeof(BITMAPINFOHEADER), 2, 2, 1, 32, BI_RGB}};
+    BYTE expected[16], actual[16];
+    HANDLE section;
+    HBITMAP bitmap, stock, restored, private_dib;
+    void *private_bits;
+    BYTE *view;
+    int ret;
+
+    if (!pCreateSessionMappedDIBSection)
+    {
+        win_skip("CreateSessionMappedDIBSection is unavailable.\n");
+        return;
+    }
+
+    SetLastError( 0xdeadbeef );
+    bitmap = pCreateSessionMappedDIBSection( 0, &bmi, DIB_RGB_COLORS, NULL, 0 );
+    ok( !bitmap, "Expected failure with a null section, got %p.\n", bitmap );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "Got last error %lu.\n", GetLastError() );
+
+    section = CreateFileMappingW( INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4096, NULL );
+    ok( !!section, "CreateFileMappingW failed, error %lu.\n", GetLastError() );
+    if (!section) return;
+
+    view = MapViewOfFile( section, FILE_MAP_ALL_ACCESS, 0, 0, 4096 );
+    ok( !!view, "MapViewOfFile failed, error %lu.\n", GetLastError() );
+    if (!view)
+    {
+        CloseHandle( section );
+        return;
+    }
+
+    memset( expected, 0x5a, sizeof(expected) );
+    memcpy( view + offset, expected, sizeof(expected) );
+    bitmap = pCreateSessionMappedDIBSection( 0, &bmi, DIB_RGB_COLORS, section, offset );
+    ok( !!bitmap, "CreateSessionMappedDIBSection failed, error %lu.\n", GetLastError() );
+    if (bitmap)
+    {
+        memset( actual, 0, sizeof(actual) );
+        ret = GetBitmapBits( bitmap, sizeof(actual), actual );
+        ok( ret == sizeof(actual), "GetBitmapBits returned %d.\n", ret );
+        ok( !memcmp( actual, expected, sizeof(actual) ), "Bitmap does not use the supplied section.\n" );
+
+        memset( expected, 0xa5, sizeof(expected) );
+        ret = SetBitmapBits( bitmap, sizeof(expected), expected );
+        ok( ret == sizeof(expected), "SetBitmapBits returned %d.\n", ret );
+        ok( !memcmp( view + offset, expected, sizeof(expected) ), "Section does not reflect bitmap writes.\n" );
+
+        if (pSetBitmapAttributes && pClearBitmapAttributes)
+        {
+            SetLastError( 0xdeadbeef );
+            stock = pSetBitmapAttributes( bitmap, 1 );
+            ok( HandleToULong(stock) == (HandleToULong(bitmap) | NTGDI_HANDLE_STOCK_OBJECT),
+                "Got stock handle %p for %p.\n", stock, bitmap );
+            ok( GetLastError() == 0xdeadbeef, "Got last error %lu.\n", GetLastError() );
+
+            SetLastError( 0xdeadbeef );
+            ok( !pSetBitmapAttributes( stock, 1 ), "Repeated set succeeded.\n" );
+            ok( GetLastError() == 0xdeadbeef, "Got last error %lu.\n", GetLastError() );
+
+            SetLastError( 0xdeadbeef );
+            restored = pClearBitmapAttributes( stock, 1 );
+            ok( restored == bitmap, "Got restored handle %p, expected %p.\n", restored, bitmap );
+            ok( GetLastError() == 0xdeadbeef, "Got last error %lu.\n", GetLastError() );
+            bitmap = restored;
+
+            SetLastError( 0xdeadbeef );
+            ok( !pClearBitmapAttributes( bitmap, 1 ), "Repeated clear succeeded.\n" );
+            ok( GetLastError() == 0xdeadbeef, "Got last error %lu.\n", GetLastError() );
+
+            SetLastError( 0xdeadbeef );
+            ok( !pSetBitmapAttributes( bitmap, 2 ), "Set with invalid flags succeeded.\n" );
+            ok( GetLastError() == 0xdeadbeef, "Got last error %lu.\n", GetLastError() );
+        }
+        ok( DeleteObject( bitmap ), "DeleteObject failed.\n" );
+    }
+
+    private_dib = CreateDIBSection( 0, &bmi, DIB_RGB_COLORS, &private_bits, NULL, 0 );
+    ok( !!private_dib, "CreateDIBSection failed, error %lu.\n", GetLastError() );
+    if (private_dib)
+    {
+        if (pSetBitmapAttributes)
+            ok( !pSetBitmapAttributes( private_dib, 1 ), "Private DIB unexpectedly became stock.\n" );
+        ok( DeleteObject( private_dib ), "DeleteObject failed.\n" );
+    }
+
+    UnmapViewOfFile( view );
+    CloseHandle( section );
 }
 
 static void test_bitmap_info(HBITMAP hbm, INT expected_depth, const BITMAPINFOHEADER *bmih)
@@ -6473,7 +6569,11 @@ START_TEST(bitmap)
     pD3DKMTDestroyDCFromMemory = (void *)GetProcAddress( hdll, "D3DKMTDestroyDCFromMemory" );
     pGdiAlphaBlend             = (void *)GetProcAddress( hdll, "GdiAlphaBlend" );
     pGdiGradientFill           = (void *)GetProcAddress( hdll, "GdiGradientFill" );
+    pCreateSessionMappedDIBSection = (void *)GetProcAddress( hdll, "CreateSessionMappedDIBSection" );
+    pSetBitmapAttributes       = (void *)GetProcAddress( hdll, "SetBitmapAttributes" );
+    pClearBitmapAttributes     = (void *)GetProcAddress( hdll, "ClearBitmapAttributes" );
 
+    test_CreateSessionMappedDIBSection();
     test_createdibitmap();
     test_dibsections();
     test_dib_formats();

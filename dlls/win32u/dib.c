@@ -1577,6 +1577,22 @@ error:
 }
 
 
+/***********************************************************************
+ *           NtGdiCreateSessionMappedDIBSection    (win32u.@)
+ */
+HBITMAP WINAPI NtGdiCreateSessionMappedDIBSection( HDC hdc, HANDLE section, DWORD offset,
+                                                   const BITMAPINFO *bmi )
+{
+    if (!section)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    return NtGdiCreateDIBSection( hdc, section, offset, bmi, DIB_RGB_COLORS, 0, 0, 0, NULL );
+}
+
+
 static BOOL memory_dib_DeleteObject( HGDIOBJ handle )
 {
     BITMAPOBJ *bmp;

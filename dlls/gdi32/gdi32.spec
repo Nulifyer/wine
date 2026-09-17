@@ -36,7 +36,7 @@
 @ stub CheckColorsInGamut
 @ stdcall ChoosePixelFormat(long ptr)
 @ stdcall Chord(long long long long long long long long long)
-# @ stub ClearBitmapAttributes
+@ stdcall ClearBitmapAttributes(long long)
 # @ stub ClearBrushAttributes
 @ stdcall CloseEnhMetaFile(long)
 @ stdcall CloseFigure(long)
@@ -97,7 +97,7 @@
 @ stdcall CreateScalableFontResourceA(long str str str)
 @ stdcall CreateScalableFontResourceW(long wstr wstr wstr)
 # @ stub CreateScaledCompatibleBitmap
-# @ stub CreateSessionMappedDIBSection
+@ stdcall CreateSessionMappedDIBSection(long ptr long long long)
 @ stdcall CreateSolidBrush(long)
 @ stdcall D3DKMTAcquireKeyedMutex(ptr) win32u.NtGdiDdDDIAcquireKeyedMutex
 @ stdcall D3DKMTAcquireKeyedMutex2(ptr) win32u.NtGdiDdDDIAcquireKeyedMutex2
@@ -587,7 +587,7 @@
 @ stdcall SelectPalette(long long long)
 @ stdcall SetAbortProc(long ptr)
 @ stdcall SetArcDirection(long long)
-# @ stub SetBitmapAttributes
+@ stdcall SetBitmapAttributes(long long)
 @ stdcall SetBitmapBits(long long ptr) NtGdiSetBitmapBits
 @ stdcall SetBitmapDimensionEx(long long long ptr) NtGdiSetBitmapDimension
 @ stdcall SetBkColor(long long)

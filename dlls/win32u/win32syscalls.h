@@ -159,7 +159,7 @@
     SYSCALL_ENTRY( 0x109b, NtGdiCancelDC, 4 ) \
     SYSCALL_ENTRY( 0x109c, NtGdiChangeGhostFont, 0 ) \
     SYSCALL_ENTRY( 0x109d, NtGdiCheckBitmapBits, 0 ) \
-    SYSCALL_ENTRY( 0x109e, NtGdiClearBitmapAttributes, 0 ) \
+    SYSCALL_ENTRY( 0x109e, NtGdiClearBitmapAttributes, 8 ) \
     SYSCALL_ENTRY( 0x109f, NtGdiClearBrushAttributes, 0 ) \
     SYSCALL_ENTRY( 0x10a0, NtGdiCloseFigure, 4 ) \
     SYSCALL_ENTRY( 0x10a1, NtGdiColorCorrectPalette, 0 ) \
@@ -191,7 +191,7 @@
     SYSCALL_ENTRY( 0x10bb, NtGdiCreateRectRgn, 16 ) \
     SYSCALL_ENTRY( 0x10bc, NtGdiCreateRoundRectRgn, 24 ) \
     SYSCALL_ENTRY( 0x10bd, NtGdiCreateServerMetaFile, 0 ) \
-    SYSCALL_ENTRY( 0x10be, NtGdiCreateSessionMappedDIBSection, 0 ) \
+    SYSCALL_ENTRY( 0x10be, NtGdiCreateSessionMappedDIBSection, 16 ) \
     SYSCALL_ENTRY( 0x10bf, NtGdiCreateSolidBrush, 8 ) \
     SYSCALL_ENTRY( 0x10c0, NtGdiDDCCIGetCapabilitiesString, 0 ) \
     SYSCALL_ENTRY( 0x10c1, NtGdiDDCCIGetCapabilitiesStringLength, 0 ) \
@@ -625,7 +625,7 @@
     SYSCALL_ENTRY( 0x126d, NtGdiSelectClipPath, 8 ) \
     SYSCALL_ENTRY( 0x126e, NtGdiSelectFont, 8 ) \
     SYSCALL_ENTRY( 0x126f, NtGdiSelectPen, 8 ) \
-    SYSCALL_ENTRY( 0x1270, NtGdiSetBitmapAttributes, 0 ) \
+    SYSCALL_ENTRY( 0x1270, NtGdiSetBitmapAttributes, 8 ) \
     SYSCALL_ENTRY( 0x1271, NtGdiSetBitmapBits, 12 ) \
     SYSCALL_ENTRY( 0x1272, NtGdiSetBitmapDimension, 16 ) \
     SYSCALL_ENTRY( 0x1273, NtGdiSetBoundsRect, 12 ) \
@@ -1701,7 +1701,7 @@
     SYSCALL_ENTRY( 0x109b, NtGdiCancelDC, 8 ) \
     SYSCALL_ENTRY( 0x109c, NtGdiChangeGhostFont, 0 ) \
     SYSCALL_ENTRY( 0x109d, NtGdiCheckBitmapBits, 0 ) \
-    SYSCALL_ENTRY( 0x109e, NtGdiClearBitmapAttributes, 0 ) \
+    SYSCALL_ENTRY( 0x109e, NtGdiClearBitmapAttributes, 16 ) \
     SYSCALL_ENTRY( 0x109f, NtGdiClearBrushAttributes, 0 ) \
     SYSCALL_ENTRY( 0x10a0, NtGdiCloseFigure, 8 ) \
     SYSCALL_ENTRY( 0x10a1, NtGdiColorCorrectPalette, 0 ) \
@@ -1733,7 +1733,7 @@
     SYSCALL_ENTRY( 0x10bb, NtGdiCreateRectRgn, 32 ) \
     SYSCALL_ENTRY( 0x10bc, NtGdiCreateRoundRectRgn, 48 ) \
     SYSCALL_ENTRY( 0x10bd, NtGdiCreateServerMetaFile, 0 ) \
-    SYSCALL_ENTRY( 0x10be, NtGdiCreateSessionMappedDIBSection, 0 ) \
+    SYSCALL_ENTRY( 0x10be, NtGdiCreateSessionMappedDIBSection, 32 ) \
     SYSCALL_ENTRY( 0x10bf, NtGdiCreateSolidBrush, 16 ) \
     SYSCALL_ENTRY( 0x10c0, NtGdiDDCCIGetCapabilitiesString, 0 ) \
     SYSCALL_ENTRY( 0x10c1, NtGdiDDCCIGetCapabilitiesStringLength, 0 ) \
@@ -2167,7 +2167,7 @@
     SYSCALL_ENTRY( 0x126d, NtGdiSelectClipPath, 16 ) \
     SYSCALL_ENTRY( 0x126e, NtGdiSelectFont, 16 ) \
     SYSCALL_ENTRY( 0x126f, NtGdiSelectPen, 16 ) \
-    SYSCALL_ENTRY( 0x1270, NtGdiSetBitmapAttributes, 0 ) \
+    SYSCALL_ENTRY( 0x1270, NtGdiSetBitmapAttributes, 16 ) \
     SYSCALL_ENTRY( 0x1271, NtGdiSetBitmapBits, 24 ) \
     SYSCALL_ENTRY( 0x1272, NtGdiSetBitmapDimension, 32 ) \
     SYSCALL_ENTRY( 0x1273, NtGdiSetBoundsRect, 24 ) \
@@ -3216,7 +3216,6 @@
     SYSCALL_STUB( NtGdiCLIPOBJ_ppoGetPath ) \
     SYSCALL_STUB( NtGdiChangeGhostFont ) \
     SYSCALL_STUB( NtGdiCheckBitmapBits ) \
-    SYSCALL_STUB( NtGdiClearBitmapAttributes ) \
     SYSCALL_STUB( NtGdiClearBrushAttributes ) \
     SYSCALL_STUB( NtGdiColorCorrectPalette ) \
     SYSCALL_STUB( NtGdiCombineTransform ) \
@@ -3229,7 +3228,6 @@
     SYSCALL_STUB( NtGdiCreateOPMProtectedOutput ) \
     SYSCALL_STUB( NtGdiCreateOPMProtectedOutputs ) \
     SYSCALL_STUB( NtGdiCreateServerMetaFile ) \
-    SYSCALL_STUB( NtGdiCreateSessionMappedDIBSection ) \
     SYSCALL_STUB( NtGdiDDCCIGetCapabilitiesString ) \
     SYSCALL_STUB( NtGdiDDCCIGetCapabilitiesStringLength ) \
     SYSCALL_STUB( NtGdiDDCCIGetTimingReport ) \
@@ -3507,7 +3505,6 @@
     SYSCALL_STUB( NtGdiSTROBJ_vEnumStart ) \
     SYSCALL_STUB( NtGdiScaleRgn ) \
     SYSCALL_STUB( NtGdiScaleValues ) \
-    SYSCALL_STUB( NtGdiSetBitmapAttributes ) \
     SYSCALL_STUB( NtGdiSetBrushAttributes ) \
     SYSCALL_STUB( NtGdiSetColorSpace ) \
     SYSCALL_STUB( NtGdiSetFontEnumeration ) \
