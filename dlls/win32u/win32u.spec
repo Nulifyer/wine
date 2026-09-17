@@ -810,7 +810,7 @@
 @ stub -syscall NtUserBitBltSysBmp
 @ stub -syscall NtUserBlockInput
 @ stub -syscall NtUserBroadcastImeShowStatusChange
-@ stub -syscall NtUserBroadcastThemeChangeEvent
+@ stdcall -syscall NtUserBroadcastThemeChangeEvent(long long)
 @ stdcall -syscall NtUserBuildHimcList(long long ptr ptr)
 @ stdcall -syscall NtUserBuildHwndList(long long long long long long ptr ptr)
 @ stdcall -syscall NtUserBuildNameList(long long ptr ptr)

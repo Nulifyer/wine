@@ -4715,6 +4715,19 @@ BOOL WINAPI NtUserPostMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam
     return put_message_in_queue( &info, NULL );
 }
 
+/***********************************************************************
+ *           NtUserBroadcastThemeChangeEvent  (win32u.@)
+ *
+ * Windows delivers this event to each GUI thread with a loaded user API
+ * hook. The uxtheme hook then sends WM_THEMECHANGED to the process windows.
+ * Wine keeps its theme integration at the window-message boundary, so post
+ * the resulting message through the existing cross-process broadcast path.
+ */
+BOOL WINAPI NtUserBroadcastThemeChangeEvent( DWORD change, LONG flags )
+{
+    return NtUserPostMessage( HWND_BROADCAST, WM_THEMECHANGED, change, flags );
+}
+
 /**********************************************************************
  *           NtUserPostThreadMessage  (win32u.@)
  */

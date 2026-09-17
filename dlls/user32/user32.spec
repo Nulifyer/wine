@@ -201,7 +201,7 @@
 2705 stdcall -noname IsChildWindowDpiMessageEnabled(ptr) NtUserIsChildWindowDpiMessageEnabled
 2706 stub -noname IsWindowBroadcastingDpiToChildren  # NtUserIsWindowBroadcastingDpiToChildren
 2707 stub @
-2708 stub -noname BroadcastThemeChangeEvent  # NtUserBroadcastThemeChangeEvent
+2708 stdcall -noname BroadcastThemeChangeEvent(long long) NtUserBroadcastThemeChangeEvent
 2709 stub -noname EnableWindowGDIScaledDpiMessage  # NtUserEnableWindowGDIScaledDpiMessage
 2710 stub -noname IsWindowGDIScaledDpiMessageEnabled  # NtUserIsWindowGDIScaledDpiMessageEnabled
 2711 stdcall -noname GetActiveProcessesDpis() NtUserGetActiveProcessesDpis

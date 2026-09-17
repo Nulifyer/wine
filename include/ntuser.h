@@ -864,6 +864,7 @@ W32KAPI UINT    WINAPI NtUserAssociateInputContext( HWND hwnd, HIMC ctx, ULONG f
 W32KAPI BOOL    WINAPI NtUserAttachThreadInput( DWORD from, DWORD to, BOOL attach );
 W32KAPI HDWP    WINAPI NtUserBeginDeferWindowPos( INT count );
 W32KAPI HDC     WINAPI NtUserBeginPaint( HWND hwnd, PAINTSTRUCT *ps );
+W32KAPI BOOL    WINAPI NtUserBroadcastThemeChangeEvent( DWORD change, LONG flags );
 W32KAPI NTSTATUS WINAPI NtUserBuildHimcList( UINT thread_id, UINT count, HIMC *buffer, UINT *size );
 W32KAPI NTSTATUS WINAPI NtUserBuildHwndList( HDESK desktop, HWND hwnd, BOOL children, BOOL non_immersive,
                                              ULONG thread_id, ULONG count, HWND *buffer, ULONG *size );

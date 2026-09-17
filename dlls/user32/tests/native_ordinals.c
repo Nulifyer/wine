@@ -28,6 +28,7 @@ typedef BOOL (WINAPI *get_current_dpi_info_fn)(HMONITOR, void *);
 typedef BOOL (WINAPI *is_thread_desktop_composited_fn)(void);
 typedef void (WINAPI *internal_enum_desktop_windows_fn)(HDESK, WNDENUMPROC, LPARAM);
 typedef void (WINAPI *internal_enum_child_windows_fn)(HWND, WNDENUMPROC, LPARAM);
+typedef BOOL (WINAPI *broadcast_theme_change_event_fn)(DWORD, LONG);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 
@@ -47,6 +48,67 @@ static DWORD thread_registration_error;
 static HWND enum_target, enum_child, enum_grandchild;
 static unsigned int enum_count;
 static BOOL enum_saw_target, enum_saw_child, enum_saw_grandchild;
+static unsigned int theme_change_count;
+static WPARAM theme_change_wparam;
+static LPARAM theme_change_lparam;
+
+static LRESULT WINAPI theme_change_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    if (message == WM_THEMECHANGED)
+    {
+        theme_change_count++;
+        theme_change_wparam = wparam;
+        theme_change_lparam = lparam;
+    }
+    return DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
+static void test_broadcast_theme_change_event(HMODULE module)
+{
+    static const WCHAR class_name[] = L"WineBroadcastThemeChange";
+    broadcast_theme_change_event_fn function;
+    WNDCLASSW class = {0};
+    MSG message;
+    HWND window;
+    BOOL ret;
+
+    function = (void *)GetProcAddress(module, (const char *)2708);
+    ok(!!function, "Ordinal 2708 is unavailable.\n");
+    if (!function) return;
+
+    class.lpfnWndProc = theme_change_proc;
+    class.hInstance = GetModuleHandleW(NULL);
+    class.lpszClassName = class_name;
+    ok(RegisterClassW(&class), "RegisterClassW failed, error %lu.\n", GetLastError());
+
+    window = CreateWindowExW(0, class_name, NULL, WS_POPUP, 0, 0, 32, 32,
+                             NULL, NULL, class.hInstance, NULL);
+    ok(!!window, "failed to create theme-change window, error %lu.\n", GetLastError());
+    if (!window) return;
+
+    theme_change_count = 0;
+    theme_change_wparam = 0;
+    theme_change_lparam = 0;
+    SetLastError(0x13579bdf);
+    ret = function(0xabcdef01, 0x76543210);
+    ok(ret, "BroadcastThemeChangeEvent returned %d, error %lu.\n", ret, GetLastError());
+    ok(GetLastError() == 0x13579bdf, "call changed last error to %#lx.\n", GetLastError());
+    ok(!theme_change_count, "theme notification was delivered synchronously.\n");
+
+    while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE))
+    {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+    ok(theme_change_count == 1, "received %u theme notifications.\n", theme_change_count);
+    ok(theme_change_wparam == (WPARAM)0xabcdef01,
+       "received wparam %#Ix.\n", theme_change_wparam);
+    ok(theme_change_lparam == (LPARAM)0x76543210,
+       "received lparam %#Ix.\n", theme_change_lparam);
+
+    DestroyWindow(window);
+    UnregisterClassW(class_name, class.hInstance);
+}
 
 static BOOL CALLBACK record_desktop_window(HWND hwnd, LPARAM stop_after_first)
 {
@@ -573,6 +635,7 @@ START_TEST(native_ordinals)
     }
 
     module = GetModuleHandleW(L"user32.dll");
+    test_broadcast_theme_change_event(module);
     test_internal_window_enumeration(module);
     test_window_services_destroy(module);
     test_gdi_scaled_process();
