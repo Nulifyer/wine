@@ -2412,6 +2412,11 @@ static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
 static void test_immediate_context(void)
 {
     ID3D11DeviceContext *immediate_context, *previous_immediate_context;
+    ID3D11DeviceContext2 *immediate_context2;
+    ID3D11DeviceContext3 *immediate_context3;
+    ID3D11Device2 *device2;
+    ID3D11Device3 *device3;
+    IUnknown *identity, *version_identity;
     ULONG expected_refcount, refcount;
     ID3D11CommandList *command_list;
     ID3D11Multithread *multithread;
@@ -2449,6 +2454,50 @@ static void test_immediate_context(void)
     check_interface(immediate_context, &IID_ID3D11Multithread, TRUE, FALSE);
     check_interface(immediate_context, &IID_ID3D11VideoContext, TRUE, FALSE);
     check_interface(immediate_context, &IID_ID3DUserDefinedAnnotation, TRUE, FALSE);
+
+    hr = ID3D11Device_QueryInterface(device, &IID_ID3D11Device2, (void **)&device2);
+    if (SUCCEEDED(hr))
+    {
+        immediate_context2 = (ID3D11DeviceContext2 *)0xdeadbeef;
+        ID3D11Device2_GetImmediateContext2(device2, &immediate_context2);
+        ok(!!immediate_context2 && immediate_context2 != (ID3D11DeviceContext2 *)0xdeadbeef,
+                "Got unexpected immediate context 2 %p.\n", immediate_context2);
+        hr = ID3D11DeviceContext_QueryInterface(immediate_context, &IID_IUnknown, (void **)&identity);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID3D11DeviceContext2_QueryInterface(immediate_context2, &IID_IUnknown,
+                (void **)&version_identity);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(identity == version_identity, "Got different context identities %p and %p.\n",
+                identity, version_identity);
+        IUnknown_Release(version_identity);
+        IUnknown_Release(identity);
+        ID3D11DeviceContext2_Release(immediate_context2);
+        ID3D11Device2_Release(device2);
+    }
+    else
+        win_skip("ID3D11Device2 is not supported.\n");
+
+    hr = ID3D11Device_QueryInterface(device, &IID_ID3D11Device3, (void **)&device3);
+    if (SUCCEEDED(hr))
+    {
+        immediate_context3 = (ID3D11DeviceContext3 *)0xdeadbeef;
+        ID3D11Device3_GetImmediateContext3(device3, &immediate_context3);
+        ok(!!immediate_context3 && immediate_context3 != (ID3D11DeviceContext3 *)0xdeadbeef,
+                "Got unexpected immediate context 3 %p.\n", immediate_context3);
+        hr = ID3D11DeviceContext_QueryInterface(immediate_context, &IID_IUnknown, (void **)&identity);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID3D11DeviceContext3_QueryInterface(immediate_context3, &IID_IUnknown,
+                (void **)&version_identity);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(identity == version_identity, "Got different context identities %p and %p.\n",
+                identity, version_identity);
+        IUnknown_Release(version_identity);
+        IUnknown_Release(identity);
+        ID3D11DeviceContext3_Release(immediate_context3);
+        ID3D11Device3_Release(device3);
+    }
+    else
+        win_skip("ID3D11Device3 is not supported.\n");
 
     ID3D11Device_GetImmediateContext(device, &immediate_context);
     ok(immediate_context == previous_immediate_context, "Got different immediate device context objects.\n");

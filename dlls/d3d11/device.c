@@ -5254,9 +5254,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_OpenSharedResourceByName(ID3D11Dev
 }
 
 static void STDMETHODCALLTYPE d3d11_device_GetImmediateContext2(ID3D11Device5 *iface,
-        ID3D11DeviceContext2 **context)
+        ID3D11DeviceContext2 **immediate_context)
 {
-    FIXME("iface %p, context %p stub!\n", iface, context);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
+
+    TRACE("iface %p, immediate_context %p.\n", iface, immediate_context);
+
+    *immediate_context = (ID3D11DeviceContext2 *)&device->immediate_context.ID3D11DeviceContext4_iface;
+    ID3D11DeviceContext2_AddRef(*immediate_context);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDeferredContext2(ID3D11Device5 *iface,
@@ -5361,9 +5366,14 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateQuery1(ID3D11Device5 *iface,
 }
 
 static void STDMETHODCALLTYPE d3d11_device_GetImmediateContext3(ID3D11Device5 *iface,
-        ID3D11DeviceContext3 **context)
+        ID3D11DeviceContext3 **immediate_context)
 {
-    FIXME("iface %p, context %p stub!\n", iface, context);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
+
+    TRACE("iface %p, immediate_context %p.\n", iface, immediate_context);
+
+    *immediate_context = (ID3D11DeviceContext3 *)&device->immediate_context.ID3D11DeviceContext4_iface;
+    ID3D11DeviceContext3_AddRef(*immediate_context);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDeferredContext3(ID3D11Device5 *iface,
