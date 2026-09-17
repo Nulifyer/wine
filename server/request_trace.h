@@ -4028,6 +4028,60 @@ static void dump_destroy_dcomp_connection_request( const struct destroy_dcomp_co
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_begin_dcomp_frame_request( const struct begin_dcomp_frame_request *req )
+{
+    fprintf( stderr, " connection=%04x", req->connection );
+}
+
+static void dump_begin_dcomp_frame_reply( const struct begin_dcomp_frame_reply *req )
+{
+    dump_uint64( " frame_id=", &req->frame_id );
+}
+
+static void dump_confirm_dcomp_frame_request( const struct confirm_dcomp_frame_request *req )
+{
+    fprintf( stderr, " connection=%04x", req->connection );
+    dump_uint64( ", frame_id=", &req->frame_id );
+}
+
+static void dump_discard_dcomp_frame_request( const struct discard_dcomp_frame_request *req )
+{
+    fprintf( stderr, " connection=%04x", req->connection );
+    dump_uint64( ", frame_id=", &req->frame_id );
+}
+
+static void dump_get_dcomp_frame_id_request( const struct get_dcomp_frame_id_request *req )
+{
+    fprintf( stderr, " type=%08x", req->type );
+}
+
+static void dump_get_dcomp_frame_id_reply( const struct get_dcomp_frame_id_reply *req )
+{
+    dump_uint64( " frame_id=", &req->frame_id );
+}
+
+static void dump_get_dcomp_frame_legacy_tokens_request( const struct get_dcomp_frame_legacy_tokens_request *req )
+{
+    dump_uint64( " frame_id=", &req->frame_id );
+}
+
+static void dump_get_dcomp_frame_legacy_tokens_reply( const struct get_dcomp_frame_legacy_tokens_reply *req )
+{
+    fprintf( stderr, " token_count=%08x", req->token_count );
+    fprintf( stderr, ", has_more=%d", req->has_more );
+}
+
+static void dump_get_dcomp_frame_surface_updates_request( const struct get_dcomp_frame_surface_updates_request *req )
+{
+    dump_uint64( " frame_id=", &req->frame_id );
+}
+
+static void dump_get_dcomp_frame_surface_updates_reply( const struct get_dcomp_frame_surface_updates_reply *req )
+{
+    fprintf( stderr, " update_count=%08x", req->update_count );
+    fprintf( stderr, ", has_more=%d", req->has_more );
+}
+
 static void dump_open_token_manager_request( const struct open_token_manager_request *req )
 {
 }
@@ -4038,6 +4092,21 @@ static void dump_open_token_manager_reply( const struct open_token_manager_reply
     dump_uint64( ", section_size=", &req->section_size );
     fprintf( stderr, ", event_a=%04x", req->event_a );
     fprintf( stderr, ", event_b=%04x", req->event_b );
+}
+
+static void dump_begin_token_manager_thread_request( const struct begin_token_manager_thread_request *req )
+{
+    fprintf( stderr, " stop_event=%04x", req->stop_event );
+    fprintf( stderr, ", adapter_count=%08x", req->adapter_count );
+}
+
+static void dump_begin_token_manager_thread_reply( const struct begin_token_manager_thread_reply *req )
+{
+    fprintf( stderr, " notification_event=%04x", req->notification_event );
+}
+
+static void dump_end_token_manager_thread_request( const struct end_token_manager_thread_request *req )
+{
 }
 
 static void dump_create_dcomp_channel_request( const struct create_dcomp_channel_request *req )
@@ -4149,6 +4218,12 @@ static void dump_initialize_kst_request( const struct initialize_kst_request *re
 static void dump_set_mit_input_callbacks_request( const struct set_mit_input_callbacks_request *req )
 {
     fprintf( stderr, " enabled=%d", req->enabled );
+}
+
+static void dump_open_coremsg_kernel_connection_request( const struct open_coremsg_kernel_connection_request *req )
+{
+    fprintf( stderr, " selector=%08x", req->selector );
+    dump_varargs_bytes( ", routing=", cur_size );
 }
 
 static void dump_register_manipulation_thread_request( const struct register_manipulation_thread_request *req )
@@ -4513,7 +4588,15 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_register_dwm_session_port_request,
     (dump_func)dump_start_dwm_kernel_request,
     (dump_func)dump_destroy_dcomp_connection_request,
+    (dump_func)dump_begin_dcomp_frame_request,
+    (dump_func)dump_confirm_dcomp_frame_request,
+    (dump_func)dump_discard_dcomp_frame_request,
+    (dump_func)dump_get_dcomp_frame_id_request,
+    (dump_func)dump_get_dcomp_frame_legacy_tokens_request,
+    (dump_func)dump_get_dcomp_frame_surface_updates_request,
     (dump_func)dump_open_token_manager_request,
+    (dump_func)dump_begin_token_manager_thread_request,
+    (dump_func)dump_end_token_manager_thread_request,
     (dump_func)dump_create_dcomp_channel_request,
     (dump_func)dump_destroy_dcomp_channel_request,
     (dump_func)dump_set_dcomp_channel_connection_request,
@@ -4526,6 +4609,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_d3dkmt_process_scheduling_priority_class_request,
     (dump_func)dump_initialize_kst_request,
     (dump_func)dump_set_mit_input_callbacks_request,
+    (dump_func)dump_open_coremsg_kernel_connection_request,
     (dump_func)dump_register_manipulation_thread_request,
 };
 
@@ -4885,7 +4969,15 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     NULL,
+    (dump_func)dump_begin_dcomp_frame_reply,
+    NULL,
+    NULL,
+    (dump_func)dump_get_dcomp_frame_id_reply,
+    (dump_func)dump_get_dcomp_frame_legacy_tokens_reply,
+    (dump_func)dump_get_dcomp_frame_surface_updates_reply,
     (dump_func)dump_open_token_manager_reply,
+    (dump_func)dump_begin_token_manager_thread_reply,
+    NULL,
     (dump_func)dump_create_dcomp_channel_reply,
     NULL,
     NULL,
@@ -4895,6 +4987,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_dcomp_channel_batch_id_reply,
     (dump_func)dump_commit_dcomp_channel_reply,
     (dump_func)dump_get_d3dkmt_process_scheduling_priority_class_reply,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -5257,7 +5350,15 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "register_dwm_session_port",
     "start_dwm_kernel",
     "destroy_dcomp_connection",
+    "begin_dcomp_frame",
+    "confirm_dcomp_frame",
+    "discard_dcomp_frame",
+    "get_dcomp_frame_id",
+    "get_dcomp_frame_legacy_tokens",
+    "get_dcomp_frame_surface_updates",
     "open_token_manager",
+    "begin_token_manager_thread",
+    "end_token_manager_thread",
     "create_dcomp_channel",
     "destroy_dcomp_channel",
     "set_dcomp_channel_connection",
@@ -5270,6 +5371,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_d3dkmt_process_scheduling_priority_class",
     "initialize_kst",
     "set_mit_input_callbacks",
+    "open_coremsg_kernel_connection",
     "register_manipulation_thread",
 };
 
@@ -5427,6 +5529,7 @@ static const struct
     { "RANGE_NOT_LOCKED",            STATUS_RANGE_NOT_LOCKED },
     { "REPARSE_POINT_NOT_RESOLVED",  STATUS_REPARSE_POINT_NOT_RESOLVED },
     { "REQUEST_CANCELED",            STATUS_REQUEST_CANCELED },
+    { "RESOURCE_IN_USE",             STATUS_RESOURCE_IN_USE },
     { "SECTION_TOO_BIG",             STATUS_SECTION_TOO_BIG },
     { "SEMAPHORE_LIMIT_EXCEEDED",    STATUS_SEMAPHORE_LIMIT_EXCEEDED },
     { "SERVER_SID_MISMATCH",         STATUS_SERVER_SID_MISMATCH },

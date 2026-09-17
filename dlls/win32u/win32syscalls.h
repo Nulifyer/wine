@@ -14,11 +14,11 @@
     SYSCALL_ENTRY( 0x100a, NtCreateCompositionSurfaceHandle, 0 ) \
     SYSCALL_ENTRY( 0x100b, NtCreateImplicitCompositionInputSink, 0 ) \
     SYSCALL_ENTRY( 0x100c, NtDCompositionAddCrossDeviceVisualChild, 0 ) \
-    SYSCALL_ENTRY( 0x100d, NtDCompositionBeginFrame, 0 ) \
+    SYSCALL_ENTRY( 0x100d, NtDCompositionBeginFrame, 12 ) \
     SYSCALL_ENTRY( 0x100e, NtDCompositionBoostCompositorClock, 0 ) \
     SYSCALL_ENTRY( 0x100f, NtDCompositionCommitChannel, 32 ) \
     SYSCALL_ENTRY( 0x1010, NtDCompositionCommitSynchronizationObject, 0 ) \
-    SYSCALL_ENTRY( 0x1011, NtDCompositionConfirmFrame, 0 ) \
+    SYSCALL_ENTRY( 0x1011, NtDCompositionConfirmFrame, 8 ) \
     SYSCALL_ENTRY( 0x1012, NtDCompositionConnectPipe, 0 ) \
     SYSCALL_ENTRY( 0x1013, NtDCompositionCreateAndBindSharedSection, 0 ) \
     SYSCALL_ENTRY( 0x1014, NtDCompositionCreateChannel, 16 ) \
@@ -36,11 +36,11 @@
     SYSCALL_ENTRY( 0x1020, NtDCompositionGetChannels, 0 ) \
     SYSCALL_ENTRY( 0x1021, NtDCompositionGetConnectionBatch, 12 ) \
     SYSCALL_ENTRY( 0x1022, NtDCompositionGetDeletedResources, 16 ) \
-    SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 0 ) \
+    SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 8 ) \
     SYSCALL_ENTRY( 0x1024, NtDCompositionGetFrameIdFromBatchId, 0 ) \
-    SYSCALL_ENTRY( 0x1025, NtDCompositionGetFrameLegacyTokens, 0 ) \
+    SYSCALL_ENTRY( 0x1025, NtDCompositionGetFrameLegacyTokens, 12 ) \
     SYSCALL_ENTRY( 0x1026, NtDCompositionGetFrameStatistics, 8 ) \
-    SYSCALL_ENTRY( 0x1027, NtDCompositionGetFrameSurfaceUpdates, 0 ) \
+    SYSCALL_ENTRY( 0x1027, NtDCompositionGetFrameSurfaceUpdates, 12 ) \
     SYSCALL_ENTRY( 0x1028, NtDCompositionGetMaterialProperty, 0 ) \
     SYSCALL_ENTRY( 0x1029, NtDCompositionGetStatistics, 0 ) \
     SYSCALL_ENTRY( 0x102a, NtDCompositionGetTargetStatistics, 0 ) \
@@ -684,7 +684,7 @@
     SYSCALL_ENTRY( 0x12a8, NtMITAccessibilityTimerNotification, 0 ) \
     SYSCALL_ENTRY( 0x12a9, NtMITActivateInputProcessing, 0 ) \
     SYSCALL_ENTRY( 0x12aa, NtMITConfigureVirtualTouchpad, 0 ) \
-    SYSCALL_ENTRY( 0x12ab, NtMITCoreMsgKOpenConnectionTo, 0 ) \
+    SYSCALL_ENTRY( 0x12ab, NtMITCoreMsgKOpenConnectionTo, 8 ) \
     SYSCALL_ENTRY( 0x12ac, NtMITDeactivateInputProcessing, 0 ) \
     SYSCALL_ENTRY( 0x12ad, NtMITDisableMouseIntercept, 0 ) \
     SYSCALL_ENTRY( 0x12ae, NtMITDispatchCompletion, 0 ) \
@@ -789,7 +789,7 @@
     SYSCALL_ENTRY( 0x1311, NtTokenManagerGetAnalogExclusiveSurfaceUpdates, 0 ) \
     SYSCALL_ENTRY( 0x1312, NtTokenManagerGetAnalogExclusiveTokenEvent, 0 ) \
     SYSCALL_ENTRY( 0x1313, NtTokenManagerOpenSectionAndEvents, 16 ) \
-    SYSCALL_ENTRY( 0x1314, NtTokenManagerThread, 0 ) \
+    SYSCALL_ENTRY( 0x1314, NtTokenManagerThread, 4 ) \
     SYSCALL_ENTRY( 0x1315, NtUnBindCompositionSurface, 0 ) \
     SYSCALL_ENTRY( 0x1316, NtUpdateInputSinkTransforms, 0 ) \
     SYSCALL_ENTRY( 0x1317, NtUserAcquireIAMKey, 0 ) \
@@ -1556,11 +1556,11 @@
     SYSCALL_ENTRY( 0x100a, NtCreateCompositionSurfaceHandle, 0 ) \
     SYSCALL_ENTRY( 0x100b, NtCreateImplicitCompositionInputSink, 0 ) \
     SYSCALL_ENTRY( 0x100c, NtDCompositionAddCrossDeviceVisualChild, 0 ) \
-    SYSCALL_ENTRY( 0x100d, NtDCompositionBeginFrame, 0 ) \
+    SYSCALL_ENTRY( 0x100d, NtDCompositionBeginFrame, 24 ) \
     SYSCALL_ENTRY( 0x100e, NtDCompositionBoostCompositorClock, 0 ) \
     SYSCALL_ENTRY( 0x100f, NtDCompositionCommitChannel, 64 ) \
     SYSCALL_ENTRY( 0x1010, NtDCompositionCommitSynchronizationObject, 0 ) \
-    SYSCALL_ENTRY( 0x1011, NtDCompositionConfirmFrame, 0 ) \
+    SYSCALL_ENTRY( 0x1011, NtDCompositionConfirmFrame, 16 ) \
     SYSCALL_ENTRY( 0x1012, NtDCompositionConnectPipe, 0 ) \
     SYSCALL_ENTRY( 0x1013, NtDCompositionCreateAndBindSharedSection, 0 ) \
     SYSCALL_ENTRY( 0x1014, NtDCompositionCreateChannel, 32 ) \
@@ -1578,11 +1578,11 @@
     SYSCALL_ENTRY( 0x1020, NtDCompositionGetChannels, 0 ) \
     SYSCALL_ENTRY( 0x1021, NtDCompositionGetConnectionBatch, 24 ) \
     SYSCALL_ENTRY( 0x1022, NtDCompositionGetDeletedResources, 32 ) \
-    SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 0 ) \
+    SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 16 ) \
     SYSCALL_ENTRY( 0x1024, NtDCompositionGetFrameIdFromBatchId, 0 ) \
-    SYSCALL_ENTRY( 0x1025, NtDCompositionGetFrameLegacyTokens, 0 ) \
+    SYSCALL_ENTRY( 0x1025, NtDCompositionGetFrameLegacyTokens, 24 ) \
     SYSCALL_ENTRY( 0x1026, NtDCompositionGetFrameStatistics, 16 ) \
-    SYSCALL_ENTRY( 0x1027, NtDCompositionGetFrameSurfaceUpdates, 0 ) \
+    SYSCALL_ENTRY( 0x1027, NtDCompositionGetFrameSurfaceUpdates, 24 ) \
     SYSCALL_ENTRY( 0x1028, NtDCompositionGetMaterialProperty, 0 ) \
     SYSCALL_ENTRY( 0x1029, NtDCompositionGetStatistics, 0 ) \
     SYSCALL_ENTRY( 0x102a, NtDCompositionGetTargetStatistics, 0 ) \
@@ -2226,7 +2226,7 @@
     SYSCALL_ENTRY( 0x12a8, NtMITAccessibilityTimerNotification, 0 ) \
     SYSCALL_ENTRY( 0x12a9, NtMITActivateInputProcessing, 0 ) \
     SYSCALL_ENTRY( 0x12aa, NtMITConfigureVirtualTouchpad, 0 ) \
-    SYSCALL_ENTRY( 0x12ab, NtMITCoreMsgKOpenConnectionTo, 0 ) \
+    SYSCALL_ENTRY( 0x12ab, NtMITCoreMsgKOpenConnectionTo, 16 ) \
     SYSCALL_ENTRY( 0x12ac, NtMITDeactivateInputProcessing, 0 ) \
     SYSCALL_ENTRY( 0x12ad, NtMITDisableMouseIntercept, 0 ) \
     SYSCALL_ENTRY( 0x12ae, NtMITDispatchCompletion, 0 ) \
@@ -2331,7 +2331,7 @@
     SYSCALL_ENTRY( 0x1311, NtTokenManagerGetAnalogExclusiveSurfaceUpdates, 0 ) \
     SYSCALL_ENTRY( 0x1312, NtTokenManagerGetAnalogExclusiveTokenEvent, 0 ) \
     SYSCALL_ENTRY( 0x1313, NtTokenManagerOpenSectionAndEvents, 32 ) \
-    SYSCALL_ENTRY( 0x1314, NtTokenManagerThread, 0 ) \
+    SYSCALL_ENTRY( 0x1314, NtTokenManagerThread, 8 ) \
     SYSCALL_ENTRY( 0x1315, NtUnBindCompositionSurface, 0 ) \
     SYSCALL_ENTRY( 0x1316, NtUpdateInputSinkTransforms, 0 ) \
     SYSCALL_ENTRY( 0x1317, NtUserAcquireIAMKey, 0 ) \
@@ -3100,10 +3100,8 @@
     SYSCALL_STUB( NtCreateCompositionSurfaceHandle ) \
     SYSCALL_STUB( NtCreateImplicitCompositionInputSink ) \
     SYSCALL_STUB( NtDCompositionAddCrossDeviceVisualChild ) \
-    SYSCALL_STUB( NtDCompositionBeginFrame ) \
     SYSCALL_STUB( NtDCompositionBoostCompositorClock ) \
     SYSCALL_STUB( NtDCompositionCommitSynchronizationObject ) \
-    SYSCALL_STUB( NtDCompositionConfirmFrame ) \
     SYSCALL_STUB( NtDCompositionConnectPipe ) \
     SYSCALL_STUB( NtDCompositionCreateAndBindSharedSection ) \
     SYSCALL_STUB( NtDCompositionCreateDwmChannel ) \
@@ -3114,10 +3112,7 @@
     SYSCALL_STUB( NtDCompositionDuplicateSwapchainHandleToDwm ) \
     SYSCALL_STUB( NtDCompositionEnableMMCSS ) \
     SYSCALL_STUB( NtDCompositionGetChannels ) \
-    SYSCALL_STUB( NtDCompositionGetFrameId ) \
     SYSCALL_STUB( NtDCompositionGetFrameIdFromBatchId ) \
-    SYSCALL_STUB( NtDCompositionGetFrameLegacyTokens ) \
-    SYSCALL_STUB( NtDCompositionGetFrameSurfaceUpdates ) \
     SYSCALL_STUB( NtDCompositionGetMaterialProperty ) \
     SYSCALL_STUB( NtDCompositionGetStatistics ) \
     SYSCALL_STUB( NtDCompositionGetTargetStatistics ) \
@@ -3539,7 +3534,6 @@
     SYSCALL_STUB( NtMITAccessibilityTimerNotification ) \
     SYSCALL_STUB( NtMITActivateInputProcessing ) \
     SYSCALL_STUB( NtMITConfigureVirtualTouchpad ) \
-    SYSCALL_STUB( NtMITCoreMsgKOpenConnectionTo ) \
     SYSCALL_STUB( NtMITDeactivateInputProcessing ) \
     SYSCALL_STUB( NtMITDisableMouseIntercept ) \
     SYSCALL_STUB( NtMITDispatchCompletion ) \
@@ -3642,7 +3636,6 @@
     SYSCALL_STUB( NtTokenManagerCreateFlipObjectTokenHandle ) \
     SYSCALL_STUB( NtTokenManagerGetAnalogExclusiveSurfaceUpdates ) \
     SYSCALL_STUB( NtTokenManagerGetAnalogExclusiveTokenEvent ) \
-    SYSCALL_STUB( NtTokenManagerThread ) \
     SYSCALL_STUB( NtUnBindCompositionSurface ) \
     SYSCALL_STUB( NtUpdateInputSinkTransforms ) \
     SYSCALL_STUB( NtUserAcquireIAMKey ) \

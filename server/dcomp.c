@@ -33,8 +33,9 @@
 #include "object.h"
 #include "process.h"
 #include "request.h"
+#include "alpc.h"
 
-#define TOKEN_MANAGER_SECTION_SIZE 0x10000
+#define TOKEN_MANAGER_SECTION_SIZE 0x1000
 #define DCOMP_CHANNEL_MAX_SIZE 0x1000000
 
 struct dcomp_connection
@@ -46,6 +47,11 @@ struct dcomp_connection
     struct event *work_event;
     int is_dwm;
     int is_consumer;
+    unsigned __int64 next_frame_id;
+    unsigned __int64 current_frame_id;
+    unsigned __int64 confirmed_frame_id;
+    unsigned __int64 completed_frame_id;
+    int frame_active;
 };
 
 struct token_manager
@@ -55,6 +61,7 @@ struct token_manager
     struct mapping *section;
     struct event *event_a;
     struct event *event_b;
+    process_id_t worker_pid;
 };
 
 struct dcomp_batch
@@ -109,6 +116,7 @@ static void dcomp_connection_dump( struct object *obj, int verbose );
 static void dcomp_connection_destroy( struct object *obj );
 static void dcomp_channel_dump( struct object *obj, int verbose );
 static void dcomp_channel_destroy( struct object *obj );
+static int process_has_dcomp_consumer_connection( const struct process *process );
 
 static const struct object_ops dcomp_connection_ops =
 {
@@ -290,6 +298,18 @@ static void release_token_manager( unsigned int session_id )
     }
 }
 
+static void release_token_manager_worker( unsigned int session_id, process_id_t process_id )
+{
+    struct token_manager *manager;
+
+    LIST_FOR_EACH_ENTRY( manager, &token_managers, struct token_manager, entry )
+    {
+        if (manager->session_id != session_id || manager->worker_pid != process_id) continue;
+        manager->worker_pid = 0;
+        return;
+    }
+}
+
 static void dcomp_connection_destroy( struct object *obj )
 {
     struct dcomp_connection *connection = (struct dcomp_connection *)obj;
@@ -305,6 +325,8 @@ static void dcomp_connection_destroy( struct object *obj )
     }
     session_id = connection->owner->session_id;
     list_remove( &connection->entry );
+    if (connection->is_consumer && !process_has_dcomp_consumer_connection( connection->owner ))
+        release_token_manager_worker( session_id, connection->owner->id );
     release_object( connection->owner );
     if (connection->work_event) release_object( connection->work_event );
     if (connection->is_consumer && !session_has_dcomp_consumer_connection( session_id ))
@@ -332,9 +354,10 @@ static struct token_manager *get_token_manager( unsigned int session_id )
     manager->section = NULL;
     manager->event_a = NULL;
     manager->event_b = NULL;
+    manager->worker_pid = 0;
     if (!(manager->section = create_anonymous_mapping( TOKEN_MANAGER_SECTION_SIZE,
                                                        FILE_READ_DATA | FILE_WRITE_DATA )) ||
-        !(manager->event_a = create_event( NULL, empty_str, 0, 0, 0, NULL )) ||
+        !(manager->event_a = create_event( NULL, empty_str, 0, 1, 0, NULL )) ||
         !(manager->event_b = create_event( NULL, empty_str, 0, 0, 0, NULL )))
     {
         if (manager->event_b) release_object( manager->event_b );
@@ -364,6 +387,11 @@ DECL_HANDLER(create_dcomp_connection)
     connection->is_dwm = !!req->is_dwm;
     connection->is_consumer = current->process->native_dwm_owner ||
                               (!is_native_machine() && connection->is_dwm);
+    connection->next_frame_id = 1;
+    connection->current_frame_id = 0;
+    connection->confirmed_frame_id = 0;
+    connection->completed_frame_id = 0;
+    connection->frame_active = 0;
     if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
         fprintf( stderr, "linuxnt: server dcomp-connection winpid=%04x session=%u flag=%u consumer=%u\n",
                  current->process->id, current->process->session_id,
@@ -384,6 +412,132 @@ DECL_HANDLER(destroy_dcomp_connection)
     status = close_handle( current->process, req->handle );
     release_object( connection );
     set_error( status );
+}
+
+DECL_HANDLER(begin_dcomp_frame)
+{
+    struct dcomp_connection *connection;
+
+    if (!(connection = (struct dcomp_connection *)get_handle_obj( current->process, req->connection,
+                                                                   0, &dcomp_connection_ops ))) return;
+    if (!is_dcomp_consumer_connection( connection )) set_error( STATUS_ACCESS_DENIED );
+    else if (connection->frame_active) set_error( STATUS_RESOURCE_IN_USE );
+    else
+    {
+        if (!(reply->frame_id = connection->next_frame_id++))
+            reply->frame_id = connection->next_frame_id++;
+        connection->current_frame_id = reply->frame_id;
+        connection->frame_active = 1;
+    }
+    release_object( connection );
+}
+
+DECL_HANDLER(confirm_dcomp_frame)
+{
+    struct dcomp_connection *connection;
+
+    if (!(connection = (struct dcomp_connection *)get_handle_obj( current->process, req->connection,
+                                                                   0, &dcomp_connection_ops ))) return;
+    if (!is_dcomp_consumer_connection( connection )) set_error( STATUS_ACCESS_DENIED );
+    else if (!connection->frame_active || connection->current_frame_id != req->frame_id)
+        set_error( STATUS_NOT_FOUND );
+    else
+    {
+        connection->confirmed_frame_id = req->frame_id;
+        connection->completed_frame_id = req->frame_id;
+        connection->frame_active = 0;
+    }
+    release_object( connection );
+}
+
+DECL_HANDLER(discard_dcomp_frame)
+{
+    struct dcomp_connection *connection;
+
+    if (!(connection = (struct dcomp_connection *)get_handle_obj( current->process, req->connection,
+                                                                   0, &dcomp_connection_ops ))) return;
+    if (!is_dcomp_consumer_connection( connection )) set_error( STATUS_ACCESS_DENIED );
+    else if (!connection->frame_active || connection->current_frame_id != req->frame_id)
+        set_error( STATUS_NOT_FOUND );
+    else connection->frame_active = 0;
+    release_object( connection );
+}
+
+static struct dcomp_connection *find_process_dcomp_consumer( struct process *process )
+{
+    struct dcomp_connection *connection;
+
+    LIST_FOR_EACH_ENTRY( connection, &dcomp_connections, struct dcomp_connection, entry )
+    {
+        if (connection->owner == process && is_dcomp_consumer_connection( connection )) return connection;
+    }
+    return NULL;
+}
+
+DECL_HANDLER(get_dcomp_frame_id)
+{
+    struct dcomp_connection *connection;
+
+    if (req->type > 2)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if ((connection = find_process_dcomp_consumer( current->process )))
+    {
+        if (!req->type) reply->frame_id = connection->current_frame_id;
+        else if (req->type == 1) reply->frame_id = connection->confirmed_frame_id;
+        else reply->frame_id = connection->completed_frame_id;
+        if (!reply->frame_id) set_error( STATUS_UNSUCCESSFUL );
+        return;
+    }
+    set_error( STATUS_ACCESS_DENIED );
+}
+
+DECL_HANDLER(get_dcomp_frame_legacy_tokens)
+{
+    struct dcomp_connection *connection;
+
+    if (!req->frame_id)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if ((connection = find_process_dcomp_consumer( current->process )))
+    {
+        if (connection->current_frame_id != req->frame_id)
+        {
+            set_error( STATUS_NOT_FOUND );
+            return;
+        }
+        reply->token_count = 0;
+        reply->has_more = 0;
+        return;
+    }
+    set_error( STATUS_ACCESS_DENIED );
+}
+
+DECL_HANDLER(get_dcomp_frame_surface_updates)
+{
+    struct dcomp_connection *connection;
+
+    if (!req->frame_id)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if ((connection = find_process_dcomp_consumer( current->process )))
+    {
+        if (connection->current_frame_id != req->frame_id)
+        {
+            set_error( STATUS_NOT_FOUND );
+            return;
+        }
+        reply->update_count = 0;
+        reply->has_more = 0;
+        return;
+    }
+    set_error( STATUS_ACCESS_DENIED );
 }
 
 DECL_HANDLER(open_token_manager)
@@ -413,6 +567,52 @@ failed:
     close_handle( current->process, reply->section );
     reply->section = 0;
     reply->event_a = 0;
+}
+
+DECL_HANDLER(begin_token_manager_thread)
+{
+    struct token_manager *manager;
+    struct event *stop_event;
+
+    if (!req->adapter_count)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(stop_event = get_event_obj( current->process, req->stop_event, SYNCHRONIZE ))) return;
+    release_object( stop_event );
+    if (!process_has_dcomp_consumer_connection( current->process ))
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!(manager = get_token_manager( current->process->session_id ))) return;
+    if (manager->worker_pid)
+    {
+        set_error( STATUS_DEVICE_BUSY );
+        return;
+    }
+    if (!(reply->notification_event = alloc_handle_no_access_check( current->process, manager->event_b,
+                                                                     SYNCHRONIZE, 0 ))) return;
+    manager->worker_pid = current->process->id;
+}
+
+DECL_HANDLER(end_token_manager_thread)
+{
+    struct token_manager *manager;
+
+    LIST_FOR_EACH_ENTRY( manager, &token_managers, struct token_manager, entry )
+    {
+        if (manager->session_id != current->process->session_id) continue;
+        if (manager->worker_pid != current->process->id)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            return;
+        }
+        manager->worker_pid = 0;
+        return;
+    }
+    set_error( STATUS_ACCESS_DENIED );
 }
 
 DECL_HANDLER(create_dcomp_channel)
@@ -658,6 +858,7 @@ DECL_HANDLER(set_mit_input_callbacks)
         set_error( STATUS_ACCESS_DENIED );
         return;
     }
+    if (!set_coremsg_input_port_ready( current->process, !!req->enabled )) return;
     current->process->mit_input_callbacks = !!req->enabled;
     if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
         fprintf( stderr, "linuxnt: server mit-input-callbacks winpid=%04x enabled=%u session=%u\n",

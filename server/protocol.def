@@ -4788,6 +4788,48 @@ struct alpc_message_info
     obj_handle_t handle;       /* connection handle to consume */
 @END
 
+/* Begin one compositor frame on a DWM-owned connection. */
+@REQ(begin_dcomp_frame)
+    obj_handle_t connection;
+@REPLY
+    unsigned __int64 frame_id;
+@END
+
+/* Confirm one compositor frame after synchronous host processing. */
+@REQ(confirm_dcomp_frame)
+    obj_handle_t connection;
+    unsigned __int64 frame_id;
+@END
+
+/* Roll back an active frame when client output marshalling fails. */
+@REQ(discard_dcomp_frame)
+    obj_handle_t connection;
+    unsigned __int64 frame_id;
+@END
+
+/* Query current, confirmed, or completed frame identity. */
+@REQ(get_dcomp_frame_id)
+    unsigned int type;
+@REPLY
+    unsigned __int64 frame_id;
+@END
+
+/* Read legacy-token metadata for a known compositor frame. */
+@REQ(get_dcomp_frame_legacy_tokens)
+    unsigned __int64 frame_id;
+@REPLY
+    unsigned int token_count;
+    int has_more;
+@END
+
+/* Read surface-update metadata for a known compositor frame. */
+@REQ(get_dcomp_frame_surface_updates)
+    unsigned __int64 frame_id;
+@REPLY
+    unsigned int update_count;
+    int has_more;
+@END
+
 /* Open the session token-manager section and notification events. */
 @REQ(open_token_manager)
 @REPLY
@@ -4795,6 +4837,18 @@ struct alpc_message_info
     mem_size_t   section_size; /* shared section size */
     obj_handle_t event_a;      /* first session notification event */
     obj_handle_t event_b;      /* second session notification event */
+@END
+
+/* Enter the session token worker and return its internal notification event. */
+@REQ(begin_token_manager_thread)
+    obj_handle_t stop_event;            /* caller-owned worker termination event */
+    unsigned int adapter_count;         /* validated adapter descriptor count */
+@REPLY
+    obj_handle_t notification_event;    /* auto-reset token notification event */
+@END
+
+/* Leave the session token worker. */
+@REQ(end_token_manager_thread)
 @END
 
 /* Create a process-owned DirectComposition command channel. */
@@ -4885,6 +4939,12 @@ struct alpc_message_info
 /* Register process-local ISM device notification callbacks. */
 @REQ(set_mit_input_callbacks)
     int enabled;                       /* callback installed in client process */
+@END
+
+/* Open one trusted CoreMessaging kernel destination for the calling process. */
+@REQ(open_coremsg_kernel_connection)
+    unsigned int selector;             /* private endpoint selector, zero through 22 */
+    VARARG(routing,bytes);              /* opaque 40-byte MsgRoutingInfo */
 @END
 
 /* Register the current thread as the DWM manipulation input consumer. */

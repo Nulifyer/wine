@@ -24,6 +24,7 @@
 #include "wine/test.h"
 
 #include "winbase.h"
+#include "winternl.h"
 #include "ntuser.h"
 
 struct kst_test
@@ -47,10 +48,229 @@ static DWORD WINAPI manipulation_thread( void *arg )
     return GetLastError() == 0xdeadbeef ? 0 : 2;
 }
 
+struct coremsg_message
+{
+    ALPC_PORT_MESSAGE header;
+    unsigned char data[296];
+};
+
+struct coremsg_registrar_context
+{
+    unsigned char guid[16];
+    NTSTATUS status;
+};
+
+struct token_thread_context
+{
+    struct token_manager_thread_info info;
+    NTSTATUS status;
+};
+
+static DWORD WINAPI token_thread( void *arg )
+{
+    struct token_thread_context *context = arg;
+
+    context->status = NtTokenManagerThread( &context->info );
+    return 0;
+}
+
+static void init_alpc_attributes( ALPC_PORT_ATTRIBUTES *attributes )
+{
+    memset( attributes, 0, sizeof(*attributes) );
+    attributes->SecurityQos.Length = sizeof(attributes->SecurityQos);
+    attributes->SecurityQos.ImpersonationLevel = SecurityIdentification;
+    attributes->SecurityQos.ContextTrackingMode = SECURITY_STATIC_TRACKING;
+    attributes->MaxMessageLength = 0x400;
+}
+
+static void put_u32( unsigned char *data, DWORD value )
+{
+    memcpy( data, &value, sizeof(value) );
+}
+
+static DWORD WINAPI coremsg_registrar_client( void *arg )
+{
+    static const WCHAR name_buffer[] = L"\\BaseNamedObjects\\CoreMessagingRegistrar";
+    UNICODE_STRING name = RTL_CONSTANT_STRING(name_buffer);
+    struct coremsg_registrar_context *context = arg;
+    ALPC_PORT_ATTRIBUTES attributes;
+    struct coremsg_message request = {0}, reply = {0};
+    HANDLE port = NULL;
+    SIZE_T size;
+
+    init_alpc_attributes( &attributes );
+    context->status = NtAlpcConnectPort( &port, &name, NULL, &attributes,
+                                         ALPC_SYNC_CONNECTION, NULL, NULL, NULL,
+                                         NULL, NULL, NULL );
+    if (context->status) return context->status;
+
+    request.header.DataLength = 132;
+    request.header.TotalLength = sizeof(request.header) + request.header.DataLength;
+    put_u32( request.data + 16, 2 );
+    put_u32( request.data + 20, 0x42 );
+    put_u32( request.data + 24, 0x10000 );
+    put_u32( request.data + 32, 92 );
+    put_u32( request.data + 40, 23 );
+    request.data[44] = 1;
+    request.data[46] = 12;
+    put_u32( request.data + 48, sizeof(L"Kernel\\MIT\\InputPort") );
+    memcpy( request.data + 52, L"Kernel\\MIT\\InputPort", sizeof(L"Kernel\\MIT\\InputPort") );
+    put_u32( request.data + 96, 24 );
+    put_u32( request.data + 100, 1 );
+    put_u32( request.data + 124, 4 );
+    put_u32( request.data + 128, 1 );
+    size = sizeof(reply);
+    context->status = NtAlpcSendWaitReceivePort( port, ALPC_MSGFLG_SYNC_REQUEST,
+                                                 &request.header, NULL, &reply.header,
+                                                 &size, NULL, NULL );
+    if (!context->status && (reply.header.DataLength != 108 || reply.data[20] != 0x42 ||
+                             reply.data[44] || reply.data[46] != 15 ||
+                             !reply.data[60]))
+        context->status = STATUS_INVALID_MESSAGE;
+    if (!context->status) memcpy( context->guid, reply.data + 92, sizeof(context->guid) );
+    NtClose( port );
+    return context->status;
+}
+
+static BOOL query_coremsg_kernel_guid( unsigned char guid[16] )
+{
+    static const WCHAR name_buffer[] = L"\\BaseNamedObjects\\CoreMessagingRegistrar";
+    UNICODE_STRING name = RTL_CONSTANT_STRING(name_buffer);
+    struct coremsg_registrar_context context = {0};
+    ALPC_PORT_ATTRIBUTES attributes;
+    OBJECT_ATTRIBUTES object_attributes;
+    struct coremsg_message connection = {0};
+    HANDLE listener = NULL, server = NULL, thread = NULL;
+    NTSTATUS status;
+    SIZE_T size;
+    BOOL ret = FALSE;
+
+    init_alpc_attributes( &attributes );
+    InitializeObjectAttributes( &object_attributes, &name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+    status = NtAlpcCreatePort( &listener, &object_attributes, &attributes );
+    ok( !status, "registrar listener creation returned %#lx\n", status );
+    if (status) goto done;
+
+    thread = CreateThread( NULL, 0, coremsg_registrar_client, &context, 0, NULL );
+    ok( !!thread, "failed to create registrar client, error %lu\n", GetLastError() );
+    if (!thread) goto done;
+
+    size = sizeof(connection);
+    status = NtAlpcSendWaitReceivePort( listener, 0, NULL, NULL, &connection.header,
+                                        &size, NULL, NULL );
+    ok( !status, "registrar connection receive returned %#lx\n", status );
+    ok( !status && (connection.header.Type & 0xff) == ALPC_MESSAGE_TYPE_CONNECTION_REQUEST,
+        "unexpected registrar connection type %#x\n", connection.header.Type );
+    if (status || (connection.header.Type & 0xff) != ALPC_MESSAGE_TYPE_CONNECTION_REQUEST)
+        goto done;
+
+    status = NtAlpcAcceptConnectPort( &server, listener, 0, NULL, &attributes, NULL,
+                                      &connection.header, NULL, TRUE );
+    ok( !status, "registrar connection accept returned %#lx\n", status );
+    if (status) goto done;
+
+    ok( WaitForSingleObject( thread, 5000 ) == WAIT_OBJECT_0,
+        "registrar client did not finish\n" );
+    ok( !context.status, "registrar lookup returned %#lx\n", context.status );
+    if (!context.status)
+    {
+        memcpy( guid, context.guid, sizeof(context.guid) );
+        ret = TRUE;
+    }
+
+done:
+    if (thread) CloseHandle( thread );
+    if (server) NtClose( server );
+    if (listener) NtClose( listener );
+    return ret;
+}
+
+static void make_coremsg_listener_name( const unsigned char guid[16], WCHAR name[80] )
+{
+    static const WCHAR prefix[] = L"\\BaseNamedObjects\\[CoreMsgK]-";
+    static const WCHAR hex[] = L"0123456789abcdef";
+    static const unsigned char order[16] = {3,2,1,0,5,4,7,6,8,9,10,11,12,13,14,15};
+    unsigned int i, pos = ARRAY_SIZE(prefix) - 1;
+
+    memcpy( name, prefix, sizeof(prefix) );
+    name[pos++] = '{';
+    for (i = 0; i < ARRAY_SIZE(order); ++i)
+    {
+        name[pos++] = hex[guid[order[i]] >> 4];
+        name[pos++] = hex[guid[order[i]] & 0x0f];
+        if (i == 3 || i == 5 || i == 7 || i == 9) name[pos++] = '-';
+    }
+    name[pos++] = '}';
+    name[pos] = 0;
+}
+
+static NTSTATUS connect_coremsg_kernel_listener( const unsigned char guid[16], BOOL send_params,
+                                                 HANDLE *port )
+{
+    struct
+    {
+        ALPC_PORT_MESSAGE header;
+        unsigned char params[24];
+    } connection = {0};
+    ALPC_PORT_ATTRIBUTES attributes;
+    WCHAR name_buffer[80];
+    UNICODE_STRING name;
+    SIZE_T size = sizeof(connection);
+    NTSTATUS status;
+
+    *port = NULL;
+    make_coremsg_listener_name( guid, name_buffer );
+    RtlInitUnicodeString( &name, name_buffer );
+    init_alpc_attributes( &attributes );
+    connection.header.DataLength = sizeof(connection.params);
+    connection.header.TotalLength = sizeof(connection);
+    status = NtAlpcConnectPort( port, &name, NULL, &attributes, 0, NULL,
+                                send_params ? &connection.header : NULL,
+                                send_params ? &size : NULL, NULL, NULL, NULL );
+    return status;
+}
+
+static void coremsg_selector_child( DWORD pid, DWORD tid, UINT selector )
+{
+    unsigned char routing_info[40] = {0};
+    NTSTATUS status;
+
+    memcpy( routing_info, &pid, sizeof(pid) );
+    memcpy( routing_info + 4, &tid, sizeof(tid) );
+    status = NtMITCoreMsgKOpenConnectionTo( selector, routing_info );
+    ok( status == STATUS_SUCCESS, "child got selector status %#lx\n", status );
+}
+
+static BOOL run_coremsg_selector_child( DWORD pid, DWORD tid, UINT selector )
+{
+    STARTUPINFOA startup = {sizeof(startup)};
+    PROCESS_INFORMATION info = {0};
+    char cmdline[2 * MAX_PATH], **argv;
+    DWORD exit_code = 0xdeadbeef;
+
+    winetest_get_mainargs( &argv );
+    sprintf( cmdline, "%s dcomp coremsg_selector_child %lx %lx %x", argv[0], pid, tid, selector );
+    ok( CreateProcessA( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info ),
+        "failed to create selector child, error %lu\n", GetLastError() );
+    if (!info.hProcess) return FALSE;
+
+    ok( WaitForSingleObject( info.hProcess, 5000 ) == WAIT_OBJECT_0,
+        "selector child did not exit\n" );
+    ok( GetExitCodeProcess( info.hProcess, &exit_code ) && !exit_code,
+        "selector child exit code %lu\n", exit_code );
+    CloseHandle( info.hThread );
+    CloseHandle( info.hProcess );
+    return !exit_code;
+}
+
 static void test_input_registration(void)
 {
-    HANDLE thread;
+    unsigned char routing_info[40] = {0};
+    unsigned char guid[16];
+    HANDLE coremsg_port, thread;
+    DWORD pid = GetCurrentProcessId(), tid = GetCurrentThreadId();
     DWORD exit_code;
+    NTSTATUS status;
 
     if (!winetest_platform_is_wine)
     {
@@ -58,11 +278,52 @@ static void test_input_registration(void)
         return;
     }
 
+    status = NtMITCoreMsgKOpenConnectionTo( 23, routing_info );
+    ok( status == STATUS_INVALID_PARAMETER, "got out-of-range selector status %#lx\n", status );
+    status = NtMITCoreMsgKOpenConnectionTo( 0, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null-routing status %#lx\n", status );
+    status = NtMITCoreMsgKOpenConnectionTo( 0, routing_info );
+    ok( status == STATUS_NOT_FOUND, "got pre-registration status %#lx\n", status );
+
     SetLastError( 0xdeadbeef );
     ok( NtMITSetInputCallbacks( input_notification_callback ), "failed to register input callback\n" );
     ok( GetLastError() == 0xdeadbeef, "input callback registration changed last error to %lu\n",
         GetLastError() );
+    status = NtMITCoreMsgKOpenConnectionTo( 0, routing_info );
+    ok( status == STATUS_UNSUCCESSFUL, "got unmatched-routing status %#lx\n", status );
+
+    if (query_coremsg_kernel_guid( guid ))
+    {
+        status = connect_coremsg_kernel_listener( guid, FALSE, &coremsg_port );
+        ok( status == STATUS_INVALID_PARAMETER,
+            "parameterless kernel listener connection returned %#lx\n", status );
+        status = connect_coremsg_kernel_listener( guid, TRUE, &coremsg_port );
+        ok( !status, "kernel listener connection returned %#lx\n", status );
+        if (status) goto done_input_registration;
+
+        memcpy( routing_info, &pid, sizeof(pid) );
+        memcpy( routing_info + 4, &tid, sizeof(tid) );
+        status = NtMITCoreMsgKOpenConnectionTo( 0, routing_info );
+        ok( status == STATUS_SUCCESS, "got connection status %#lx\n", status );
+        status = NtMITCoreMsgKOpenConnectionTo( 0, routing_info );
+        ok( status == STATUS_ALREADY_REGISTERED, "got duplicate selector status %#lx\n", status );
+        status = NtMITCoreMsgKOpenConnectionTo( 22, routing_info );
+        ok( status == STATUS_SUCCESS, "got boundary selector status %#lx\n", status );
+
+        if (run_coremsg_selector_child( pid, tid, 7 ))
+        {
+            status = NtMITCoreMsgKOpenConnectionTo( 7, routing_info );
+            ok( status == STATUS_SUCCESS, "selector survived owner teardown, status %#lx\n", status );
+        }
+
+        NtClose( coremsg_port );
+        status = NtMITCoreMsgKOpenConnectionTo( 1, routing_info );
+        ok( status == STATUS_UNSUCCESSFUL, "got disconnected-routing status %#lx\n", status );
+    }
+done_input_registration:
     ok( NtMITSetInputCallbacks( NULL ), "failed to clear input callback\n" );
+    status = NtMITCoreMsgKOpenConnectionTo( 1, routing_info );
+    ok( status == STATUS_UNSUCCESSFUL, "got post-callback routing status %#lx\n", status );
 
     SetLastError( 0xdeadbeef );
     ok( NtUserRegisterManipulationThread( NULL ), "failed to register current manipulation thread\n" );
@@ -391,6 +652,106 @@ done:
     CloseHandle( event );
 }
 
+static void test_frame_lifecycle(void)
+{
+    struct dcomposition_frame_info frame_info = {0};
+    struct dcomposition_confirm_frame_info confirm_info = {0};
+    HANDLE event, ordinary_connection = NULL, connection = NULL;
+    UINT64 frame_id = 0xcccccccccccccccc, queried_id;
+    UINT token_count;
+    BOOL has_more;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create event, error %lu\n", GetLastError() );
+    if (!event) return;
+
+    status = NtDCompositionBeginFrame( NULL, NULL, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null begin status %#lx\n", status );
+    status = NtDCompositionConfirmFrame( NULL, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null confirm status %#lx\n", status );
+    status = NtDCompositionGetFrameId( 3, &queried_id );
+    ok( status == STATUS_INVALID_PARAMETER, "got invalid type status %#lx\n", status );
+
+    status = NtDCompositionCreateConnection( FALSE, event, &ordinary_connection );
+    ok( status == STATUS_SUCCESS, "got ordinary connection status %#lx\n", status );
+    status = NtDCompositionBeginFrame( ordinary_connection, &frame_info, &frame_id );
+    ok( status == STATUS_ACCESS_DENIED, "got ordinary begin status %#lx\n", status );
+    if (ordinary_connection) NtDCompositionDestroyConnection( ordinary_connection );
+
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got connection status %#lx\n", status );
+    queried_id = 0xcccccccccccccccc;
+    status = NtDCompositionGetFrameId( 0, &queried_id );
+    ok( status == STATUS_UNSUCCESSFUL, "got initial query status %#lx\n", status );
+    ok( queried_id == 0xcccccccccccccccc, "initial query changed id %s\n",
+        wine_dbgstr_longlong(queried_id) );
+
+    status = NtDCompositionBeginFrame( connection, &frame_info, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null-output begin status %#lx\n", status );
+    status = NtDCompositionBeginFrame( connection, &frame_info, &frame_id );
+    ok( status == STATUS_SUCCESS, "got begin status %#lx\n", status );
+    ok( frame_id && frame_id != 0xcccccccccccccccc, "got frame id %s\n",
+        wine_dbgstr_longlong(frame_id) );
+    token_count = 0xcccccccc;
+    has_more = 0xcccccccc;
+    status = NtDCompositionGetFrameLegacyTokens( &frame_id, &token_count, &has_more );
+    ok( status == STATUS_SUCCESS, "got legacy-token status %#lx\n", status );
+    ok( !token_count, "got legacy-token count %u\n", token_count );
+    ok( !has_more, "got legacy-token continuation %u\n", has_more );
+    queried_id = frame_id + 1;
+    token_count = 0xcccccccc;
+    has_more = 0xcccccccc;
+    status = NtDCompositionGetFrameLegacyTokens( &queried_id, &token_count, &has_more );
+    ok( status == STATUS_NOT_FOUND, "got unknown legacy-token status %#lx\n", status );
+    ok( !token_count, "unknown legacy-token count %u\n", token_count );
+    ok( !has_more, "unknown legacy-token continuation %u\n", has_more );
+    token_count = 0xcccccccc;
+    has_more = 0xcccccccc;
+    status = NtDCompositionGetFrameSurfaceUpdates( &frame_id, &token_count, &has_more );
+    ok( status == STATUS_SUCCESS, "got surface-update status %#lx\n", status );
+    ok( !token_count, "got surface-update count %u\n", token_count );
+    ok( !has_more, "got surface-update continuation %u\n", has_more );
+    token_count = 0xcccccccc;
+    has_more = 0xcccccccc;
+    status = NtDCompositionGetFrameSurfaceUpdates( &queried_id, &token_count, &has_more );
+    ok( status == STATUS_NOT_FOUND, "got unknown surface-update status %#lx\n", status );
+    ok( !token_count, "unknown surface-update count %u\n", token_count );
+    ok( !has_more, "unknown surface-update continuation %u\n", has_more );
+    queried_id = 0;
+    status = NtDCompositionGetFrameId( 0, &queried_id );
+    ok( status == STATUS_SUCCESS, "got current query status %#lx\n", status );
+    ok( queried_id == frame_id, "got current id %s expected %s\n", wine_dbgstr_longlong(queried_id),
+        wine_dbgstr_longlong(frame_id) );
+    status = NtDCompositionBeginFrame( connection, &frame_info, &queried_id );
+    ok( status == STATUS_RESOURCE_IN_USE, "got repeated begin status %#lx\n", status );
+
+    confirm_info.frame_id = frame_id + 1;
+    status = NtDCompositionConfirmFrame( connection, &confirm_info );
+    ok( status == STATUS_NOT_FOUND, "got unknown confirm status %#lx\n", status );
+    confirm_info.frame_id = frame_id;
+    confirm_info.update_count = 1;
+    status = NtDCompositionConfirmFrame( connection, &confirm_info );
+    ok( status == STATUS_INVALID_PARAMETER, "got missing updates status %#lx\n", status );
+    confirm_info.update_count = 0;
+    status = NtDCompositionConfirmFrame( connection, &confirm_info );
+    ok( status == STATUS_SUCCESS, "got confirm status %#lx\n", status );
+
+    queried_id = 0;
+    status = NtDCompositionGetFrameId( 1, &queried_id );
+    ok( status == STATUS_SUCCESS, "got confirmed query status %#lx\n", status );
+    ok( queried_id == frame_id, "got confirmed id %s expected %s\n", wine_dbgstr_longlong(queried_id),
+        wine_dbgstr_longlong(frame_id) );
+    queried_id = 0;
+    status = NtDCompositionGetFrameId( 2, &queried_id );
+    ok( status == STATUS_SUCCESS, "got completed query status %#lx\n", status );
+    ok( queried_id == frame_id, "got completed id %s expected %s\n", wine_dbgstr_longlong(queried_id),
+        wine_dbgstr_longlong(frame_id) );
+
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_resource_retirement(void)
 {
     void *resources = (void *)0xcccccccc;
@@ -450,20 +811,46 @@ static void test_resource_retirement(void)
 static void test_token_manager_lifetime(void)
 {
     HANDLE work_event, ordinary_connection = NULL, dwm_connection = NULL;
+    HANDLE token_stop, thread;
     HANDLE section = NULL, event_a = NULL, event_b = NULL;
     HANDLE section2 = NULL, event_a2 = NULL, event_b2 = NULL;
     SIZE_T section_size = ~(SIZE_T)0, section_size2 = ~(SIZE_T)0;
     NTSTATUS status;
+    struct token_manager_adapter_info adapter = {0};
+    struct token_thread_context thread_context = {0};
     void *view;
 
     work_event = CreateEventW( NULL, FALSE, FALSE, NULL );
     ok( !!work_event, "CreateEventW failed, error %lu\n", GetLastError() );
     if (!work_event) return;
+    token_stop = CreateEventW( NULL, TRUE, FALSE, NULL );
+    ok( !!token_stop, "CreateEventW failed, error %lu\n", GetLastError() );
+    if (!token_stop)
+    {
+        CloseHandle( work_event );
+        return;
+    }
+
+    thread_context.info.stop_event = token_stop;
+    thread_context.info.adapters = &adapter;
+    thread_context.info.adapter_count = 1;
+    status = NtTokenManagerThread( NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null-info status %#lx\n", status );
+    thread_context.info.adapter_count = 0;
+    status = NtTokenManagerThread( &thread_context.info );
+    ok( status == STATUS_INVALID_PARAMETER, "got zero-count status %#lx\n", status );
+    thread_context.info.adapter_count = 1;
+    thread_context.info.adapters = (void *)1;
+    status = NtTokenManagerThread( &thread_context.info );
+    ok( status == STATUS_INVALID_PARAMETER, "got invalid-adapter status %#lx\n", status );
+    thread_context.info.adapters = &adapter;
 
     status = NtDCompositionCreateConnection( FALSE, work_event, &ordinary_connection );
     ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
     status = NtTokenManagerOpenSectionAndEvents( &section, &section_size, &event_a, &event_b );
     ok( status == STATUS_ACCESS_DENIED, "got status %#lx\n", status );
+    status = NtTokenManagerThread( &thread_context.info );
+    ok( status == STATUS_ACCESS_DENIED, "got ordinary worker status %#lx\n", status );
     ok( section == INVALID_HANDLE_VALUE, "got section %p\n", section );
     ok( !section_size, "got section size %Iu\n", section_size );
     ok( event_a == INVALID_HANDLE_VALUE, "got event_a %p\n", event_a );
@@ -475,7 +862,7 @@ static void test_token_manager_lifetime(void)
     status = NtTokenManagerOpenSectionAndEvents( &section, &section_size, &event_a, &event_b );
     ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
     ok( section && section != INVALID_HANDLE_VALUE, "got section %p\n", section );
-    ok( section_size == 0x10000, "got section size %Iu\n", section_size );
+    ok( section_size == 0x1000, "got section size %Iu\n", section_size );
     ok( event_a && event_a != INVALID_HANDLE_VALUE, "got event_a %p\n", event_a );
     ok( event_b && event_b != INVALID_HANDLE_VALUE, "got event_b %p\n", event_b );
     view = MapViewOfFile( section, FILE_MAP_READ, 0, 0, section_size );
@@ -487,8 +874,27 @@ static void test_token_manager_lifetime(void)
     ok( section_size2 == section_size, "got section size %Iu\n", section_size2 );
     ok( SetEvent( event_a ), "SetEvent failed, error %lu\n", GetLastError() );
     ok( WaitForSingleObject( event_a2, 0 ) == WAIT_OBJECT_0, "event_a handles do not share state\n" );
+    ok( WaitForSingleObject( event_a, 0 ) == WAIT_OBJECT_0, "event_a is not manual reset\n" );
+    ok( ResetEvent( event_a ), "ResetEvent failed, error %lu\n", GetLastError() );
     ok( SetEvent( event_b ), "SetEvent failed, error %lu\n", GetLastError() );
     ok( WaitForSingleObject( event_b2, 0 ) == WAIT_OBJECT_0, "event_b handles do not share state\n" );
+    ok( WaitForSingleObject( event_b, 0 ) == WAIT_TIMEOUT, "event_b is not auto reset\n" );
+
+    thread_context.status = 0xdeadbeef;
+    thread = CreateThread( NULL, 0, token_thread, &thread_context, 0, NULL );
+    ok( !!thread, "CreateThread failed, error %lu\n", GetLastError() );
+    if (thread)
+    {
+        Sleep(50);
+        ok( WaitForSingleObject( thread, 0 ) == WAIT_TIMEOUT, "token worker returned early, status %#lx\n",
+            thread_context.status );
+        ok( SetEvent( event_b ), "SetEvent failed, error %lu\n", GetLastError() );
+        Sleep(10);
+        ok( SetEvent( token_stop ), "SetEvent failed, error %lu\n", GetLastError() );
+        ok( WaitForSingleObject( thread, 2000 ) == WAIT_OBJECT_0, "token worker did not stop\n" );
+        ok( thread_context.status == STATUS_SUCCESS, "got token worker status %#lx\n", thread_context.status );
+        CloseHandle( thread );
+    }
 
     CloseHandle( section );
     CloseHandle( event_a );
@@ -504,16 +910,29 @@ static void test_token_manager_lifetime(void)
     section_size = ~(SIZE_T)0;
     status = NtTokenManagerOpenSectionAndEvents( &section, &section_size, &event_a, &event_b );
     ok( status == STATUS_ACCESS_DENIED, "got status %#lx\n", status );
+    CloseHandle( token_stop );
     CloseHandle( work_event );
 }
 
 START_TEST(dcomp)
 {
+    unsigned int argc;
+    char **argv;
+
+    argc = winetest_get_mainargs( &argv );
+    if (argc == 6 && !strcmp( argv[2], "coremsg_selector_child" ))
+    {
+        coremsg_selector_child( strtoul( argv[3], NULL, 16 ), strtoul( argv[4], NULL, 16 ),
+                                strtoul( argv[5], NULL, 16 ) );
+        return;
+    }
+
     test_input_registration();
     test_kst();
     test_frame_statistics();
     test_channel_lifetime();
     test_connection_queue();
+    test_frame_lifecycle();
     test_resource_retirement();
     test_connection_lifetime();
     test_token_manager_lifetime();

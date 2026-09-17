@@ -25,6 +25,7 @@
 #include "config.h"
 
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ntstatus.h"
@@ -41,6 +42,12 @@ C_ASSERT( offsetof(struct dcomposition_connection_batch, next) == 8 );
 C_ASSERT( offsetof(struct dcomposition_connection_batch, u.create.channel) == 16 );
 C_ASSERT( offsetof(struct dcomposition_connection_batch, u.create.connection) == 24 );
 C_ASSERT( offsetof(struct dcomposition_connection_batch, u.create.object) == 32 );
+#ifdef _WIN64
+C_ASSERT( sizeof(struct dcomposition_frame_info) == 160 );
+C_ASSERT( sizeof(struct dcomposition_confirm_frame_info) == 56 );
+C_ASSERT( sizeof(struct token_manager_adapter_info) == 24 );
+C_ASSERT( sizeof(struct token_manager_thread_info) == 24 );
+#endif
 
 struct dcomp_channel_view
 {
@@ -210,6 +217,253 @@ NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection )
             free( view );
         }
     }
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionBeginFrame( HANDLE connection,
+                                           const struct dcomposition_frame_info *user_info,
+                                           UINT64 *frame_id )
+{
+    struct dcomposition_frame_info info;
+    const UINT64 *references;
+    UINT64 id = 0;
+    UINT64 value;
+    UINT reference_count;
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
+
+    TRACE( "connection %p, info %p, frame_id %p\n", connection, user_info, frame_id );
+
+    if (!user_info || !frame_id) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        info = *user_info;
+        memcpy( &references, info.data + 144, sizeof(references) );
+        memcpy( &reference_count, info.data + 152, sizeof(reference_count) );
+        if (!references && reference_count)
+            status = STATUS_INVALID_PARAMETER;
+        else if (reference_count > 0x1fffffff)
+            status = STATUS_INTEGER_OVERFLOW;
+        else if (reference_count && ((ULONG_PTR)references & 7))
+            status = STATUS_DATATYPE_MISALIGNMENT;
+        else
+        {
+            if (reference_count)
+            {
+                memcpy( &value, references, sizeof(value) );
+                memcpy( &value, references + reference_count - 1, sizeof(value) );
+                (void)value;
+            }
+            status = STATUS_SUCCESS;
+        }
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status) return status;
+
+    SERVER_START_REQ( begin_dcomp_frame )
+    {
+        req->connection = wine_server_obj_handle( connection );
+        status = wine_server_call( req );
+        if (!status) id = reply->frame_id;
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
+    __TRY
+    {
+        *frame_id = id;
+        status = STATUS_SUCCESS;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+
+    if (!status) return STATUS_SUCCESS;
+
+    SERVER_START_REQ( discard_dcomp_frame )
+    {
+        req->connection = wine_server_obj_handle( connection );
+        req->frame_id = id;
+        wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionConfirmFrame( HANDLE connection,
+                                             const struct dcomposition_confirm_frame_info *user_info )
+{
+    struct dcomposition_confirm_frame_info info;
+    const BYTE *updates;
+    BYTE value;
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
+    UINT update_count, i;
+
+    TRACE( "connection %p, info %p\n", connection, user_info );
+
+    if (!user_info) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        info = *user_info;
+        update_count = min( info.update_count, 256u );
+        updates = info.updates;
+        if (!info.frame_id || (update_count && !updates)) status = STATUS_INVALID_PARAMETER;
+        else
+        {
+            for (i = 0; i < update_count * 120; ++i) value = updates[i];
+            if (update_count) (void)value;
+            status = STATUS_SUCCESS;
+        }
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status) return status;
+
+    SERVER_START_REQ( confirm_dcomp_frame )
+    {
+        req->connection = wine_server_obj_handle( connection );
+        req->frame_id = info.frame_id;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionGetFrameId( UINT type, UINT64 *frame_id )
+{
+    UINT64 id = 0;
+    NTSTATUS status;
+
+    TRACE( "type %u, frame_id %p\n", type, frame_id );
+
+    if (!frame_id || type > 2) return STATUS_INVALID_PARAMETER;
+    SERVER_START_REQ( get_dcomp_frame_id )
+    {
+        req->type = type;
+        status = wine_server_call( req );
+        if (!status) id = reply->frame_id;
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+    __TRY
+    {
+        *frame_id = id;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionGetFrameLegacyTokens( const UINT64 *user_frame_id,
+                                                     UINT *token_count, BOOL *has_more )
+{
+    UINT64 frame_id = 0;
+    UINT count = 0;
+    BOOL more = FALSE;
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
+
+    TRACE( "frame_id %p, token_count %p, has_more %p\n", user_frame_id, token_count, has_more );
+
+    if (!user_frame_id || !token_count || !has_more) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        frame_id = *user_frame_id;
+        *token_count = 0;
+        *has_more = FALSE;
+        status = frame_id ? STATUS_SUCCESS : STATUS_INVALID_PARAMETER;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status) return status;
+
+    SERVER_START_REQ( get_dcomp_frame_legacy_tokens )
+    {
+        req->frame_id = frame_id;
+        status = wine_server_call( req );
+        if (!status)
+        {
+            count = reply->token_count;
+            more = reply->has_more;
+        }
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
+    __TRY
+    {
+        *token_count = count;
+        *has_more = more;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionGetFrameSurfaceUpdates( const UINT64 *user_frame_id,
+                                                       UINT *update_count, BOOL *has_more )
+{
+    UINT64 frame_id = 0;
+    UINT count = 0;
+    BOOL more = FALSE;
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
+
+    TRACE( "frame_id %p, update_count %p, has_more %p\n", user_frame_id, update_count, has_more );
+
+    if (!user_frame_id || !update_count || !has_more) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        frame_id = *user_frame_id;
+        *update_count = 0;
+        *has_more = FALSE;
+        status = frame_id ? STATUS_SUCCESS : STATUS_INVALID_PARAMETER;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status) return status;
+
+    SERVER_START_REQ( get_dcomp_frame_surface_updates )
+    {
+        req->frame_id = frame_id;
+        status = wine_server_call( req );
+        if (!status)
+        {
+            count = reply->update_count;
+            more = reply->has_more;
+        }
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
+    __TRY
+    {
+        *update_count = count;
+        *has_more = more;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
     return status;
 }
 
@@ -571,5 +825,74 @@ NTSTATUS WINAPI NtTokenManagerOpenSectionAndEvents( HANDLE *section, SIZE_T *sec
         }
     }
     SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtTokenManagerThread( const struct token_manager_thread_info *user_info )
+{
+    struct token_manager_adapter_info inline_adapters[5], *adapters = inline_adapters;
+    struct token_manager_thread_info info;
+    HANDLE events[2], notification_event = NULL;
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
+    SIZE_T size;
+
+    TRACE( "info %p\n", user_info );
+
+    if (!user_info) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        info = *user_info;
+    }
+    __EXCEPT
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (!info.adapter_count || !info.adapters ||
+        info.adapter_count > ~(UINT)0 / sizeof(*adapters))
+        return STATUS_INVALID_PARAMETER;
+
+    size = (SIZE_T)info.adapter_count * sizeof(*adapters);
+    if (info.adapter_count > ARRAY_SIZE(inline_adapters) && !(adapters = malloc( size )))
+        return STATUS_NO_MEMORY;
+    __TRY
+    {
+        memcpy( adapters, info.adapters, size );
+        status = STATUS_SUCCESS;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status) goto done;
+
+    SERVER_START_REQ( begin_token_manager_thread )
+    {
+        req->stop_event = wine_server_obj_handle( info.stop_event );
+        req->adapter_count = info.adapter_count;
+        status = wine_server_call( req );
+        if (!status) notification_event = wine_server_ptr_handle( reply->notification_event );
+    }
+    SERVER_END_REQ;
+    if (status) goto done;
+
+    events[0] = info.stop_event;
+    events[1] = notification_event;
+    do
+        status = NtWaitForMultipleObjects( ARRAY_SIZE(events), events, WaitAny, FALSE, NULL );
+    while (status == STATUS_WAIT_0 + 1);
+    if (status == STATUS_WAIT_0) status = STATUS_SUCCESS;
+
+    NtClose( notification_event );
+    SERVER_START_REQ( end_token_manager_thread )
+    {
+        NTSTATUS end_status = wine_server_call( req );
+        if (!status) status = end_status;
+    }
+    SERVER_END_REQ;
+
+done:
+    if (adapters != inline_adapters) free( adapters );
     return status;
 }

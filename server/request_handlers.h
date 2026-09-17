@@ -361,7 +361,15 @@ DECL_HANDLER(create_dcomp_connection);
 DECL_HANDLER(register_dwm_session_port);
 DECL_HANDLER(start_dwm_kernel);
 DECL_HANDLER(destroy_dcomp_connection);
+DECL_HANDLER(begin_dcomp_frame);
+DECL_HANDLER(confirm_dcomp_frame);
+DECL_HANDLER(discard_dcomp_frame);
+DECL_HANDLER(get_dcomp_frame_id);
+DECL_HANDLER(get_dcomp_frame_legacy_tokens);
+DECL_HANDLER(get_dcomp_frame_surface_updates);
 DECL_HANDLER(open_token_manager);
+DECL_HANDLER(begin_token_manager_thread);
+DECL_HANDLER(end_token_manager_thread);
 DECL_HANDLER(create_dcomp_channel);
 DECL_HANDLER(destroy_dcomp_channel);
 DECL_HANDLER(set_dcomp_channel_connection);
@@ -374,6 +382,7 @@ DECL_HANDLER(get_d3dkmt_process_scheduling_priority_class);
 DECL_HANDLER(set_d3dkmt_process_scheduling_priority_class);
 DECL_HANDLER(initialize_kst);
 DECL_HANDLER(set_mit_input_callbacks);
+DECL_HANDLER(open_coremsg_kernel_connection);
 DECL_HANDLER(register_manipulation_thread);
 
 typedef void (*req_handler)( const void *req, void *reply );
@@ -733,7 +742,15 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_register_dwm_session_port,
     (req_handler)req_start_dwm_kernel,
     (req_handler)req_destroy_dcomp_connection,
+    (req_handler)req_begin_dcomp_frame,
+    (req_handler)req_confirm_dcomp_frame,
+    (req_handler)req_discard_dcomp_frame,
+    (req_handler)req_get_dcomp_frame_id,
+    (req_handler)req_get_dcomp_frame_legacy_tokens,
+    (req_handler)req_get_dcomp_frame_surface_updates,
     (req_handler)req_open_token_manager,
+    (req_handler)req_begin_token_manager_thread,
+    (req_handler)req_end_token_manager_thread,
     (req_handler)req_create_dcomp_channel,
     (req_handler)req_destroy_dcomp_channel,
     (req_handler)req_set_dcomp_channel_connection,
@@ -746,6 +763,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_d3dkmt_process_scheduling_priority_class,
     (req_handler)req_initialize_kst,
     (req_handler)req_set_mit_input_callbacks,
+    (req_handler)req_open_coremsg_kernel_connection,
     (req_handler)req_register_manipulation_thread,
 };
 
@@ -2782,12 +2800,42 @@ C_ASSERT( sizeof(struct register_dwm_session_port_request) == 16 );
 C_ASSERT( sizeof(struct start_dwm_kernel_request) == 16 );
 C_ASSERT( offsetof(struct destroy_dcomp_connection_request, handle) == 12 );
 C_ASSERT( sizeof(struct destroy_dcomp_connection_request) == 16 );
+C_ASSERT( offsetof(struct begin_dcomp_frame_request, connection) == 12 );
+C_ASSERT( sizeof(struct begin_dcomp_frame_request) == 16 );
+C_ASSERT( offsetof(struct begin_dcomp_frame_reply, frame_id) == 8 );
+C_ASSERT( sizeof(struct begin_dcomp_frame_reply) == 16 );
+C_ASSERT( offsetof(struct confirm_dcomp_frame_request, connection) == 12 );
+C_ASSERT( offsetof(struct confirm_dcomp_frame_request, frame_id) == 16 );
+C_ASSERT( sizeof(struct confirm_dcomp_frame_request) == 24 );
+C_ASSERT( offsetof(struct discard_dcomp_frame_request, connection) == 12 );
+C_ASSERT( offsetof(struct discard_dcomp_frame_request, frame_id) == 16 );
+C_ASSERT( sizeof(struct discard_dcomp_frame_request) == 24 );
+C_ASSERT( offsetof(struct get_dcomp_frame_id_request, type) == 12 );
+C_ASSERT( sizeof(struct get_dcomp_frame_id_request) == 16 );
+C_ASSERT( offsetof(struct get_dcomp_frame_id_reply, frame_id) == 8 );
+C_ASSERT( sizeof(struct get_dcomp_frame_id_reply) == 16 );
+C_ASSERT( offsetof(struct get_dcomp_frame_legacy_tokens_request, frame_id) == 16 );
+C_ASSERT( sizeof(struct get_dcomp_frame_legacy_tokens_request) == 24 );
+C_ASSERT( offsetof(struct get_dcomp_frame_legacy_tokens_reply, token_count) == 8 );
+C_ASSERT( offsetof(struct get_dcomp_frame_legacy_tokens_reply, has_more) == 12 );
+C_ASSERT( sizeof(struct get_dcomp_frame_legacy_tokens_reply) == 16 );
+C_ASSERT( offsetof(struct get_dcomp_frame_surface_updates_request, frame_id) == 16 );
+C_ASSERT( sizeof(struct get_dcomp_frame_surface_updates_request) == 24 );
+C_ASSERT( offsetof(struct get_dcomp_frame_surface_updates_reply, update_count) == 8 );
+C_ASSERT( offsetof(struct get_dcomp_frame_surface_updates_reply, has_more) == 12 );
+C_ASSERT( sizeof(struct get_dcomp_frame_surface_updates_reply) == 16 );
 C_ASSERT( sizeof(struct open_token_manager_request) == 16 );
 C_ASSERT( offsetof(struct open_token_manager_reply, section) == 8 );
 C_ASSERT( offsetof(struct open_token_manager_reply, section_size) == 16 );
 C_ASSERT( offsetof(struct open_token_manager_reply, event_a) == 24 );
 C_ASSERT( offsetof(struct open_token_manager_reply, event_b) == 28 );
 C_ASSERT( sizeof(struct open_token_manager_reply) == 32 );
+C_ASSERT( offsetof(struct begin_token_manager_thread_request, stop_event) == 12 );
+C_ASSERT( offsetof(struct begin_token_manager_thread_request, adapter_count) == 16 );
+C_ASSERT( sizeof(struct begin_token_manager_thread_request) == 24 );
+C_ASSERT( offsetof(struct begin_token_manager_thread_reply, notification_event) == 8 );
+C_ASSERT( sizeof(struct begin_token_manager_thread_reply) == 16 );
+C_ASSERT( sizeof(struct end_token_manager_thread_request) == 16 );
 C_ASSERT( offsetof(struct create_dcomp_channel_request, size) == 16 );
 C_ASSERT( offsetof(struct create_dcomp_channel_request, flags) == 24 );
 C_ASSERT( sizeof(struct create_dcomp_channel_request) == 32 );
@@ -2840,4 +2888,6 @@ C_ASSERT( offsetof(struct initialize_kst_request, update_event) == 16 );
 C_ASSERT( sizeof(struct initialize_kst_request) == 24 );
 C_ASSERT( offsetof(struct set_mit_input_callbacks_request, enabled) == 12 );
 C_ASSERT( sizeof(struct set_mit_input_callbacks_request) == 16 );
+C_ASSERT( offsetof(struct open_coremsg_kernel_connection_request, selector) == 12 );
+C_ASSERT( sizeof(struct open_coremsg_kernel_connection_request) == 16 );
 C_ASSERT( sizeof(struct register_manipulation_thread_request) == 16 );

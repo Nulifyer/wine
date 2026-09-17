@@ -62,6 +62,7 @@
 #include "process.h"
 #include "thread.h"
 #include "request.h"
+#include "alpc.h"
 #include "user.h"
 #include "security.h"
 
@@ -811,6 +812,7 @@ static void process_destroy( struct object *obj )
     assert( !process->sigkill_timeout );  /* timeout should hold a reference to the process */
 
     if (process->native_bootstrap_image != -1) close( process->native_bootstrap_image );
+    cleanup_process_coremsg_connections( process );
     cleanup_process_wnf_states( process );
     close_process_handles( process );
     set_process_startup_state( process, STARTUP_ABORTED );
@@ -1087,6 +1089,7 @@ static void process_killed( struct process *process )
     process->desktop = 0;
     process->ui_context_initialized = 0;
     cancel_terminating_process_asyncs( process );
+    cleanup_process_coremsg_connections( process );
     cleanup_process_wnf_states( process );
     close_process_handles( process );
     if (process->idle_event) release_object( process->idle_event );

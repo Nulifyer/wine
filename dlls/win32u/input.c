@@ -76,6 +76,39 @@ BOOL WINAPI NtMITSetInputCallbacks( void *callback )
 }
 
 /***********************************************************************
+ *           NtMITCoreMsgKOpenConnectionTo    (win32u.@)
+ */
+NTSTATUS WINAPI NtMITCoreMsgKOpenConnectionTo( UINT selector, const void *routing_info )
+{
+    unsigned char routing[40];
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
+
+    TRACE( "selector %u, routing_info %p\n", selector, routing_info );
+
+    if (selector > 22 || !routing_info) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        memcpy( routing, routing_info, sizeof(routing) );
+        status = STATUS_SUCCESS;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status) return status;
+
+    SERVER_START_REQ( open_coremsg_kernel_connection )
+    {
+        req->selector = selector;
+        wine_server_add_data( req, routing, sizeof(routing) );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+/***********************************************************************
  *           NtUserRegisterManipulationThread    (win32u.@)
  *
  * Registration belongs to the calling thread.  Genuine DWM performs this

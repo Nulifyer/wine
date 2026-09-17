@@ -6988,6 +6988,82 @@ struct destroy_dcomp_connection_reply
 };
 
 
+struct begin_dcomp_frame_request
+{
+    struct request_header __header;
+    obj_handle_t connection;
+};
+struct begin_dcomp_frame_reply
+{
+    struct reply_header __header;
+    unsigned __int64 frame_id;
+};
+
+
+struct confirm_dcomp_frame_request
+{
+    struct request_header __header;
+    obj_handle_t connection;
+    unsigned __int64 frame_id;
+};
+struct confirm_dcomp_frame_reply
+{
+    struct reply_header __header;
+};
+
+
+struct discard_dcomp_frame_request
+{
+    struct request_header __header;
+    obj_handle_t connection;
+    unsigned __int64 frame_id;
+};
+struct discard_dcomp_frame_reply
+{
+    struct reply_header __header;
+};
+
+
+struct get_dcomp_frame_id_request
+{
+    struct request_header __header;
+    unsigned int type;
+};
+struct get_dcomp_frame_id_reply
+{
+    struct reply_header __header;
+    unsigned __int64 frame_id;
+};
+
+
+struct get_dcomp_frame_legacy_tokens_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 frame_id;
+};
+struct get_dcomp_frame_legacy_tokens_reply
+{
+    struct reply_header __header;
+    unsigned int token_count;
+    int has_more;
+};
+
+
+struct get_dcomp_frame_surface_updates_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 frame_id;
+};
+struct get_dcomp_frame_surface_updates_reply
+{
+    struct reply_header __header;
+    unsigned int update_count;
+    int has_more;
+};
+
+
 struct open_token_manager_request
 {
     struct request_header __header;
@@ -7001,6 +7077,32 @@ struct open_token_manager_reply
     mem_size_t   section_size;
     obj_handle_t event_a;
     obj_handle_t event_b;
+};
+
+
+struct begin_token_manager_thread_request
+{
+    struct request_header __header;
+    obj_handle_t stop_event;
+    unsigned int adapter_count;
+    char __pad_20[4];
+};
+struct begin_token_manager_thread_reply
+{
+    struct reply_header __header;
+    obj_handle_t notification_event;
+    char __pad_12[4];
+};
+
+
+struct end_token_manager_thread_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct end_token_manager_thread_reply
+{
+    struct reply_header __header;
 };
 
 
@@ -7167,6 +7269,18 @@ struct set_mit_input_callbacks_request
     int enabled;
 };
 struct set_mit_input_callbacks_reply
+{
+    struct reply_header __header;
+};
+
+
+struct open_coremsg_kernel_connection_request
+{
+    struct request_header __header;
+    unsigned int selector;
+    /* VARARG(routing,bytes); */
+};
+struct open_coremsg_kernel_connection_reply
 {
     struct reply_header __header;
 };
@@ -7539,7 +7653,15 @@ enum request
     REQ_register_dwm_session_port,
     REQ_start_dwm_kernel,
     REQ_destroy_dcomp_connection,
+    REQ_begin_dcomp_frame,
+    REQ_confirm_dcomp_frame,
+    REQ_discard_dcomp_frame,
+    REQ_get_dcomp_frame_id,
+    REQ_get_dcomp_frame_legacy_tokens,
+    REQ_get_dcomp_frame_surface_updates,
     REQ_open_token_manager,
+    REQ_begin_token_manager_thread,
+    REQ_end_token_manager_thread,
     REQ_create_dcomp_channel,
     REQ_destroy_dcomp_channel,
     REQ_set_dcomp_channel_connection,
@@ -7552,6 +7674,7 @@ enum request
     REQ_set_d3dkmt_process_scheduling_priority_class,
     REQ_initialize_kst,
     REQ_set_mit_input_callbacks,
+    REQ_open_coremsg_kernel_connection,
     REQ_register_manipulation_thread,
     REQ_NB_REQUESTS
 };
@@ -7914,7 +8037,15 @@ union generic_request
     struct register_dwm_session_port_request register_dwm_session_port_request;
     struct start_dwm_kernel_request start_dwm_kernel_request;
     struct destroy_dcomp_connection_request destroy_dcomp_connection_request;
+    struct begin_dcomp_frame_request begin_dcomp_frame_request;
+    struct confirm_dcomp_frame_request confirm_dcomp_frame_request;
+    struct discard_dcomp_frame_request discard_dcomp_frame_request;
+    struct get_dcomp_frame_id_request get_dcomp_frame_id_request;
+    struct get_dcomp_frame_legacy_tokens_request get_dcomp_frame_legacy_tokens_request;
+    struct get_dcomp_frame_surface_updates_request get_dcomp_frame_surface_updates_request;
     struct open_token_manager_request open_token_manager_request;
+    struct begin_token_manager_thread_request begin_token_manager_thread_request;
+    struct end_token_manager_thread_request end_token_manager_thread_request;
     struct create_dcomp_channel_request create_dcomp_channel_request;
     struct destroy_dcomp_channel_request destroy_dcomp_channel_request;
     struct set_dcomp_channel_connection_request set_dcomp_channel_connection_request;
@@ -7927,6 +8058,7 @@ union generic_request
     struct set_d3dkmt_process_scheduling_priority_class_request set_d3dkmt_process_scheduling_priority_class_request;
     struct initialize_kst_request initialize_kst_request;
     struct set_mit_input_callbacks_request set_mit_input_callbacks_request;
+    struct open_coremsg_kernel_connection_request open_coremsg_kernel_connection_request;
     struct register_manipulation_thread_request register_manipulation_thread_request;
 };
 union generic_reply
@@ -8287,7 +8419,15 @@ union generic_reply
     struct register_dwm_session_port_reply register_dwm_session_port_reply;
     struct start_dwm_kernel_reply start_dwm_kernel_reply;
     struct destroy_dcomp_connection_reply destroy_dcomp_connection_reply;
+    struct begin_dcomp_frame_reply begin_dcomp_frame_reply;
+    struct confirm_dcomp_frame_reply confirm_dcomp_frame_reply;
+    struct discard_dcomp_frame_reply discard_dcomp_frame_reply;
+    struct get_dcomp_frame_id_reply get_dcomp_frame_id_reply;
+    struct get_dcomp_frame_legacy_tokens_reply get_dcomp_frame_legacy_tokens_reply;
+    struct get_dcomp_frame_surface_updates_reply get_dcomp_frame_surface_updates_reply;
     struct open_token_manager_reply open_token_manager_reply;
+    struct begin_token_manager_thread_reply begin_token_manager_thread_reply;
+    struct end_token_manager_thread_reply end_token_manager_thread_reply;
     struct create_dcomp_channel_reply create_dcomp_channel_reply;
     struct destroy_dcomp_channel_reply destroy_dcomp_channel_reply;
     struct set_dcomp_channel_connection_reply set_dcomp_channel_connection_reply;
@@ -8300,9 +8440,10 @@ union generic_reply
     struct set_d3dkmt_process_scheduling_priority_class_reply set_d3dkmt_process_scheduling_priority_class_reply;
     struct initialize_kst_reply initialize_kst_reply;
     struct set_mit_input_callbacks_reply set_mit_input_callbacks_reply;
+    struct open_coremsg_kernel_connection_reply open_coremsg_kernel_connection_reply;
     struct register_manipulation_thread_reply register_manipulation_thread_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1014
+#define SERVER_PROTOCOL_VERSION 1019
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -37,6 +37,7 @@
 #include "thread.h"
 #include "security.h"
 #include "request.h"
+#include "unicode.h"
 
 static const WCHAR alpc_port_name[] = {'A','L','P','C',' ','P','o','r','t'};
 
@@ -70,7 +71,8 @@ enum alpc_kernel_port
 {
     ALPC_KERNEL_PORT_NONE,
     ALPC_KERNEL_POWER_PORT,
-    ALPC_KERNEL_DWM_SESSION_PORT
+    ALPC_KERNEL_DWM_SESSION_PORT,
+    ALPC_KERNEL_COREMSG_PORT
 };
 
 enum dwm_session_port_phase
@@ -80,6 +82,8 @@ enum dwm_session_port_phase
     DWM_SESSION_PORT_STARTED,
     DWM_SESSION_PORT_READY
 };
+
+struct coremsg_client_port;
 
 struct alpc_port
 {
@@ -119,6 +123,7 @@ struct alpc_port
     struct list             kernel_session_entry;   /* weak entry in the live session-port registry */
     unsigned int            kernel_session_id;
     enum dwm_session_port_phase kernel_session_phase;
+    struct coremsg_client_port *coremsg_client;      /* owned virtual-kernel client record */
     struct token            *client_token;          /* captured connecting security */
     int                      impersonation_level, tracking_mode;
     struct thread           *thread;                /* thread owning the port */
@@ -167,6 +172,7 @@ static void dispatch_all_receives( void );
 static struct list message_requests = LIST_INIT(message_requests);
 static struct alpc_port *default_hard_error_port;
 static struct process *default_hard_error_process;
+static void disconnect_coremsg_client_port( struct coremsg_client_port *client );
 
 struct alpc_message
 {
@@ -279,6 +285,7 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     list_init( &port->kernel_session_entry );
     port->kernel_session_id = 0;
     port->kernel_session_phase = DWM_SESSION_PORT_REGISTERED;
+    port->coremsg_client = NULL;
     port->thread      = (struct thread *)grab_object( current );
     list_init( &port->messages );
     list_init( &port->receive_waiters );
@@ -334,6 +341,11 @@ static void alpc_port_destroy( struct object *obj )
     struct alpc_message *message, *next;
 
     assert( obj->ops == &alpc_port_ops );
+    if (port->coremsg_client)
+    {
+        disconnect_coremsg_client_port( port->coremsg_client );
+        port->coremsg_client = NULL;
+    }
     if (!list_empty( &port->kernel_session_entry ))
     {
         if (port->kernel_port == ALPC_KERNEL_DWM_SESSION_PORT)
@@ -365,8 +377,231 @@ static unsigned int next_message_id;
 static unsigned __int64 next_work_ticket;
 static struct list connecting_ports = LIST_INIT(connecting_ports);
 static struct list dwm_session_ports = LIST_INIT(dwm_session_ports);
+static struct list coremsg_kernel_ports = LIST_INIT(coremsg_kernel_ports);
+static unsigned int next_coremsg_guid;
+
+struct coremsg_client_port
+{
+    struct list entry;             /* weak entry in coremsg_kernel_port.clients */
+    struct coremsg_kernel_port *port;
+    process_id_t pid;
+    thread_id_t tid;
+    unsigned int refs;             /* ALPC endpoint plus open selector targets */
+    unsigned int connected;
+};
+
+struct coremsg_connection_target
+{
+    struct process *owner;         /* weak; process cleanup clears the target */
+    struct coremsg_client_port *client;
+    unsigned char routing[40];
+};
+
+struct coremsg_kernel_port
+{
+    struct list entry;
+    unsigned int session_id;
+    unsigned char guid[16]; /* little-endian GUID wire representation */
+    struct list clients;    /* weak; ALPC server endpoints own records */
+    struct coremsg_connection_target targets[23];
+};
 
 static const WCHAR dwm_api_port_name[] = {'D','w','m','A','p','i','P','o','r','t'};
+static const WCHAR coremsg_registrar_name[] =
+    {'C','o','r','e','M','e','s','s','a','g','i','n','g','R','e','g','i','s','t','r','a','r'};
+static const WCHAR coremsg_input_name[] =
+    {'K','e','r','n','e','l','\\','M','I','T','\\','I','n','p','u','t','P','o','r','t',0};
+static const WCHAR coremsg_listener_prefix[] =
+    {'\\','B','a','s','e','N','a','m','e','d','O','b','j','e','c','t','s','\\',
+     '[','C','o','r','e','M','s','g','K',']','-'};
+
+/* CoreMessaging's AlpcClientConnection::CreateClientPort sends the private
+ * ConnectionParams record as the ALPC connection message.  The kernel port
+ * consumes the record while the client identity used for routing remains the
+ * authenticated ALPC caller identity. */
+#define COREMSG_CONNECTION_PARAMS_SIZE 24
+
+static unsigned int get_u32( const unsigned char *data )
+{
+    return (unsigned int)data[0] | (unsigned int)data[1] << 8 |
+           (unsigned int)data[2] << 16 | (unsigned int)data[3] << 24;
+}
+
+static unsigned int get_u16( const unsigned char *data )
+{
+    return (unsigned int)data[0] | (unsigned int)data[1] << 8;
+}
+
+static void put_u32( unsigned char *data, unsigned int value )
+{
+    data[0] = value;
+    data[1] = value >> 8;
+    data[2] = value >> 16;
+    data[3] = value >> 24;
+}
+
+static struct coremsg_kernel_port *find_coremsg_kernel_port( unsigned int session_id )
+{
+    struct coremsg_kernel_port *port;
+
+    LIST_FOR_EACH_ENTRY( port, &coremsg_kernel_ports, struct coremsg_kernel_port, entry )
+        if (port->session_id == session_id) return port;
+    return NULL;
+}
+
+static void make_coremsg_guid( struct coremsg_kernel_port *port )
+{
+    unsigned int serial = ++next_coremsg_guid;
+
+    if (!serial) serial = ++next_coremsg_guid;
+    put_u32( port->guid, 0x4e540000 | (serial & 0xffff) );
+    port->guid[4] = port->session_id;
+    port->guid[5] = port->session_id >> 8;
+    port->guid[6] = serial >> 8;
+    port->guid[7] = 0x40 | ((serial >> 16) & 0x0f);
+    port->guid[8] = 0x80 | ((serial >> 16) & 0x3f);
+    port->guid[9] = serial >> 24;
+    memcpy( port->guid + 10, "LinuxT", 6 );
+}
+
+static struct coremsg_kernel_port *register_coremsg_kernel_port( struct process *process,
+                                                                 const unsigned char *guid )
+{
+    struct coremsg_kernel_port *port = find_coremsg_kernel_port( process->session_id );
+
+    if (port)
+    {
+        if (!guid || !memcmp( port->guid, guid, sizeof(port->guid) )) return port;
+        set_error( STATUS_ALREADY_REGISTERED );
+        return NULL;
+    }
+    if (is_native_machine() && !process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return NULL;
+    }
+    if (!(port = mem_alloc( sizeof(*port) ))) return NULL;
+    port->session_id = process->session_id;
+    list_init( &port->clients );
+    memset( port->targets, 0, sizeof(port->targets) );
+    if (guid) memcpy( port->guid, guid, sizeof(port->guid) );
+    else make_coremsg_guid( port );
+    list_add_tail( &coremsg_kernel_ports, &port->entry );
+    return port;
+}
+
+static struct coremsg_client_port *grab_coremsg_client_port( struct coremsg_client_port *client )
+{
+    if (client) client->refs++;
+    return client;
+}
+
+static void release_coremsg_client_port( struct coremsg_client_port *client )
+{
+    if (client && !--client->refs) free( client );
+}
+
+static void disconnect_coremsg_client_port( struct coremsg_client_port *client )
+{
+    if (!client->connected) return;
+    list_remove( &client->entry );
+    list_init( &client->entry );
+    client->connected = 0;
+    client->port = NULL;
+    release_coremsg_client_port( client );
+}
+
+static struct coremsg_client_port *connect_coremsg_client_port( struct coremsg_kernel_port *port,
+                                                                process_id_t pid, thread_id_t tid )
+{
+    struct coremsg_client_port *client;
+
+    if (!(client = mem_alloc( sizeof(*client) ))) return NULL;
+    client->port = port;
+    client->pid = pid;
+    client->tid = tid;
+    client->refs = 1;
+    client->connected = 1;
+    list_add_tail( &port->clients, &client->entry );
+    return client;
+}
+
+static struct coremsg_client_port *find_coremsg_client_port( struct coremsg_kernel_port *port,
+                                                             process_id_t pid, thread_id_t tid )
+{
+    struct coremsg_client_port *client;
+
+    LIST_FOR_EACH_ENTRY( client, &port->clients, struct coremsg_client_port, entry )
+        if (client->connected && client->pid == pid && client->tid == tid) return client;
+    return NULL;
+}
+
+static void clear_coremsg_target( struct coremsg_connection_target *target )
+{
+    release_coremsg_client_port( target->client );
+    memset( target, 0, sizeof(*target) );
+}
+
+int set_coremsg_input_port_ready( struct process *process, int enabled )
+{
+    struct coremsg_kernel_port *port;
+
+    if (!enabled) return 1;
+    if (!(port = find_coremsg_kernel_port( process->session_id )) &&
+        !(port = register_coremsg_kernel_port( process, NULL ))) return 0;
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server coremsg-input-port winpid=%04x session=%u guid=%02x%02x%02x%02x\n",
+                 process->id, process->session_id, port->guid[0], port->guid[1],
+                 port->guid[2], port->guid[3] );
+    return 1;
+}
+
+void cleanup_process_coremsg_connections( struct process *process )
+{
+    struct coremsg_kernel_port *port;
+    unsigned int i;
+
+    LIST_FOR_EACH_ENTRY( port, &coremsg_kernel_ports, struct coremsg_kernel_port, entry )
+        for (i = 0; i < ARRAY_SIZE(port->targets); ++i)
+            if (port->targets[i].owner == process) clear_coremsg_target( &port->targets[i] );
+}
+
+static void coremsg_guid_string( const unsigned char guid[16], WCHAR string[39] )
+{
+    static const unsigned char order[16] = {3,2,1,0,5,4,7,6,8,9,10,11,12,13,14,15};
+    static const WCHAR hex[] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
+    unsigned int i, pos = 0;
+
+    string[pos++] = '{';
+    for (i = 0; i < 16; ++i)
+    {
+        unsigned char byte = guid[order[i]];
+        string[pos++] = hex[byte >> 4];
+        string[pos++] = hex[byte & 0x0f];
+        if (i == 3 || i == 5 || i == 7 || i == 9) string[pos++] = '-';
+    }
+    string[pos++] = '}';
+    string[pos] = 0;
+}
+
+static void coremsg_listener_name( const struct coremsg_kernel_port *port, WCHAR name[68] )
+{
+    memcpy( name, coremsg_listener_prefix, sizeof(coremsg_listener_prefix) );
+    coremsg_guid_string( port->guid, name + ARRAY_SIZE(coremsg_listener_prefix) );
+}
+
+static struct coremsg_kernel_port *find_coremsg_listener( struct process *process,
+                                                          const struct unicode_str *name )
+{
+    struct coremsg_kernel_port *port = find_coremsg_kernel_port( process->session_id );
+    WCHAR expected[68];
+
+    if (!port) return NULL;
+    coremsg_listener_name( port, expected );
+    if (name->len != (ARRAY_SIZE(expected) - 1) * sizeof(WCHAR) ||
+        memcmp( name->str, expected, name->len )) return NULL;
+    return port;
+}
 
 static struct alpc_port *find_dwm_session_port( unsigned int session_id )
 {
@@ -375,6 +610,221 @@ static struct alpc_port *find_dwm_session_port( unsigned int session_id )
     LIST_FOR_EACH_ENTRY( port, &dwm_session_ports, struct alpc_port, kernel_session_entry )
         if (port->kernel_session_id == session_id) return port;
     return NULL;
+}
+
+static int is_coremsg_registrar_connection( struct alpc_port *port )
+{
+    struct alpc_port *server, *listener;
+    const WCHAR *name;
+    data_size_t name_len;
+
+    if (port->type != COMMUNICATION_PORT || !(server = port->peer) ||
+        !(listener = server->connection_port)) return 0;
+    name = get_object_name( &listener->obj, &name_len );
+    return name && name_len == sizeof(coremsg_registrar_name) &&
+           !memcmp( name, coremsg_registrar_name, sizeof(coremsg_registrar_name) );
+}
+
+static int coremsg_request_envelope( const unsigned char *data, data_size_t size,
+                                     unsigned int method )
+{
+    return size >= 48 && !(size & 3) && get_u32( data + 16 ) == 2 &&
+           get_u32( data + 24 ) == 0x10000 && !get_u32( data + 28 ) &&
+           get_u32( data + 32 ) == size - 40 && !get_u32( data + 36 ) &&
+           get_u32( data + 40 ) == (size - 40) / 4 && get_u16( data + 44 ) == 1 &&
+           get_u16( data + 46 ) == method;
+}
+
+static int coremsg_request_name( const unsigned char *data, data_size_t size,
+                                 unsigned int method )
+{
+    if (!coremsg_request_envelope( data, size, method ) || size < 96 ||
+        get_u32( data + 48 ) != sizeof(coremsg_input_name) ||
+        memcmp( data + 52, coremsg_input_name, sizeof(coremsg_input_name) )) return 0;
+
+    if (method == 11)
+        return size == 164 && get_u32( data + 96 ) == 24 && get_u32( data + 124 ) == 8 &&
+               get_u32( data + 136 ) == 16 && get_u32( data + 156 ) == 4 &&
+               get_u32( data + 160 ) == 1;
+    if (method == 12)
+        return size == 132 && get_u32( data + 96 ) == 24 && get_u32( data + 124 ) == 4 &&
+               get_u32( data + 128 ) == 1;
+    return 0;
+}
+
+static int coremsg_request_record( const unsigned char *data, data_size_t size,
+                                   unsigned int method, data_size_t record_size,
+                                   const unsigned char guid[16] )
+{
+    return size == 52 + record_size && coremsg_request_envelope( data, size, method ) &&
+           get_u32( data + 48 ) == record_size &&
+           !memcmp( data + 52 + 24, guid, 16 );
+}
+
+static void set_coremsg_reply( struct alpc_send_receive_reply *reply, data_size_t capacity,
+                               unsigned int attributes, const unsigned char *data, data_size_t size )
+{
+    data_size_t prefix = get_receipt_size( attributes );
+    unsigned char *buffer;
+
+    if (capacity < size)
+    {
+        reply->info.size = size;
+        set_error( STATUS_BUFFER_TOO_SMALL );
+        return;
+    }
+    memset( &reply->info, 0, sizeof(reply->info) );
+    reply->info.type = ALPC_MESSAGE_TYPE_REPLY;
+    reply->info.size = size;
+    if (!(buffer = set_reply_data_size( prefix + size ))) return;
+    memset( buffer, 0, prefix );
+    memcpy( buffer + prefix, data, size );
+}
+
+static void build_coremsg_register_reply( unsigned int correlation, unsigned char reply[56] )
+{
+    memset( reply, 0, 56 );
+    put_u32( reply + 20, correlation );
+    put_u32( reply + 24, 0x10000 );
+    put_u32( reply + 32, 16 );
+    put_u32( reply + 40, 4 );
+    reply[46] = 0x0e;
+    put_u32( reply + 48, 4 );
+}
+
+static void build_coremsg_find_reply( const struct coremsg_kernel_port *port, unsigned int correlation,
+                                      unsigned char reply[108] )
+{
+    memset( reply, 0, 108 );
+    put_u32( reply + 20, correlation );
+    put_u32( reply + 24, 0x10000 );
+    put_u32( reply + 32, 68 );
+    put_u32( reply + 40, 17 );
+    reply[46] = 0x0f;
+    put_u32( reply + 48, 4 );
+    put_u32( reply + 56, 1 );
+    put_u32( reply + 64, 40 );
+    if (port)
+    {
+        put_u32( reply + 60, 1 );
+        put_u32( reply + 84, 50 );
+        memcpy( reply + 92, port->guid, sizeof(port->guid) );
+    }
+    else put_u32( reply + 52, 0x87b20809 );
+}
+
+static void build_coremsg_extended_info_reply( unsigned int correlation, unsigned char reply[76] )
+{
+    memset( reply, 0, 76 );
+    put_u32( reply + 20, correlation );
+    put_u32( reply + 24, 0x10000 );
+    put_u32( reply + 32, 36 );
+    put_u32( reply + 40, 9 );
+    reply[46] = 0x0d;
+    put_u32( reply + 48, 4 );
+    put_u32( reply + 56, 16 );
+    /* ExtendedRoutingInfo is the target client's VM id.  The ordinary ALPC
+     * registrar initializes its local VM id to Guid::Empty; advertising a
+     * nonzero value makes genuine CoreMessaging select its cross-partition
+     * adapter for this otherwise local connection. */
+}
+
+static void build_coremsg_prepare_reply( const struct coremsg_kernel_port *port, unsigned int correlation,
+                                         unsigned char reply[296] )
+{
+    WCHAR name[68];
+    unsigned int i;
+
+    coremsg_listener_name( port, name );
+    memset( reply, 0, 296 );
+    put_u32( reply + 20, correlation );
+    put_u32( reply + 24, 0x10000 );
+    put_u32( reply + 32, 256 );
+    put_u32( reply + 40, 64 );
+    reply[46] = 6;
+    put_u32( reply + 48, 4 );
+    put_u32( reply + 56, sizeof(name) );
+    for (i = 0; i < ARRAY_SIZE(name); ++i)
+    {
+        reply[60 + 2 * i] = name[i];
+        reply[61 + 2 * i] = name[i] >> 8;
+    }
+    put_u32( reply + 196, 16 );
+    put_u32( reply + 216, 16 );
+    put_u32( reply + 236, 56 );
+}
+
+/* CoreMessagingRegistrar owns public endpoint traffic.  Only the kernel-name
+ * family that win32k normally publishes is consumed here. */
+static int handle_coremsg_registrar_message( struct alpc_port *port,
+                                             const struct alpc_send_receive_request *req,
+                                             struct alpc_send_receive_reply *reply, data_size_t capacity )
+{
+    const unsigned char *data = get_req_data();
+    data_size_t size = get_req_data_size();
+    struct coremsg_kernel_port *kernel_port;
+    unsigned int correlation, method;
+    unsigned char response[296];
+
+    if (!is_coremsg_registrar_connection( port ) || !req->send || size < 48) return 0;
+    if (get_u16( data + 44 ) != 1) return 0;
+    correlation = get_u32( data + 20 );
+    method = get_u16( data + 46 );
+    kernel_port = find_coremsg_kernel_port( current->process->session_id );
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ) &&
+        (method == 3 || method == 10 || method == 11 || method == 12))
+        fprintf( stderr, "linuxnt: server coremsg-registrar winpid=%04x session=%u method=%u correlation=%u registered=%u\n",
+                 current->process->id, current->process->session_id, method, correlation,
+                 !!kernel_port );
+
+    if (method == 11 && kernel_port && size == 164 && coremsg_request_name( data, size, 11 ) &&
+        !memcmp( data + 140, kernel_port->guid, sizeof(kernel_port->guid) ))
+    {
+        if (!req->receive || req->flags != 0x20000)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return 1;
+        }
+        build_coremsg_register_reply( correlation, response );
+        set_coremsg_reply( reply, capacity, req->receive_attributes, response, 56 );
+        return 1;
+    }
+    if (method == 12 && coremsg_request_name( data, size, 12 ))
+    {
+        if (!req->receive || req->flags != 0x20000)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return 1;
+        }
+        build_coremsg_find_reply( kernel_port, correlation, response );
+        set_coremsg_reply( reply, capacity, req->receive_attributes, response, 108 );
+        return 1;
+    }
+    if (method == 10 && kernel_port &&
+        coremsg_request_record( data, size, 10, 40, kernel_port->guid ))
+    {
+        if (!req->receive || req->flags != 0x20000)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return 1;
+        }
+        build_coremsg_extended_info_reply( correlation, response );
+        set_coremsg_reply( reply, capacity, req->receive_attributes, response, 76 );
+        return 1;
+    }
+    if (method == 3 && kernel_port &&
+        coremsg_request_record( data, size, 3, 56, kernel_port->guid ))
+    {
+        if (!req->receive || req->flags != 0x20000)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return 1;
+        }
+        build_coremsg_prepare_reply( kernel_port, correlation, response );
+        set_coremsg_reply( reply, capacity, req->receive_attributes, response, 296 );
+        return 1;
+    }
+    return 0;
 }
 
 /* USER session-port messages are consumed by win32k on Windows.  Keep the
@@ -857,6 +1307,17 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
             }
             return 1;
         }
+        if (!id && target->kernel_port == ALPC_KERNEL_COREMSG_PORT)
+        {
+            /* The connection and lifetime are real ALPC state.  Private input
+             * packet delivery is a separate contract and is not fabricated. */
+            if (flags & 0x20000)
+            {
+                set_error( STATUS_NOT_IMPLEMENTED );
+                return 0;
+            }
+            return 1;
+        }
         if (!id && port->connection_port && !(target->flags & 0x20000))
         {
             set_error( STATUS_LPC_REQUESTS_NOT_ALLOWED );
@@ -1189,6 +1650,13 @@ DECL_HANDLER(alpc_create_port)
                                     .access = ALPC_PORT_ALL_ACCESS };
 
     if (!get_req_object_attributes( &params )) return;
+    if (current->process->native_dwm_owner && getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+    {
+        fprintf( stderr, "linuxnt: server dwm-alpc-create winpid=%04x root=%p attributes=%#x name=\"",
+                 current->process->id, params.root, params.attr );
+        dump_strW( params.name.str, params.name.len, stderr, "\"\"" );
+        fputs( "\"\n", stderr );
+    }
     reply->handle = create_named_obj_handle( current->process, &params );
     if (params.root) release_object( params.root );
 }
@@ -1223,6 +1691,7 @@ DECL_HANDLER(alpc_send_receive)
         handle_dwm_session_message( port, req, reply, capacity );
         goto done;
     }
+    if (handle_coremsg_registrar_message( port, req, reply, capacity )) goto done;
     if (req->flags & ~(1 | 0x10000 | 0x20000) ||
         ((req->flags & 0x20000) && (!req->receive || port->type == CONNECTION_PORT)))
     {
@@ -1322,7 +1791,9 @@ DECL_HANDLER(alpc_connect_port)
     const struct sid *sid;
     const struct security_descriptor *server_sd;
     struct alpc_port *listener = NULL, *client = NULL, *server = NULL;
+    struct coremsg_kernel_port *coremsg_port = NULL;
     struct alpc_message *message;
+    enum alpc_kernel_port kernel_port = ALPC_KERNEL_PORT_NONE;
     struct alpc_port_init_data init = { .type = COMMUNICATION_PORT, .flags = req->port_flags,
                                         .max_msg_len = req->max_msg_len };
     struct alpc_port_init_data server_init = { .type = COMMUNICATION_PORT, .server = 1,
@@ -1351,6 +1822,13 @@ DECL_HANDLER(alpc_connect_port)
     }
     name.str = (const WCHAR *)data;
     name.len = req->name_size;
+    if (current->process->native_dwm_owner && getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+    {
+        fprintf( stderr, "linuxnt: server dwm-alpc-connect winpid=%04x root=%04x attributes=%#x name=\"",
+                 current->process->id, req->rootdir, req->attributes );
+        dump_strW( name.str, name.len, stderr, "\"\"" );
+        fputs( "\"\n", stderr );
+    }
     sid = (const struct sid *)(data + req->name_size);
     if (req->sid_size && (!sid_valid_size( sid, req->sid_size ) || sid->revision != SID_REVISION ||
                          sid->sub_count > SID_MAX_SUB_AUTHORITIES || sid_len( sid ) != req->sid_size))
@@ -1367,8 +1845,19 @@ DECL_HANDLER(alpc_connect_port)
     payload_size = size - req->name_size - req->sid_size - req->server_sd_size;
     if (!req->rootdir && !req->attributes && name.len == sizeof(power_port_name) &&
         !memcmp( name.str, power_port_name, sizeof(power_port_name) ))
+        kernel_port = ALPC_KERNEL_POWER_PORT;
+    else if (!req->rootdir && !(req->attributes & ~OBJ_CASE_INSENSITIVE) &&
+             (coremsg_port = find_coremsg_listener( current->process, &name )))
     {
-        if (req->sid_size || req->server_sd_size || payload_size)
+        kernel_port = ALPC_KERNEL_COREMSG_PORT;
+        if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+            fprintf( stderr, "linuxnt: server coremsg-connect winpid=%04x session=%u attributes=%#x\n",
+                     current->process->id, current->process->session_id, req->attributes );
+    }
+    if (kernel_port != ALPC_KERNEL_PORT_NONE)
+    {
+        if (req->sid_size || req->server_sd_size ||
+            (coremsg_port ? payload_size != COREMSG_CONNECTION_PARAMS_SIZE : payload_size))
         {
             set_error( STATUS_INVALID_PARAMETER );
             goto done;
@@ -1395,7 +1884,15 @@ DECL_HANDLER(alpc_connect_port)
             handle = 0;
             goto done;
         }
-        server->kernel_port = ALPC_KERNEL_POWER_PORT;
+        server->kernel_port = kernel_port;
+        if (coremsg_port) server->kernel_session_id = coremsg_port->session_id;
+        if (coremsg_port && !(server->coremsg_client = connect_coremsg_client_port(
+                                 coremsg_port, current->process->id, current->id )))
+        {
+            close_handle( current->process, handle );
+            handle = 0;
+            goto done;
+        }
         server->impersonation_level = client->impersonation_level;
         server->tracking_mode = client->tracking_mode;
         if (!client->tracking_mode)
@@ -1717,6 +2214,51 @@ DECL_HANDLER(start_dwm_kernel)
         return;
     }
     port->kernel_session_phase = DWM_SESSION_PORT_STARTED;
+}
+
+DECL_HANDLER(open_coremsg_kernel_connection)
+{
+    const unsigned char *routing = get_req_data();
+    struct coremsg_kernel_port *port;
+    struct coremsg_client_port *client;
+    struct coremsg_connection_target *target;
+    process_id_t pid;
+    thread_id_t tid;
+
+    if (req->selector > 22 || get_req_data_size() != 40)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(port = find_coremsg_kernel_port( current->process->session_id )))
+    {
+        set_error( STATUS_NOT_FOUND );
+        return;
+    }
+    if (is_native_machine() && !current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    target = &port->targets[req->selector];
+    if (target->client)
+    {
+        set_error( STATUS_ALREADY_REGISTERED );
+        return;
+    }
+    pid = get_u32( routing );
+    tid = get_u32( routing + 4 );
+    if (!(client = find_coremsg_client_port( port, pid, tid )))
+    {
+        set_error( STATUS_UNSUCCESSFUL );
+        return;
+    }
+    target->owner = current->process;
+    target->client = grab_coremsg_client_port( client );
+    memcpy( target->routing, routing, sizeof(target->routing) );
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server coremsg-open winpid=%04x session=%u selector=%u client=%04x:%04x\n",
+                 current->process->id, current->process->session_id, req->selector, pid, tid );
 }
 
 /* Handle access precedes message lookup. The caller supplies identity only;

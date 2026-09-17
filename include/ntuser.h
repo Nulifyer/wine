@@ -750,6 +750,7 @@ typedef enum _USERTHREADSTATECLASS
 W32KAPI NTSTATUS WINAPI NtDCompositionCreateConnection( BOOL is_dwm, HANDLE event, HANDLE *connection );
 W32KAPI BOOL WINAPI NtKSTInitialize( HANDLE stop_event, HANDLE update_event );
 W32KAPI UINT WINAPI NtKSTWait(void);
+W32KAPI NTSTATUS WINAPI NtMITCoreMsgKOpenConnectionTo( UINT selector, const void *routing_info );
 W32KAPI BOOL WINAPI NtMITSetInputCallbacks( void *callback );
 W32KAPI BOOL WINAPI NtUserRegisterManipulationThread( void *registration );
 W32KAPI NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection );
@@ -812,8 +813,44 @@ struct dcomposition_capability_info
 };
 W32KAPI NTSTATUS WINAPI NtDCompositionGetFrameStatistics( struct dcomposition_frame_statistics *statistics,
                                                            struct dcomposition_capability_info *capabilities );
+struct dcomposition_frame_info
+{
+    BYTE data[160];
+};
+struct dcomposition_confirm_frame_info
+{
+    UINT64 frame_id;
+    BYTE data[32];
+    UINT update_count;
+    UINT reserved;
+    const void *updates;
+};
+W32KAPI NTSTATUS WINAPI NtDCompositionBeginFrame( HANDLE connection,
+                                                   const struct dcomposition_frame_info *info,
+                                                   UINT64 *frame_id );
+W32KAPI NTSTATUS WINAPI NtDCompositionConfirmFrame( HANDLE connection,
+                                                     const struct dcomposition_confirm_frame_info *info );
+W32KAPI NTSTATUS WINAPI NtDCompositionGetFrameId( UINT type, UINT64 *frame_id );
+W32KAPI NTSTATUS WINAPI NtDCompositionGetFrameLegacyTokens( const UINT64 *frame_id,
+                                                             UINT *token_count, BOOL *has_more );
+W32KAPI NTSTATUS WINAPI NtDCompositionGetFrameSurfaceUpdates( const UINT64 *frame_id,
+                                                              UINT *update_count, BOOL *has_more );
 W32KAPI NTSTATUS WINAPI NtTokenManagerOpenSectionAndEvents( HANDLE *section, SIZE_T *section_size,
                                                              HANDLE *event_a, HANDLE *event_b );
+struct token_manager_adapter_info
+{
+    LUID adapter_luid;
+    HANDLE render_fence;
+    UINT64 reserved;
+};
+struct token_manager_thread_info
+{
+    HANDLE stop_event;
+    const struct token_manager_adapter_info *adapters;
+    UINT adapter_count;
+    UINT reserved;
+};
+W32KAPI NTSTATUS WINAPI NtTokenManagerThread( const struct token_manager_thread_info *info );
 
 W32KAPI HKL     WINAPI NtUserActivateKeyboardLayout( HKL layout, UINT flags );
 W32KAPI BOOL    WINAPI NtUserAddClipboardFormatListener( HWND hwnd );

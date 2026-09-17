@@ -12,11 +12,11 @@
 @ stub -syscall NtCreateCompositionSurfaceHandle
 @ stub -syscall NtCreateImplicitCompositionInputSink
 @ stub -syscall NtDCompositionAddCrossDeviceVisualChild
-@ stub -syscall NtDCompositionBeginFrame
+@ stdcall -syscall NtDCompositionBeginFrame(long ptr ptr)
 @ stub -syscall NtDCompositionBoostCompositorClock
 @ stdcall -syscall NtDCompositionCommitChannel(long ptr ptr long long ptr ptr long)
 @ stub -syscall NtDCompositionCommitSynchronizationObject
-@ stub -syscall NtDCompositionConfirmFrame
+@ stdcall -syscall NtDCompositionConfirmFrame(long ptr)
 @ stub -syscall NtDCompositionConnectPipe
 @ stub -syscall NtDCompositionCreateAndBindSharedSection
 @ stdcall -syscall NtDCompositionCreateChannel(ptr ptr ptr long)
@@ -34,11 +34,11 @@
 @ stub -syscall NtDCompositionGetChannels
 @ stdcall -syscall NtDCompositionGetConnectionBatch(long ptr ptr)
 @ stdcall -syscall NtDCompositionGetDeletedResources(long long ptr ptr)
-@ stub -syscall NtDCompositionGetFrameId
+@ stdcall -syscall NtDCompositionGetFrameId(long ptr)
 @ stub -syscall NtDCompositionGetFrameIdFromBatchId
-@ stub -syscall NtDCompositionGetFrameLegacyTokens
+@ stdcall -syscall NtDCompositionGetFrameLegacyTokens(ptr ptr ptr)
 @ stdcall -syscall NtDCompositionGetFrameStatistics(ptr ptr)
-@ stub -syscall NtDCompositionGetFrameSurfaceUpdates
+@ stdcall -syscall NtDCompositionGetFrameSurfaceUpdates(ptr ptr ptr)
 @ stub -syscall NtDCompositionGetMaterialProperty
 @ stub -syscall NtDCompositionGetStatistics
 @ stub -syscall NtDCompositionGetTargetStatistics
@@ -682,7 +682,7 @@
 @ stub -syscall NtMITAccessibilityTimerNotification
 @ stub -syscall NtMITActivateInputProcessing
 @ stub -syscall NtMITConfigureVirtualTouchpad
-@ stub -syscall NtMITCoreMsgKOpenConnectionTo
+@ stdcall -syscall NtMITCoreMsgKOpenConnectionTo(long ptr)
 @ stub -syscall NtMITDeactivateInputProcessing
 @ stub -syscall NtMITDisableMouseIntercept
 @ stub -syscall NtMITDispatchCompletion
@@ -787,7 +787,7 @@
 @ stub -syscall NtTokenManagerGetAnalogExclusiveSurfaceUpdates
 @ stub -syscall NtTokenManagerGetAnalogExclusiveTokenEvent
 @ stdcall -syscall NtTokenManagerOpenSectionAndEvents(ptr ptr ptr ptr)
-@ stub -syscall NtTokenManagerThread
+@ stdcall -syscall NtTokenManagerThread(ptr)
 @ stub -syscall NtUnBindCompositionSurface
 @ stub -syscall NtUpdateInputSinkTransforms
 @ stub -syscall NtUserAcquireIAMKey
