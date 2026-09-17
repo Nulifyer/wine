@@ -202,9 +202,65 @@ DLL_DIRECTORY_COOKIE WINAPI DECLSPEC_HOTPATCH AddDllDirectory( const WCHAR *dir 
 /***********************************************************************
  *	DelayLoadFailureHook   (kernelbase.@)
  */
+struct delay_load_fallback
+{
+    const char *module;
+    const char *function;
+    FARPROC handler;
+};
+
+static BOOL WINAPI xer_should_wer_manage_root_directory(void)
+{
+    RtlSetLastWin32Error( ERROR_PROC_NOT_FOUND );
+    return TRUE;
+}
+
+static const struct delay_load_fallback delay_load_fallbacks[] =
+{
+    { "ext-ms-win-wer-xbox-l1-2-0.dll", "XerShouldWerManageRootDirectory",
+      (FARPROC)xer_should_wer_manage_root_directory },
+    { "ext-ms-win-wer-xbox-l1-2-1.dll", "XerShouldWerManageRootDirectory",
+      (FARPROC)xer_should_wer_manage_root_directory },
+};
+
+static BOOL ascii_equal_ignore_case( const char *left, const char *right )
+{
+    unsigned char a, b;
+
+    do
+    {
+        a = *left++;
+        b = *right++;
+        if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
+        if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
+        if (a != b) return FALSE;
+    } while (a);
+    return TRUE;
+}
+
+static FARPROC lookup_delay_load_fallback( const char *module, const char *function )
+{
+    unsigned int i;
+
+    if (!module || !function || !((ULONG_PTR)function >> 16)) return NULL;
+
+    for (i = 0; i < ARRAY_SIZE(delay_load_fallbacks); ++i)
+    {
+        const struct delay_load_fallback *fallback = &delay_load_fallbacks[i];
+
+        if (ascii_equal_ignore_case( module, fallback->module ) &&
+            !strcmp( function, fallback->function ))
+            return fallback->handler;
+    }
+    return NULL;
+}
+
 FARPROC WINAPI DECLSPEC_HOTPATCH DelayLoadFailureHook( LPCSTR name, LPCSTR function )
 {
+    FARPROC fallback;
     ULONG_PTR args[2];
+
+    if ((fallback = lookup_delay_load_fallback( name, function ))) return fallback;
 
     if ((ULONG_PTR)function >> 16)
         ERR( "failed to delay load %s.%s\n", name, function );

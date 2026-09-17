@@ -6,6 +6,7 @@ SOURCES = \
 	exit.c \
 	file.c \
 	globalization_key.c \
+	loader.c \
 	memory.c \
 	path.c \
 	process.c \
