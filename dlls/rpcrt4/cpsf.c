@@ -136,15 +136,10 @@ static HRESULT WINAPI CStdPSFactory_CreateStub(LPPSFACTORYBUFFER iface,
     return E_NOINTERFACE;
 
   name = ProxyInfo->pNamesArray ? ProxyInfo->pNamesArray[Index] : NULL;
-  if (is_compact_proxy_file(ProxyInfo) && ProxyInfo->pDelegatedIIDs && ProxyInfo->pDelegatedIIDs[Index])
-  {
-    FIXME("compact delegated stub %s is not supported\n", debugstr_guid(riid));
-    return E_NOTIMPL;
-  }
   if(ProxyInfo->pDelegatedIIDs && ProxyInfo->pDelegatedIIDs[Index])
     return  CStdStubBuffer_Delegating_Construct(riid, pUnkServer, name,
-                                                ProxyInfo->pStubVtblList[Index], ProxyInfo->pDelegatedIIDs[Index],
-                                                iface, ppStub);
+                                                ProxyInfo->pStubVtblList[Index], is_compact_proxy_file(ProxyInfo),
+                                                ProxyInfo->pDelegatedIIDs[Index], iface, ppStub);
 
   return CStdStubBuffer_Construct(riid, pUnkServer, name,
                                   ProxyInfo->pStubVtblList[Index], is_compact_proxy_file(ProxyInfo), iface, ppStub);

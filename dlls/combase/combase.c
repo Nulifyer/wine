@@ -39,6 +39,8 @@ HINSTANCE hProxyDll;
 
 static const CLSID CLSID_ContextSwitcher =
     {0x0000034e, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
+static const IID inspectable_iid =
+    {0xaf86e2e0, 0xb12d, 0x4c6a, {0x9c, 0x5a, 0xd7, 0xaa, 0x65, 0x10, 0x1e, 0x90}};
 
 static ULONG_PTR global_options[COMGLB_PROPERTIES_RESERVED3 + 1];
 
@@ -2647,6 +2649,14 @@ HRESULT WINAPI CoGetPSClsid(REFIID riid, CLSID *pclsid)
 
     if (!pclsid)
         return E_INVALIDARG;
+
+    /* IInspectable is the standard delegated base of WinRT interfaces and
+     * is owned by combase's built-in proxy/stub factory. */
+    if (IsEqualIID(riid, &inspectable_iid))
+    {
+        *pclsid = CLSID_PSFactoryBuffer;
+        return S_OK;
+    }
 
     EnterCriticalSection(&cs_registered_ps);
 

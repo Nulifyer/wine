@@ -46,6 +46,7 @@ struct compact_stub_buffer
 };
 
 static const IRpcStubBufferVtbl compact_stub_vtbl;
+static const IRpcStubBufferVtbl compact_delegating_stub_vtbl;
 
 static LONG WINAPI stub_filter(EXCEPTION_POINTERS *eptr)
 {
@@ -69,6 +70,8 @@ static const CInterfaceStubHeader *get_stub_header(const CStdStubBuffer *stub)
     const CInterfaceStubVtbl *vtbl;
     if (stub->lpVtbl == &compact_stub_vtbl)
         return CONTAINING_RECORD(stub, struct compact_stub_buffer, stub)->header;
+    if (stub->lpVtbl == &compact_delegating_stub_vtbl)
+        return CONTAINING_RECORD(stub, cstdstubbuffer_delegating_t, stub_buffer)->header;
     vtbl = CONTAINING_RECORD(stub->lpVtbl, CInterfaceStubVtbl, Vtbl);
 
     return &vtbl->header;
@@ -153,6 +156,7 @@ HRESULT CStdStubBuffer_Delegating_Construct(REFIID riid,
                                             LPUNKNOWN pUnkServer,
                                             PCInterfaceName name,
                                             CInterfaceStubVtbl *vtbl,
+                                            BOOL compact,
                                             REFIID delegating_iid,
                                             LPPSFACTORYBUFFER pPSFactory,
                                             LPRPCSTUBBUFFER *ppStub)
@@ -190,7 +194,12 @@ HRESULT CStdStubBuffer_Delegating_Construct(REFIID riid,
         return r;
     }
 
-    This->stub_buffer.lpVtbl = &vtbl->Vtbl;
+    if (compact)
+    {
+        This->header = &vtbl->header;
+        This->stub_buffer.lpVtbl = &compact_delegating_stub_vtbl;
+    }
+    else This->stub_buffer.lpVtbl = &vtbl->Vtbl;
     This->stub_buffer.RefCount = 1;
     This->stub_buffer.pvServerObject = pvServer;
     This->stub_buffer.pPSFactory = pPSFactory;
@@ -367,7 +376,11 @@ void WINAPI CStdStubBuffer_DebugServerRelease(LPRPCSTUBBUFFER iface,
  * independently of the COM references retained by QueryInterface and support. */
 static IRpcStubBuffer *WINAPI compact_stub_support(IRpcStubBuffer *iface, REFIID iid)
 {
-    IRpcStubBuffer *supported = CStdStubBuffer_IsIIDSupported(iface, iid);
+    CStdStubBuffer *stub = impl_from_IRpcStubBuffer(iface);
+    IRpcStubBuffer *supported;
+
+    if (!stub->pvServerObject) return NULL;
+    supported = CStdStubBuffer_IsIIDSupported(iface, iid);
     if (supported) IRpcStubBuffer_AddRef(supported);
     return supported;
 }
@@ -463,6 +476,36 @@ const IRpcStubBufferVtbl CStdStubBuffer_Delegating_Vtbl =
     CStdStubBuffer_Invoke,
     CStdStubBuffer_IsIIDSupported,
     CStdStubBuffer_Delegating_CountRefs,
+    CStdStubBuffer_DebugServerQueryInterface,
+    CStdStubBuffer_DebugServerRelease
+};
+
+static ULONG WINAPI compact_delegating_stub_release(IRpcStubBuffer *iface)
+{
+    cstdstubbuffer_delegating_t *stub = impl_from_delegating(iface);
+    ULONG refs = InterlockedDecrement(&stub->stub_buffer.RefCount);
+
+    if (!refs)
+    {
+        /* As with compact nondelegating stubs, the channel owns disconnecting
+         * the server before it releases the stub. */
+        IRpcStubBuffer_Release(stub->base_stub);
+        IPSFactoryBuffer_Release(stub->stub_buffer.pPSFactory);
+        free(stub);
+    }
+    return refs;
+}
+
+static const IRpcStubBufferVtbl compact_delegating_stub_vtbl =
+{
+    CStdStubBuffer_QueryInterface,
+    CStdStubBuffer_AddRef,
+    compact_delegating_stub_release,
+    CStdStubBuffer_Delegating_Connect,
+    CStdStubBuffer_Delegating_Disconnect,
+    CStdStubBuffer_Invoke,
+    compact_stub_support,
+    compact_stub_count_refs,
     CStdStubBuffer_DebugServerQueryInterface,
     CStdStubBuffer_DebugServerRelease
 };

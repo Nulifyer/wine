@@ -118,7 +118,6 @@ HRESULT StdProxy_Construct(REFIID riid,
   if (is_compact_proxy_file(ProxyInfo))
   {
     ULONG count = ProxyInfo->pStubVtblList[Index]->header.DispatchTableCount;
-    if (ProxyInfo->pDelegatedIIDs && ProxyInfo->pDelegatedIIDs[Index]) return E_NOTIMPL;
     if (!create_compact_stubless_table((const void **)vtbl, count, &vtbl, &owned_vtbl))
       return E_OUTOFMEMORY;
   }

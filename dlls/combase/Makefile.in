@@ -19,6 +19,7 @@ SOURCES = \
 	rpc.c \
 	string.c \
 	stubmanager.c \
-	usrmarshal.c
+	usrmarshal.c \
+	winrt.idl
 
 dlldata_EXTRADEFS = -DENTRY_PREFIX=COMBASE_ -DPROXY_CLSID=CLSID_PSFactoryBuffer

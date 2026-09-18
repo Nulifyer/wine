@@ -48,6 +48,7 @@ typedef struct
     IUnknown base_obj;
     IRpcStubBuffer *base_stub;
     CStdStubBuffer stub_buffer;
+    const CInterfaceStubHeader *header;
 } cstdstubbuffer_delegating_t;
 
 HRESULT StdProxy_Construct(REFIID riid, LPUNKNOWN pUnkOuter, const ProxyFileInfo *ProxyInfo,
@@ -63,7 +64,7 @@ HRESULT CStdStubBuffer_Construct(REFIID riid, LPUNKNOWN pUnkServer, PCInterfaceN
                                  LPRPCSTUBBUFFER *ppStub);
 
 HRESULT CStdStubBuffer_Delegating_Construct(REFIID riid, LPUNKNOWN pUnkServer, PCInterfaceName name,
-                                            CInterfaceStubVtbl *vtbl, REFIID delegating_iid,
+                                            CInterfaceStubVtbl *vtbl, BOOL compact, REFIID delegating_iid,
                                             LPPSFACTORYBUFFER pPSFactory, LPRPCSTUBBUFFER *ppStub);
 
 const MIDL_SERVER_INFO *CStdStubBuffer_GetServerInfo(IRpcStubBuffer *iface);

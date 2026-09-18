@@ -1,0 +1,18 @@
+/*
+ * Standard Windows Runtime proxy definitions
+ *
+ * Copyright 2026 Nulifyer
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ */
+
+#pragma makedep proxy
+
+/*
+ * IInspectable is the delegated base for Windows Runtime interfaces.  Keep
+ * its proxy in combase's built-in proxy set, matching the native ownership.
+ */
+#include "inspectable.idl"

@@ -276,6 +276,57 @@ static CInterfaceStubVtbl if2_stub_vtbl =
     { 0, 0, test_CStdStubBuffer2_Release, 0, 0, 0, 0, 0, 0, 0 }
 };
 
+static const MIDL_STUBLESS_PROXY_INFO if2_proxy_info =
+{
+    &Object_StubDesc,
+    __MIDL_ProcFormatString.Format,
+    &if2_FormatStringOffsetTable[-3],
+    NULL,
+    0,
+    NULL
+};
+
+static const struct
+{
+    const MIDL_STUBLESS_PROXY_INFO *info;
+    const IID *iid;
+    INT_PTR marker;
+} if2_compact_proxy_vtbl =
+{
+    &if2_proxy_info,
+    &IID_if2,
+    -2
+};
+
+static const CInterfaceStubVtbl if2_compact_stub_vtbl =
+{
+    {
+        &IID_if2,
+        &if2_server_info,
+        13,
+        &if2_table[-3]
+    },
+    { (void *)-2 }
+};
+
+static const CInterfaceProxyVtbl *compact_delegating_proxy_vtbl_list[] =
+{
+    (const CInterfaceProxyVtbl *)&if2_compact_proxy_vtbl,
+    NULL
+};
+
+static const CInterfaceStubVtbl *compact_delegating_stub_vtbl_list[] =
+{
+    &if2_compact_stub_vtbl,
+    NULL
+};
+
+static const IID *compact_delegating_base_iid_list[] =
+{
+    &IID_ITypeLib,
+    NULL
+};
+
 static CINTERFACE_PROXY_VTABLE(5) if3_proxy_vtbl =
 {
     { &IID_if3 },
@@ -1146,6 +1197,91 @@ static void test_delegating_Invoke(IPSFactoryBuffer *ppsf)
     free(msg.Buffer);
     IRpcStubBuffer_Release(pstub);
 }
+
+static void test_compact_delegating_factory(void)
+{
+    static const unsigned short versions[] = {16, 20};
+    ITypeLibVtbl *obj_vtbl = &delegating_invoke_test_obj_vtbl;
+    IUnknown *obj = (IUnknown *)&obj_vtbl;
+    IRpcChannelBufferVtbl *channel_vtbl = &delegating_invoke_test_rpc_chan_vtbl;
+    IRpcChannelBuffer *channel = (IRpcChannelBuffer *)&channel_vtbl;
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(versions); ++i)
+    {
+        const IID *async_iids[] = {NULL};
+        ExtendedProxyFileInfo info =
+        {
+            (const PCInterfaceProxyVtblList *)compact_delegating_proxy_vtbl_list,
+            (const PCInterfaceStubVtblList *)compact_delegating_stub_vtbl_list,
+            NULL,
+            (const IID **)compact_delegating_base_iid_list,
+            (PIIDLookup)~(ULONG_PTR)0,
+            1,
+            versions[i],
+            versions[i] == 20 ? async_iids : NULL,
+            0,
+            0,
+            0
+        };
+        const ProxyFileInfo *files[] = {&info, NULL};
+        CStdPSFactoryBuffer factory_buffer = {0};
+        IPSFactoryBuffer *factory = NULL;
+        IRpcProxyBuffer *proxy = NULL;
+        IRpcStubBuffer *stub = NULL, *supported;
+        IUnknown *proxy_object = NULL;
+        RPCOLEMESSAGE msg = {0};
+        HRESULT hr;
+        ULONG refs;
+
+        hr = NdrDllGetClassObject(&CLSID_psfact, &IID_IPSFactoryBuffer, (void **)&factory,
+                                  files, &CLSID_psfact, &factory_buffer);
+        ok(hr == S_OK, "version %u: NdrDllGetClassObject returned %#lx\n", versions[i], hr);
+        if (FAILED(hr)) continue;
+
+        hr = IPSFactoryBuffer_CreateProxy(factory, NULL, &IID_if2, &proxy, (void **)&proxy_object);
+        ok(hr == S_OK, "version %u: CreateProxy returned %#lx\n", versions[i], hr);
+        ok(proxy != NULL, "version %u: proxy is NULL\n", versions[i]);
+        ok(proxy_object != NULL, "version %u: proxy object is NULL\n", versions[i]);
+        if (proxy_object) IUnknown_Release(proxy_object);
+        if (proxy) IRpcProxyBuffer_Release(proxy);
+
+        hr = IPSFactoryBuffer_CreateStub(factory, &IID_if2, obj, &stub);
+        ok(hr == S_OK, "version %u: CreateStub returned %#lx\n", versions[i], hr);
+        ok(stub != NULL, "version %u: stub is NULL\n", versions[i]);
+        if (stub)
+        {
+            supported = IRpcStubBuffer_IsIIDSupported(stub, &IID_if2);
+            ok(supported == stub, "version %u: IsIIDSupported returned %p\n", versions[i], supported);
+            if (supported) IRpcStubBuffer_Release(supported);
+            ok(IRpcStubBuffer_CountRefs(stub) == 1,
+               "version %u: connected CountRefs was not one\n", versions[i]);
+
+            msg.dataRepresentation = NDR_LOCAL_DATA_REPRESENTATION;
+            msg.iMethod = 3;
+            hr = IRpcStubBuffer_Invoke(stub, &msg, channel);
+            ok(hr == S_OK, "version %u: Invoke returned %#lx\n", versions[i], hr);
+            if (hr == S_OK)
+            {
+                ok(*(DWORD *)msg.Buffer == 0xabcdef, "version %u: buf[0] %#lx\n",
+                   versions[i], *(DWORD *)msg.Buffer);
+                ok(*((DWORD *)msg.Buffer + 1) == S_OK, "version %u: buf[1] %#lx\n",
+                   versions[i], *((DWORD *)msg.Buffer + 1));
+            }
+            free(msg.Buffer);
+
+            IRpcStubBuffer_Disconnect(stub);
+            ok(IRpcStubBuffer_CountRefs(stub) == 0,
+               "version %u: disconnected CountRefs was not zero\n", versions[i]);
+            ok(IRpcStubBuffer_IsIIDSupported(stub, &IID_if2) == NULL,
+               "version %u: disconnected stub still supports IID\n", versions[i]);
+            IRpcStubBuffer_Release(stub);
+        }
+
+        refs = IPSFactoryBuffer_Release(factory);
+        ok(refs == 0, "version %u: factory refs %lu\n", versions[i], refs);
+    }
+}
 static const CInterfaceProxyVtbl *cstub_ProxyVtblList2[] =
 {
     NULL
@@ -1566,6 +1702,7 @@ START_TEST( cstub )
     test_Disconnect(ppsf);
     test_Release(ppsf);
     test_delegating_Invoke(ppsf);
+    test_compact_delegating_factory();
     test_NdrDllRegisterProxy();
     test_delegated_methods();
     test_ChannelBufferRefCount(ppsf);
