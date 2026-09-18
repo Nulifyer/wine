@@ -304,7 +304,7 @@ static const CInterfaceStubVtbl if2_compact_stub_vtbl =
         &IID_if2,
         &if2_server_info,
         13,
-        &if2_table[-3]
+        (const PRPC_STUB_FUNCTION *)(INT_PTR)-2
     },
     { (void *)-2 }
 };
@@ -1218,6 +1218,8 @@ static void test_delegating_Invoke(IPSFactoryBuffer *ppsf)
 
 static void test_compact_delegating_factory(void)
 {
+    static const RPC_SYNTAX_IDENTIFIER unknown_syntax =
+        {{0x12345678, 0x1234, 0x5678, {0x90, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67}}, {1, 0}};
     static const unsigned short versions[] = {16, 20};
     ITypeLibVtbl *obj_vtbl = &delegating_invoke_test_obj_vtbl;
     IUnknown *obj = (IUnknown *)&obj_vtbl;
@@ -1287,6 +1289,25 @@ static void test_compact_delegating_factory(void)
                    versions[i], *((DWORD *)msg.Buffer + 1));
             }
             free(msg.Buffer);
+            msg.Buffer = NULL;
+
+            /* A -2 compact dispatch-table marker forwards the first six
+            * delegated methods and selects NdrStubCall3 thereafter. */
+            msg.iMethod = 6;
+            msg.reserved2[0] = (void *)&unknown_syntax;
+            hr = IRpcStubBuffer_Invoke(stub, &msg, channel);
+            ok(hr == S_OK, "version %u: interpreted Invoke returned %#lx\n", versions[i], hr);
+            ok(!msg.Buffer, "version %u: interpreted Invoke returned buffer %p\n", versions[i], msg.Buffer);
+
+            msg.iMethod = 2;
+            hr = IRpcStubBuffer_Invoke(stub, &msg, channel);
+            ok(hr == HRESULT_FROM_WIN32(RPC_S_PROCNUM_OUT_OF_RANGE),
+               "version %u: low method Invoke returned %#lx\n", versions[i], hr);
+
+            msg.iMethod = 13;
+            hr = IRpcStubBuffer_Invoke(stub, &msg, channel);
+            ok(hr == HRESULT_FROM_WIN32(RPC_S_PROCNUM_OUT_OF_RANGE),
+               "version %u: high method Invoke returned %#lx\n", versions[i], hr);
 
             IRpcStubBuffer_Disconnect(stub);
             ok(IRpcStubBuffer_CountRefs(stub) == 0,

@@ -312,6 +312,7 @@ HRESULT WINAPI CStdStubBuffer_Invoke(LPRPCSTUBBUFFER iface,
 {
   CStdStubBuffer *This = impl_from_IRpcStubBuffer(iface);
   const CInterfaceStubHeader *header = get_stub_header(This);
+  const PRPC_STUB_FUNCTION *dispatch_table = header->pDispatchTable;
   DWORD dwPhase = STUB_UNMARSHAL;
   HRESULT hr = S_OK;
 
@@ -319,9 +320,25 @@ HRESULT WINAPI CStdStubBuffer_Invoke(LPRPCSTUBBUFFER iface,
 
   __TRY
   {
-    if (header->pDispatchTable)
-      header->pDispatchTable[pMsg->iMethod](iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
-    else /* pure interpreted */
+    if (pMsg->iMethod < 3 || pMsg->iMethod >= header->DispatchTableCount)
+      RpcRaiseException(RPC_S_PROCNUM_OUT_OF_RANGE);
+    else if (dispatch_table == (const PRPC_STUB_FUNCTION *)(INT_PTR)-1)
+    {
+      if (pMsg->iMethod < 6)
+        NdrStubForwardingFunction(iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
+      else
+        NdrStubCall2(iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
+    }
+    else if (dispatch_table == (const PRPC_STUB_FUNCTION *)(INT_PTR)-2)
+    {
+      if (pMsg->iMethod < 6)
+        NdrStubForwardingFunction(iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
+      else
+        NdrStubCall3(iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
+    }
+    else if (dispatch_table)
+      dispatch_table[pMsg->iMethod](iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
+    else
       NdrStubCall2(iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
   }
   __EXCEPT(stub_filter)
