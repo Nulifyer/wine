@@ -51,6 +51,11 @@ struct winstation
     process_id_t       logon_ui_process_id;/* process allowed to register the BSDR window */
     struct window     *bsdr_window;        /* blocked-shutdown resolver window */
     unsigned int       bsdr_flags;         /* blocked-shutdown resolver registration flags */
+    process_id_t       user_api_hook_owner;/* process owning the session user API hook */
+    unsigned int       user_api_hook_generation; /* session hook generation */
+    data_size_t        user_api_hook_size; /* packed user API hook string bytes */
+    data_size_t        user_api_hook_len[4]; /* packed string lengths */
+    WCHAR             *user_api_hook_data; /* packed module/procedure strings */
     unsigned int       monitor_count;      /* number of monitors */
     struct monitor_info *monitors;         /* window station monitors */
     unsigned __int64   monitor_serial;     /* winstation monitor update counter */

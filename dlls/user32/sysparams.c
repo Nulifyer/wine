@@ -235,7 +235,10 @@ static BOOL update_desktop_wallpaper(void)
  */
 BOOL WINAPI SystemParametersInfoForDpi( UINT action, UINT val, PVOID ptr, UINT winini, UINT dpi )
 {
-    BOOL ret = NtUserSystemParametersInfoForDpi( action, val, ptr, winini, dpi );
+    BOOL ret;
+
+    user_api_hook_ensure_loaded();
+    ret = NtUserSystemParametersInfoForDpi( action, val, ptr, winini, dpi );
     if (ret && (action == SPI_SETDESKWALLPAPER || action == SPI_SETDESKPATTERN))
         ret = update_desktop_wallpaper();
     return ret;
@@ -247,7 +250,10 @@ BOOL WINAPI SystemParametersInfoForDpi( UINT action, UINT val, PVOID ptr, UINT w
  */
 BOOL WINAPI SystemParametersInfoW( UINT action, UINT val, void *ptr, UINT winini )
 {
-    BOOL ret = NtUserSystemParametersInfo( action, val, ptr, winini );
+    BOOL ret;
+
+    user_api_hook_ensure_loaded();
+    ret = NtUserSystemParametersInfo( action, val, ptr, winini );
     if (ret && (action == SPI_SETDESKWALLPAPER || action == SPI_SETDESKPATTERN))
         ret = update_desktop_wallpaper();
     return ret;
@@ -271,6 +277,7 @@ BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,
 {
     BOOL ret;
 
+    user_api_hook_ensure_loaded();
     TRACE("(%u, %u, %p, %u)\n", uiAction, uiParam, pvParam, fuWinIni);
 
     switch (uiAction)
@@ -407,6 +414,7 @@ BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,
  */
 INT WINAPI GetSystemMetrics( INT index )
 {
+    user_api_hook_ensure_loaded();
     return NtUserGetSystemMetrics( index );
 }
 
@@ -416,6 +424,7 @@ INT WINAPI GetSystemMetrics( INT index )
  */
 INT WINAPI GetSystemMetricsForDpi( INT index, UINT dpi )
 {
+    user_api_hook_ensure_loaded();
     return NtUserGetSystemMetricsForDpi( index, dpi );
 }
 

@@ -1285,7 +1285,7 @@
     SYSCALL_ENTRY( 0x1501, NtUserRegisterTasklist, 0 ) \
     SYSCALL_ENTRY( 0x1502, NtUserRegisterTouchHitTestingWindow, 0 ) \
     SYSCALL_ENTRY( 0x1503, NtUserRegisterTouchPadCapable, 4 ) \
-    SYSCALL_ENTRY( 0x1504, NtUserRegisterUserApiHook, 0 ) \
+    SYSCALL_ENTRY( 0x1504, NtUserRegisterUserApiHook, 16 ) \
     SYSCALL_ENTRY( 0x1505, NtUserRegisterUserHungAppHandlers, 0 ) \
     SYSCALL_ENTRY( 0x1506, NtUserRegisterWindowArrangementCallout, 0 ) \
     SYSCALL_ENTRY( 0x1507, NtUserRegisterWindowMessage, 4 ) \
@@ -2827,7 +2827,7 @@
     SYSCALL_ENTRY( 0x1501, NtUserRegisterTasklist, 0 ) \
     SYSCALL_ENTRY( 0x1502, NtUserRegisterTouchHitTestingWindow, 0 ) \
     SYSCALL_ENTRY( 0x1503, NtUserRegisterTouchPadCapable, 8 ) \
-    SYSCALL_ENTRY( 0x1504, NtUserRegisterUserApiHook, 0 ) \
+    SYSCALL_ENTRY( 0x1504, NtUserRegisterUserApiHook, 32 ) \
     SYSCALL_ENTRY( 0x1505, NtUserRegisterUserHungAppHandlers, 0 ) \
     SYSCALL_ENTRY( 0x1506, NtUserRegisterWindowArrangementCallout, 0 ) \
     SYSCALL_ENTRY( 0x1507, NtUserRegisterWindowMessage, 8 ) \
@@ -3861,7 +3861,6 @@
     SYSCALL_STUB( NtUserLinkDpiCursor ) \
     SYSCALL_STUB( NtUserLoadCursorsAndIcons ) \
     SYSCALL_STUB( NtUserLoadKeyboardLayoutEx ) \
-    SYSCALL_STUB( NtUserLoadUserApiHook ) \
     SYSCALL_STUB( NtUserLockCursor ) \
     SYSCALL_STUB( NtUserLockSetForegroundWindow ) \
     SYSCALL_STUB( NtUserLockWindowStation ) \
@@ -3923,7 +3922,6 @@
     SYSCALL_STUB( NtUserRegisterSystemThread ) \
     SYSCALL_STUB( NtUserRegisterTasklist ) \
     SYSCALL_STUB( NtUserRegisterTouchHitTestingWindow ) \
-    SYSCALL_STUB( NtUserRegisterUserApiHook ) \
     SYSCALL_STUB( NtUserRegisterUserHungAppHandlers ) \
     SYSCALL_STUB( NtUserRegisterWindowArrangementCallout ) \
     SYSCALL_STUB( NtUserReleaseDwmHitTestWaiters ) \
@@ -4062,7 +4060,6 @@
     SYSCALL_STUB( NtUserUnloadKeyboardLayout ) \
     SYSCALL_STUB( NtUserUnlockWindowStation ) \
     SYSCALL_STUB( NtUserUnregisterSessionPort ) \
-    SYSCALL_STUB( NtUserUnregisterUserApiHook ) \
     SYSCALL_STUB( NtUserUpdateClientRect ) \
     SYSCALL_STUB( NtUserUpdateDefaultDesktopThumbnail ) \
     SYSCALL_STUB( NtUserUpdateInstance ) \

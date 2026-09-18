@@ -149,6 +149,11 @@ static bool winstation_init( struct object *obj, const void *init_data )
     winstation->logon_ui_process_id = 0;
     winstation->bsdr_window = NULL;
     winstation->bsdr_flags = 0;
+    winstation->user_api_hook_owner = 0;
+    winstation->user_api_hook_generation = 1;
+    winstation->user_api_hook_size = 0;
+    memset( winstation->user_api_hook_len, 0, sizeof(winstation->user_api_hook_len) );
+    winstation->user_api_hook_data = NULL;
     winstation->monitors = NULL;
     winstation->monitor_count = 0;
     winstation->monitor_serial = 1;
@@ -210,6 +215,15 @@ void cleanup_process_winstation_state( struct process *process )
             winstation->bsdr_window = NULL;
             winstation->bsdr_flags = 0;
         }
+        if (winstation->user_api_hook_owner == process->id)
+        {
+            winstation->user_api_hook_owner = 0;
+            winstation->user_api_hook_size = 0;
+            memset( winstation->user_api_hook_len, 0, sizeof(winstation->user_api_hook_len) );
+            free( winstation->user_api_hook_data );
+            winstation->user_api_hook_data = NULL;
+            if (!++winstation->user_api_hook_generation) ++winstation->user_api_hook_generation;
+        }
     }
 }
 
@@ -250,6 +264,7 @@ static void winstation_destroy( struct object *obj )
     if (winstation->atom_table) release_object( winstation->atom_table );
     free( winstation->desktop_names );
     free( winstation->monitors );
+    free( winstation->user_api_hook_data );
 }
 
 /* retrieve the process window station, checking the handle access rights */
@@ -762,6 +777,112 @@ DECL_HANDLER(set_process_winstation)
         current->process->winstation = req->handle;
         release_object( winstation );
     }
+}
+
+static int valid_user_api_hook_lengths( const data_size_t lengths[4], data_size_t total )
+{
+    data_size_t sum = 0;
+    unsigned int i;
+
+    for (i = 0; i < 4; ++i)
+    {
+        if (!lengths[i] || (lengths[i] & (sizeof(WCHAR) - 1)) ||
+            lengths[i] > (MAX_PATH - 1) * sizeof(WCHAR)) return 0;
+        if (sum > ~(data_size_t)0 - lengths[i]) return 0;
+        sum += lengths[i];
+    }
+    return sum == total;
+}
+
+/* Register one user API hook descriptor for the calling process' session. */
+DECL_HANDLER(register_user_api_hook)
+{
+    const data_size_t lengths[4] =
+    {
+        req->module64_len, req->proc64_len, req->module32_len, req->proc32_len
+    };
+    struct winstation *winstation;
+    WCHAR *data;
+
+    if (!valid_user_api_hook_lengths( lengths, get_req_data_size() ))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!equal_sid( token_get_user( current->process->token ), &local_system_sid ) ||
+        !thread_single_check_privilege( current, SeTcbPrivilege ))
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!(winstation = get_process_winstation( current->process, 0 ))) return;
+    if (winstation->user_api_hook_owner &&
+        winstation->user_api_hook_owner != current->process->id)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        release_object( winstation );
+        return;
+    }
+    if (!(data = memdup( get_req_data(), get_req_data_size() )))
+    {
+        release_object( winstation );
+        return;
+    }
+
+    free( winstation->user_api_hook_data );
+    winstation->user_api_hook_data = data;
+    winstation->user_api_hook_size = get_req_data_size();
+    memcpy( winstation->user_api_hook_len, lengths, sizeof(lengths) );
+    winstation->user_api_hook_owner = current->process->id;
+    if (!++winstation->user_api_hook_generation) ++winstation->user_api_hook_generation;
+    reply->generation = winstation->user_api_hook_generation;
+    release_object( winstation );
+}
+
+/* Return the current session hook descriptor to a process in the same window station. */
+DECL_HANDLER(get_user_api_hook)
+{
+    struct winstation *winstation;
+
+    if (!(winstation = get_process_winstation( current->process, 0 ))) return;
+    reply->generation = winstation->user_api_hook_generation;
+    if (winstation->user_api_hook_owner && winstation->user_api_hook_data)
+    {
+        reply->registered = 1;
+        reply->module64_len = winstation->user_api_hook_len[0];
+        reply->proc64_len = winstation->user_api_hook_len[1];
+        reply->module32_len = winstation->user_api_hook_len[2];
+        reply->proc32_len = winstation->user_api_hook_len[3];
+        if (winstation->user_api_hook_size <= get_reply_max_size())
+            set_reply_data( winstation->user_api_hook_data, winstation->user_api_hook_size );
+        else
+            set_error( STATUS_BUFFER_TOO_SMALL );
+    }
+    release_object( winstation );
+}
+
+/* Clear the hook only when the caller owns the session registration. */
+DECL_HANDLER(unregister_user_api_hook)
+{
+    struct winstation *winstation;
+
+    if (!(winstation = get_process_winstation( current->process, 0 ))) return;
+    if (!winstation->user_api_hook_owner ||
+        winstation->user_api_hook_owner != current->process->id)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        release_object( winstation );
+        return;
+    }
+
+    winstation->user_api_hook_owner = 0;
+    winstation->user_api_hook_size = 0;
+    memset( winstation->user_api_hook_len, 0, sizeof(winstation->user_api_hook_len) );
+    free( winstation->user_api_hook_data );
+    winstation->user_api_hook_data = NULL;
+    if (!++winstation->user_api_hook_generation) ++winstation->user_api_hook_generation;
+    reply->generation = winstation->user_api_hook_generation;
+    release_object( winstation );
 }
 
 /* create a desktop */

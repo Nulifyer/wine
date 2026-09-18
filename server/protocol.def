@@ -3081,6 +3081,38 @@ enum coords_relative
 @END
 
 
+/* Register the session user API hook module and initialization procedure pair */
+@REQ(register_user_api_hook)
+    data_size_t module64_len;      /* 64-bit module name length in bytes */
+    data_size_t proc64_len;        /* 64-bit procedure name length in bytes */
+    data_size_t module32_len;      /* 32-bit module name length in bytes */
+    data_size_t proc32_len;        /* 32-bit procedure name length in bytes */
+    VARARG(data,bytes);            /* packed strings in the order above */
+@REPLY
+    unsigned int generation;      /* session hook generation */
+@END
+
+
+/* Query the session user API hook module and initialization procedure pair */
+@REQ(get_user_api_hook)
+@REPLY
+    unsigned int registered;      /* nonzero if a hook is registered */
+    unsigned int generation;      /* session hook generation */
+    data_size_t module64_len;      /* 64-bit module name length in bytes */
+    data_size_t proc64_len;        /* 64-bit procedure name length in bytes */
+    data_size_t module32_len;      /* 32-bit module name length in bytes */
+    data_size_t proc32_len;        /* 32-bit procedure name length in bytes */
+    VARARG(data,bytes);            /* packed strings in the order above */
+@END
+
+
+/* Unregister the session user API hook owned by the calling process */
+@REQ(unregister_user_api_hook)
+@REPLY
+    unsigned int generation;      /* new session hook generation */
+@END
+
+
 /* Enumerate window stations and desktops */
 @REQ(enum_winstation)
     obj_handle_t handle;          /* handle to the window station */

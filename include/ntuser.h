@@ -91,6 +91,7 @@ struct user_entry
     USER32_CALLBACK_ENTRY(ImmTranslateMessage) \
     USER32_CALLBACK_ENTRY(InitBuiltinClasses) \
     USER32_CALLBACK_ENTRY(LoadDriver) \
+    USER32_CALLBACK_ENTRY(LoadUserApiHookCallback) \
     USER32_CALLBACK_ENTRY(LoadImage) \
     USER32_CALLBACK_ENTRY(LoadSysMenu) \
     USER32_CALLBACK_ENTRY(PostDDEMessage) \
@@ -114,6 +115,17 @@ enum
 struct dispatch_callback_params
 {
     UINT64 callback;
+};
+
+/* NtUserLoadUserApiHookCallback params. String offsets are relative to this structure. */
+struct load_user_api_hook_params
+{
+    UINT generation;
+    UINT module_offset;
+    UINT module_len;
+    UINT proc_offset;
+    UINT proc_len;
+    WCHAR data[1];
 };
 
 static inline NTSTATUS KeUserDispatchCallback( const struct dispatch_callback_params *params, ULONG len,
@@ -1092,6 +1104,8 @@ W32KAPI BOOL    WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrg
 W32KAPI ATOM    WINAPI NtUserRegisterClassExWOW( const WNDCLASSEXW *wc, UNICODE_STRING *name, UNICODE_STRING *version,
                                                  struct client_menu_name *menu_name, DWORD fnid, DWORD flags, DWORD *wow );
 W32KAPI BOOL    WINAPI NtUserRegisterDManipHook(void);
+W32KAPI BOOL    WINAPI NtUserRegisterUserApiHook( UNICODE_STRING *module64, UNICODE_STRING *proc64,
+                                                  UNICODE_STRING *module32, UNICODE_STRING *proc32 );
 W32KAPI BOOL    WINAPI NtUserRegisterBSDRWindow( HWND hwnd, DWORD flags );
 W32KAPI BOOL    WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk );
 W32KAPI BOOL    WINAPI NtUserRegisterLogonProcess( DWORD process_id, BOOL secure );
@@ -1187,6 +1201,8 @@ W32KAPI BOOL    WINAPI NtUserTranslateMessage( const MSG *msg, UINT flags );
 W32KAPI BOOL    WINAPI NtUserUnhookWinEvent( HWINEVENTHOOK hEventHook );
 W32KAPI BOOL    WINAPI NtUserUnhookWindowsHook( INT id, HOOKPROC proc );
 W32KAPI BOOL    WINAPI NtUserUnhookWindowsHookEx( HHOOK handle );
+W32KAPI BOOL    WINAPI NtUserLoadUserApiHook(void);
+W32KAPI BOOL    WINAPI NtUserUnregisterUserApiHook(void);
 W32KAPI BOOL    WINAPI NtUserUnregisterClass( UNICODE_STRING *name, HINSTANCE instance, struct client_menu_name **menu_name );
 W32KAPI BOOL    WINAPI NtUserUnregisterHotKey( HWND hwnd, INT id );
 W32KAPI BOOL    WINAPI NtUserUpdateInputContext( HIMC handle, UINT attr, UINT_PTR value );

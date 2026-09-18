@@ -1184,7 +1184,7 @@
 @ stub -syscall NtUserLinkDpiCursor
 @ stub -syscall NtUserLoadCursorsAndIcons
 @ stub -syscall NtUserLoadKeyboardLayoutEx
-@ stub -syscall NtUserLoadUserApiHook
+@ stdcall -syscall NtUserLoadUserApiHook()
 @ stub -syscall NtUserLockCursor
 @ stub -syscall NtUserLockSetForegroundWindow
 @ stub -syscall NtUserLockWindowStation
@@ -1283,7 +1283,7 @@
 @ stub -syscall NtUserRegisterTasklist
 @ stub -syscall NtUserRegisterTouchHitTestingWindow
 @ stdcall -syscall NtUserRegisterTouchPadCapable(long)
-@ stub -syscall NtUserRegisterUserApiHook
+@ stdcall -syscall NtUserRegisterUserApiHook(ptr ptr ptr ptr)
 @ stub -syscall NtUserRegisterUserHungAppHandlers
 @ stub -syscall NtUserRegisterWindowArrangementCallout
 @ stdcall -syscall NtUserRegisterWindowMessage(ptr)
@@ -1505,7 +1505,7 @@
 @ stdcall -syscall NtUserUnregisterClass(ptr ptr ptr)
 @ stdcall -syscall NtUserUnregisterHotKey(long long)
 @ stub -syscall NtUserUnregisterSessionPort
-@ stub -syscall NtUserUnregisterUserApiHook
+@ stdcall -syscall NtUserUnregisterUserApiHook()
 @ stub -syscall NtUserUpdateClientRect
 @ stub -syscall NtUserUpdateDefaultDesktopThumbnail
 @ stdcall -syscall NtUserUpdateInputContext(long long ptr)

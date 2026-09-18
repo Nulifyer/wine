@@ -1244,12 +1244,12 @@ BOOL WINAPI ThemeHooksInstall(void)
     hooks.pNonClientButtonDraw = UXTHEME_NonClientButtonDraw;
     hooks.pScrollBarDraw = UXTHEME_ScrollBarDraw;
     hooks.pScrollBarWndProc = UXTHEME_ScrollbarWndProc;
-    return RegisterUserApiHook(&hooks, &user_api);
+    return __wine_register_user_api_hook(&hooks, &user_api);
 }
 
 BOOL WINAPI ThemeHooksRemove(void)
 {
-    UnregisterUserApiHook();
+    __wine_unregister_user_api_hook();
     return TRUE;
 }
 

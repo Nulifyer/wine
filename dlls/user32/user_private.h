@@ -162,6 +162,9 @@ extern int bitmap_info_size( const BITMAPINFO * info, WORD coloruse );
 extern BOOL get_icon_size( HICON handle, SIZE *size );
 
 extern struct user_api_hook *user_api;
+BOOL user_api_hook_load( const struct load_user_api_hook_params *params, ULONG size );
+void user_api_hook_ensure_loaded(void);
+void user_api_hook_process_detach( BOOL process_terminating );
 LRESULT WINAPI USER_DefDlgProc(HWND, UINT, WPARAM, LPARAM, BOOL);
 LRESULT WINAPI USER_ScrollBarProc(HWND, UINT, WPARAM, LPARAM, BOOL);
 void WINAPI USER_NonClientButtonDraw(HWND, HDC, enum NONCLIENT_BUTTON_TYPE, RECT, BOOL, BOOL);

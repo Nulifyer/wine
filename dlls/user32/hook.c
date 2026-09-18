@@ -99,6 +99,226 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION api_hook_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
+struct modern_user_api_hook
+{
+    DWORD size;
+    DWORD reserved;
+    void *def_window_proc_a;
+    void *def_window_proc_w;
+    const BYTE *def_window_msg_mask;
+    DWORD def_window_msg_mask_size;
+    DWORD def_window_flags;
+    void *get_scroll_info;
+    void *set_scroll_info;
+    void *enable_scroll_bar;
+    void *adjust_window_rect_ex;
+    void *set_window_rgn;
+    void *pre_window_proc;
+    void *post_window_proc;
+    const BYTE *window_msg_mask;
+    DWORD window_msg_mask_size;
+    DWORD window_flags;
+    void *pre_dialog_proc;
+    void *post_dialog_proc;
+    const BYTE *dialog_msg_mask;
+    DWORD dialog_msg_mask_size;
+    DWORD dialog_flags;
+    void *get_system_metrics;
+    void *system_parameters_info_a;
+    void *system_parameters_info_w;
+    void *force_reset;
+    void *draw_frame_control;
+    void *draw_caption;
+    void *mdi_redraw_frame;
+    void *broadcast_theme_change;
+    void *get_system_metrics_for_dpi;
+    void *system_parameters_info_for_dpi;
+    void *get_real_window_owner;
+};
+
+typedef BOOL (CDECL *user_api_hook_init_proc)( DWORD mode, struct modern_user_api_hook *hook );
+
+static HMODULE modern_hook_module;
+static user_api_hook_init_proc modern_hook_init;
+static UINT modern_hook_generation;
+static BOOL modern_hook_checked;
+static BOOL modern_hook_loading;
+static struct modern_user_api_hook modern_hook_table;
+
+#ifdef _WIN64
+C_ASSERT( sizeof(struct modern_user_api_hook) == 0xe8 );
+C_ASSERT( offsetof(struct modern_user_api_hook, force_reset) == 0xa8 );
+C_ASSERT( offsetof(struct modern_user_api_hook, broadcast_theme_change) == 0xc8 );
+#else
+C_ASSERT( sizeof(struct modern_user_api_hook) == 0x84 );
+C_ASSERT( offsetof(struct modern_user_api_hook, force_reset) == 0x64 );
+C_ASSERT( offsetof(struct modern_user_api_hook, broadcast_theme_change) == 0x74 );
+#endif
+
+static LRESULT WINAPI default_pre_dispatch_proc(void)
+{
+    return 0;
+}
+
+static void WINAPI real_mdi_redraw_frame(void)
+{
+}
+
+static HWND WINAPI get_real_window_owner( HWND hwnd )
+{
+    return GetWindow( hwnd, GW_OWNER );
+}
+
+static BOOL CDECL force_reset_user_api_hook( HMODULE module )
+{
+    BOOL ret = FALSE;
+
+    EnterCriticalSection( &api_hook_cs );
+    if (module == modern_hook_module)
+    {
+        modern_hook_generation = 0;
+        ret = TRUE;
+    }
+    LeaveCriticalSection( &api_hook_cs );
+    return ret;
+}
+
+static void reset_modern_user_api_hook( struct modern_user_api_hook *hook )
+{
+    memset( hook, 0, sizeof(*hook) );
+    hook->size = sizeof(*hook);
+    hook->def_window_proc_a = DefWindowProcA;
+    hook->def_window_proc_w = DefWindowProcW;
+    hook->get_scroll_info = GetScrollInfo;
+    hook->set_scroll_info = NtUserSetScrollInfo;
+    hook->enable_scroll_bar = NtUserEnableScrollBar;
+    hook->adjust_window_rect_ex = AdjustWindowRectEx;
+    hook->set_window_rgn = NtUserSetWindowRgn;
+    hook->pre_window_proc = default_pre_dispatch_proc;
+    hook->post_window_proc = default_pre_dispatch_proc;
+    hook->pre_dialog_proc = default_pre_dispatch_proc;
+    hook->post_dialog_proc = default_pre_dispatch_proc;
+    hook->get_system_metrics = GetSystemMetrics;
+    hook->system_parameters_info_a = SystemParametersInfoA;
+    hook->system_parameters_info_w = SystemParametersInfoW;
+    hook->force_reset = (void *)force_reset_user_api_hook;
+    hook->draw_frame_control = DrawFrameControl;
+    hook->draw_caption = DrawCaption;
+    hook->mdi_redraw_frame = real_mdi_redraw_frame;
+    hook->get_system_metrics_for_dpi = GetSystemMetricsForDpi;
+    hook->system_parameters_info_for_dpi = SystemParametersInfoForDpi;
+    hook->get_real_window_owner = get_real_window_owner;
+}
+
+static void unload_modern_user_api_hook( DWORD mode )
+{
+    user_api_hook_init_proc init;
+    HMODULE module;
+
+    EnterCriticalSection( &api_hook_cs );
+    init = modern_hook_init;
+    module = modern_hook_module;
+    modern_hook_init = NULL;
+    modern_hook_module = NULL;
+    modern_hook_generation = 0;
+    memset( &modern_hook_table, 0, sizeof(modern_hook_table) );
+    LeaveCriticalSection( &api_hook_cs );
+
+    if (init) init( mode, NULL );
+    if (module) FreeLibrary( module );
+}
+
+BOOL user_api_hook_load( const struct load_user_api_hook_params *params, ULONG size )
+{
+    struct modern_user_api_hook table;
+    user_api_hook_init_proc init;
+    const WCHAR *module_name, *proc_name;
+    HMODULE module;
+    char proc[MAX_PATH];
+    BOOL ret = FALSE;
+
+    if (!params || size < FIELD_OFFSET( struct load_user_api_hook_params, data ) ||
+        params->module_offset > size || params->module_len > size - params->module_offset ||
+        params->proc_offset > size || params->proc_len > size - params->proc_offset ||
+        params->module_len > (MAX_PATH - 1) * sizeof(WCHAR) ||
+        params->proc_len > (MAX_PATH - 1) * sizeof(WCHAR) ||
+        params->module_offset + params->module_len + sizeof(WCHAR) > size ||
+        params->proc_offset + params->proc_len + sizeof(WCHAR) > size) return FALSE;
+
+    module_name = (const WCHAR *)((const BYTE *)params + params->module_offset);
+    proc_name = (const WCHAR *)((const BYTE *)params + params->proc_offset);
+    if (module_name[params->module_len / sizeof(WCHAR)] ||
+        proc_name[params->proc_len / sizeof(WCHAR)]) return FALSE;
+
+    EnterCriticalSection( &api_hook_cs );
+    if (modern_hook_module && modern_hook_generation == params->generation)
+    {
+        LeaveCriticalSection( &api_hook_cs );
+        return TRUE;
+    }
+    if (modern_hook_loading)
+    {
+        LeaveCriticalSection( &api_hook_cs );
+        return FALSE;
+    }
+    modern_hook_checked = TRUE;
+    modern_hook_loading = TRUE;
+    LeaveCriticalSection( &api_hook_cs );
+
+    unload_modern_user_api_hook( 1 );
+    if (!(module = LoadLibraryExW( module_name, NULL, LOAD_WITH_ALTERED_SEARCH_PATH ))) goto done;
+    if (!WideCharToMultiByte( CP_ACP, 0, proc_name, -1, proc, sizeof(proc), NULL, NULL ) ||
+        !(init = (user_api_hook_init_proc)GetProcAddress( module, proc )))
+    {
+        FreeLibrary( module );
+        goto done;
+    }
+
+    reset_modern_user_api_hook( &table );
+    if (!init( 0, &table ) || table.size != sizeof(table) ||
+        table.force_reset != (void *)force_reset_user_api_hook)
+    {
+        init( 1, NULL );
+        FreeLibrary( module );
+        goto done;
+    }
+
+    EnterCriticalSection( &api_hook_cs );
+    modern_hook_module = module;
+    modern_hook_init = init;
+    modern_hook_generation = params->generation;
+    modern_hook_table = table;
+    LeaveCriticalSection( &api_hook_cs );
+    ret = TRUE;
+
+done:
+    EnterCriticalSection( &api_hook_cs );
+    modern_hook_loading = FALSE;
+    LeaveCriticalSection( &api_hook_cs );
+    return ret;
+}
+
+void user_api_hook_ensure_loaded(void)
+{
+    BOOL check = FALSE;
+
+    if (RtlIsThreadWithinLoaderCallout()) return;
+    EnterCriticalSection( &api_hook_cs );
+    if (!modern_hook_checked && !modern_hook_module && !modern_hook_loading)
+    {
+        modern_hook_checked = TRUE;
+        check = TRUE;
+    }
+    LeaveCriticalSection( &api_hook_cs );
+    if (check) NtUserLoadUserApiHook();
+}
+
+void user_api_hook_process_detach( BOOL process_terminating )
+{
+    if (process_terminating) return;
+    unload_modern_user_api_hook( 2 );
+}
+
 
 #define WH_WINEVENT (WH_MAXHOOK+1)
 
@@ -541,8 +761,9 @@ BOOL WINAPI IsWinEventHookInstalled(DWORD dwEvent)
     return TRUE;
 }
 
-/* Undocumented RegisterUserApiHook() */
-BOOL WINAPI RegisterUserApiHook(const struct user_api_hook *new_hook, struct user_api_hook *old_hook)
+/* Wine's original in-process hook table, retained for the builtin UxTheme implementation. */
+BOOL CDECL __wine_register_user_api_hook(const struct user_api_hook *new_hook,
+                                         struct user_api_hook *old_hook)
 {
     if (!new_hook)
         return FALSE;
@@ -556,8 +777,33 @@ BOOL WINAPI RegisterUserApiHook(const struct user_api_hook *new_hook, struct use
     return TRUE;
 }
 
+void CDECL __wine_unregister_user_api_hook(void)
+{
+    InterlockedExchangePointer((void **)&user_api, &original_user_api);
+}
+
+/* Undocumented current Windows RegisterUserApiHook() descriptor ABI. */
+BOOL WINAPI RegisterUserApiHook(const struct user_api_hook_descriptor *descriptor)
+{
+    UNICODE_STRING module64, proc64, module32, proc32;
+
+    if (!descriptor || descriptor->size != sizeof(*descriptor) ||
+        !descriptor->module64 || !descriptor->proc64 ||
+        !descriptor->module32 || !descriptor->proc32)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    RtlInitUnicodeString( &module64, descriptor->module64 );
+    RtlInitUnicodeString( &proc64, descriptor->proc64 );
+    RtlInitUnicodeString( &module32, descriptor->module32 );
+    RtlInitUnicodeString( &proc32, descriptor->proc32 );
+    return NtUserRegisterUserApiHook( &module64, &proc64, &module32, &proc32 );
+}
+
 /* Undocumented UnregisterUserApiHook() */
 void WINAPI UnregisterUserApiHook(void)
 {
-    InterlockedExchangePointer((void **)&user_api, &original_user_api);
+    if (NtUserUnregisterUserApiHook()) unload_modern_user_api_hook( 1 );
 }

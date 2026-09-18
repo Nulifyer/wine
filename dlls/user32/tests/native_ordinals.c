@@ -30,6 +30,7 @@ typedef void (WINAPI *internal_enum_desktop_windows_fn)(HDESK, WNDENUMPROC, LPAR
 typedef void (WINAPI *internal_enum_child_windows_fn)(HWND, WNDENUMPROC, LPARAM);
 typedef BOOL (WINAPI *broadcast_theme_change_event_fn)(DWORD, LONG);
 typedef DWORD (WINAPI *get_queue_status_readonly_fn)(UINT);
+typedef BOOL (WINAPI *register_user_api_hook_fn)(const struct user_api_hook_descriptor *);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 
@@ -661,6 +662,42 @@ static void test_current_dpi_info_for_window(HMODULE module)
     if (popup) DestroyWindow(popup);
 }
 
+static void test_register_user_api_hook(HMODULE module)
+{
+    static const WCHAR uxtheme[] = L"C:\\Windows\\System32\\uxtheme.dll";
+    static const WCHAR init[] = L"ThemeInitApiHook";
+    struct user_api_hook_descriptor descriptor =
+    {
+        sizeof(descriptor), uxtheme, init, uxtheme, init
+    };
+    register_user_api_hook_fn function;
+    BOOL ret;
+
+    function = (void *)GetProcAddress(module, "RegisterUserApiHook");
+    ok(!!function, "RegisterUserApiHook is unavailable.\n");
+    if (!function) return;
+
+    SetLastError(0x13579bdf);
+    ret = function(NULL);
+    ok(!ret, "null descriptor returned %d.\n", ret);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+       "null descriptor set error %#lx.\n", GetLastError());
+
+    descriptor.size--;
+    SetLastError(0x13579bdf);
+    ret = function(&descriptor);
+    ok(!ret, "wrong descriptor size returned %d.\n", ret);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+       "wrong descriptor size set error %#lx.\n", GetLastError());
+    descriptor.size++;
+
+    SetLastError(0x13579bdf);
+    ret = function(&descriptor);
+    ok(!ret, "unprivileged registration returned %d.\n", ret);
+    ok(GetLastError() == ERROR_ACCESS_DENIED,
+       "unprivileged registration set error %#lx.\n", GetLastError());
+}
+
 START_TEST(native_ordinals)
 {
     char **argv;
@@ -686,6 +723,7 @@ START_TEST(native_ordinals)
     test_gdi_scaled_process();
     test_thread_desktop_composited(module);
     test_current_dpi_info_for_window(module);
+    test_register_user_api_hook(module);
 
     pGetProcessUIContextInformation = (void *)GetProcAddress(module,
                                                              "GetProcessUIContextInformation");

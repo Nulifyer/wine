@@ -72,6 +72,125 @@ BOOL is_hooked( INT id )
     return ret;
 }
 
+static BOOL valid_user_api_hook_string( const UNICODE_STRING *str )
+{
+    return str && str->Buffer && str->Length && !(str->Length & (sizeof(WCHAR) - 1)) &&
+           str->Length <= str->MaximumLength && str->Length <= (MAX_PATH - 1) * sizeof(WCHAR);
+}
+
+/***********************************************************************
+ *           NtUserRegisterUserApiHook   (win32u.@)
+ */
+BOOL WINAPI NtUserRegisterUserApiHook( UNICODE_STRING *module64, UNICODE_STRING *proc64,
+                                       UNICODE_STRING *module32, UNICODE_STRING *proc32 )
+{
+    BOOL ret = FALSE;
+
+    if (!valid_user_api_hook_string( module64 ) || !valid_user_api_hook_string( proc64 ) ||
+        !valid_user_api_hook_string( module32 ) || !valid_user_api_hook_string( proc32 ))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    SERVER_START_REQ( register_user_api_hook )
+    {
+        req->module64_len = module64->Length;
+        req->proc64_len = proc64->Length;
+        req->module32_len = module32->Length;
+        req->proc32_len = proc32->Length;
+        wine_server_add_data( req, module64->Buffer, module64->Length );
+        wine_server_add_data( req, proc64->Buffer, proc64->Length );
+        wine_server_add_data( req, module32->Buffer, module32->Length );
+        wine_server_add_data( req, proc32->Buffer, proc32->Length );
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserLoadUserApiHook   (win32u.@)
+ */
+BOOL WINAPI NtUserLoadUserApiHook(void)
+{
+    BYTE strings[4 * MAX_PATH * sizeof(WCHAR)];
+    struct load_user_api_hook_params *params;
+    data_size_t lengths[4] = {0};
+    data_size_t offsets[4], reply_size = 0;
+    unsigned int generation = 0;
+    void *ret_ptr = NULL;
+    ULONG ret_len = 0;
+    NTSTATUS status;
+    BOOL registered = FALSE, ret = FALSE;
+    size_t params_size;
+    unsigned int i, module_index, proc_index;
+
+    SERVER_START_REQ( get_user_api_hook )
+    {
+        wine_server_set_reply( req, strings, sizeof(strings) );
+        status = wine_server_call_err( req );
+        if (!status)
+        {
+            registered = reply->registered;
+            generation = reply->generation;
+            lengths[0] = reply->module64_len;
+            lengths[1] = reply->proc64_len;
+            lengths[2] = reply->module32_len;
+            lengths[3] = reply->proc32_len;
+            reply_size = wine_server_reply_size( reply );
+        }
+    }
+    SERVER_END_REQ;
+    if (status || !registered) return FALSE;
+
+    offsets[0] = 0;
+    for (i = 1; i < 4; ++i) offsets[i] = offsets[i - 1] + lengths[i - 1];
+    if (offsets[3] + lengths[3] != reply_size) return FALSE;
+#ifdef _WIN64
+    module_index = 0;
+    proc_index = 1;
+#else
+    module_index = 2;
+    proc_index = 3;
+#endif
+    if (!lengths[module_index] || !lengths[proc_index]) return FALSE;
+
+    params_size = FIELD_OFFSET( struct load_user_api_hook_params, data ) +
+                  lengths[module_index] + sizeof(WCHAR) + lengths[proc_index] + sizeof(WCHAR);
+    if (!(params = malloc( params_size ))) return FALSE;
+    params->generation = generation;
+    params->module_offset = FIELD_OFFSET( struct load_user_api_hook_params, data );
+    params->module_len = lengths[module_index];
+    params->proc_offset = params->module_offset + params->module_len + sizeof(WCHAR);
+    params->proc_len = lengths[proc_index];
+    memcpy( (BYTE *)params + params->module_offset, strings + offsets[module_index], params->module_len );
+    *(WCHAR *)((BYTE *)params + params->module_offset + params->module_len) = 0;
+    memcpy( (BYTE *)params + params->proc_offset, strings + offsets[proc_index], params->proc_len );
+    *(WCHAR *)((BYTE *)params + params->proc_offset + params->proc_len) = 0;
+
+    status = KeUserModeCallback( NtUserLoadUserApiHookCallback, params, params_size,
+                                 &ret_ptr, &ret_len );
+    if (!status && ret_len == sizeof(ret)) ret = *(BOOL *)ret_ptr;
+    free( params );
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserUnregisterUserApiHook   (win32u.@)
+ */
+BOOL WINAPI NtUserUnregisterUserApiHook(void)
+{
+    BOOL ret;
+
+    SERVER_START_REQ( unregister_user_api_hook )
+    {
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
 /***********************************************************************
  *           NtUserSetWindowsHookEx   (win32u.@)
  */

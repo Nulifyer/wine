@@ -979,7 +979,7 @@
 @ stdcall RegisterTasklist(long)
 @ stdcall RegisterTouchHitTestingWindow(long long)
 @ stdcall RegisterTouchWindow(long long)
-@ stdcall RegisterUserApiHook(ptr ptr)
+@ stdcall RegisterUserApiHook(ptr)
 @ stdcall RegisterWindowMessageA(str)
 @ stdcall RegisterWindowMessageW(wstr)
 @ stdcall ReleaseCapture() NtUserReleaseCapture
@@ -1186,6 +1186,8 @@
 @ stdcall UnregisterSuspendResumeNotification(ptr)
 @ stdcall UnregisterTouchWindow(long)
 @ stdcall UnregisterUserApiHook()
+@ cdecl __wine_register_user_api_hook(ptr ptr)
+@ cdecl __wine_unregister_user_api_hook()
 # @ stub UpdateDefaultDesktopThumbnail
 @ stdcall UpdateLayeredWindow(long long ptr ptr long ptr long ptr long)
 @ stdcall UpdateLayeredWindowIndirect(long ptr)

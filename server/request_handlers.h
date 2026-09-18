@@ -187,6 +187,9 @@ DECL_HANDLER(close_winstation);
 DECL_HANDLER(set_winstation_monitors);
 DECL_HANDLER(get_process_winstation);
 DECL_HANDLER(set_process_winstation);
+DECL_HANDLER(register_user_api_hook);
+DECL_HANDLER(get_user_api_hook);
+DECL_HANDLER(unregister_user_api_hook);
 DECL_HANDLER(enum_winstation);
 DECL_HANDLER(create_desktop);
 DECL_HANDLER(open_desktop);
@@ -569,6 +572,9 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_winstation_monitors,
     (req_handler)req_get_process_winstation,
     (req_handler)req_set_process_winstation,
+    (req_handler)req_register_user_api_hook,
+    (req_handler)req_get_user_api_hook,
+    (req_handler)req_unregister_user_api_hook,
     (req_handler)req_enum_winstation,
     (req_handler)req_create_desktop,
     (req_handler)req_open_desktop,
@@ -1853,6 +1859,24 @@ C_ASSERT( offsetof(struct get_process_winstation_reply, handle) == 8 );
 C_ASSERT( sizeof(struct get_process_winstation_reply) == 16 );
 C_ASSERT( offsetof(struct set_process_winstation_request, handle) == 12 );
 C_ASSERT( sizeof(struct set_process_winstation_request) == 16 );
+C_ASSERT( offsetof(struct register_user_api_hook_request, module64_len) == 12 );
+C_ASSERT( offsetof(struct register_user_api_hook_request, proc64_len) == 16 );
+C_ASSERT( offsetof(struct register_user_api_hook_request, module32_len) == 20 );
+C_ASSERT( offsetof(struct register_user_api_hook_request, proc32_len) == 24 );
+C_ASSERT( sizeof(struct register_user_api_hook_request) == 32 );
+C_ASSERT( offsetof(struct register_user_api_hook_reply, generation) == 8 );
+C_ASSERT( sizeof(struct register_user_api_hook_reply) == 16 );
+C_ASSERT( sizeof(struct get_user_api_hook_request) == 16 );
+C_ASSERT( offsetof(struct get_user_api_hook_reply, registered) == 8 );
+C_ASSERT( offsetof(struct get_user_api_hook_reply, generation) == 12 );
+C_ASSERT( offsetof(struct get_user_api_hook_reply, module64_len) == 16 );
+C_ASSERT( offsetof(struct get_user_api_hook_reply, proc64_len) == 20 );
+C_ASSERT( offsetof(struct get_user_api_hook_reply, module32_len) == 24 );
+C_ASSERT( offsetof(struct get_user_api_hook_reply, proc32_len) == 28 );
+C_ASSERT( sizeof(struct get_user_api_hook_reply) == 32 );
+C_ASSERT( sizeof(struct unregister_user_api_hook_request) == 16 );
+C_ASSERT( offsetof(struct unregister_user_api_hook_reply, generation) == 8 );
+C_ASSERT( sizeof(struct unregister_user_api_hook_reply) == 16 );
 C_ASSERT( offsetof(struct enum_winstation_request, handle) == 12 );
 C_ASSERT( sizeof(struct enum_winstation_request) == 16 );
 C_ASSERT( offsetof(struct enum_winstation_reply, count) == 8 );

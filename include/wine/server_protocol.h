@@ -4181,6 +4181,58 @@ struct set_process_winstation_reply
 
 
 
+struct register_user_api_hook_request
+{
+    struct request_header __header;
+    data_size_t module64_len;
+    data_size_t proc64_len;
+    data_size_t module32_len;
+    data_size_t proc32_len;
+    /* VARARG(data,bytes); */
+    char __pad_28[4];
+};
+struct register_user_api_hook_reply
+{
+    struct reply_header __header;
+    unsigned int generation;
+    char __pad_12[4];
+};
+
+
+
+struct get_user_api_hook_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_user_api_hook_reply
+{
+    struct reply_header __header;
+    unsigned int registered;
+    unsigned int generation;
+    data_size_t module64_len;
+    data_size_t proc64_len;
+    data_size_t module32_len;
+    data_size_t proc32_len;
+    /* VARARG(data,bytes); */
+};
+
+
+
+struct unregister_user_api_hook_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct unregister_user_api_hook_reply
+{
+    struct reply_header __header;
+    unsigned int generation;
+    char __pad_12[4];
+};
+
+
+
 struct enum_winstation_request
 {
     struct request_header __header;
@@ -7490,6 +7542,9 @@ enum request
     REQ_set_winstation_monitors,
     REQ_get_process_winstation,
     REQ_set_process_winstation,
+    REQ_register_user_api_hook,
+    REQ_get_user_api_hook,
+    REQ_unregister_user_api_hook,
     REQ_enum_winstation,
     REQ_create_desktop,
     REQ_open_desktop,
@@ -7875,6 +7930,9 @@ union generic_request
     struct set_winstation_monitors_request set_winstation_monitors_request;
     struct get_process_winstation_request get_process_winstation_request;
     struct set_process_winstation_request set_process_winstation_request;
+    struct register_user_api_hook_request register_user_api_hook_request;
+    struct get_user_api_hook_request get_user_api_hook_request;
+    struct unregister_user_api_hook_request unregister_user_api_hook_request;
     struct enum_winstation_request enum_winstation_request;
     struct create_desktop_request create_desktop_request;
     struct open_desktop_request open_desktop_request;
@@ -8258,6 +8316,9 @@ union generic_reply
     struct set_winstation_monitors_reply set_winstation_monitors_reply;
     struct get_process_winstation_reply get_process_winstation_reply;
     struct set_process_winstation_reply set_process_winstation_reply;
+    struct register_user_api_hook_reply register_user_api_hook_reply;
+    struct get_user_api_hook_reply get_user_api_hook_reply;
+    struct unregister_user_api_hook_reply unregister_user_api_hook_reply;
     struct enum_winstation_reply enum_winstation_reply;
     struct create_desktop_reply create_desktop_reply;
     struct open_desktop_reply open_desktop_reply;
@@ -8458,6 +8519,6 @@ union generic_reply
     struct register_manipulation_thread_reply register_manipulation_thread_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1020
+#define SERVER_PROTOCOL_VERSION 1021
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

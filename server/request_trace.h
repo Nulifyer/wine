@@ -2126,6 +2126,44 @@ static void dump_set_process_winstation_request( const struct set_process_winsta
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_register_user_api_hook_request( const struct register_user_api_hook_request *req )
+{
+    fprintf( stderr, " module64_len=%u", req->module64_len );
+    fprintf( stderr, ", proc64_len=%u", req->proc64_len );
+    fprintf( stderr, ", module32_len=%u", req->module32_len );
+    fprintf( stderr, ", proc32_len=%u", req->proc32_len );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_register_user_api_hook_reply( const struct register_user_api_hook_reply *req )
+{
+    fprintf( stderr, " generation=%08x", req->generation );
+}
+
+static void dump_get_user_api_hook_request( const struct get_user_api_hook_request *req )
+{
+}
+
+static void dump_get_user_api_hook_reply( const struct get_user_api_hook_reply *req )
+{
+    fprintf( stderr, " registered=%08x", req->registered );
+    fprintf( stderr, ", generation=%08x", req->generation );
+    fprintf( stderr, ", module64_len=%u", req->module64_len );
+    fprintf( stderr, ", proc64_len=%u", req->proc64_len );
+    fprintf( stderr, ", module32_len=%u", req->module32_len );
+    fprintf( stderr, ", proc32_len=%u", req->proc32_len );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_unregister_user_api_hook_request( const struct unregister_user_api_hook_request *req )
+{
+}
+
+static void dump_unregister_user_api_hook_reply( const struct unregister_user_api_hook_reply *req )
+{
+    fprintf( stderr, " generation=%08x", req->generation );
+}
+
 static void dump_enum_winstation_request( const struct enum_winstation_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -4418,6 +4456,9 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_winstation_monitors_request,
     (dump_func)dump_get_process_winstation_request,
     (dump_func)dump_set_process_winstation_request,
+    (dump_func)dump_register_user_api_hook_request,
+    (dump_func)dump_get_user_api_hook_request,
+    (dump_func)dump_unregister_user_api_hook_request,
     (dump_func)dump_enum_winstation_request,
     (dump_func)dump_create_desktop_request,
     (dump_func)dump_open_desktop_request,
@@ -4800,6 +4841,9 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_winstation_monitors_reply,
     (dump_func)dump_get_process_winstation_reply,
     NULL,
+    (dump_func)dump_register_user_api_hook_reply,
+    (dump_func)dump_get_user_api_hook_reply,
+    (dump_func)dump_unregister_user_api_hook_reply,
     (dump_func)dump_enum_winstation_reply,
     (dump_func)dump_create_desktop_reply,
     (dump_func)dump_open_desktop_reply,
@@ -5182,6 +5226,9 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_winstation_monitors",
     "get_process_winstation",
     "set_process_winstation",
+    "register_user_api_hook",
+    "get_user_api_hook",
+    "unregister_user_api_hook",
     "enum_winstation",
     "create_desktop",
     "open_desktop",

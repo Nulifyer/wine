@@ -136,6 +136,12 @@ static NTSTATUS WINAPI User32LoadDriver( void *args, ULONG size )
     return LdrLoadDll( L"c:\\windows\\system32", 0, &str, &module );
 }
 
+static NTSTATUS WINAPI User32LoadUserApiHookCallback( void *args, ULONG size )
+{
+    BOOL ret = user_api_hook_load( args, size );
+    return NtCallbackReturn( &ret, sizeof(ret), STATUS_SUCCESS );
+}
+
 static NTSTATUS WINAPI User32UnpackDDEMessage( void *args, ULONG size )
 {
     const struct unpack_dde_message_params *params = args;
@@ -262,6 +268,7 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
         thread_detach();
         break;
     case DLL_PROCESS_DETACH:
+        user_api_hook_process_detach( reserved != NULL );
         window_services_process_detach( reserved != NULL );
         FreeLibrary(imm32_module);
         break;
