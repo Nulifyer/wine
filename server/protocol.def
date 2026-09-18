@@ -4436,6 +4436,25 @@ enum inproc_sync_type
 @END
 
 
+/* Create a display manager object */
+@REQ(d3dkmt_disp_mgr_create)
+    unsigned int        access;          /* wanted access rights */
+    unsigned int        flags;           /* display manager creation flags */
+    VARARG(objattr,object_attributes);   /* object attributes */
+@REPLY
+    obj_handle_t        handle;          /* display manager handle */
+@END
+
+
+/* Bind a display manager to its ALPC listener */
+@REQ(d3dkmt_disp_mgr_operation)
+    obj_handle_t        manager;         /* display manager handle */
+    unsigned int        operation;       /* operation selector */
+    obj_handle_t        port;            /* ALPC listener handle */
+    int                 connect;         /* connect the session display broker */
+@END
+
+
 /* Update a global/shared d3dkmt object runtime data */
 @REQ(d3dkmt_object_update)
     unsigned int        type;           /* d3dkmt object type */

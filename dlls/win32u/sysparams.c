@@ -8205,6 +8205,134 @@ done:
     return status;
 }
 
+struct d3dkmt_ddisplay_enum_adapter
+{
+    LUID adapter_luid;
+    LUID preferred_render_luid;
+    WCHAR device_interface_path[260];
+    UINT display_class;
+    UINT source_count;
+    UINT pci_vendor_id;
+    UINT pci_device_id;
+    UINT pci_segment;
+    UINT pci_subsystem_id;
+    UINT pci_revision;
+    UINT flags;
+};
+
+struct d3dkmt_ddisplay_enum_target
+{
+    LUID adapter_luid;
+    UINT target_id;
+    WCHAR device_interface_path[260];
+    WCHAR monitor_friendly_name[260];
+    UINT connection_id;
+    UINT target_type;
+    UINT hpd_awareness;
+    UINT target_priority;
+    UINT target_force_priority;
+    UINT status;
+    UINT default_docking_orientation;
+    UINT default_monitor_orientation;
+    UINT flags;
+};
+
+struct d3dkmt_ddisplay_enum
+{
+    UINT adapter_count;
+    UINT adapter_capacity;
+    struct d3dkmt_ddisplay_enum_adapter *adapters;
+    UINT target_count;
+    UINT target_capacity;
+    struct d3dkmt_ddisplay_enum_target *targets;
+};
+
+C_ASSERT( sizeof(struct d3dkmt_ddisplay_enum_adapter) == 0x238 );
+C_ASSERT( sizeof(struct d3dkmt_ddisplay_enum_target) == 0x440 );
+
+/******************************************************************************
+ *           NtGdiDdDDIDDisplayEnum    (win32u.@)
+ *
+ * Return the private display-manager topology from the same cache used by
+ * DisplayConfig and D3DKMT adapter enumeration.  DispBroker can translate
+ * this legacy record into its versioned record when DDisplayEnum2 is absent.
+ */
+NTSTATUS WINAPI NtGdiDdDDIDDisplayEnum( void *arg )
+{
+    struct d3dkmt_ddisplay_enum *desc = arg;
+    struct d3dkmt_ddisplay_enum_adapter adapter;
+    struct d3dkmt_ddisplay_enum_target target;
+    struct monitor *monitor;
+    struct gpu *gpu;
+    unsigned int adapter_count = 0, target_count = 0, i, j;
+    char buffer[MAX_PATH + 4 + sizeof(guid_devinterface_display_adapterA)];
+
+    TRACE( "desc %p\n", desc );
+
+    if (!desc) return STATUS_INVALID_PARAMETER;
+    if (!lock_display_devices( FALSE )) return STATUS_UNSUCCESSFUL;
+
+    LIST_FOR_EACH_ENTRY( gpu, &gpus, struct gpu, entry ) adapter_count++;
+    LIST_FOR_EACH_ENTRY( monitor, &monitors, struct monitor, entry )
+        if (monitor->source) target_count++;
+
+    desc->adapter_count = adapter_count;
+    desc->target_count = target_count;
+    if (desc->adapter_capacity < adapter_count || desc->target_capacity < target_count)
+    {
+        unlock_display_devices();
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+    if ((adapter_count && !desc->adapters) || (target_count && !desc->targets))
+    {
+        unlock_display_devices();
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    i = 0;
+    LIST_FOR_EACH_ENTRY( gpu, &gpus, struct gpu, entry )
+    {
+        memset( &adapter, 0, sizeof(adapter) );
+        adapter.adapter_luid = gpu->luid;
+        adapter.preferred_render_luid = gpu->luid;
+        adapter.source_count = gpu->source_count;
+
+        snprintf( buffer, ARRAY_SIZE(buffer), "\\\\?\\%s\\%s", gpu->path,
+                  guid_devinterface_display_adapterA );
+        for (j = 4; buffer[j]; ++j) if (buffer[j] == '\\') buffer[j] = '#';
+        asciiz_to_unicode( adapter.device_interface_path, buffer );
+        desc->adapters[i++] = adapter;
+    }
+
+    i = 0;
+    LIST_FOR_EACH_ENTRY( monitor, &monitors, struct monitor, entry )
+    {
+        if (!monitor->source) continue;
+
+        memset( &target, 0, sizeof(target) );
+        target.adapter_luid = monitor->source->gpu->luid;
+        target.target_id = monitor->output_id;
+        target.connection_id = monitor->id;
+        target.target_type = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL;
+        target.default_docking_orientation = get_dc_rotation( &monitor->source->current );
+        target.default_monitor_orientation = get_dc_rotation( &monitor->source->current );
+        target.flags = 1; /* connected */
+        monitor_get_interface_name( monitor, target.device_interface_path );
+        if (monitor->edid_info.flags & MONITOR_INFO_HAS_MONITOR_NAME)
+            memcpy( target.monitor_friendly_name, monitor->edid_info.monitor_name,
+                    sizeof(monitor->edid_info.monitor_name) );
+        else
+        {
+            snprintf( buffer, ARRAY_SIZE(buffer), "Display%u", monitor->output_id + 1 );
+            asciiz_to_unicode( target.monitor_friendly_name, buffer );
+        }
+        desc->targets[i++] = target;
+    }
+
+    unlock_display_devices();
+    return STATUS_SUCCESS;
+}
+
 /******************************************************************************
  *           NtDxgkEnumAdapters3    (win32u.@)
  */

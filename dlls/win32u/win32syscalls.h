@@ -82,7 +82,7 @@
     SYSCALL_ENTRY( 0x104e, NtDxgkCreateTrackedWorkload, 0 ) \
     SYSCALL_ENTRY( 0x104f, NtDxgkDestroyDoorbell, 0 ) \
     SYSCALL_ENTRY( 0x1050, NtDxgkDestroyTrackedWorkload, 0 ) \
-    SYSCALL_ENTRY( 0x1051, NtDxgkDispMgrOperation, 0 ) \
+    SYSCALL_ENTRY( 0x1051, NtDxgkDispMgrOperation, 4 ) \
     SYSCALL_ENTRY( 0x1052, NtDxgkDisplayMuxSwitchExecute, 0 ) \
     SYSCALL_ENTRY( 0x1053, NtDxgkDisplayMuxSwitchFinish, 0 ) \
     SYSCALL_ENTRY( 0x1054, NtDxgkDisplayMuxSwitchPrepare, 0 ) \
@@ -236,7 +236,7 @@
     SYSCALL_ENTRY( 0x10e8, NtGdiDdDDICreateSwapChain, 0 ) \
     SYSCALL_ENTRY( 0x10e9, NtGdiDdDDICreateSynchronizationObject, 4 ) \
     SYSCALL_ENTRY( 0x10ea, NtGdiDdDDICreateSynchronizationObject2, 4 ) \
-    SYSCALL_ENTRY( 0x10eb, NtGdiDdDDIDDisplayEnum, 0 ) \
+    SYSCALL_ENTRY( 0x10eb, NtGdiDdDDIDDisplayEnum, 4 ) \
     SYSCALL_ENTRY( 0x10ec, NtGdiDdDDIDestroyAllocation, 4 ) \
     SYSCALL_ENTRY( 0x10ed, NtGdiDdDDIDestroyAllocation2, 4 ) \
     SYSCALL_ENTRY( 0x10ee, NtGdiDdDDIDestroyContext, 0 ) \
@@ -250,9 +250,9 @@
     SYSCALL_ENTRY( 0x10f6, NtGdiDdDDIDestroyPagingQueue, 0 ) \
     SYSCALL_ENTRY( 0x10f7, NtGdiDdDDIDestroyProtectedSession, 0 ) \
     SYSCALL_ENTRY( 0x10f8, NtGdiDdDDIDestroySynchronizationObject, 4 ) \
-    SYSCALL_ENTRY( 0x10f9, NtGdiDdDDIDispMgrCreate, 0 ) \
-    SYSCALL_ENTRY( 0x10fa, NtGdiDdDDIDispMgrSourceOperation, 0 ) \
-    SYSCALL_ENTRY( 0x10fb, NtGdiDdDDIDispMgrTargetOperation, 0 ) \
+    SYSCALL_ENTRY( 0x10f9, NtGdiDdDDIDispMgrCreate, 4 ) \
+    SYSCALL_ENTRY( 0x10fa, NtGdiDdDDIDispMgrSourceOperation, 4 ) \
+    SYSCALL_ENTRY( 0x10fb, NtGdiDdDDIDispMgrTargetOperation, 4 ) \
     SYSCALL_ENTRY( 0x10fc, NtGdiDdDDIEnumAdapters, 4 ) \
     SYSCALL_ENTRY( 0x10fd, NtGdiDdDDIEnumAdapters2, 4 ) \
     SYSCALL_ENTRY( 0x10fe, NtGdiDdDDIEscape, 4 ) \
@@ -1624,7 +1624,7 @@
     SYSCALL_ENTRY( 0x104e, NtDxgkCreateTrackedWorkload, 0 ) \
     SYSCALL_ENTRY( 0x104f, NtDxgkDestroyDoorbell, 0 ) \
     SYSCALL_ENTRY( 0x1050, NtDxgkDestroyTrackedWorkload, 0 ) \
-    SYSCALL_ENTRY( 0x1051, NtDxgkDispMgrOperation, 0 ) \
+    SYSCALL_ENTRY( 0x1051, NtDxgkDispMgrOperation, 8 ) \
     SYSCALL_ENTRY( 0x1052, NtDxgkDisplayMuxSwitchExecute, 0 ) \
     SYSCALL_ENTRY( 0x1053, NtDxgkDisplayMuxSwitchFinish, 0 ) \
     SYSCALL_ENTRY( 0x1054, NtDxgkDisplayMuxSwitchPrepare, 0 ) \
@@ -1778,7 +1778,7 @@
     SYSCALL_ENTRY( 0x10e8, NtGdiDdDDICreateSwapChain, 0 ) \
     SYSCALL_ENTRY( 0x10e9, NtGdiDdDDICreateSynchronizationObject, 8 ) \
     SYSCALL_ENTRY( 0x10ea, NtGdiDdDDICreateSynchronizationObject2, 8 ) \
-    SYSCALL_ENTRY( 0x10eb, NtGdiDdDDIDDisplayEnum, 0 ) \
+    SYSCALL_ENTRY( 0x10eb, NtGdiDdDDIDDisplayEnum, 8 ) \
     SYSCALL_ENTRY( 0x10ec, NtGdiDdDDIDestroyAllocation, 8 ) \
     SYSCALL_ENTRY( 0x10ed, NtGdiDdDDIDestroyAllocation2, 8 ) \
     SYSCALL_ENTRY( 0x10ee, NtGdiDdDDIDestroyContext, 0 ) \
@@ -1792,9 +1792,9 @@
     SYSCALL_ENTRY( 0x10f6, NtGdiDdDDIDestroyPagingQueue, 0 ) \
     SYSCALL_ENTRY( 0x10f7, NtGdiDdDDIDestroyProtectedSession, 0 ) \
     SYSCALL_ENTRY( 0x10f8, NtGdiDdDDIDestroySynchronizationObject, 8 ) \
-    SYSCALL_ENTRY( 0x10f9, NtGdiDdDDIDispMgrCreate, 0 ) \
-    SYSCALL_ENTRY( 0x10fa, NtGdiDdDDIDispMgrSourceOperation, 0 ) \
-    SYSCALL_ENTRY( 0x10fb, NtGdiDdDDIDispMgrTargetOperation, 0 ) \
+    SYSCALL_ENTRY( 0x10f9, NtGdiDdDDIDispMgrCreate, 8 ) \
+    SYSCALL_ENTRY( 0x10fa, NtGdiDdDDIDispMgrSourceOperation, 8 ) \
+    SYSCALL_ENTRY( 0x10fb, NtGdiDdDDIDispMgrTargetOperation, 8 ) \
     SYSCALL_ENTRY( 0x10fc, NtGdiDdDDIEnumAdapters, 8 ) \
     SYSCALL_ENTRY( 0x10fd, NtGdiDdDDIEnumAdapters2, 8 ) \
     SYSCALL_ENTRY( 0x10fe, NtGdiDdDDIEscape, 8 ) \
@@ -3151,7 +3151,6 @@
     SYSCALL_STUB( NtDxgkCreateTrackedWorkload ) \
     SYSCALL_STUB( NtDxgkDestroyDoorbell ) \
     SYSCALL_STUB( NtDxgkDestroyTrackedWorkload ) \
-    SYSCALL_STUB( NtDxgkDispMgrOperation ) \
     SYSCALL_STUB( NtDxgkDisplayMuxSwitchExecute ) \
     SYSCALL_STUB( NtDxgkDisplayMuxSwitchFinish ) \
     SYSCALL_STUB( NtDxgkDisplayMuxSwitchPrepare ) \
@@ -3257,7 +3256,6 @@
     SYSCALL_STUB( NtGdiDdDDICreatePagingQueue ) \
     SYSCALL_STUB( NtGdiDdDDICreateProtectedSession ) \
     SYSCALL_STUB( NtGdiDdDDICreateSwapChain ) \
-    SYSCALL_STUB( NtGdiDdDDIDDisplayEnum ) \
     SYSCALL_STUB( NtGdiDdDDIDestroyContext ) \
     SYSCALL_STUB( NtGdiDdDDIDestroyHwContext ) \
     SYSCALL_STUB( NtGdiDdDDIDestroyHwQueue ) \
@@ -3265,9 +3263,6 @@
     SYSCALL_STUB( NtGdiDdDDIDestroyOverlay ) \
     SYSCALL_STUB( NtGdiDdDDIDestroyPagingQueue ) \
     SYSCALL_STUB( NtGdiDdDDIDestroyProtectedSession ) \
-    SYSCALL_STUB( NtGdiDdDDIDispMgrCreate ) \
-    SYSCALL_STUB( NtGdiDdDDIDispMgrSourceOperation ) \
-    SYSCALL_STUB( NtGdiDdDDIDispMgrTargetOperation ) \
     SYSCALL_STUB( NtGdiDdDDIEvict ) \
     SYSCALL_STUB( NtGdiDdDDIExtractBundleObject ) \
     SYSCALL_STUB( NtGdiDdDDIFlipOverlay ) \

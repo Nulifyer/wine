@@ -31,6 +31,7 @@
 
 #include "file.h"
 #include "handle.h"
+#include "process.h"
 #include "request.h"
 #include "security.h"
 
@@ -96,6 +97,80 @@ static const struct object_ops d3dkmt_mutex_ops =
     .dump    = d3dkmt_mutex_dump,
     .destroy = d3dkmt_mutex_destroy,
 };
+
+static const WCHAR dxgk_display_manager_name[] =
+    {'D','x','g','k','D','i','s','p','l','a','y','M','a','n','a','g','e','r','O','b','j','e','c','t'};
+
+static struct type_descr dxgk_display_manager_type =
+{
+    { dxgk_display_manager_name, sizeof(dxgk_display_manager_name) },
+    STANDARD_RIGHTS_ALL,
+    {
+        STANDARD_RIGHTS_READ,
+        STANDARD_RIGHTS_WRITE,
+        STANDARD_RIGHTS_EXECUTE,
+        STANDARD_RIGHTS_ALL,
+    },
+};
+
+struct dxgk_display_manager
+{
+    struct object  obj;
+    struct process *owner;
+    struct object  *port;
+    unsigned int    session_id;
+    unsigned int    flags;
+};
+
+struct dxgk_display_manager_init_data
+{
+    struct process *owner;
+    unsigned int session_id;
+    unsigned int flags;
+};
+
+static void dxgk_display_manager_dump( struct object *obj, int verbose );
+static bool dxgk_display_manager_init( struct object *obj, const void *init_data );
+static void dxgk_display_manager_destroy( struct object *obj );
+
+static const struct object_ops dxgk_display_manager_ops =
+{
+    .size    = sizeof(struct dxgk_display_manager),
+    .type    = &dxgk_display_manager_type,
+    .dump    = dxgk_display_manager_dump,
+    .init    = dxgk_display_manager_init,
+    .destroy = dxgk_display_manager_destroy,
+};
+
+static void dxgk_display_manager_dump( struct object *obj, int verbose )
+{
+    struct dxgk_display_manager *manager = (struct dxgk_display_manager *)obj;
+
+    assert( obj->ops == &dxgk_display_manager_ops );
+    fprintf( stderr, "DxgkDisplayManager owner=%04x session=%u flags=%#x port=%p\n",
+             manager->owner->id, manager->session_id, manager->flags, manager->port );
+}
+
+static bool dxgk_display_manager_init( struct object *obj, const void *init_data )
+{
+    const struct dxgk_display_manager_init_data *data = init_data;
+    struct dxgk_display_manager *manager = (struct dxgk_display_manager *)obj;
+
+    manager->owner = (struct process *)grab_object( data->owner );
+    manager->port = NULL;
+    manager->session_id = data->session_id;
+    manager->flags = data->flags;
+    return true;
+}
+
+static void dxgk_display_manager_destroy( struct object *obj )
+{
+    struct dxgk_display_manager *manager = (struct dxgk_display_manager *)obj;
+
+    assert( obj->ops == &dxgk_display_manager_ops );
+    if (manager->port) release_object( manager->port );
+    release_object( manager->owner );
+}
 
 #define DXGK_SHARED_SYNC_QUERY_STATE  0x0001
 #define DXGK_SHARED_SYNC_MODIFY_STATE 0x0002
@@ -541,6 +616,64 @@ DECL_HANDLER(d3dkmt_object_create)
 
 done:
     if (fd) release_object( fd );
+}
+
+DECL_HANDLER(d3dkmt_disp_mgr_create)
+{
+    struct dxgk_display_manager_init_data data =
+    {
+        .owner = current->process,
+        .session_id = current->process->session_id,
+        .flags = req->flags,
+    };
+    struct object_params params =
+    {
+        .ops = &dxgk_display_manager_ops,
+        .access = req->access,
+        .init_data = &data,
+    };
+
+    if (req->flags & ~1u)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!get_req_object_attributes( &params )) return;
+    reply->handle = create_named_obj_handle( current->process, &params );
+    if (params.root) release_object( params.root );
+}
+
+DECL_HANDLER(d3dkmt_disp_mgr_operation)
+{
+    struct dxgk_display_manager *manager;
+    struct object *port;
+
+    if (!(manager = (struct dxgk_display_manager *)get_handle_obj( current->process, req->manager,
+                                                                   READ_CONTROL,
+                                                                   &dxgk_display_manager_ops ))) return;
+    if (req->operation != 1)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+    if (manager->session_id != current->process->session_id)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto done;
+    }
+    if (!(port = get_alpc_port_obj( current->process, req->port, ALPC_PORT_ALL_ACCESS ))) goto done;
+    if (req->connect && !equal_sid( token_get_user( current->process->token ), &local_system_sid ))
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        release_object( port );
+        goto done;
+    }
+
+    if (manager->port) release_object( manager->port );
+    manager->port = port;
+
+done:
+    release_object( manager );
 }
 
 /* update a global d3dkmt object */

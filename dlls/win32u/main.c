@@ -336,6 +336,31 @@ NTSTATUS SYSCALL_API NtGdiDdDDIEnumAdapters2( D3DKMT_ENUMADAPTERS2 *desc )
     SYSCALL_FUNC( NtGdiDdDDIEnumAdapters2 );
 }
 
+NTSTATUS SYSCALL_API NtDxgkDispMgrOperation( void *desc )
+{
+    SYSCALL_FUNC( NtDxgkDispMgrOperation );
+}
+
+NTSTATUS SYSCALL_API NtGdiDdDDIDDisplayEnum( void *desc )
+{
+    SYSCALL_FUNC( NtGdiDdDDIDDisplayEnum );
+}
+
+NTSTATUS SYSCALL_API NtGdiDdDDIDispMgrCreate( void *desc )
+{
+    SYSCALL_FUNC( NtGdiDdDDIDispMgrCreate );
+}
+
+NTSTATUS SYSCALL_API NtGdiDdDDIDispMgrSourceOperation( void *desc )
+{
+    SYSCALL_FUNC( NtGdiDdDDIDispMgrSourceOperation );
+}
+
+NTSTATUS SYSCALL_API NtGdiDdDDIDispMgrTargetOperation( void *desc )
+{
+    SYSCALL_FUNC( NtGdiDdDDIDispMgrTargetOperation );
+}
+
 NTSTATUS SYSCALL_API NtGdiDdDDIEscape( const D3DKMT_ESCAPE *desc )
 {
     SYSCALL_FUNC( NtGdiDdDDIEscape );

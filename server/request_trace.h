@@ -3631,6 +3631,26 @@ static void dump_d3dkmt_object_create_reply( const struct d3dkmt_object_create_r
     fprintf( stderr, ", handle=%04x", req->handle );
 }
 
+static void dump_d3dkmt_disp_mgr_create_request( const struct d3dkmt_disp_mgr_create_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
+}
+
+static void dump_d3dkmt_disp_mgr_create_reply( const struct d3dkmt_disp_mgr_create_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_d3dkmt_disp_mgr_operation_request( const struct d3dkmt_disp_mgr_operation_request *req )
+{
+    fprintf( stderr, " manager=%04x", req->manager );
+    fprintf( stderr, ", operation=%08x", req->operation );
+    fprintf( stderr, ", port=%04x", req->port );
+    fprintf( stderr, ", connect=%d", req->connect );
+}
+
 static void dump_d3dkmt_object_update_request( const struct d3dkmt_object_update_request *req )
 {
     fprintf( stderr, " type=%08x", req->type );
@@ -4611,6 +4631,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_inproc_sync_fd_request,
     (dump_func)dump_get_inproc_alert_fd_request,
     (dump_func)dump_d3dkmt_object_create_request,
+    (dump_func)dump_d3dkmt_disp_mgr_create_request,
+    (dump_func)dump_d3dkmt_disp_mgr_operation_request,
     (dump_func)dump_d3dkmt_object_update_request,
     (dump_func)dump_d3dkmt_object_query_request,
     (dump_func)dump_d3dkmt_object_open_request,
@@ -4998,6 +5020,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_inproc_sync_fd_reply,
     (dump_func)dump_get_inproc_alert_fd_reply,
     (dump_func)dump_d3dkmt_object_create_reply,
+    (dump_func)dump_d3dkmt_disp_mgr_create_reply,
+    NULL,
     NULL,
     (dump_func)dump_d3dkmt_object_query_reply,
     (dump_func)dump_d3dkmt_object_open_reply,
@@ -5385,6 +5409,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "get_inproc_sync_fd",
     "get_inproc_alert_fd",
     "d3dkmt_object_create",
+    "d3dkmt_disp_mgr_create",
+    "d3dkmt_disp_mgr_operation",
     "d3dkmt_object_update",
     "d3dkmt_object_query",
     "d3dkmt_object_open",

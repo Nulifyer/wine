@@ -6417,6 +6417,39 @@ struct d3dkmt_object_create_reply
 
 
 
+struct d3dkmt_disp_mgr_create_request
+{
+    struct request_header __header;
+    unsigned int        access;
+    unsigned int        flags;
+    /* VARARG(objattr,object_attributes); */
+    char __pad_20[4];
+};
+struct d3dkmt_disp_mgr_create_reply
+{
+    struct reply_header __header;
+    obj_handle_t        handle;
+    char __pad_12[4];
+};
+
+
+
+struct d3dkmt_disp_mgr_operation_request
+{
+    struct request_header __header;
+    obj_handle_t        manager;
+    unsigned int        operation;
+    obj_handle_t        port;
+    int                 connect;
+    char __pad_28[4];
+};
+struct d3dkmt_disp_mgr_operation_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct d3dkmt_object_update_request
 {
     struct request_header __header;
@@ -7711,6 +7744,8 @@ enum request
     REQ_get_inproc_sync_fd,
     REQ_get_inproc_alert_fd,
     REQ_d3dkmt_object_create,
+    REQ_d3dkmt_disp_mgr_create,
+    REQ_d3dkmt_disp_mgr_operation,
     REQ_d3dkmt_object_update,
     REQ_d3dkmt_object_query,
     REQ_d3dkmt_object_open,
@@ -8101,6 +8136,8 @@ union generic_request
     struct get_inproc_sync_fd_request get_inproc_sync_fd_request;
     struct get_inproc_alert_fd_request get_inproc_alert_fd_request;
     struct d3dkmt_object_create_request d3dkmt_object_create_request;
+    struct d3dkmt_disp_mgr_create_request d3dkmt_disp_mgr_create_request;
+    struct d3dkmt_disp_mgr_operation_request d3dkmt_disp_mgr_operation_request;
     struct d3dkmt_object_update_request d3dkmt_object_update_request;
     struct d3dkmt_object_query_request d3dkmt_object_query_request;
     struct d3dkmt_object_open_request d3dkmt_object_open_request;
@@ -8489,6 +8526,8 @@ union generic_reply
     struct get_inproc_sync_fd_reply get_inproc_sync_fd_reply;
     struct get_inproc_alert_fd_reply get_inproc_alert_fd_reply;
     struct d3dkmt_object_create_reply d3dkmt_object_create_reply;
+    struct d3dkmt_disp_mgr_create_reply d3dkmt_disp_mgr_create_reply;
+    struct d3dkmt_disp_mgr_operation_reply d3dkmt_disp_mgr_operation_reply;
     struct d3dkmt_object_update_reply d3dkmt_object_update_reply;
     struct d3dkmt_object_query_reply d3dkmt_object_query_reply;
     struct d3dkmt_object_open_reply d3dkmt_object_open_reply;
@@ -8554,6 +8593,6 @@ union generic_reply
     struct register_manipulation_thread_reply register_manipulation_thread_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1024
+#define SERVER_PROTOCOL_VERSION 1025
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

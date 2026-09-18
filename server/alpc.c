@@ -267,6 +267,18 @@ static const struct object_ops alpc_port_ops =
     .destroy      = alpc_port_destroy
 };
 
+struct object *get_alpc_port_obj( struct process *process, obj_handle_t handle, unsigned int access )
+{
+    struct alpc_port *port;
+
+    if (!(port = (struct alpc_port *)get_handle_obj( process, handle, access, &alpc_port_ops ))) return NULL;
+    if (port->thread->process == process) return &port->obj;
+
+    release_object( port );
+    set_error( STATUS_ACCESS_DENIED );
+    return NULL;
+}
+
 static void alpc_port_dump( struct object *obj, int verbose )
 {
     struct alpc_port *port = (struct alpc_port *)obj;

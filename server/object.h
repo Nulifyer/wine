@@ -262,6 +262,10 @@ extern struct keyed_event *get_keyed_event_obj( struct process *process, obj_han
 extern void set_event( struct event *event );
 extern void reset_event( struct event *event );
 
+/* ALPC port functions */
+
+extern struct object *get_alpc_port_obj( struct process *process, obj_handle_t handle, unsigned int access );
+
 /* mutex functions */
 
 extern void abandon_mutexes( struct thread *thread );

@@ -150,6 +150,27 @@ struct d3dkmt_object
     HANDLE              handle;         /* internal handle of the server object */
 };
 
+struct d3dkmt_disp_mgr_create
+{
+    OBJECT_ATTRIBUTES *object_attributes;
+    ACCESS_MASK access;
+    UINT flags;
+    HANDLE handle;
+};
+
+struct d3dkmt_disp_mgr_operation
+{
+    UINT operation;
+    UINT reserved;
+    HANDLE manager;
+    HANDLE port;
+    UINT connect;
+    UINT reserved2;
+};
+
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_create, handle) == sizeof(void *) + 2 * sizeof(UINT) );
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_operation, manager) == 8 );
+
 struct d3dkmt_mutex
 {
     struct d3dkmt_object obj;
@@ -319,6 +340,72 @@ static NTSTATUS d3dkmt_object_create( struct d3dkmt_object *object, int fd, UINT
     if (status) WARN( "Failed to create global object for %p, status %#x\n", object, status );
     else TRACE( "Created global object %#x for %p/%#x\n", object->global, object, object->local );
     return status;
+}
+
+/******************************************************************************
+ *           NtGdiDdDDIDispMgrCreate    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDIDispMgrCreate( void *arg )
+{
+    struct d3dkmt_disp_mgr_create *desc = arg;
+    struct object_attributes *objattr;
+    data_size_t len;
+    NTSTATUS status;
+
+    TRACE( "desc %p\n", desc );
+
+    if (!desc) return STATUS_INVALID_PARAMETER;
+    if ((status = wine_server_alloc_object_attributes( desc->object_attributes, &objattr, &len )))
+        return status;
+
+    SERVER_START_REQ( d3dkmt_disp_mgr_create )
+    {
+        req->access = desc->access;
+        req->flags = desc->flags;
+        wine_server_add_data( req, objattr, len );
+        status = wine_server_call( req );
+        if (!status) desc->handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+
+    free( objattr );
+    return status;
+}
+
+/******************************************************************************
+ *           NtDxgkDispMgrOperation    (win32u.@)
+ */
+NTSTATUS WINAPI NtDxgkDispMgrOperation( void *arg )
+{
+    struct d3dkmt_disp_mgr_operation *desc = arg;
+    NTSTATUS status;
+
+    TRACE( "desc %p\n", desc );
+
+    if (!desc) return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( d3dkmt_disp_mgr_operation )
+    {
+        req->manager = wine_server_obj_handle( desc->manager );
+        req->operation = desc->operation;
+        req->port = wine_server_obj_handle( desc->port );
+        req->connect = !!desc->connect;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtGdiDdDDIDispMgrSourceOperation( void *desc )
+{
+    FIXME( "unsupported source operation %p\n", desc );
+    return desc ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
+}
+
+NTSTATUS WINAPI NtGdiDdDDIDispMgrTargetOperation( void *desc )
+{
+    FIXME( "unsupported target operation %p\n", desc );
+    return desc ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
 }
 
 static NTSTATUS d3dkmt_object_update( struct d3dkmt_object *object, const void *runtime, UINT runtime_size )

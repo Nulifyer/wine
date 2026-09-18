@@ -59,6 +59,80 @@ static PFN_vkGetDeviceProcAddr p_vkGetDeviceProcAddr;
 static const LUID luid_zero;
 const GUID GUID_NULL = {0};
 
+struct d3dkmt_disp_mgr_create
+{
+    OBJECT_ATTRIBUTES *object_attributes;
+    ACCESS_MASK access;
+    UINT flags;
+    HANDLE handle;
+};
+
+struct d3dkmt_disp_mgr_operation
+{
+    UINT operation;
+    UINT reserved;
+    HANDLE manager;
+    HANDLE port;
+    UINT connect;
+    UINT reserved2;
+};
+
+struct d3dkmt_ddisplay_enum_adapter
+{
+    LUID adapter_luid;
+    LUID preferred_render_luid;
+    WCHAR device_interface_path[260];
+    UINT display_class;
+    UINT source_count;
+    UINT pci_vendor_id;
+    UINT pci_device_id;
+    UINT pci_segment;
+    UINT pci_subsystem_id;
+    UINT pci_revision;
+    UINT flags;
+};
+
+struct d3dkmt_ddisplay_enum_target
+{
+    LUID adapter_luid;
+    UINT target_id;
+    WCHAR device_interface_path[260];
+    WCHAR monitor_friendly_name[260];
+    UINT connection_id;
+    UINT target_type;
+    UINT hpd_awareness;
+    UINT target_priority;
+    UINT target_force_priority;
+    UINT status;
+    UINT default_docking_orientation;
+    UINT default_monitor_orientation;
+    UINT flags;
+};
+
+struct d3dkmt_ddisplay_enum
+{
+    UINT adapter_count;
+    UINT adapter_capacity;
+    struct d3dkmt_ddisplay_enum_adapter *adapters;
+    UINT target_count;
+    UINT target_capacity;
+    struct d3dkmt_ddisplay_enum_target *targets;
+};
+
+C_ASSERT( sizeof(struct d3dkmt_disp_mgr_create) == 24 );
+C_ASSERT( sizeof(struct d3dkmt_disp_mgr_operation) == 32 );
+C_ASSERT( sizeof(struct d3dkmt_ddisplay_enum_adapter) == 0x238 );
+C_ASSERT( sizeof(struct d3dkmt_ddisplay_enum_target) == 0x440 );
+
+static void init_alpc_attributes( ALPC_PORT_ATTRIBUTES *attributes )
+{
+    memset( attributes, 0, sizeof(*attributes) );
+    attributes->SecurityQos.Length = sizeof(attributes->SecurityQos);
+    attributes->SecurityQos.ImpersonationLevel = SecurityIdentification;
+    attributes->SecurityQos.ContextTrackingMode = SECURITY_STATIC_TRACKING;
+    attributes->MaxMessageLength = 0x400;
+}
+
 static const char *debugstr_luid( const LUID *luid )
 {
     if (!luid) return "(null)";
@@ -834,6 +908,117 @@ static void test_D3DKMTEnumAdapters2(void)
     ok( status == STATUS_BUFFER_TOO_SMALL, "Got unexpected return code %#lx.\n", status );
 
     free( enum_adapters_2_desc.pAdapters );
+}
+
+static void test_D3DKMTDisplayManager(void)
+{
+    NTSTATUS (WINAPI *pD3DKMTDDisplayEnum)( struct d3dkmt_ddisplay_enum *desc );
+    NTSTATUS (WINAPI *pD3DKMTDispMgrCreate)( struct d3dkmt_disp_mgr_create *desc );
+    NTSTATUS (WINAPI *pD3DKMTDispMgrOperation)( struct d3dkmt_disp_mgr_operation *desc );
+    NTSTATUS (WINAPI *pD3DKMTDispMgrSourceOperation)( void *desc );
+    NTSTATUS (WINAPI *pD3DKMTDispMgrTargetOperation)( void *desc );
+    struct d3dkmt_disp_mgr_create create = {0};
+    struct d3dkmt_disp_mgr_operation operation = {0};
+    struct d3dkmt_ddisplay_enum enumeration = {0};
+    ALPC_PORT_ATTRIBUTES port_attributes;
+    OBJECT_ATTRIBUTES object_attributes;
+    HANDLE gdi32, listener = NULL, event;
+    NTSTATUS status;
+    UINT i;
+
+    gdi32 = GetModuleHandleA( "gdi32.dll" );
+    pD3DKMTDDisplayEnum = (void *)GetProcAddress( gdi32, "D3DKMTDDisplayEnum" );
+    pD3DKMTDispMgrCreate = (void *)GetProcAddress( gdi32, "D3DKMTDispMgrCreate" );
+    pD3DKMTDispMgrOperation = (void *)GetProcAddress( gdi32, "D3DKMTDispMgrOperation" );
+    pD3DKMTDispMgrSourceOperation = (void *)GetProcAddress( gdi32, "D3DKMTDispMgrSourceOperation" );
+    pD3DKMTDispMgrTargetOperation = (void *)GetProcAddress( gdi32, "D3DKMTDispMgrTargetOperation" );
+    ok( !!pD3DKMTDDisplayEnum, "D3DKMTDDisplayEnum is missing\n" );
+    ok( !!pD3DKMTDispMgrCreate, "D3DKMTDispMgrCreate is missing\n" );
+    ok( !!pD3DKMTDispMgrOperation, "D3DKMTDispMgrOperation is missing\n" );
+    ok( !!pD3DKMTDispMgrSourceOperation, "D3DKMTDispMgrSourceOperation is missing\n" );
+    ok( !!pD3DKMTDispMgrTargetOperation, "D3DKMTDispMgrTargetOperation is missing\n" );
+    if (!pD3DKMTDDisplayEnum || !pD3DKMTDispMgrCreate || !pD3DKMTDispMgrOperation ||
+        !pD3DKMTDispMgrSourceOperation || !pD3DKMTDispMgrTargetOperation) return;
+
+    status = pD3DKMTDDisplayEnum( NULL );
+    ok_nt( STATUS_INVALID_PARAMETER, status );
+    status = pD3DKMTDDisplayEnum( &enumeration );
+    ok( status == STATUS_BUFFER_TOO_SMALL || status == STATUS_SUCCESS,
+        "initial display enumeration returned %#lx\n", status );
+    ok( enumeration.adapter_count || !enumeration.target_count,
+        "got %u targets without an adapter\n", enumeration.target_count );
+
+    enumeration.adapter_capacity = enumeration.adapter_count;
+    enumeration.target_capacity = enumeration.target_count;
+    enumeration.adapters = calloc( enumeration.adapter_capacity, sizeof(*enumeration.adapters) );
+    enumeration.targets = calloc( enumeration.target_capacity, sizeof(*enumeration.targets) );
+    status = pD3DKMTDDisplayEnum( &enumeration );
+    ok_nt( STATUS_SUCCESS, status );
+    for (i = 0; i < enumeration.adapter_count; ++i)
+    {
+        ok( enumeration.adapters[i].adapter_luid.LowPart || enumeration.adapters[i].adapter_luid.HighPart,
+            "adapter %u has a zero LUID\n", i );
+        ok( enumeration.adapters[i].device_interface_path[0], "adapter %u has no path\n", i );
+    }
+    for (i = 0; i < enumeration.target_count; ++i)
+    {
+        ok( enumeration.targets[i].adapter_luid.LowPart || enumeration.targets[i].adapter_luid.HighPart,
+            "target %u has a zero adapter LUID\n", i );
+        ok( enumeration.targets[i].device_interface_path[0], "target %u has no path\n", i );
+        ok( enumeration.targets[i].monitor_friendly_name[0], "target %u has no friendly name\n", i );
+        ok( enumeration.targets[i].flags & 1, "target %u is not connected\n", i );
+    }
+    free( enumeration.adapters );
+    free( enumeration.targets );
+
+    InitializeObjectAttributes( &object_attributes, NULL, 0, NULL, NULL );
+    create.object_attributes = &object_attributes;
+    create.access = STANDARD_RIGHTS_ALL;
+    create.handle = (HANDLE)0xdeadbeef;
+    create.flags = 2;
+    status = pD3DKMTDispMgrCreate( &create );
+    ok_nt( STATUS_INVALID_PARAMETER, status );
+    ok_ptr( create.handle, ==, (HANDLE)0xdeadbeef );
+
+    create.flags = 0;
+    status = pD3DKMTDispMgrCreate( &create );
+    ok_nt( STATUS_SUCCESS, status );
+    ok( create.handle && create.handle != (HANDLE)0xdeadbeef, "got manager handle %p\n", create.handle );
+
+    operation.manager = create.handle;
+    operation.operation = 2;
+    status = pD3DKMTDispMgrOperation( &operation );
+    ok_nt( STATUS_INVALID_PARAMETER, status );
+
+    operation.operation = 1;
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "CreateEventW failed, error %lu\n", GetLastError() );
+    operation.port = event;
+    status = pD3DKMTDispMgrOperation( &operation );
+    ok_nt( STATUS_OBJECT_TYPE_MISMATCH, status );
+    CloseHandle( event );
+
+    init_alpc_attributes( &port_attributes );
+    status = NtAlpcCreatePort( &listener, NULL, &port_attributes );
+    ok_nt( STATUS_SUCCESS, status );
+    operation.port = listener;
+    operation.connect = 0;
+    status = pD3DKMTDispMgrOperation( &operation );
+    ok_nt( STATUS_SUCCESS, status );
+
+    operation.connect = 1;
+    status = pD3DKMTDispMgrOperation( &operation );
+    ok_nt( STATUS_ACCESS_DENIED, status );
+    NtClose( listener );
+
+    status = pD3DKMTDispMgrOperation( &operation );
+    ok_nt( STATUS_INVALID_HANDLE, status );
+
+    status = pD3DKMTDispMgrSourceOperation( &operation );
+    ok_nt( STATUS_NOT_SUPPORTED, status );
+    status = pD3DKMTDispMgrTargetOperation( &operation );
+    ok_nt( STATUS_NOT_SUPPORTED, status );
+    NtClose( create.handle );
 }
 
 static void test_D3DKMTEnumAdapters3(void)
@@ -7006,6 +7191,7 @@ START_TEST( d3dkmt )
     test_D3DKMTOpenAdapterFromHdc();
     test_D3DKMTIsFeatureEnabled();
     test_D3DKMTEnumAdapters2();
+    test_D3DKMTDisplayManager();
     test_D3DKMTEnumAdapters3();
     test_D3DKMTCloseAdapter();
     test_D3DKMTCreateDevice();
