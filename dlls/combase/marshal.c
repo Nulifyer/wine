@@ -426,6 +426,93 @@ HRESULT WINAPI CoCreateFreeThreadedMarshaler(IUnknown *outer, IUnknown **marshal
     return S_OK;
 }
 
+struct ftmarshal_factory
+{
+    IClassFactory IClassFactory_iface;
+    LONG refcount;
+};
+
+static inline struct ftmarshal_factory *impl_from_ftmarshal_factory(IClassFactory *iface)
+{
+    return CONTAINING_RECORD(iface, struct ftmarshal_factory, IClassFactory_iface);
+}
+
+static HRESULT WINAPI ftmarshal_factory_QueryInterface(IClassFactory *iface, REFIID riid, void **obj)
+{
+    if (!obj) return E_POINTER;
+
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IClassFactory))
+    {
+        *obj = iface;
+        IClassFactory_AddRef(iface);
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI ftmarshal_factory_AddRef(IClassFactory *iface)
+{
+    struct ftmarshal_factory *factory = impl_from_ftmarshal_factory(iface);
+    return InterlockedIncrement(&factory->refcount);
+}
+
+static ULONG WINAPI ftmarshal_factory_Release(IClassFactory *iface)
+{
+    struct ftmarshal_factory *factory = impl_from_ftmarshal_factory(iface);
+    ULONG refcount = InterlockedDecrement(&factory->refcount);
+
+    if (!refcount) free(factory);
+    return refcount;
+}
+
+static HRESULT WINAPI ftmarshal_factory_CreateInstance(IClassFactory *iface, IUnknown *outer,
+        REFIID riid, void **obj)
+{
+    IUnknown *marshaler;
+    HRESULT hr;
+
+    if (!obj) return E_POINTER;
+    *obj = NULL;
+
+    hr = CoCreateFreeThreadedMarshaler(outer, &marshaler);
+    if (SUCCEEDED(hr))
+    {
+        hr = IUnknown_QueryInterface(marshaler, riid, obj);
+        IUnknown_Release(marshaler);
+    }
+    return hr;
+}
+
+static HRESULT WINAPI ftmarshal_factory_LockServer(IClassFactory *iface, BOOL lock)
+{
+    return S_OK;
+}
+
+static const IClassFactoryVtbl ftmarshal_factory_vtbl =
+{
+    ftmarshal_factory_QueryInterface,
+    ftmarshal_factory_AddRef,
+    ftmarshal_factory_Release,
+    ftmarshal_factory_CreateInstance,
+    ftmarshal_factory_LockServer,
+};
+
+HRESULT ftmarshal_get_class_factory(REFIID riid, void **obj)
+{
+    struct ftmarshal_factory *factory;
+    HRESULT hr;
+
+    if (!(factory = malloc(sizeof(*factory)))) return E_OUTOFMEMORY;
+    factory->IClassFactory_iface.lpVtbl = &ftmarshal_factory_vtbl;
+    factory->refcount = 1;
+
+    hr = IClassFactory_QueryInterface(&factory->IClassFactory_iface, riid, obj);
+    IClassFactory_Release(&factory->IClassFactory_iface);
+    return hr;
+}
+
 /***********************************************************************
  *            CoGetMarshalSizeMax        (combase.@)
  */

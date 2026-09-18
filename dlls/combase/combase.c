@@ -724,6 +724,8 @@ static HRESULT psfactory_get_class_object(REFIID riid, void **obj)
 
 static HRESULT get_builtin_class_factory(REFCLSID rclsid, REFIID riid, void **obj)
 {
+    if (IsEqualCLSID(rclsid, &CLSID_InProcFreeMarshaler))
+        return ftmarshal_get_class_factory(riid, obj);
     if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
         return IClassFactory_QueryInterface(&global_options_factory, riid, obj);
     if (IsEqualCLSID(rclsid, &CLSID_ContextSwitcher))
@@ -1959,7 +1961,8 @@ static HRESULT com_get_class_object(REFCLSID rclsid, DWORD clscontext,
         {
             apartment_release(apt);
 
-            if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
+            if (IsEqualCLSID(rclsid, &CLSID_InProcFreeMarshaler) ||
+                    IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
                     IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable) ||
                     IsEqualCLSID(rclsid, &CLSID_PSFactoryBuffer))
                 return get_builtin_class_factory(rclsid, riid, obj);
@@ -4000,7 +4003,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj)
 
     *obj = NULL;
 
-    if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
+    if (IsEqualCLSID(rclsid, &CLSID_InProcFreeMarshaler) ||
+            IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
             IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable) ||
             IsEqualCLSID(rclsid, &CLSID_PSFactoryBuffer))
         return get_builtin_class_factory(rclsid, riid, obj);

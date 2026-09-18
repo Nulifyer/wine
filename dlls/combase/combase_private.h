@@ -24,6 +24,7 @@ extern HINSTANCE hProxyDll;
 
 HRESULT git_get_class_factory(REFIID riid, void **obj);
 void git_release(void);
+HRESULT ftmarshal_get_class_factory(REFIID riid, void **obj);
 
 struct apartment
 {

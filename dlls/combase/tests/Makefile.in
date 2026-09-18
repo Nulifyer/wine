@@ -6,6 +6,7 @@ SOURCES = \
 	aggregate_identity.c \
 	cleanup.c \
 	combase.rc \
+	free_threaded_marshaler.c \
 	global_interface_table.c \
 	implicit_local_server.c \
 	native_ordinals.c \
