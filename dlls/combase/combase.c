@@ -42,6 +42,17 @@ static const CLSID CLSID_ContextSwitcher =
 
 static ULONG_PTR global_options[COMGLB_PROPERTIES_RESERVED3 + 1];
 
+struct allowed_unmarshaler
+{
+    struct list entry;
+    CLSID clsid;
+};
+
+static struct list allowed_unmarshalers = LIST_INIT(allowed_unmarshalers);
+static SRWLOCK security_lock = SRWLOCK_INIT;
+static BOOL security_initialized;
+static DWORD security_capabilities;
+
 /* Ole32 exports */
 extern void WINAPI DestroyRunningObjectTable(void);
 extern HRESULT WINAPI Ole32DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj);
@@ -1306,10 +1317,91 @@ HRESULT WINAPI CoInitializeSecurity(PSECURITY_DESCRIPTOR sd, LONG cAuthSvc,
         SOLE_AUTHENTICATION_SERVICE *asAuthSvc, void *reserved1, DWORD authn_level,
         DWORD imp_level, void *reserved2, DWORD capabilities, void *reserved3)
 {
-    FIXME("%p, %ld, %p, %p, %ld, %ld, %p, %ld, %p stub\n", sd, cAuthSvc, asAuthSvc, reserved1, authn_level,
+    HRESULT hr = S_OK;
+
+    FIXME("%p, %ld, %p, %p, %ld, %ld, %p, %ld, %p semi-stub\n", sd, cAuthSvc, asAuthSvc, reserved1, authn_level,
             imp_level, reserved2, capabilities, reserved3);
 
-    return S_OK;
+    AcquireSRWLockExclusive(&security_lock);
+    if (security_initialized)
+        hr = RPC_E_TOO_LATE;
+    else
+    {
+        security_capabilities = capabilities;
+        security_initialized = TRUE;
+    }
+    ReleaseSRWLockExclusive(&security_lock);
+
+    return hr;
+}
+
+/***********************************************************************
+ *           CoAllowUnmarshalerCLSID    (combase.@)
+ */
+HRESULT WINAPI CoAllowUnmarshalerCLSID(REFCLSID clsid)
+{
+    struct allowed_unmarshaler *entry;
+    HRESULT hr = S_OK;
+
+    TRACE("%s\n", debugstr_guid(clsid));
+
+    if (!InternalIsProcessInitialized()) return CO_E_NOTINITIALIZED;
+
+    AcquireSRWLockExclusive(&security_lock);
+    if (!security_initialized)
+        hr = E_FAIL;
+    else
+    {
+        LIST_FOR_EACH_ENTRY(entry, &allowed_unmarshalers, struct allowed_unmarshaler, entry)
+            if (IsEqualCLSID(&entry->clsid, clsid)) goto done;
+
+        if (!(entry = malloc(sizeof(*entry))))
+            hr = E_OUTOFMEMORY;
+        else
+        {
+            entry->clsid = *clsid;
+            list_add_tail(&allowed_unmarshalers, &entry->entry);
+        }
+    }
+
+done:
+    ReleaseSRWLockExclusive(&security_lock);
+    return hr;
+}
+
+BOOL com_is_custom_unmarshaler_allowed(REFCLSID clsid)
+{
+    static const WCHAR marshaler_category[] =
+            L"Implemented Categories\\{00000003-0000-0000-C000-000000000046}";
+    static const CLSID CLSID_DfMarshal =
+            {0x0000030b, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+    struct allowed_unmarshaler *entry;
+    BOOL allowed = FALSE;
+    HKEY key;
+
+    AcquireSRWLockShared(&security_lock);
+    if (!security_initialized || !(security_capabilities & EOAC_NO_CUSTOM_MARSHAL) ||
+            IsEqualCLSID(clsid, &CLSID_InProcFreeMarshaler) || IsEqualCLSID(clsid, &CLSID_DfMarshal))
+        allowed = TRUE;
+    else
+    {
+        LIST_FOR_EACH_ENTRY(entry, &allowed_unmarshalers, struct allowed_unmarshaler, entry)
+        {
+            if (IsEqualCLSID(&entry->clsid, clsid))
+            {
+                allowed = TRUE;
+                break;
+            }
+        }
+    }
+    ReleaseSRWLockShared(&security_lock);
+
+    if (!allowed && SUCCEEDED(open_key_for_clsid(clsid, marshaler_category, KEY_READ, &key)))
+    {
+        RegCloseKey(key);
+        allowed = TRUE;
+    }
+    return allowed;
 }
 
 /***********************************************************************
@@ -3982,13 +4074,22 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
         hProxyDll = hinstDLL;
         break;
     case DLL_PROCESS_DETACH:
+    {
+        struct allowed_unmarshaler *entry, *next;
+
         com_revoke_local_servers();
         if (reserved) break;
+        LIST_FOR_EACH_ENTRY_SAFE(entry, next, &allowed_unmarshalers, struct allowed_unmarshaler, entry)
+        {
+            list_remove(&entry->entry);
+            free(entry);
+        }
         git_release();
         apartment_global_cleanup();
         DeleteCriticalSection(&registered_classes_cs);
         rpc_unregister_channel_hooks();
         break;
+    }
     case DLL_THREAD_DETACH:
         com_cleanup_tlsdata();
         break;

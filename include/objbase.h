@@ -377,6 +377,7 @@ WINOLE32API HRESULT WINAPI CoEnableCallCancellation(void *reserved);
 
 /* security */
 WINOLE32API HRESULT WINAPI CoInitializeSecurity(PSECURITY_DESCRIPTOR pSecDesc, LONG cAuthSvc, SOLE_AUTHENTICATION_SERVICE* asAuthSvc, void* pReserved1, DWORD dwAuthnLevel, DWORD dwImpLevel, void* pReserved2, DWORD dwCapabilities, void* pReserved3);
+WINOLE32API HRESULT WINAPI CoAllowUnmarshalerCLSID(REFCLSID clsid);
 WINOLE32API HRESULT WINAPI CoGetCallContext(REFIID riid, void** ppInterface);
 WINOLE32API HRESULT WINAPI CoSwitchCallContext(IUnknown *pContext, IUnknown **ppOldContext);
 WINOLE32API HRESULT WINAPI CoQueryAuthenticationServices(DWORD* pcAuthSvc, SOLE_AUTHENTICATION_SERVICE** asAuthSvc);

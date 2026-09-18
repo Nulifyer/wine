@@ -696,6 +696,12 @@ static HRESULT get_unmarshaler_from_stream(IStream *stream, IMarshal **marshal, 
             ERR("Failed to read OR_CUSTOM header, %#lx\n", hr);
             return STG_E_READFAULT;
         }
+        if (!com_is_custom_unmarshaler_allowed(&objref.u_objref.u_custom.clsid))
+        {
+            WARN("Custom unmarshaler %s is blocked by process policy\n",
+                    debugstr_guid(&objref.u_objref.u_custom.clsid));
+            return E_ACCESSDENIED;
+        }
         /* now create the marshaler specified in the stream */
         hr = CoCreateInstance(&objref.u_objref.u_custom.clsid, NULL,
                               CLSCTX_INPROC_SERVER, &IID_IMarshal,

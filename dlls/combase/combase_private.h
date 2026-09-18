@@ -59,6 +59,7 @@ struct apartment
 };
 
 HRESULT open_key_for_clsid(REFCLSID clsid, const WCHAR *keyname, REGSAM access, HKEY *subkey);
+BOOL com_is_custom_unmarshaler_allowed(REFCLSID clsid);
 HRESULT open_appidkey_from_clsid(REFCLSID clsid, REGSAM access, HKEY *subkey);
 
 /* DCOM messages used by the apartment window (not compatible with native) */

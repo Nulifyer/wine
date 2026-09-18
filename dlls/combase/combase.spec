@@ -89,7 +89,7 @@
 @ stdcall CleanupTlsOleState(ptr)
 @ stdcall ClearCleanupFlag(long)
 @ stdcall CoAddRefServerProcess()
-@ stub CoAllowUnmarshalerCLSID
+@ stdcall CoAllowUnmarshalerCLSID(ptr)
 @ stub CoCancelCall
 @ stdcall CoCopyProxy(ptr ptr)
 @ stdcall CoCreateErrorInfo(ptr) CreateErrorInfo

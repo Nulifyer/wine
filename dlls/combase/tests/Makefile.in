@@ -5,6 +5,7 @@ SOURCES = \
 	activation_wait.c \
 	aggregate_identity.c \
 	cleanup.c \
+	custom_unmarshaler_policy.c \
 	combase.rc \
 	free_threaded_marshaler.c \
 	global_interface_table.c \
