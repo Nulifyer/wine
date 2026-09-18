@@ -46,6 +46,17 @@ struct rot_entry
 
 static struct list RunningObjectTable = LIST_INIT(RunningObjectTable);
 
+struct activation_factory_entry
+{
+    struct list entry;
+    WCHAR *classid;
+    InterfaceData *object;
+    DWORD cookie;
+    LONG refs;
+};
+
+static struct list activation_factories = LIST_INIT(activation_factories);
+
 static CRITICAL_SECTION csRunningObjectTable;
 static CRITICAL_SECTION_DEBUG critsect_debug =
 {
@@ -66,6 +77,29 @@ static inline void rot_entry_release(struct rot_entry *rot_entry)
         free(rot_entry->moniker_data);
         free(rot_entry);
     }
+}
+
+static void activation_factory_entry_release(struct activation_factory_entry *entry)
+{
+    if (!InterlockedDecrement(&entry->refs))
+    {
+        free(entry->classid);
+        free(entry->object);
+        free(entry);
+    }
+}
+
+static InterfaceData *copy_interface_data(const InterfaceData *source, BOOL midl)
+{
+    SIZE_T size = FIELD_OFFSET(InterfaceData, abData[source->ulCntData]);
+    InterfaceData *copy = midl ? MIDL_user_allocate(size) : malloc(size);
+
+    if (copy)
+    {
+        copy->ulCntData = source->ulCntData;
+        memcpy(copy->abData, source->abData, source->ulCntData);
+    }
+    return copy;
 }
 
 HRESULT __cdecl IrotRegister(
@@ -357,6 +391,90 @@ HRESULT __cdecl IrotEnumRunning(
     return hr;
 }
 
+HRESULT __cdecl IrotRegisterActivationFactory(IrotHandle h, const WCHAR *classid,
+        const InterfaceData *object, IrotCookie *cookie, IrotActivationContextHandle *ctxt_handle)
+{
+    struct activation_factory_entry *entry, *existing;
+    HRESULT hr = S_OK;
+
+    if (!(entry = calloc(1, sizeof(*entry)))) return E_OUTOFMEMORY;
+    entry->refs = 1;
+    if (!(entry->classid = wcsdup(classid)) || !(entry->object = copy_interface_data(object, FALSE)))
+    {
+        activation_factory_entry_release(entry);
+        return E_OUTOFMEMORY;
+    }
+
+    EnterCriticalSection(&csRunningObjectTable);
+    LIST_FOR_EACH_ENTRY(existing, &activation_factories, struct activation_factory_entry, entry)
+    {
+        if (!wcscmp(existing->classid, classid))
+        {
+            hr = CO_E_ALREADYINITIALIZED;
+            break;
+        }
+    }
+    if (SUCCEEDED(hr))
+    {
+        entry->cookie = InterlockedIncrement(&last_cookie);
+        list_add_tail(&activation_factories, &entry->entry);
+        *cookie = entry->cookie;
+        *ctxt_handle = entry;
+    }
+    LeaveCriticalSection(&csRunningObjectTable);
+
+    if (FAILED(hr)) activation_factory_entry_release(entry);
+    return hr;
+}
+
+HRESULT __cdecl IrotRevokeActivationFactory(IrotHandle h, IrotCookie cookie,
+        IrotActivationContextHandle *ctxt_handle, PInterfaceData *object)
+{
+    struct activation_factory_entry *entry;
+    HRESULT hr = E_INVALIDARG;
+
+    *object = NULL;
+    EnterCriticalSection(&csRunningObjectTable);
+    LIST_FOR_EACH_ENTRY(entry, &activation_factories, struct activation_factory_entry, entry)
+    {
+        if (entry->cookie == cookie && entry == *ctxt_handle)
+        {
+            if (!(*object = copy_interface_data(entry->object, TRUE)))
+                hr = E_OUTOFMEMORY;
+            else
+            {
+                list_remove(&entry->entry);
+                *ctxt_handle = NULL;
+                hr = S_OK;
+            }
+            break;
+        }
+    }
+    LeaveCriticalSection(&csRunningObjectTable);
+
+    if (SUCCEEDED(hr)) activation_factory_entry_release(entry);
+    return hr;
+}
+
+HRESULT __cdecl IrotGetActivationFactory(IrotHandle h, const WCHAR *classid, PInterfaceData *object)
+{
+    const struct activation_factory_entry *entry;
+    HRESULT hr = REGDB_E_CLASSNOTREG;
+
+    *object = NULL;
+    EnterCriticalSection(&csRunningObjectTable);
+    LIST_FOR_EACH_ENTRY(entry, &activation_factories, const struct activation_factory_entry, entry)
+    {
+        if (!wcscmp(entry->classid, classid))
+        {
+            hr = (*object = copy_interface_data(entry->object, TRUE)) ? S_OK : E_OUTOFMEMORY;
+            break;
+        }
+    }
+    LeaveCriticalSection(&csRunningObjectTable);
+    return hr;
+}
+
 void __RPC_USER IrotContextHandle_rundown(IrotContextHandle ctxt_handle)
 {
     struct rot_entry *rot_entry = ctxt_handle;
@@ -364,6 +482,16 @@ void __RPC_USER IrotContextHandle_rundown(IrotContextHandle ctxt_handle)
     list_remove(&rot_entry->entry);
     LeaveCriticalSection(&csRunningObjectTable);
     rot_entry_release(rot_entry);
+}
+
+void __RPC_USER IrotActivationContextHandle_rundown(IrotActivationContextHandle ctxt_handle)
+{
+    struct activation_factory_entry *entry = ctxt_handle;
+
+    EnterCriticalSection(&csRunningObjectTable);
+    list_remove(&entry->entry);
+    LeaveCriticalSection(&csRunningObjectTable);
+    activation_factory_entry_release(entry);
 }
 
 void * __RPC_USER MIDL_user_allocate(SIZE_T size)

@@ -9,6 +9,7 @@
 180 stdcall -noname CoUnmarshalInterface_ordinal180(ptr ptr ptr) CoUnmarshalInterface
 359 stdcall CoUnmarshalHresult(ptr ptr)
 360 stdcall CoUnmarshalInterface(ptr ptr ptr)
+513 stdcall InternalIsApartmentInitialized()
 598 stub WindowsInspectString
 599 stub WindowsInspectString2
 600 stdcall WindowsIsStringEmpty(ptr)
@@ -103,7 +104,7 @@
 @ stdcall CoDecodeProxy(long int64 ptr)
 @ stdcall CoDecrementMTAUsage(ptr)
 @ stdcall CoDisableCallCancellation(ptr)
-@ stub CoDisconnectContext
+@ stdcall CoDisconnectContext(long)
 @ stdcall CoDisconnectObject(ptr long)
 @ stdcall CoEnableCallCancellation(ptr)
 @ stdcall CoFileTimeNow(ptr)
@@ -266,10 +267,10 @@
 @ stub InternalCallerIsAppContainer
 @ stub InternalCanMakeOutCall
 @ stub InternalCoIsSurrogateProcess
-@ stub InternalCoRegisterDisconnectCallback
+@ stdcall InternalCoRegisterDisconnectCallback(ptr long ptr ptr ptr)
 @ stub InternalCoRegisterSurrogatedObject
 @ stdcall InternalCoStdMarshalObject(ptr long ptr ptr)
-@ stub InternalCoUnregisterDisconnectCallback
+@ stdcall InternalCoUnregisterDisconnectCallback(ptr)
 @ stub InternalCompleteObjRef
 @ stdcall InternalCreateCAggId(ptr ptr)
 @ stub InternalCreateIdentityHandler
@@ -284,7 +285,6 @@
 @ stdcall InternalIrotNoteChangeTime(long ptr)
 @ stdcall InternalIrotRegister(ptr ptr ptr ptr long ptr ptr)
 @ stdcall InternalIrotRevoke(long ptr ptr ptr)
-@ stub InternalIsApartmentInitialized
 @ stdcall InternalIsProcessInitialized()
 @ stub InternalMarshalObjRef
 @ stub InternalNotifyDDStartOrStop
@@ -332,7 +332,7 @@
 @ stub RoReportFailedDelegate
 @ stdcall RoReportUnhandledError(ptr)
 @ stub RoResolveRestrictedErrorInfoReference
-@ stub RoRevokeActivationFactories
+@ stdcall RoRevokeActivationFactories(ptr)
 @ stdcall RoSetErrorReportingFlags(long)
 @ stdcall RoTransformError(long long ptr)
 @ stdcall RoTransformErrorW(long long long ptr)

@@ -256,11 +256,15 @@ struct stub_manager
 
     ULONG             norm_refs;  /* refcount of normal marshals (CS lock) */
     BOOL              disconnected; /* CoDisconnectObject has been called (CS lock) */
+    struct list       disconnect_callbacks; /* registered disconnect sinks (CS lock) */
 };
 
 ULONG stub_manager_int_release(struct stub_manager *stub_manager);
 struct stub_manager * get_stub_manager_from_object(struct apartment *apt, IUnknown *object, BOOL alloc);
 void stub_manager_disconnect(struct stub_manager *m);
+HRESULT apartment_disconnect_stub_managers(struct apartment *apt);
+HRESULT stub_manager_register_disconnect(struct stub_manager *m, IUnknown *sink, void *context, void **cookie);
+HRESULT stub_manager_unregister_disconnect(void *cookie);
 ULONG stub_manager_ext_addref(struct stub_manager *m, ULONG refs, BOOL tableweak);
 ULONG stub_manager_ext_release(struct stub_manager *m, ULONG refs, BOOL tableweak, BOOL last_unlock_releases);
 struct stub_manager * get_stub_manager(struct apartment *apt, OID oid);
@@ -275,6 +279,10 @@ HRESULT ipid_get_dispatch_params(const IPID *ipid, struct apartment **stub_apt,
         IID *iid, IUnknown **iface);
 HRESULT ipid_get_dest_context(const IPID *ipid, MSHCTX *dest_context, void **dest_context_data);
 HRESULT start_apartment_remote_unknown(struct apartment *apt);
+HRESULT rpc_register_activation_factory(const WCHAR *classid, const MInterfacePointer *object,
+        DWORD *cookie, void **context);
+HRESULT rpc_revoke_activation_factory(DWORD cookie, void **context, MInterfacePointer **object);
+HRESULT rpc_get_activation_factory(const WCHAR *classid, MInterfacePointer **object);
 void get_process_secret(GUID *process_secret);
 HRESULT com_invoke_context(IObjContext *, PFNCONTEXTCALL, ComCallData *, REFIID);
 HRESULT set_error_info(IErrorInfo *error_info);

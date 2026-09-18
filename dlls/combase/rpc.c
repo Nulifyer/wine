@@ -400,6 +400,30 @@ HRESULT WINAPI InternalIrotRevoke(IrotCookie cookie, IrotContextHandle *ctxt_han
     RPCSS_CALL_END
 }
 
+HRESULT rpc_register_activation_factory(const WCHAR *classid, const MInterfacePointer *object,
+        DWORD *cookie, void **context)
+{
+    RPCSS_CALL_START
+    hr = IrotRegisterActivationFactory(get_irot_handle(), classid, (const InterfaceData *)object,
+            cookie, (IrotActivationContextHandle *)context);
+    RPCSS_CALL_END
+}
+
+HRESULT rpc_revoke_activation_factory(DWORD cookie, void **context, MInterfacePointer **object)
+{
+    RPCSS_CALL_START
+    hr = IrotRevokeActivationFactory(get_irot_handle(), cookie,
+            (IrotActivationContextHandle *)context, (PInterfaceData *)object);
+    RPCSS_CALL_END
+}
+
+HRESULT rpc_get_activation_factory(const WCHAR *classid, MInterfacePointer **object)
+{
+    RPCSS_CALL_START
+    hr = IrotGetActivationFactory(get_irot_handle(), classid, (PInterfaceData *)object);
+    RPCSS_CALL_END
+}
+
 static HRESULT rpcss_server_register(REFCLSID clsid, DWORD flags, MInterfacePointer *obj, unsigned int *cookie)
 {
     RPCSS_CALL_START

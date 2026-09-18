@@ -9,6 +9,7 @@
  * version 2.1 of the License, or (at your option) any later version.
  */
 
+#define COBJMACROS
 #include <stdarg.h>
 
 #include "windef.h"
@@ -25,7 +26,98 @@ typedef HRESULT (WINAPI *unmarshal_restricted_error_fn)(void *, void *);
 typedef HRESULT (WINAPI *get_registration_store_context_fn)(UINT32, void *, UINT32, REFIID, void **);
 typedef HRESULT (WINAPI *ro_initialize_strict_fn)(UINT32);
 typedef BOOL (WINAPI *is_error_propagation_enabled_fn)(void);
+typedef BOOL (WINAPI *is_apartment_initialized_fn)(void);
 typedef BOOL (WINAPI *quirk_is_enabled_fn)(void *);
+typedef HRESULT (WINAPI *register_disconnect_fn)(IUnknown *, DWORD, IUnknown *, void *, void **);
+typedef HRESULT (WINAPI *unregister_disconnect_fn)(void *);
+
+struct test_unknown
+{
+    IUnknown IUnknown_iface;
+    LONG refs;
+};
+
+struct test_disconnect_sink
+{
+    IUnknown IUnknown_iface;
+    LONG refs;
+    LONG calls;
+    void *context;
+};
+
+struct test_disconnect_sink_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(IUnknown *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(IUnknown *);
+    ULONG (WINAPI *Release)(IUnknown *);
+    void (WINAPI *OnDisconnect)(IUnknown *, void *);
+};
+
+static HRESULT WINAPI test_unknown_QueryInterface(IUnknown *iface, REFIID iid, void **out)
+{
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (!IsEqualIID(iid, &IID_IUnknown)) return E_NOINTERFACE;
+    *out = iface;
+    IUnknown_AddRef(iface);
+    return S_OK;
+}
+
+static ULONG WINAPI test_unknown_AddRef(IUnknown *iface)
+{
+    struct test_unknown *object = CONTAINING_RECORD(iface, struct test_unknown, IUnknown_iface);
+    return InterlockedIncrement(&object->refs);
+}
+
+static ULONG WINAPI test_unknown_Release(IUnknown *iface)
+{
+    struct test_unknown *object = CONTAINING_RECORD(iface, struct test_unknown, IUnknown_iface);
+    return InterlockedDecrement(&object->refs);
+}
+
+static const IUnknownVtbl test_unknown_vtbl =
+{
+    test_unknown_QueryInterface,
+    test_unknown_AddRef,
+    test_unknown_Release,
+};
+
+static HRESULT WINAPI test_sink_QueryInterface(IUnknown *iface, REFIID iid, void **out)
+{
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (!IsEqualIID(iid, &IID_IUnknown)) return E_NOINTERFACE;
+    *out = iface;
+    IUnknown_AddRef(iface);
+    return S_OK;
+}
+
+static ULONG WINAPI test_sink_AddRef(IUnknown *iface)
+{
+    struct test_disconnect_sink *sink = CONTAINING_RECORD(iface, struct test_disconnect_sink, IUnknown_iface);
+    return InterlockedIncrement(&sink->refs);
+}
+
+static ULONG WINAPI test_sink_Release(IUnknown *iface)
+{
+    struct test_disconnect_sink *sink = CONTAINING_RECORD(iface, struct test_disconnect_sink, IUnknown_iface);
+    return InterlockedDecrement(&sink->refs);
+}
+
+static void WINAPI test_sink_OnDisconnect(IUnknown *iface, void *context)
+{
+    struct test_disconnect_sink *sink = CONTAINING_RECORD(iface, struct test_disconnect_sink, IUnknown_iface);
+    sink->context = context;
+    InterlockedIncrement(&sink->calls);
+}
+
+static const struct test_disconnect_sink_vtbl test_sink_vtbl =
+{
+    test_sink_QueryInterface,
+    test_sink_AddRef,
+    test_sink_Release,
+    test_sink_OnDisconnect,
+};
 
 struct apartment_test
 {
@@ -80,6 +172,47 @@ static void test_apartment_type(ro_initialize_strict_fn initialize, UINT32 reque
     }
 }
 
+static void test_disconnect_callbacks(register_disconnect_fn register_callback,
+        unregister_disconnect_fn unregister_callback)
+{
+    struct test_unknown object = {{&test_unknown_vtbl}, 1};
+    struct test_disconnect_sink sink = {{(const IUnknownVtbl *)&test_sink_vtbl}, 1};
+    void *context = (void *)0x12345678, *cookie = (void *)0xdeadbeef;
+    HRESULT hr;
+
+    hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    ok(hr == S_OK, "CoInitializeEx returned %#lx.\n", hr);
+    if (FAILED(hr)) return;
+
+    hr = unregister_callback(NULL);
+    ok(hr == E_INVALIDARG, "Unregistering a NULL callback returned %#lx.\n", hr);
+
+    hr = register_callback(&object.IUnknown_iface, MSHLFLAGS_NORMAL,
+            &sink.IUnknown_iface, context, &cookie);
+    ok(hr == S_OK, "Registering a disconnect callback returned %#lx.\n", hr);
+    ok(cookie != NULL, "Registration returned a NULL cookie.\n");
+    ok(sink.refs == 2, "Disconnect sink has %ld references.\n", sink.refs);
+
+    hr = unregister_callback(cookie);
+    ok(hr == S_OK, "Unregistering a disconnect callback returned %#lx.\n", hr);
+    ok(sink.calls == 0, "Unregistered sink was called %ld times.\n", sink.calls);
+    ok(sink.refs == 1, "Disconnect sink has %ld references after unregister.\n", sink.refs);
+
+    cookie = NULL;
+    hr = register_callback(&object.IUnknown_iface, MSHLFLAGS_NORMAL,
+            &sink.IUnknown_iface, context, &cookie);
+    ok(hr == S_OK, "Registering a second disconnect callback returned %#lx.\n", hr);
+
+    hr = CoDisconnectObject(&object.IUnknown_iface, 0);
+    ok(hr == S_OK, "CoDisconnectObject returned %#lx.\n", hr);
+    ok(sink.calls == 1, "Disconnect sink was called %ld times.\n", sink.calls);
+    ok(sink.context == context, "Disconnect sink received context %p.\n", sink.context);
+    ok(sink.refs == 1, "Disconnect sink has %ld references after disconnect.\n", sink.refs);
+    ok(object.refs == 1, "Object has %ld references after disconnect.\n", object.refs);
+
+    CoUninitialize();
+}
+
 static void test_native_ordinals(void)
 {
     originate_or_transform_error_fn originate;
@@ -90,7 +223,10 @@ static void test_native_ordinals(void)
     get_registration_store_context_fn get_registration_store_context;
     ro_initialize_strict_fn ro_initialize_strict;
     is_error_propagation_enabled_fn is_error_propagation_enabled;
+    is_apartment_initialized_fn is_apartment_initialized;
     quirk_is_enabled_fn quirk_is_enabled;
+    register_disconnect_fn register_disconnect;
+    unregister_disconnect_fn unregister_disconnect;
     HMODULE module = GetModuleHandleW(L"combase.dll");
     HMODULE kernelbase = GetModuleHandleW(L"kernelbase.dll");
     FARPROC co_unmarshal_hresult, co_unmarshal_interface;
@@ -115,6 +251,9 @@ static void test_native_ordinals(void)
     windows_inspect_string2 = GetProcAddress(module, "WindowsInspectString2");
     windows_is_string_empty = GetProcAddress(module, "WindowsIsStringEmpty");
     is_error_propagation_enabled = (void *)GetProcAddress(module, "IsErrorPropagationEnabled");
+    is_apartment_initialized = (void *)GetProcAddress(module, "InternalIsApartmentInitialized");
+    register_disconnect = (void *)GetProcAddress(module, "InternalCoRegisterDisconnectCallback");
+    unregister_disconnect = (void *)GetProcAddress(module, "InternalCoUnregisterDisconnectCallback");
     quirk_is_enabled = kernelbase ? (void *)GetProcAddress(kernelbase, "QuirkIsEnabled") : NULL;
 
     ok(!!originate, "Ordinal 176 is unavailable.\n");
@@ -126,6 +265,9 @@ static void test_native_ordinals(void)
     ok(!!get_registration_store_context, "Ordinal 153 is unavailable.\n");
     ok(!!ro_initialize_strict, "Ordinal 179 is unavailable.\n");
     ok(!!is_error_propagation_enabled, "IsErrorPropagationEnabled is unavailable.\n");
+    ok(!!is_apartment_initialized, "InternalIsApartmentInitialized is unavailable.\n");
+    ok(!!register_disconnect, "InternalCoRegisterDisconnectCallback is unavailable.\n");
+    ok(!!unregister_disconnect, "InternalCoUnregisterDisconnectCallback is unavailable.\n");
     ok(!!quirk_is_enabled, "QuirkIsEnabled is unavailable.\n");
     ok((void *)originate != (void *)GetProcAddress(module, "CoVrfReleaseThreadState"),
             "Ordinal 176 still resolves to CoVrfReleaseThreadState.\n");
@@ -145,10 +287,33 @@ static void test_native_ordinals(void)
             "Ordinal 599 does not resolve to WindowsInspectString2.\n");
     ok(GetProcAddress(module, (const char *)600) == windows_is_string_empty,
             "Ordinal 600 does not resolve to WindowsIsStringEmpty.\n");
+    ok(GetProcAddress(module, (const char *)513) == (FARPROC)is_apartment_initialized,
+            "Ordinal 513 does not resolve to InternalIsApartmentInitialized.\n");
+
+    if (is_apartment_initialized)
+    {
+        CO_MTA_USAGE_COOKIE mta_cookie;
+
+        ok(!is_apartment_initialized(), "Apartment is initialized before COM entry.\n");
+        hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+        ok(hr == S_OK, "CoInitializeEx returned %#lx.\n", hr);
+        ok(is_apartment_initialized(), "STA is not reported as initialized.\n");
+        CoUninitialize();
+        ok(!is_apartment_initialized(), "Apartment remains initialized after CoUninitialize.\n");
+
+        hr = CoIncrementMTAUsage(&mta_cookie);
+        ok(hr == S_OK, "CoIncrementMTAUsage returned %#lx.\n", hr);
+        ok(is_apartment_initialized(), "Process MTA is not reported as initialized.\n");
+        CoDecrementMTAUsage(mta_cookie);
+        ok(!is_apartment_initialized(), "Apartment remains initialized after releasing the process MTA.\n");
+    }
 
     if (is_error_propagation_enabled && quirk_is_enabled)
         ok(is_error_propagation_enabled() == !quirk_is_enabled((void *)(ULONG_PTR)0x30000),
                 "Error propagation state does not match quirk 0x30000.\n");
+
+    if (register_disconnect && unregister_disconnect)
+        test_disconnect_callbacks(register_disconnect, unregister_disconnect);
 
     if (ro_initialize_strict)
     {

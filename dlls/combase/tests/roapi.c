@@ -17,6 +17,8 @@
  */
 #define COBJMACROS
 #include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
 #include <wchar.h>
 
 #include "windef.h"
@@ -143,6 +145,236 @@ static void test_ActivationFactories(void)
     WindowsDeleteString(str);
 
     RoUninitialize();
+}
+
+static HSTRING registered_classid;
+static IActivationFactory *registered_factory;
+static LONG registered_callback_count;
+static HANDLE registered_callback_event;
+
+static HRESULT WINAPI registered_factory_callback(HSTRING classid, IActivationFactory **factory)
+{
+    INT32 order;
+    HRESULT hr;
+
+    InterlockedIncrement(&registered_callback_count);
+    if (registered_callback_event) SetEvent(registered_callback_event);
+    hr = WindowsCompareStringOrdinal(classid, registered_classid, &order);
+    ok(hr == S_OK, "WindowsCompareStringOrdinal returned %#lx.\n", hr);
+    ok(!order, "Unexpected class id %s.\n", debugstr_hstring(classid));
+
+    IActivationFactory_AddRef((*factory = registered_factory));
+    return S_OK;
+}
+
+static void test_registered_activation_factories(void)
+{
+    static const WCHAR registered_name[] = L"Wine.Test.Registered";
+    static const WCHAR factory_name[] = L"Wine.Test.Trusted";
+    PFNGETACTIVATIONFACTORY callback = registered_factory_callback;
+    RO_REGISTRATION_COOKIE cookie = (RO_REGISTRATION_COOKIE)0xdeadbeef, duplicate_cookie;
+    IActivationFactory *factory = NULL;
+    HSTRING factory_classid;
+    HRESULT hr;
+
+    hr = WindowsCreateString(registered_name, ARRAY_SIZE(registered_name) - 1, &registered_classid);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    hr = WindowsCreateString(factory_name, ARRAY_SIZE(factory_name) - 1, &factory_classid);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+
+    hr = RoRegisterActivationFactories(&registered_classid, &callback, 1, NULL);
+    ok(hr == E_POINTER, "RoRegisterActivationFactories returned %#lx.\n", hr);
+
+    hr = RoInitialize(RO_INIT_MULTITHREADED);
+    ok(hr == S_OK, "RoInitialize returned %#lx.\n", hr);
+    hr = RoGetActivationFactory(factory_classid, &IID_IActivationFactory, (void **)&registered_factory);
+    if (FAILED(hr))
+    {
+        win_skip("Could not get the test activation factory, hr %#lx.\n", hr);
+        goto done;
+    }
+
+    registered_callback_count = 0;
+    hr = RoRegisterActivationFactories(&registered_classid, &callback, 1, &cookie);
+    if (hr == REGDB_E_CLASSNOTREG)
+    {
+        win_skip("The test runtime class is not registered as out-of-process.\n");
+        goto done;
+    }
+    ok(hr == S_OK, "RoRegisterActivationFactories returned %#lx.\n", hr);
+    ok(cookie && cookie != (RO_REGISTRATION_COOKIE)0xdeadbeef, "Unexpected cookie %p.\n", cookie);
+
+    duplicate_cookie = (RO_REGISTRATION_COOKIE)0xdeadbeef;
+    hr = RoRegisterActivationFactories(&registered_classid, &callback, 1, &duplicate_cookie);
+    ok(hr == CO_E_ALREADYINITIALIZED, "RoRegisterActivationFactories returned %#lx.\n", hr);
+    ok(!duplicate_cookie, "Unexpected duplicate cookie %p.\n", duplicate_cookie);
+
+    hr = RoGetActivationFactory(registered_classid, &IID_IActivationFactory, (void **)&factory);
+    ok(hr == S_OK, "RoGetActivationFactory returned %#lx.\n", hr);
+    ok(factory == registered_factory, "Unexpected factory %p, expected %p.\n", factory, registered_factory);
+    ok(registered_callback_count == 1, "Callback count is %ld.\n", registered_callback_count);
+    if (factory) IActivationFactory_Release(factory);
+
+    RoRevokeActivationFactories(cookie);
+    factory = NULL;
+    hr = RoGetActivationFactory(registered_classid, &IID_IActivationFactory, (void **)&factory);
+    ok(hr == REGDB_E_CLASSNOTREG, "RoGetActivationFactory returned %#lx.\n", hr);
+    ok(!factory, "Unexpected factory %p.\n", factory);
+    ok(registered_callback_count == 1, "Callback count is %ld.\n", registered_callback_count);
+
+done:
+    if (registered_factory) IActivationFactory_Release(registered_factory);
+    registered_factory = NULL;
+    RoUninitialize();
+    WindowsDeleteString(factory_classid);
+    WindowsDeleteString(registered_classid);
+    registered_classid = NULL;
+}
+
+static void run_registered_activation_server(const char *ready_name, const char *callback_name,
+        const char *stop_name)
+{
+    static const WCHAR registered_name[] = L"Wine.Test.Registered";
+    static const WCHAR factory_name[] = L"Wine.Test.Trusted";
+    PFNGETACTIVATIONFACTORY callback = registered_factory_callback;
+    RO_REGISTRATION_COOKIE cookie = NULL;
+    HSTRING factory_classid = NULL;
+    HANDLE ready = NULL, stop = NULL;
+    HRESULT hr;
+    DWORD ret = 0;
+
+    if (!(ready = OpenEventA(EVENT_MODIFY_STATE, FALSE, ready_name))) ExitProcess(2);
+    if (!(registered_callback_event = OpenEventA(EVENT_MODIFY_STATE, FALSE, callback_name))) ExitProcess(3);
+    if (!(stop = OpenEventA(SYNCHRONIZE, FALSE, stop_name))) ExitProcess(4);
+
+    if (FAILED(hr = WindowsCreateString(registered_name, ARRAY_SIZE(registered_name) - 1,
+            &registered_classid)))
+    {
+        ret = 5;
+        goto done;
+    }
+    if (FAILED(hr = WindowsCreateString(factory_name, ARRAY_SIZE(factory_name) - 1, &factory_classid)))
+    {
+        ret = 6;
+        goto done;
+    }
+    if (FAILED(hr = RoInitialize(RO_INIT_MULTITHREADED)))
+    {
+        ret = 7;
+        goto done;
+    }
+    if (FAILED(hr = RoGetActivationFactory(factory_classid, &IID_IActivationFactory,
+            (void **)&registered_factory)))
+    {
+        ret = 8;
+        goto uninitialize;
+    }
+    if (FAILED(hr = RoRegisterActivationFactories(&registered_classid, &callback, 1, &cookie)))
+    {
+        ret = 9;
+        goto uninitialize;
+    }
+
+    SetEvent(ready);
+    if (WaitForSingleObject(stop, 15000) != WAIT_OBJECT_0) ret = 10;
+
+    RoRevokeActivationFactories(cookie);
+
+uninitialize:
+    if (registered_factory) IActivationFactory_Release(registered_factory);
+    registered_factory = NULL;
+    RoUninitialize();
+done:
+    WindowsDeleteString(factory_classid);
+    WindowsDeleteString(registered_classid);
+    registered_classid = NULL;
+    if (registered_callback_event) CloseHandle(registered_callback_event);
+    registered_callback_event = NULL;
+    if (stop) CloseHandle(stop);
+    if (ready) CloseHandle(ready);
+    ExitProcess(ret);
+}
+
+static void test_cross_process_activation_factory(void)
+{
+    static const WCHAR registered_name[] = L"Wine.Test.Registered";
+    char command[3 * MAX_PATH], executable[MAX_PATH], ready_name[80], callback_name[80], stop_name[80];
+    HANDLE waits[2], ready = NULL, callback = NULL, stop = NULL;
+    PROCESS_INFORMATION process_info = {0};
+    STARTUPINFOA startup_info = {sizeof(startup_info)};
+    IClassFactory *factory = NULL;
+    HSTRING classid = NULL;
+    DWORD wait, exit_code;
+    HRESULT hr;
+    BOOL ret;
+
+    sprintf(ready_name, "WineRoActivationReady-%08lx-%08lx", GetCurrentProcessId(), GetTickCount());
+    sprintf(callback_name, "WineRoActivationCallback-%08lx-%08lx", GetCurrentProcessId(), GetTickCount());
+    sprintf(stop_name, "WineRoActivationStop-%08lx-%08lx", GetCurrentProcessId(), GetTickCount());
+    ready = CreateEventA(NULL, TRUE, FALSE, ready_name);
+    ok(!!ready, "CreateEventA failed, error %lu.\n", GetLastError());
+    stop = CreateEventA(NULL, TRUE, FALSE, stop_name);
+    ok(!!stop, "CreateEventA failed, error %lu.\n", GetLastError());
+    callback = CreateEventA(NULL, TRUE, FALSE, callback_name);
+    ok(!!callback, "CreateEventA failed, error %lu.\n", GetLastError());
+    if (!ready || !callback || !stop) goto done;
+
+    GetModuleFileNameA(NULL, executable, ARRAY_SIZE(executable));
+    sprintf(command, "\"%s\" roapi activation_server %s %s %s", executable, ready_name,
+            callback_name, stop_name);
+    ret = CreateProcessA(executable, command, NULL, NULL, FALSE, 0, NULL, NULL,
+            &startup_info, &process_info);
+    ok(ret, "CreateProcessA failed, error %lu.\n", GetLastError());
+    if (!ret) goto done;
+
+    waits[0] = ready;
+    waits[1] = process_info.hProcess;
+    wait = WaitForMultipleObjects(ARRAY_SIZE(waits), waits, FALSE, 15000);
+    ok(wait == WAIT_OBJECT_0, "Activation server wait returned %#lx.\n", wait);
+    if (wait != WAIT_OBJECT_0) goto stop_server;
+
+    hr = WindowsCreateString(registered_name, ARRAY_SIZE(registered_name) - 1, &classid);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    hr = RoInitialize(RO_INIT_MULTITHREADED);
+    ok(hr == S_OK, "RoInitialize returned %#lx.\n", hr);
+    hr = RoGetActivationFactory(classid, &IID_IClassFactory, (void **)&factory);
+    ok(hr == S_OK, "RoGetActivationFactory returned %#lx.\n", hr);
+    wait = WaitForSingleObject(callback, 5000);
+    ok(wait == WAIT_OBJECT_0, "Factory callback wait returned %#lx.\n", wait);
+    if (factory)
+    {
+        IClassFactory_Release(factory);
+        factory = NULL;
+    }
+    RoUninitialize();
+
+stop_server:
+    SetEvent(stop);
+    wait = WaitForSingleObject(process_info.hProcess, 15000);
+    ok(wait == WAIT_OBJECT_0, "Activation server exit wait returned %#lx.\n", wait);
+    if (wait == WAIT_OBJECT_0)
+    {
+        GetExitCodeProcess(process_info.hProcess, &exit_code);
+        ok(!exit_code, "Activation server exited with %lu.\n", exit_code);
+    }
+    CloseHandle(process_info.hThread);
+    CloseHandle(process_info.hProcess);
+
+    if (classid)
+    {
+        hr = RoInitialize(RO_INIT_MULTITHREADED);
+        ok(hr == S_OK, "RoInitialize returned %#lx.\n", hr);
+        hr = RoGetActivationFactory(classid, &IID_IClassFactory, (void **)&factory);
+        ok(hr == REGDB_E_CLASSNOTREG, "RoGetActivationFactory returned %#lx.\n", hr);
+        ok(!factory, "Unexpected factory %p.\n", factory);
+        RoUninitialize();
+    }
+
+done:
+    WindowsDeleteString(classid);
+    if (callback) CloseHandle(callback);
+    if (stop) CloseHandle(stop);
+    if (ready) CloseHandle(ready);
 }
 
 static APTTYPE check_thread_apttype;
@@ -1578,12 +1810,22 @@ static void test_error_reporting(void)
 
 START_TEST(roapi)
 {
+    char **argv;
+    int argc = winetest_get_mainargs(&argv);
     BOOL ret;
+
+    if (argc >= 6 && !strcmp(argv[2], "activation_server"))
+    {
+        run_registered_activation_server(argv[3], argv[4], argv[5]);
+        return;
+    }
 
     load_resource(L"wine.combase.test.dll");
 
     test_implicit_mta();
     test_ActivationFactories();
+    test_registered_activation_factories();
+    test_cross_process_activation_factory();
     test_RoGetAgileReference();
     test_RoGetErrorReportingFlags();
     test_RoSetErrorReportingFlags();

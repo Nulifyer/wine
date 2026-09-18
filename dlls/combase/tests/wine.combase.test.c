@@ -39,6 +39,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(combase);
 struct factory
 {
     IActivationFactory IActivationFactory_iface;
+    IClassFactory IClassFactory_iface;
     LONG ref;
     BOOL trusted;
 };
@@ -46,6 +47,11 @@ struct factory
 static inline struct factory *impl_from_IActivationFactory(IActivationFactory *iface)
 {
     return CONTAINING_RECORD(iface, struct factory, IActivationFactory_iface);
+}
+
+static inline struct factory *impl_from_IClassFactory(IClassFactory *iface)
+{
+    return CONTAINING_RECORD(iface, struct factory, IClassFactory_iface);
 }
 
 static HRESULT WINAPI factory_QueryInterface(IActivationFactory *iface, REFIID iid, void **out)
@@ -60,6 +66,12 @@ static HRESULT WINAPI factory_QueryInterface(IActivationFactory *iface, REFIID i
             || IsEqualGUID(iid, &IID_IActivationFactory))
     {
         IInspectable_AddRef((*out = &impl->IActivationFactory_iface));
+        return S_OK;
+    }
+    if (IsEqualGUID(iid, &IID_IClassFactory))
+    {
+        IActivationFactory_AddRef(iface);
+        *out = &impl->IClassFactory_iface;
         return S_OK;
     }
 
@@ -127,8 +139,46 @@ static const struct IActivationFactoryVtbl factory_vtbl =
     factory_ActivateInstance,
 };
 
-static struct factory class_factory = {{&factory_vtbl}, 0};
-static struct factory trusted_factory = {{&factory_vtbl}, 0, TRUE};
+static HRESULT WINAPI class_factory_QueryInterface(IClassFactory *iface, REFIID iid, void **out)
+{
+    struct factory *impl = impl_from_IClassFactory(iface);
+    return IActivationFactory_QueryInterface(&impl->IActivationFactory_iface, iid, out);
+}
+
+static ULONG WINAPI class_factory_AddRef(IClassFactory *iface)
+{
+    struct factory *impl = impl_from_IClassFactory(iface);
+    return IActivationFactory_AddRef(&impl->IActivationFactory_iface);
+}
+
+static ULONG WINAPI class_factory_Release(IClassFactory *iface)
+{
+    struct factory *impl = impl_from_IClassFactory(iface);
+    return IActivationFactory_Release(&impl->IActivationFactory_iface);
+}
+
+static HRESULT WINAPI class_factory_CreateInstance(IClassFactory *iface, IUnknown *outer,
+        REFIID iid, void **out)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI class_factory_LockServer(IClassFactory *iface, BOOL lock)
+{
+    return lock ? S_OK : S_FALSE;
+}
+
+static const IClassFactoryVtbl class_factory_vtbl =
+{
+    class_factory_QueryInterface,
+    class_factory_AddRef,
+    class_factory_Release,
+    class_factory_CreateInstance,
+    class_factory_LockServer,
+};
+
+static struct factory class_factory = {{&factory_vtbl}, {&class_factory_vtbl}, 0};
+static struct factory trusted_factory = {{&factory_vtbl}, {&class_factory_vtbl}, 0, TRUE};
 
 HRESULT WINAPI DllCanUnloadNow(void)
 {

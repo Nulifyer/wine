@@ -419,6 +419,24 @@ BOOL WINAPI InternalIsProcessInitialized(void)
 }
 
 /***********************************************************************
+ *           InternalIsApartmentInitialized  (combase.@)
+ */
+BOOL WINAPI InternalIsApartmentInitialized(void)
+{
+    struct apartment *apt;
+
+    TRACE("\n");
+
+    /* Native reports an initialized apartment for a thread that entered COM,
+     * joined the neutral apartment, or can use an existing process MTA. Wine
+     * represents the first two cases as the current apartment and the latter
+     * as its process-wide MTA. */
+    if (!(apt = apartment_get_current_or_mta())) return FALSE;
+    apartment_release(apt);
+    return TRUE;
+}
+
+/***********************************************************************
  *           InternalTlsAllocData    (combase.@)
  */
 HRESULT WINAPI InternalTlsAllocData(struct tlsdata **data)
@@ -3822,6 +3840,61 @@ HRESULT WINAPI CoDisconnectObject(IUnknown *object, DWORD reserved)
 
     apartment_release(apt);
     return S_OK;
+}
+
+/******************************************************************************
+ *            CoDisconnectContext    (combase.@)
+ */
+HRESULT WINAPI CoDisconnectContext(DWORD timeout)
+{
+    struct apartment *apt;
+    HRESULT hr;
+
+    TRACE("%lu\n", timeout);
+
+    if (!(apt = apartment_get_current_or_mta())) return RPC_E_WRONG_THREAD;
+
+    hr = apartment_disconnectproxies(apt);
+    if (SUCCEEDED(hr)) hr = apartment_disconnect_stub_managers(apt);
+
+    apartment_release(apt);
+    return hr;
+}
+
+/******************************************************************************
+ *            InternalCoRegisterDisconnectCallback    (combase.@)
+ */
+HRESULT WINAPI InternalCoRegisterDisconnectCallback(IUnknown *object, DWORD flags, IUnknown *sink,
+        void *context, void **cookie)
+{
+    struct stub_manager *manager;
+    struct apartment *apt;
+    HRESULT hr;
+
+    TRACE("%p, %#lx, %p, %p, %p\n", object, flags, sink, context, cookie);
+
+    if (!object || !sink || !cookie) return E_INVALIDARG;
+    *cookie = NULL;
+    if (!(apt = apartment_get_current_or_mta())) return CO_E_NOTINITIALIZED;
+
+    if (!(manager = get_stub_manager_from_object(apt, object, TRUE)))
+        hr = E_OUTOFMEMORY;
+    else
+    {
+        hr = stub_manager_register_disconnect(manager, sink, context, cookie);
+        stub_manager_int_release(manager);
+    }
+    apartment_release(apt);
+    return hr;
+}
+
+/******************************************************************************
+ *            InternalCoUnregisterDisconnectCallback    (combase.@)
+ */
+HRESULT WINAPI InternalCoUnregisterDisconnectCallback(void *cookie)
+{
+    TRACE("%p\n", cookie);
+    return stub_manager_unregister_disconnect(cookie);
 }
 
 /******************************************************************************

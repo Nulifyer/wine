@@ -18,6 +18,7 @@
  */
 #define COBJMACROS
 #include "objbase.h"
+#include "cguid.h"
 #include "ctxtcall.h"
 #include "comsvcs.h"
 #include "initguid.h"
@@ -51,6 +52,35 @@ struct activatable_class_data
     DWORD module_offset;
     DWORD threading_model;
 };
+
+struct activation_factory_registration;
+
+struct activation_factory_entry
+{
+    struct list entry;
+    IUnknown IUnknown_iface;
+    HSTRING classid;
+    PFNGETACTIVATIONFACTORY callback;
+    HMODULE module;
+    DWORD rpc_cookie;
+    void *rpc_context;
+    struct activation_factory_registration *registration;
+};
+
+struct activation_factory_registration
+{
+    LONG refs;
+    UINT32 count;
+    struct activation_factory_entry entries[1];
+};
+
+static SRWLOCK activation_factory_lock = SRWLOCK_INIT;
+static struct list activation_factory_list = LIST_INIT(activation_factory_list);
+
+static inline struct activation_factory_entry *impl_from_activation_factory_provider(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, struct activation_factory_entry, IUnknown_iface);
+}
 
 HRESULT package_get_class_path(const WCHAR *classid, WCHAR **path);
 BOOL WINAPI QuirkIsEnabled(void *quirk);
@@ -144,6 +174,211 @@ done:
     return hr;
 }
 
+static ULONG activation_factory_registration_release(struct activation_factory_registration *registration)
+{
+    LONG refs;
+    UINT32 i;
+
+    if ((refs = InterlockedDecrement(&registration->refs))) return refs;
+
+    for (i = 0; i < registration->count; ++i)
+    {
+        WindowsDeleteString(registration->entries[i].classid);
+        if (registration->entries[i].module) FreeLibrary(registration->entries[i].module);
+    }
+    free(registration);
+    return 0;
+}
+
+static HRESULT get_activation_factory_from_callback(struct activation_factory_entry *entry,
+        REFIID iid, void **factory)
+{
+    IActivationFactory *activation_factory = NULL;
+    HRESULT hr;
+
+    hr = entry->callback(entry->classid, &activation_factory);
+    if (SUCCEEDED(hr))
+    {
+        if (activation_factory)
+            hr = IActivationFactory_QueryInterface(activation_factory, iid, factory);
+        else
+            hr = E_UNEXPECTED;
+    }
+    if (activation_factory) IActivationFactory_Release(activation_factory);
+    return hr;
+}
+
+static HRESULT WINAPI activation_factory_provider_QueryInterface(IUnknown *iface, REFIID iid, void **out)
+{
+    struct activation_factory_entry *entry = impl_from_activation_factory_provider(iface);
+
+    TRACE("provider %s query %s\n", debugstr_hstring(entry->classid), debugstr_guid(iid));
+
+    if (!out) return E_POINTER;
+    *out = NULL;
+
+    if (IsEqualIID(iid, &IID_IUnknown))
+    {
+        *out = iface;
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+
+    /* Keep the provider on the standard COM marshaler. The object returned by
+     * the class callback may choose its own marshaler after the remote client
+     * asks for the requested factory interface. */
+    if (IsEqualIID(iid, &IID_IProxyManager) || IsEqualIID(iid, &IID_IMarshal) ||
+            IsEqualIID(iid, &IID_IMarshal2) ||
+            IsEqualIID(iid, &IID_IStdMarshalInfo) || IsEqualIID(iid, &IID_IExternalConnection) ||
+            IsEqualIID(iid, &IID_IAgileObject) || IsEqualIID(iid, &IID_INoMarshal))
+        return E_NOINTERFACE;
+
+    return get_activation_factory_from_callback(entry, iid, out);
+}
+
+static ULONG WINAPI activation_factory_provider_AddRef(IUnknown *iface)
+{
+    struct activation_factory_entry *entry = impl_from_activation_factory_provider(iface);
+    return InterlockedIncrement(&entry->registration->refs);
+}
+
+static ULONG WINAPI activation_factory_provider_Release(IUnknown *iface)
+{
+    struct activation_factory_entry *entry = impl_from_activation_factory_provider(iface);
+    return activation_factory_registration_release(entry->registration);
+}
+
+static const IUnknownVtbl activation_factory_provider_vtbl =
+{
+    activation_factory_provider_QueryInterface,
+    activation_factory_provider_AddRef,
+    activation_factory_provider_Release,
+};
+
+static HRESULT create_stream_from_mip(const MInterfacePointer *mip, IStream **stream)
+{
+    LARGE_INTEGER zero = {{0}};
+    ULONG written;
+    HRESULT hr;
+
+    if (FAILED(hr = CreateStreamOnHGlobal(NULL, TRUE, stream))) return hr;
+    if (FAILED(hr = IStream_Write(*stream, mip->abData, mip->ulCntData, &written)) ||
+            written != mip->ulCntData)
+    {
+        if (SUCCEEDED(hr)) hr = STG_E_WRITEFAULT;
+        IStream_Release(*stream);
+        *stream = NULL;
+        return hr;
+    }
+    if (FAILED(hr = IStream_Seek(*stream, zero, STREAM_SEEK_SET, NULL)))
+    {
+        IStream_Release(*stream);
+        *stream = NULL;
+    }
+    return hr;
+}
+
+static HRESULT marshal_activation_factory_provider(IUnknown *provider, MInterfacePointer **mip)
+{
+    LARGE_INTEGER zero = {{0}};
+    IStream *stream = NULL;
+    HGLOBAL global;
+    SIZE_T size;
+    void *data;
+    HRESULT hr;
+
+    *mip = NULL;
+    if (FAILED(hr = CreateStreamOnHGlobal(NULL, TRUE, &stream))) return hr;
+    if (FAILED(hr = CoMarshalInterface(stream, &IID_IUnknown, provider,
+            MSHCTX_LOCAL | MSHCTX_NOSHAREDMEM, NULL, MSHLFLAGS_TABLESTRONG))) goto done;
+    if (FAILED(hr = GetHGlobalFromStream(stream, &global))) goto release_marshal;
+    if ((size = GlobalSize(global)) > ULONG_MAX || !(data = GlobalLock(global)))
+    {
+        hr = size > ULONG_MAX ? E_OUTOFMEMORY : HRESULT_FROM_WIN32(GetLastError());
+        goto release_marshal;
+    }
+    if (!(*mip = malloc(FIELD_OFFSET(MInterfacePointer, abData[size]))))
+        hr = E_OUTOFMEMORY;
+    else
+    {
+        (*mip)->ulCntData = size;
+        memcpy((*mip)->abData, data, size);
+        hr = S_OK;
+    }
+    GlobalUnlock(global);
+    if (SUCCEEDED(hr)) goto done;
+
+release_marshal:
+    IStream_Seek(stream, zero, STREAM_SEEK_SET, NULL);
+    CoReleaseMarshalData(stream);
+done:
+    IStream_Release(stream);
+    return hr;
+}
+
+static HRESULT release_marshaled_activation_factory(MInterfacePointer *mip)
+{
+    IStream *stream;
+    HRESULT hr;
+
+    if (FAILED(hr = create_stream_from_mip(mip, &stream))) return hr;
+    hr = CoReleaseMarshalData(stream);
+    IStream_Release(stream);
+    return hr;
+}
+
+static HRESULT get_remote_activation_factory(HSTRING classid, REFIID iid, void **factory, BOOL *found)
+{
+    MInterfacePointer *mip = NULL;
+    IUnknown *provider = NULL;
+    IStream *stream = NULL;
+    HRESULT hr;
+
+    *found = FALSE;
+    hr = rpc_get_activation_factory(WindowsGetStringRawBuffer(classid, NULL), &mip);
+    TRACE("shared activation lookup %s returned %#lx\n", debugstr_hstring(classid), hr);
+    if (hr == REGDB_E_CLASSNOTREG) return hr;
+    if (FAILED(hr)) return hr;
+    *found = TRUE;
+
+    if (SUCCEEDED(hr = create_stream_from_mip(mip, &stream)))
+        hr = CoUnmarshalInterface(stream, &IID_IUnknown, (void **)&provider);
+    if (SUCCEEDED(hr)) hr = IUnknown_QueryInterface(provider, iid, factory);
+
+    if (provider) IUnknown_Release(provider);
+    if (stream) IStream_Release(stream);
+    free(mip);
+    return hr;
+}
+
+static HRESULT get_registered_activation_factory(HSTRING classid, REFIID iid, void **factory, BOOL *found)
+{
+    struct activation_factory_registration *registration = NULL;
+    struct activation_factory_entry *entry;
+    INT32 order;
+    HRESULT hr;
+
+    *found = FALSE;
+
+    AcquireSRWLockShared(&activation_factory_lock);
+    LIST_FOR_EACH_ENTRY(entry, &activation_factory_list, struct activation_factory_entry, entry)
+    {
+        if (FAILED(WindowsCompareStringOrdinal(entry->classid, classid, &order)) || order) continue;
+
+        registration = entry->registration;
+        InterlockedIncrement(&registration->refs);
+        *found = TRUE;
+        break;
+    }
+    ReleaseSRWLockShared(&activation_factory_lock);
+
+    if (!registration) return REGDB_E_CLASSNOTREG;
+
+    hr = get_activation_factory_from_callback(entry, iid, factory);
+    activation_factory_registration_release(registration);
+    return hr;
+}
+
 
 /***********************************************************************
  *      RoInitialize (combase.@)
@@ -199,6 +434,7 @@ HRESULT WINAPI DECLSPEC_HOTPATCH RoGetActivationFactory(HSTRING classid, REFIID 
     IActivationFactory *factory;
     WCHAR *library;
     HMODULE module;
+    BOOL found;
     HRESULT hr;
 
     FIXME("(%s, %s, %p): semi-stub\n", debugstr_hstring(classid), debugstr_guid(iid), class_factory);
@@ -207,6 +443,11 @@ HRESULT WINAPI DECLSPEC_HOTPATCH RoGetActivationFactory(HSTRING classid, REFIID 
         return E_INVALIDARG;
 
     if (FAILED(hr = ensure_mta()))
+        return hr;
+
+    if (classid && (SUCCEEDED(hr = get_registered_activation_factory(classid, iid, class_factory, &found)) || found))
+        return hr;
+    if (classid && (SUCCEEDED(hr = get_remote_activation_factory(classid, iid, class_factory, &found)) || found))
         return hr;
 
     hr = get_library_for_classid(WindowsGetStringRawBuffer(classid, NULL), &library);
@@ -582,9 +823,152 @@ HRESULT WINAPI RoGetServerActivatableClasses(HSTRING name, HSTRING **classes, DW
 HRESULT WINAPI RoRegisterActivationFactories(HSTRING *classes, PFNGETACTIVATIONFACTORY *callbacks,
                                              UINT32 count, RO_REGISTRATION_COOKIE *cookie)
 {
-    FIXME("(%p, %p, %d, %p): stub\n", classes, callbacks, count, cookie);
+    struct activation_factory_registration *registration;
+    struct activation_factory_entry *entry;
+    MInterfacePointer *mip = NULL;
+    struct apartment *apt;
+    SIZE_T size;
+    UINT32 i, j;
+    HRESULT hr;
 
+    TRACE("(%p, %p, %u, %p)\n", classes, callbacks, count, cookie);
+
+    if (!cookie) return E_POINTER;
+    *cookie = NULL;
+    if (!classes || !callbacks || !count) return E_INVALIDARG;
+
+    if (!(apt = apartment_get_current_or_mta())) return CO_E_NOTINITIALIZED;
+    apartment_release(apt);
+
+    size = count * sizeof(*registration->entries);
+    if (size / sizeof(*registration->entries) != count ||
+            size > SIZE_MAX - offsetof(struct activation_factory_registration, entries))
+        return E_OUTOFMEMORY;
+    size += offsetof(struct activation_factory_registration, entries);
+    if (!(registration = calloc(1, size))) return E_OUTOFMEMORY;
+
+    registration->refs = 1;
+    registration->count = count;
+    for (i = 0; i < count; ++i)
+    {
+        entry = &registration->entries[i];
+        entry->IUnknown_iface.lpVtbl = &activation_factory_provider_vtbl;
+        entry->callback = callbacks[i];
+        entry->registration = registration;
+        if (!classes[i] || !callbacks[i])
+        {
+            hr = E_INVALIDARG;
+            goto failed;
+        }
+        if (FAILED(hr = WindowsDuplicateString(classes[i], &entry->classid))) goto failed;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                (const WCHAR *)(ULONG_PTR)callbacks[i], &entry->module))
+        {
+            hr = HRESULT_FROM_WIN32(GetLastError());
+            goto failed;
+        }
+        for (j = 0; j < i; ++j)
+        {
+            INT32 order;
+
+            if (SUCCEEDED(WindowsCompareStringOrdinal(registration->entries[j].classid, classes[i], &order)) && !order)
+            {
+                hr = CO_E_ALREADYINITIALIZED;
+                goto failed;
+            }
+        }
+    }
+
+    for (i = 0; i < count; ++i)
+    {
+        entry = &registration->entries[i];
+        if (FAILED(hr = marshal_activation_factory_provider(&entry->IUnknown_iface, &mip))) goto failed;
+        hr = rpc_register_activation_factory(WindowsGetStringRawBuffer(entry->classid, NULL), mip,
+                &entry->rpc_cookie, &entry->rpc_context);
+        if (FAILED(hr))
+        {
+            release_marshaled_activation_factory(mip);
+            free(mip);
+            mip = NULL;
+            goto failed;
+        }
+        TRACE("published activation factory %s with cookie %lu\n",
+                debugstr_hstring(entry->classid), entry->rpc_cookie);
+        free(mip);
+        mip = NULL;
+    }
+
+    AcquireSRWLockExclusive(&activation_factory_lock);
+    LIST_FOR_EACH_ENTRY(entry, &activation_factory_list, struct activation_factory_entry, entry)
+    {
+        for (i = 0; i < count; ++i)
+        {
+            INT32 order;
+
+            if (SUCCEEDED(WindowsCompareStringOrdinal(entry->classid, classes[i], &order)) && !order)
+            {
+                ReleaseSRWLockExclusive(&activation_factory_lock);
+                hr = CO_E_ALREADYINITIALIZED;
+                goto failed;
+            }
+        }
+    }
+    for (i = 0; i < count; ++i)
+        list_add_tail(&activation_factory_list, &registration->entries[i].entry);
+    ReleaseSRWLockExclusive(&activation_factory_lock);
+
+    *cookie = (RO_REGISTRATION_COOKIE)registration;
     return S_OK;
+
+failed:
+    free(mip);
+    for (i = 0; i < count; ++i)
+    {
+        MInterfacePointer *registered_mip = NULL;
+
+        if (registration->entries[i].rpc_cookie &&
+                SUCCEEDED(rpc_revoke_activation_factory(registration->entries[i].rpc_cookie,
+                        &registration->entries[i].rpc_context, &registered_mip)))
+        {
+            release_marshaled_activation_factory(registered_mip);
+            free(registered_mip);
+        }
+    }
+    activation_factory_registration_release(registration);
+    return hr;
+}
+
+/***********************************************************************
+ *      RoRevokeActivationFactories (combase.@)
+ */
+void WINAPI RoRevokeActivationFactories(RO_REGISTRATION_COOKIE cookie)
+{
+    struct activation_factory_registration *registration =
+            (struct activation_factory_registration *)cookie;
+    UINT32 i;
+
+    TRACE("(%p)\n", cookie);
+
+    if (!registration) return;
+
+    AcquireSRWLockExclusive(&activation_factory_lock);
+    for (i = 0; i < registration->count; ++i)
+        list_remove(&registration->entries[i].entry);
+    ReleaseSRWLockExclusive(&activation_factory_lock);
+
+    for (i = 0; i < registration->count; ++i)
+    {
+        MInterfacePointer *mip = NULL;
+
+        if (SUCCEEDED(rpc_revoke_activation_factory(registration->entries[i].rpc_cookie,
+                &registration->entries[i].rpc_context, &mip)))
+        {
+            release_marshaled_activation_factory(mip);
+            free(mip);
+        }
+    }
+
+    activation_factory_registration_release(registration);
 }
 
 struct restricted_error_info

@@ -47,6 +47,22 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
+struct disconnect_callback
+{
+    struct list entry;
+    struct stub_manager *manager;
+    IUnknown *sink;
+    void *context;
+};
+
+struct disconnect_sink_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(IUnknown *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(IUnknown *);
+    ULONG (WINAPI *Release)(IUnknown *);
+    void (WINAPI *OnDisconnect)(IUnknown *, void *);
+};
+
 /* generates an ipid in the following format (similar to native version):
  * Data1 = apartment-local ipid counter
  * Data2 = apartment creator thread ID, or 0 for an MTA.
@@ -189,6 +205,7 @@ static struct stub_manager *new_stub_manager(struct apartment *apt, IUnknown *ob
     if (!sm) return NULL;
 
     list_init(&sm->ifstubs);
+    list_init(&sm->disconnect_callbacks);
 
     InitializeCriticalSectionEx(&sm->lock, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
     sm->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": stub_manager");
@@ -244,6 +261,8 @@ static struct stub_manager *new_stub_manager(struct apartment *apt, IUnknown *ob
 
 void stub_manager_disconnect(struct stub_manager *m)
 {
+    struct disconnect_callback *callback;
+    struct list *cursor;
     struct ifstub *ifstub;
 
     EnterCriticalSection(&m->lock);
@@ -254,7 +273,111 @@ void stub_manager_disconnect(struct stub_manager *m)
 
         m->disconnected = TRUE;
     }
+
+    while ((cursor = list_head(&m->disconnect_callbacks)))
+    {
+        const struct disconnect_sink_vtbl *vtbl;
+        IUnknown *sink;
+        void *context;
+
+        callback = LIST_ENTRY(cursor, struct disconnect_callback, entry);
+        vtbl = (const struct disconnect_sink_vtbl *)callback->sink->lpVtbl;
+        sink = callback->sink;
+        context = callback->context;
+
+        list_remove(&callback->entry);
+        callback->sink = NULL;
+        LeaveCriticalSection(&m->lock);
+
+        vtbl->OnDisconnect(sink, context);
+        IUnknown_Release(sink);
+        free(callback);
+
+        EnterCriticalSection(&m->lock);
+    }
     LeaveCriticalSection(&m->lock);
+}
+
+HRESULT apartment_disconnect_stub_managers(struct apartment *apt)
+{
+    struct stub_manager **managers, *manager;
+    SIZE_T count = 0, i = 0;
+
+    EnterCriticalSection(&apt->cs);
+    LIST_FOR_EACH_ENTRY(manager, &apt->stubmgrs, struct stub_manager, entry) ++count;
+    if (!(managers = calloc(count, sizeof(*managers))) && count)
+    {
+        LeaveCriticalSection(&apt->cs);
+        return E_OUTOFMEMORY;
+    }
+    LIST_FOR_EACH_ENTRY(manager, &apt->stubmgrs, struct stub_manager, entry)
+    {
+        ++manager->refs;
+        managers[i++] = manager;
+    }
+    LeaveCriticalSection(&apt->cs);
+
+    for (i = 0; i < count; ++i)
+    {
+        stub_manager_disconnect(managers[i]);
+        stub_manager_int_release(managers[i]);
+    }
+    free(managers);
+    return S_OK;
+}
+
+HRESULT stub_manager_register_disconnect(struct stub_manager *m, IUnknown *sink, void *context, void **cookie)
+{
+    struct disconnect_callback *callback;
+
+    if (!sink || !cookie) return E_INVALIDARG;
+    *cookie = NULL;
+
+    if (!(callback = malloc(sizeof(*callback)))) return E_OUTOFMEMORY;
+    callback->manager = m;
+    callback->sink = sink;
+    callback->context = context;
+    IUnknown_AddRef(sink);
+
+    EnterCriticalSection(&m->lock);
+    if (m->disconnected)
+    {
+        LeaveCriticalSection(&m->lock);
+        IUnknown_Release(sink);
+        free(callback);
+        return E_UNEXPECTED;
+    }
+    list_add_head(&m->disconnect_callbacks, &callback->entry);
+    LeaveCriticalSection(&m->lock);
+
+    *cookie = callback;
+    return S_OK;
+}
+
+HRESULT stub_manager_unregister_disconnect(void *cookie)
+{
+    struct disconnect_callback *callback = cookie;
+    struct stub_manager *manager;
+    IUnknown *sink;
+
+    if (!callback) return E_INVALIDARG;
+    manager = callback->manager;
+
+    EnterCriticalSection(&manager->lock);
+    sink = callback->sink;
+    if (sink)
+    {
+        list_remove(&callback->entry);
+        callback->sink = NULL;
+    }
+    LeaveCriticalSection(&manager->lock);
+
+    if (sink)
+    {
+        IUnknown_Release(sink);
+        free(callback);
+    }
+    return S_OK;
 }
 
 /* caller must remove stub manager from apartment prior to calling this function */
@@ -263,6 +386,8 @@ static void stub_manager_delete(struct stub_manager *m)
     struct list *cursor;
 
     TRACE("destroying %p (oid=%s)\n", m, wine_dbgstr_longlong(m->oid));
+
+    stub_manager_disconnect(m);
 
     /* release every ifstub */
     while ((cursor = list_head(&m->ifstubs)))

@@ -45,6 +45,9 @@ extern "C" {
 HRESULT WINAPI RoActivateInstance(HSTRING classid, IInspectable **instance);
 HRESULT WINAPI RoGetActivationFactory(HSTRING classid, REFIID iid, void **class_factory);
 HRESULT WINAPI RoInitialize(RO_INIT_TYPE type);
+HRESULT WINAPI RoRegisterActivationFactories(HSTRING *classes, PFNGETACTIVATIONFACTORY *callbacks,
+                                              UINT32 count, RO_REGISTRATION_COOKIE *cookie);
+void WINAPI RoRevokeActivationFactories(RO_REGISTRATION_COOKIE cookie);
 void WINAPI RoUninitialize(void);
 HRESULT WINAPI RoGetApartmentIdentifier(UINT64 *identifier);
 

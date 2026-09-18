@@ -53,6 +53,7 @@ interface Irot
 
 	typedef handle_t IrotHandle;
 	typedef [context_handle] void *IrotContextHandle;
+	typedef [context_handle] void *IrotActivationContextHandle;
 
 	HRESULT IrotRegister(
 		[in]  IrotHandle h,
@@ -94,4 +95,22 @@ interface Irot
 	HRESULT IrotEnumRunning(
 		[in]  IrotHandle h,
 		[out] PInterfaceList *list);
+
+	HRESULT IrotRegisterActivationFactory(
+		[in]  IrotHandle h,
+		[in, string] const WCHAR *classid,
+		[in]  const InterfaceData *object,
+		[out] IrotCookie *cookie,
+		[out] IrotActivationContextHandle *ctxt_handle);
+
+	HRESULT IrotRevokeActivationFactory(
+		[in]  IrotHandle h,
+		[in]  IrotCookie cookie,
+		[in, out] IrotActivationContextHandle *ctxt_handle,
+		[out] PInterfaceData *object);
+
+	HRESULT IrotGetActivationFactory(
+		[in]  IrotHandle h,
+		[in, string] const WCHAR *classid,
+		[out] PInterfaceData *object);
 }
