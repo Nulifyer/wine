@@ -1066,6 +1066,24 @@ todo_wine {
     ok(PSFactoryBuffer.RefCount == facbuf_refs, "factory buffer refs %ld orig %ld\n", PSFactoryBuffer.RefCount, facbuf_refs);
 }
 
+static void test_NdrStubCall3(IPSFactoryBuffer *ppsf)
+{
+    static const RPC_SYNTAX_IDENTIFIER unknown_syntax =
+        {{0x12345678, 0x1234, 0x5678, {0x90, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67}}, {1, 0}};
+    IUnknownVtbl *orig_vtbl = &connect_test_orig_vtbl;
+    IUnknown *obj = (IUnknown *)&orig_vtbl;
+    IRpcStubBuffer *stub = create_stub(ppsf, &IID_if1, obj, S_OK);
+    RPC_MESSAGE msg = {0};
+    DWORD phase = STUB_UNMARSHAL;
+    LONG ret;
+
+    msg.TransferSyntax = (RPC_SYNTAX_IDENTIFIER *)&unknown_syntax;
+    ret = NdrStubCall3(stub, NULL, &msg, &phase);
+    ok(ret == HRESULT_FROM_WIN32(RPC_X_WRONG_STUB_VERSION), "got %#lx\n", ret);
+
+    IRpcStubBuffer_Release(stub);
+}
+
 static HRESULT WINAPI delegating_invoke_test_QI(ITypeLib *pUnk, REFIID iid, void** ppv)
 {
 
@@ -1701,6 +1719,7 @@ START_TEST( cstub )
     test_Connect(ppsf);
     test_Disconnect(ppsf);
     test_Release(ppsf);
+    test_NdrStubCall3(ppsf);
     test_delegating_Invoke(ppsf);
     test_compact_delegating_factory();
     test_NdrDllRegisterProxy();

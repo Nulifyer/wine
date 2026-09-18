@@ -1251,6 +1251,12 @@ static size_t get_retval_size(MIDL_STUB_MESSAGE *stub_msg, PFORMAT_STRING format
     return 0;
 }
 
+static const RPC_SYNTAX_IDENTIFIER ndr_syntax_id =
+    {{0x8a885d04, 0x1ceb, 0x11c9, {0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48, 0x60}}, {2, 0}};
+
+static const RPC_SYNTAX_IDENTIFIER ndr64_syntax_id =
+    {{0x71710533, 0xbeba, 0x4937, {0x83, 0x19, 0xb5, 0xdb, 0xef, 0x9c, 0xcc, 0x36}}, {1, 0}};
+
 /***********************************************************************
  *            NdrStubCall2 [RPCRT4.@]
  *
@@ -1512,6 +1518,48 @@ LONG WINAPI NdrStubCall2(
     free(args);
 
     return S_OK;
+}
+
+/***********************************************************************
+ *            NdrStubCall3 [RPCRT4.@]
+ *
+ * Selects the interpreter for stubs generated with multiple transfer
+ * syntaxes.  The classic NDR syntax uses the existing NdrStubCall2
+ * interpreter.  NDR64 format strings are not interpreted yet.
+ */
+LONG WINAPI NdrStubCall3(
+    struct IRpcStubBuffer *pThis,
+    struct IRpcChannelBuffer *pChannel,
+    PRPC_MESSAGE pRpcMsg,
+    DWORD *pdwStubPhase)
+{
+    const MIDL_SERVER_INFO *server_info;
+    ULONG_PTR i;
+
+    TRACE("pThis %p, pChannel %p, pRpcMsg %p, pdwStubPhase %p\n",
+            pThis, pChannel, pRpcMsg, pdwStubPhase);
+
+    if (!pRpcMsg->TransferSyntax ||
+        !memcmp(pRpcMsg->TransferSyntax, &ndr_syntax_id, sizeof(ndr_syntax_id)))
+        return NdrStubCall2(pThis, pChannel, pRpcMsg, pdwStubPhase);
+
+    if (pThis)
+        server_info = CStdStubBuffer_GetServerInfo(pThis);
+    else
+        server_info = ((RPC_SERVER_INTERFACE *)pRpcMsg->RpcInterfaceInformation)->InterpreterInfo;
+
+    for (i = 0; i < server_info->nCount; ++i)
+    {
+        const MIDL_SYNTAX_INFO *syntax_info = &server_info->pSyntaxInfo[i];
+
+        if (!memcmp(&syntax_info->TransferSyntax, &ndr64_syntax_id, sizeof(ndr64_syntax_id)))
+        {
+            FIXME("NDR64 syntax is not supported.\n");
+            return HRESULT_FROM_WIN32(RPC_X_WRONG_STUB_VERSION);
+        }
+    }
+
+    return HRESULT_FROM_WIN32(RPC_X_WRONG_STUB_VERSION);
 }
 
 /***********************************************************************
@@ -1955,9 +2003,6 @@ RPCRTAPI LONG RPC_ENTRY NdrAsyncStubCall(struct IRpcStubBuffer* pThis,
     FIXME("unimplemented, expect crash!\n");
     return 0;
 }
-
-static const RPC_SYNTAX_IDENTIFIER ndr_syntax_id =
-    {{0x8a885d04, 0x1ceb, 0x11c9, {0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48, 0x60}}, {2, 0}};
 
 static void ndr_async_server_call(PRPC_MESSAGE pRpcMsg, const MIDL_SYNTAX_INFO *syntax_info)
 {
