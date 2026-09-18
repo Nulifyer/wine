@@ -2563,8 +2563,12 @@ struct d3d_shader_resource_view *unsafe_impl_from_ID3D11ShaderResourceView(ID3D1
 {
     if (!iface)
         return NULL;
-    assert(iface->lpVtbl == &d3d11_shader_resource_view_vtbl);
-    return impl_from_ID3D11ShaderResourceView(iface);
+
+    if (iface->lpVtbl == &d3d11_shader_resource_view_vtbl)
+        return impl_from_ID3D11ShaderResourceView(iface);
+
+    assert(iface->lpVtbl == (ID3D11ShaderResourceViewVtbl *)&d3d11_shader_resource_view1_vtbl);
+    return impl_from_ID3D11ShaderResourceView1((ID3D11ShaderResourceView1 *)iface);
 }
 
 struct d3d_shader_resource_view *unsafe_impl_from_ID3D10ShaderResourceView(ID3D10ShaderResourceView *iface)

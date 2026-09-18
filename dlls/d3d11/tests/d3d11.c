@@ -2737,8 +2737,9 @@ static void test_shader_resource_view1(void)
     D3D11_SHADER_RESOURCE_VIEW_DESC returned_desc;
     D3D11_TEXTURE2D_DESC texture_desc = {0};
     ID3D11ShaderResourceView1 *view1, *queried_view1;
-    ID3D11ShaderResourceView *view;
-    IUnknown *identity, *identity1;
+    ID3D11ShaderResourceView *view, *direct_view, *bound_view, *null_view = NULL;
+    ID3D11DeviceContext *context;
+    IUnknown *identity, *identity1, *bound_identity;
     ID3D11Resource *resource;
     ID3D11Texture2D *texture;
     ID3D11Device3 *device3;
@@ -2810,6 +2811,24 @@ static void test_shader_resource_view1(void)
     hr = ID3D11ShaderResourceView_QueryInterface(view, &IID_IUnknown, (void **)&identity);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(identity == identity1, "Got different identities %p and %p.\n", identity, identity1);
+
+    ID3D11Device_GetImmediateContext(device, &context);
+    direct_view = (ID3D11ShaderResourceView *)view1;
+    ID3D11DeviceContext_PSSetShaderResources(context, 0, 1, &direct_view);
+    bound_view = NULL;
+    ID3D11DeviceContext_PSGetShaderResources(context, 0, 1, &bound_view);
+    ok(!!bound_view, "Expected a bound shader resource view.\n");
+    if (bound_view)
+    {
+        hr = ID3D11ShaderResourceView_QueryInterface(bound_view, &IID_IUnknown, (void **)&bound_identity);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(bound_identity == identity1, "Got different identities %p and %p.\n", bound_identity, identity1);
+        IUnknown_Release(bound_identity);
+        ID3D11ShaderResourceView_Release(bound_view);
+    }
+    ID3D11DeviceContext_PSSetShaderResources(context, 0, 1, &null_view);
+    ID3D11DeviceContext_Release(context);
+
     IUnknown_Release(identity);
     IUnknown_Release(identity1);
 
