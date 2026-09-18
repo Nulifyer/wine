@@ -1862,6 +1862,35 @@ HRESULT CDECL wined3d_output_get_raster_status(const struct wined3d_output *outp
     return WINED3D_OK;
 }
 
+HRESULT CDECL wined3d_output_wait_for_vblank(const struct wined3d_output *output)
+{
+    LONGLONG ticks_per_frame, ticks_until_vblank;
+    LARGE_INTEGER counter, frequency, timeout;
+    struct wined3d_display_mode mode;
+    HRESULT hr;
+
+    TRACE("output %p.\n", output);
+
+    wined3d_mutex_lock();
+    hr = wined3d_output_get_display_mode(output, &mode, NULL);
+    wined3d_mutex_unlock();
+    if (FAILED(hr))
+        return hr;
+
+    if (!QueryPerformanceCounter(&counter) || !QueryPerformanceFrequency(&frequency))
+        return WINED3DERR_INVALIDCALL;
+    if (mode.refresh_rate == DEFAULT_REFRESH_RATE)
+        mode.refresh_rate = 60;
+    if (!(ticks_per_frame = frequency.QuadPart / mode.refresh_rate))
+        return WINED3DERR_INVALIDCALL;
+
+    ticks_until_vblank = ticks_per_frame - counter.QuadPart % ticks_per_frame;
+    timeout.QuadPart = -((ticks_until_vblank * 10000000 + frequency.QuadPart - 1) / frequency.QuadPart);
+    NtDelayExecution(FALSE, &timeout);
+
+    return WINED3D_OK;
+}
+
 HRESULT CDECL wined3d_check_depth_stencil_match(const struct wined3d_adapter *adapter,
         enum wined3d_device_type device_type, enum wined3d_format_id adapter_format_id,
         enum wined3d_format_id render_target_format_id, enum wined3d_format_id depth_stencil_format_id)
