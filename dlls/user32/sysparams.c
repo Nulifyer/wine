@@ -1116,6 +1116,7 @@ LONG WINAPI SetDisplayConfig(UINT32 path_info_count, DISPLAYCONFIG_PATH_INFO *pa
  */
 BOOL WINAPI DECLSPEC_HOTPATCH AdjustWindowRect( RECT *rect, DWORD style, BOOL menu )
 {
+    user_api_hook_ensure_loaded();
     TRACE( "(%s) %08lx %d\n", wine_dbgstr_rect( rect ), style, menu );
     return NtUserAdjustWindowRect( rect, style, menu, 0, GetDpiForSystem() );
 }
@@ -1126,6 +1127,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH AdjustWindowRect( RECT *rect, DWORD style, BOOL me
  */
 BOOL WINAPI DECLSPEC_HOTPATCH AdjustWindowRectEx( RECT *rect, DWORD style, BOOL menu, DWORD ex_style )
 {
+    user_api_hook_ensure_loaded();
     TRACE( "(%s) %08lx %d %08lx\n", wine_dbgstr_rect( rect ), style, menu, ex_style );
     return NtUserAdjustWindowRect( rect, style, menu, ex_style, GetDpiForSystem() );
 }
@@ -1136,6 +1138,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH AdjustWindowRectEx( RECT *rect, DWORD style, BOOL 
  */
 BOOL WINAPI DECLSPEC_HOTPATCH AdjustWindowRectExForDpi( RECT *rect, DWORD style, BOOL menu, DWORD ex_style, UINT dpi )
 {
+    user_api_hook_ensure_loaded();
     TRACE( "(%s) %08lx %d %08lx %u\n", wine_dbgstr_rect( rect ), style, menu, ex_style, dpi );
     return NtUserAdjustWindowRect( rect, style, menu, ex_style, dpi );
 }

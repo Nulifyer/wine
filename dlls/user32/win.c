@@ -30,6 +30,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(win);
 
 #define MAX_ATOM_LEN 255 /* from dlls/kernel32/atom.c */
 
+/***********************************************************************
+ *           SetWindowRgn   (USER32.@)
+ */
+int WINAPI SetWindowRgn( HWND hwnd, HRGN region, BOOL redraw )
+{
+    user_api_hook_ensure_loaded();
+    return NtUserSetWindowRgn( hwnd, region, redraw );
+}
+
 static const char *debugstr_us( const UNICODE_STRING *us )
 {
     if (!us) return "<null>";

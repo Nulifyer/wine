@@ -1014,6 +1014,7 @@ struct shared_cursor
 typedef volatile struct
 {
     unsigned int         flags;
+    unsigned int         user_api_hook_generation;
     struct shared_cursor cursor;
     unsigned char        keystate[256];
     unsigned __int64     monitor_serial;
@@ -8519,6 +8520,6 @@ union generic_reply
     struct register_manipulation_thread_reply register_manipulation_thread_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1021
+#define SERVER_PROTOCOL_VERSION 1022
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

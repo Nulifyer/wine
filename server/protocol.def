@@ -1030,6 +1030,7 @@ struct shared_cursor
 typedef volatile struct
 {
     unsigned int         flags;            /* desktop flags */
+    unsigned int         user_api_hook_generation; /* window-station user API hook generation */
     struct shared_cursor cursor;           /* global cursor information */
     unsigned char        keystate[256];    /* asynchronous key state */
     unsigned __int64     monitor_serial;   /* winstation monitor update counter */

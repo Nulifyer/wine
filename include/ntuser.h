@@ -121,6 +121,7 @@ struct dispatch_callback_params
 struct load_user_api_hook_params
 {
     UINT generation;
+    UINT registered;
     UINT module_offset;
     UINT module_len;
     UINT proc_offset;

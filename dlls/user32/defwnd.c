@@ -89,6 +89,7 @@ LRESULT WINAPI DefWindowProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     LRESULT result = 0;
     HWND full_handle;
 
+    user_api_hook_ensure_loaded();
     if (!(full_handle = WIN_IsCurrentProcess( hwnd )))
     {
         if (!IsWindow( hwnd )) return 0;
@@ -159,6 +160,7 @@ LRESULT WINAPI DefWindowProcW(
     LRESULT result = 0;
     HWND full_handle;
 
+    user_api_hook_ensure_loaded();
     if (!(full_handle = WIN_IsCurrentProcess( hwnd )))
     {
         if (!IsWindow( hwnd )) return 0;

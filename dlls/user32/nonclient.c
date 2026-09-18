@@ -30,6 +30,7 @@
  */
 BOOL WINAPI DrawCaption( HWND hwnd, HDC hdc, const RECT *rect, UINT flags )
 {
+    user_api_hook_ensure_loaded();
     return NtUserDrawCaptionTemp( hwnd, hdc, rect, 0, 0, NULL, flags & 0x103f );
 }
 

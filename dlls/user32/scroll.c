@@ -313,6 +313,7 @@ LRESULT ScrollBarWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetScrollInfo(HWND hwnd, INT nBar, LPSCROLLINFO info)
 {
+    user_api_hook_ensure_loaded();
     TRACE("hwnd=%p nBar=%d info=%p\n", hwnd, nBar, info);
 
     /* Refer SB_CTL requests to the window */
@@ -322,6 +323,26 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetScrollInfo(HWND hwnd, INT nBar, LPSCROLLINFO in
         return TRUE;
     }
     return NtUserGetScrollInfo( hwnd, nBar, info );
+}
+
+
+/*************************************************************************
+ *           SetScrollInfo   (USER32.@)
+ */
+INT WINAPI SetScrollInfo( HWND hwnd, INT bar, const SCROLLINFO *info, BOOL redraw )
+{
+    user_api_hook_ensure_loaded();
+    return NtUserSetScrollInfo( hwnd, bar, info, redraw );
+}
+
+
+/*************************************************************************
+ *           EnableScrollBar   (USER32.@)
+ */
+BOOL WINAPI EnableScrollBar( HWND hwnd, UINT bar, UINT flags )
+{
+    user_api_hook_ensure_loaded();
+    return NtUserEnableScrollBar( hwnd, bar, flags );
 }
 
 

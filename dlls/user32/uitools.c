@@ -1219,6 +1219,7 @@ static BOOL UITOOLS95_DrawFrameMenu(HDC dc, LPRECT r, UINT uFlags)
 BOOL WINAPI DrawFrameControl( HDC hdc, LPRECT rc, UINT uType,
                                   UINT uState )
 {
+    user_api_hook_ensure_loaded();
     switch(uType)
     {
     case DFC_BUTTON:

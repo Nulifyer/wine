@@ -78,6 +78,21 @@ static BOOL valid_user_api_hook_string( const UNICODE_STRING *str )
            str->Length <= str->MaximumLength && str->Length <= (MAX_PATH - 1) * sizeof(WCHAR);
 }
 
+static LONG user_api_hook_generation;
+static LONG user_api_hook_registered;
+
+static unsigned int get_user_api_hook_generation(void)
+{
+    struct object_lock lock = OBJECT_LOCK_INIT;
+    const desktop_shm_t *desktop_shm;
+    unsigned int generation = 0;
+    UINT status;
+
+    while ((status = get_shared_desktop( &lock, &desktop_shm )) == STATUS_PENDING)
+        generation = desktop_shm->user_api_hook_generation;
+    return status ? 0 : generation;
+}
+
 /***********************************************************************
  *           NtUserRegisterUserApiHook   (win32u.@)
  */
@@ -106,6 +121,7 @@ BOOL WINAPI NtUserRegisterUserApiHook( UNICODE_STRING *module64, UNICODE_STRING 
         ret = !wine_server_call_err( req );
     }
     SERVER_END_REQ;
+    TRACE( "registration %s\n", ret ? "succeeded" : "failed" );
     return ret;
 }
 
@@ -118,13 +134,20 @@ BOOL WINAPI NtUserLoadUserApiHook(void)
     struct load_user_api_hook_params *params;
     data_size_t lengths[4] = {0};
     data_size_t offsets[4], reply_size = 0;
-    unsigned int generation = 0;
+    unsigned int generation = get_user_api_hook_generation();
     void *ret_ptr = NULL;
     ULONG ret_len = 0;
     NTSTATUS status;
     BOOL registered = FALSE, ret = FALSE;
     size_t params_size;
     unsigned int i, module_index, proc_index;
+
+    if (generation && generation == InterlockedCompareExchange( &user_api_hook_generation, 0, 0 ))
+        return InterlockedCompareExchange( &user_api_hook_registered, 0, 0 );
+
+    TRACE( "observed generation %u (cached %d, registered %d)\n", generation,
+           InterlockedCompareExchange( &user_api_hook_generation, 0, 0 ),
+           InterlockedCompareExchange( &user_api_hook_registered, 0, 0 ) );
 
     SERVER_START_REQ( get_user_api_hook )
     {
@@ -142,7 +165,27 @@ BOOL WINAPI NtUserLoadUserApiHook(void)
         }
     }
     SERVER_END_REQ;
-    if (status || !registered) return FALSE;
+    if (status) return FALSE;
+
+    TRACE( "server generation %u is %s\n", generation,
+           registered ? "registered" : "unregistered" );
+
+    if (!registered)
+    {
+        struct load_user_api_hook_params empty = { .generation = generation, .registered = FALSE };
+
+        if (InterlockedCompareExchange( &user_api_hook_registered, 0, 0 ))
+        {
+            status = KeUserModeCallback( NtUserLoadUserApiHookCallback, &empty,
+                                         FIELD_OFFSET( struct load_user_api_hook_params, data ),
+                                         &ret_ptr, &ret_len );
+            if (status || ret_len != sizeof(ret) || !*(BOOL *)ret_ptr) return FALSE;
+            TRACE( "unloaded generation %u\n", generation );
+        }
+        InterlockedExchange( &user_api_hook_registered, FALSE );
+        InterlockedExchange( &user_api_hook_generation, generation );
+        return FALSE;
+    }
 
     offsets[0] = 0;
     for (i = 1; i < 4; ++i) offsets[i] = offsets[i - 1] + lengths[i - 1];
@@ -160,6 +203,7 @@ BOOL WINAPI NtUserLoadUserApiHook(void)
                   lengths[module_index] + sizeof(WCHAR) + lengths[proc_index] + sizeof(WCHAR);
     if (!(params = malloc( params_size ))) return FALSE;
     params->generation = generation;
+    params->registered = TRUE;
     params->module_offset = FIELD_OFFSET( struct load_user_api_hook_params, data );
     params->module_len = lengths[module_index];
     params->proc_offset = params->module_offset + params->module_len + sizeof(WCHAR);
@@ -173,6 +217,13 @@ BOOL WINAPI NtUserLoadUserApiHook(void)
                                  &ret_ptr, &ret_len );
     if (!status && ret_len == sizeof(ret)) ret = *(BOOL *)ret_ptr;
     free( params );
+    if (ret)
+    {
+        InterlockedExchange( &user_api_hook_registered, TRUE );
+        InterlockedExchange( &user_api_hook_generation, generation );
+        TRACE( "loaded generation %u\n", generation );
+    }
+    else TRACE( "failed to load generation %u\n", generation );
     return ret;
 }
 
@@ -188,6 +239,7 @@ BOOL WINAPI NtUserUnregisterUserApiHook(void)
         ret = !wine_server_call_err( req );
     }
     SERVER_END_REQ;
+    TRACE( "unregistration %s\n", ret ? "succeeded" : "failed" );
     return ret;
 }
 

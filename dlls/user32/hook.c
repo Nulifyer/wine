@@ -141,7 +141,6 @@ typedef BOOL (CDECL *user_api_hook_init_proc)( DWORD mode, struct modern_user_ap
 static HMODULE modern_hook_module;
 static user_api_hook_init_proc modern_hook_init;
 static UINT modern_hook_generation;
-static BOOL modern_hook_checked;
 static BOOL modern_hook_loading;
 static struct modern_user_api_hook modern_hook_table;
 
@@ -237,8 +236,29 @@ BOOL user_api_hook_load( const struct load_user_api_hook_params *params, ULONG s
     char proc[MAX_PATH];
     BOOL ret = FALSE;
 
-    if (!params || size < FIELD_OFFSET( struct load_user_api_hook_params, data ) ||
-        params->module_offset > size || params->module_len > size - params->module_offset ||
+    if (!params || size < FIELD_OFFSET( struct load_user_api_hook_params, data )) return FALSE;
+
+    if (!params->registered)
+    {
+        TRACE( "unloading modern user API hook generation %u\n", params->generation );
+        EnterCriticalSection( &api_hook_cs );
+        if (modern_hook_loading)
+        {
+            LeaveCriticalSection( &api_hook_cs );
+            return FALSE;
+        }
+        modern_hook_loading = TRUE;
+        LeaveCriticalSection( &api_hook_cs );
+
+        unload_modern_user_api_hook( 1 );
+        EnterCriticalSection( &api_hook_cs );
+        modern_hook_generation = params->generation;
+        modern_hook_loading = FALSE;
+        LeaveCriticalSection( &api_hook_cs );
+        return TRUE;
+    }
+
+    if (params->module_offset > size || params->module_len > size - params->module_offset ||
         params->proc_offset > size || params->proc_len > size - params->proc_offset ||
         params->module_len > (MAX_PATH - 1) * sizeof(WCHAR) ||
         params->proc_len > (MAX_PATH - 1) * sizeof(WCHAR) ||
@@ -249,6 +269,9 @@ BOOL user_api_hook_load( const struct load_user_api_hook_params *params, ULONG s
     proc_name = (const WCHAR *)((const BYTE *)params + params->proc_offset);
     if (module_name[params->module_len / sizeof(WCHAR)] ||
         proc_name[params->proc_len / sizeof(WCHAR)]) return FALSE;
+
+    TRACE( "loading modern user API hook %s!%s generation %u\n",
+           debugstr_w(module_name), debugstr_w(proc_name), params->generation );
 
     EnterCriticalSection( &api_hook_cs );
     if (modern_hook_module && modern_hook_generation == params->generation)
@@ -261,7 +284,6 @@ BOOL user_api_hook_load( const struct load_user_api_hook_params *params, ULONG s
         LeaveCriticalSection( &api_hook_cs );
         return FALSE;
     }
-    modern_hook_checked = TRUE;
     modern_hook_loading = TRUE;
     LeaveCriticalSection( &api_hook_cs );
 
@@ -292,6 +314,8 @@ BOOL user_api_hook_load( const struct load_user_api_hook_params *params, ULONG s
     ret = TRUE;
 
 done:
+    TRACE( "modern user API hook generation %u load %s\n", params->generation,
+           ret ? "succeeded" : "failed" );
     EnterCriticalSection( &api_hook_cs );
     modern_hook_loading = FALSE;
     LeaveCriticalSection( &api_hook_cs );
@@ -304,11 +328,7 @@ void user_api_hook_ensure_loaded(void)
 
     if (RtlIsThreadWithinLoaderCallout()) return;
     EnterCriticalSection( &api_hook_cs );
-    if (!modern_hook_checked && !modern_hook_module && !modern_hook_loading)
-    {
-        modern_hook_checked = TRUE;
-        check = TRUE;
-    }
+    if (!modern_hook_loading) check = TRUE;
     LeaveCriticalSection( &api_hook_cs );
     if (check) NtUserLoadUserApiHook();
 }

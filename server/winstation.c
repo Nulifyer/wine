@@ -163,6 +163,22 @@ static bool winstation_init( struct object *obj, const void *init_data )
     return true;
 }
 
+/* Publish a user API hook generation change to every desktop in the window station. */
+static void update_user_api_hook_generation( struct winstation *winstation )
+{
+    struct desktop *desktop;
+
+    if (!++winstation->user_api_hook_generation) ++winstation->user_api_hook_generation;
+    LIST_FOR_EACH_ENTRY( desktop, &winstation->desktops, struct desktop, entry )
+    {
+        SHARED_WRITE_BEGIN( desktop->shared, desktop_shm_t )
+        {
+            shared->user_api_hook_generation = winstation->user_api_hook_generation;
+        }
+        SHARED_WRITE_END;
+    }
+}
+
 /* Register the process that owns the logon UI for this window station. */
 DECL_HANDLER(register_logon_process)
 {
@@ -222,7 +238,7 @@ void cleanup_process_winstation_state( struct process *process )
             memset( winstation->user_api_hook_len, 0, sizeof(winstation->user_api_hook_len) );
             free( winstation->user_api_hook_data );
             winstation->user_api_hook_data = NULL;
-            if (!++winstation->user_api_hook_generation) ++winstation->user_api_hook_generation;
+            update_user_api_hook_generation( winstation );
         }
     }
 }
@@ -401,6 +417,7 @@ static bool desktop_init( struct object *obj, const void *init_data )
     SHARED_WRITE_BEGIN( desktop->shared, desktop_shm_t )
     {
         shared->flags = flags;
+        shared->user_api_hook_generation = winstation->user_api_hook_generation;
         shared->cursor.x = 0;
         shared->cursor.y = 0;
         shared->cursor.last_change = 0;
@@ -834,7 +851,7 @@ DECL_HANDLER(register_user_api_hook)
     winstation->user_api_hook_size = get_req_data_size();
     memcpy( winstation->user_api_hook_len, lengths, sizeof(lengths) );
     winstation->user_api_hook_owner = current->process->id;
-    if (!++winstation->user_api_hook_generation) ++winstation->user_api_hook_generation;
+    update_user_api_hook_generation( winstation );
     reply->generation = winstation->user_api_hook_generation;
     release_object( winstation );
 }
@@ -880,7 +897,7 @@ DECL_HANDLER(unregister_user_api_hook)
     memset( winstation->user_api_hook_len, 0, sizeof(winstation->user_api_hook_len) );
     free( winstation->user_api_hook_data );
     winstation->user_api_hook_data = NULL;
-    if (!++winstation->user_api_hook_generation) ++winstation->user_api_hook_generation;
+    update_user_api_hook_generation( winstation );
     reply->generation = winstation->user_api_hook_generation;
     release_object( winstation );
 }
