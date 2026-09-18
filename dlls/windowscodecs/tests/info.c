@@ -103,6 +103,36 @@ static BOOL is_pixelformat(GUID *format)
     return SUCCEEDED(hr) && componenttype == WICPixelFormat;
 }
 
+static void test_png_decoder2_component_info(void)
+{
+    IWICBitmapDecoderInfo *decoder_info;
+    IWICComponentInfo *info;
+    CLSID clsid;
+    HRESULT hr;
+
+    hr = get_component_info(&CLSID_WICPngDecoder2, &info);
+    if (hr == REGDB_E_CLASSNOTREG)
+    {
+        win_skip("WIC PNG decoder 2 is not registered.\n");
+        return;
+    }
+    ok(hr == S_OK, "CreateComponentInfo failed, hr=%#lx.\n", hr);
+    if (FAILED(hr)) return;
+
+    hr = IWICComponentInfo_QueryInterface(info, &IID_IWICBitmapDecoderInfo,
+            (void **)&decoder_info);
+    ok(hr == S_OK, "QueryInterface failed, hr=%#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        hr = IWICBitmapDecoderInfo_GetCLSID(decoder_info, &clsid);
+        ok(hr == S_OK, "GetCLSID failed, hr=%#lx.\n", hr);
+        ok(IsEqualGUID(&CLSID_WICPngDecoder2, &clsid), "Unexpected CLSID %s.\n",
+                wine_dbgstr_guid(&clsid));
+        IWICBitmapDecoderInfo_Release(decoder_info);
+    }
+    IWICComponentInfo_Release(info);
+}
+
 static void test_decoder_info(void)
 {
     static const struct decoder_info_test
@@ -986,6 +1016,7 @@ START_TEST(info)
     }
 
     run_child_test("get_handler_info_cold_cache");
+    test_png_decoder2_component_info();
     test_decoder_info();
     test_encoder_info();
     test_reader_info();

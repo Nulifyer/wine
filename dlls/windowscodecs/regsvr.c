@@ -1544,6 +1544,17 @@ static struct regsvr_decoder const decoder_list[] = {
 	png_formats,
 	png_patterns
     },
+    {   &CLSID_WICPngDecoder2,
+	"The Wine Project",
+	"PNG Decoder 2",
+	"1.0.0.0",
+	&GUID_VendorMicrosoft,
+	&GUID_ContainerFormatPng,
+	"image/png",
+	".png",
+	png_formats,
+	png_patterns
+    },
     {   &CLSID_WICTiffDecoder,
         "The Wine Project",
         "TIFF Decoder",
