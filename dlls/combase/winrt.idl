@@ -12,7 +12,18 @@
 #pragma makedep proxy
 
 /*
- * IInspectable is the delegated base for Windows Runtime interfaces.  Keep
- * its proxy in combase's built-in proxy set, matching the native ownership.
+ * IInspectable is the delegated base for Windows Runtime interfaces and
+ * IActivationFactory is the standard factory contract.  Keep both proxies in
+ * combase's built-in proxy set, matching the native ownership.
  */
 #include "inspectable.idl"
+
+[
+    object,
+    uuid(00000035-0000-0000-c000-000000000046),
+    pointer_default(unique)
+]
+interface IActivationFactory : IInspectable
+{
+    HRESULT ActivateInstance([out] IInspectable **instance);
+}
