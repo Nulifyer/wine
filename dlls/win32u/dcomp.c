@@ -74,6 +74,17 @@ struct dcomp_connection_batch_view
     struct dcomposition_connection_batch *batch;
 };
 
+struct dcomp_protocol_block_header
+{
+    const void *next;
+    const void *previous;
+    UINT type;
+    UINT size;
+};
+
+#define DCOMP_PROTOCOL_MAX_SIZE 0x10000
+#define DCOMP_PROTOCOL_MAX_BLOCKS 4096
+
 static pthread_mutex_t dcomp_channel_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct list dcomp_channel_views = LIST_INIT( dcomp_channel_views );
 static struct list dcomp_connection_batch_views = LIST_INIT( dcomp_connection_batch_views );
@@ -224,6 +235,83 @@ static struct dcomp_connection_batch_view *find_dcomp_connection_batch_view( HAN
     LIST_FOR_EACH_ENTRY( view, &dcomp_connection_batch_views, struct dcomp_connection_batch_view, entry )
         if (view->connection == connection) return view;
     return NULL;
+}
+
+static NTSTATUS copy_dcomp_protocol_blocks( const void *list, BYTE **data,
+                                             data_size_t *data_size )
+{
+    struct dcomp_protocol_block_header header;
+    const void *next;
+    BYTE *new_data;
+    SIZE_T size = 0;
+    UINT count = 0;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    *data = NULL;
+    *data_size = 0;
+    if (!list) return STATUS_SUCCESS;
+
+    __TRY
+    {
+        memcpy( &next, list, sizeof(next) );
+    }
+    __EXCEPT
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+
+    while (next != list)
+    {
+        if (!next || count++ == DCOMP_PROTOCOL_MAX_BLOCKS)
+        {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        __TRY
+        {
+            memcpy( &header, next, sizeof(header) );
+        }
+        __EXCEPT
+        {
+            status = STATUS_INVALID_PARAMETER;
+        }
+        __ENDTRY
+        if (status) break;
+        if (header.size < 8 || (header.size & 3) ||
+            header.size > DCOMP_PROTOCOL_MAX_SIZE - size)
+        {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        if (!(new_data = realloc( *data, size + header.size )))
+        {
+            status = STATUS_NO_MEMORY;
+            break;
+        }
+        *data = new_data;
+        __TRY
+        {
+            memcpy( new_data + size, (const BYTE *)next + sizeof(header), header.size );
+        }
+        __EXCEPT
+        {
+            status = STATUS_INVALID_PARAMETER;
+        }
+        __ENDTRY
+        if (status) break;
+        size += header.size;
+        next = header.next;
+    }
+
+    if (status)
+    {
+        free( *data );
+        *data = NULL;
+        return status;
+    }
+    *data_size = size;
+    return STATUS_SUCCESS;
 }
 
 static UINT get_composition_refresh_rate(void)
@@ -933,44 +1021,64 @@ NTSTATUS WINAPI NtDCompositionGetDeletedResources( UINT channel, UINT capacity,
     return status;
 }
 
-NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *buffer,
-                                              ULONG length, HANDLE resource,
-                                              const void *resource_data, const UINT *resources,
+NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *state,
+                                              ULONG flags, HANDLE sync_object,
+                                              const void *protocol_blocks, const UINT *resources,
                                               UINT resource_count )
 {
     struct dcomp_channel_view *view;
+    data_size_t protocol_size = 0;
+    BYTE *protocol_data = NULL;
+    UINT committed_batch_id = 0;
+    BYTE committed_state = 0;
     NTSTATUS status;
 
-    TRACE( "channel %#x, batch_id %p, buffer %p, length %u, resource %p, resource_data %p, "
-           "resources %p, resource_count %u\n", channel, batch_id, buffer, length, resource,
-           resource_data, resources, resource_count );
+    TRACE( "channel %#x, batch_id %p, state %p, flags %#x, sync_object %p, "
+           "protocol_blocks %p, resources %p, resource_count %u\n", channel, batch_id, state,
+           flags, sync_object, protocol_blocks, resources, resource_count );
 
-    if (!batch_id) return STATUS_INVALID_PARAMETER;
-    if (resource || resource_data || resources || resource_count) return STATUS_NOT_SUPPORTED;
+    if (!state) return STATUS_INVALID_PARAMETER;
+    if (sync_object || resources || resource_count) return STATUS_NOT_SUPPORTED;
+    if ((status = copy_dcomp_protocol_blocks( protocol_blocks, &protocol_data, &protocol_size )))
+        return status;
 
     pthread_mutex_lock( &dcomp_channel_lock );
     view = find_dcomp_channel_view( channel );
     if (!view)
     {
         pthread_mutex_unlock( &dcomp_channel_lock );
+        free( protocol_data );
         return STATUS_ACCESS_DENIED;
-    }
-    if (buffer != view->address || length > view->size)
-    {
-        pthread_mutex_unlock( &dcomp_channel_lock );
-        return STATUS_INVALID_PARAMETER;
     }
 
     SERVER_START_REQ( commit_dcomp_channel )
     {
         req->channel = channel;
-        req->length = length;
-        wine_server_add_data( req, buffer, length );
+        req->protocol_blocks = !!protocol_blocks;
+        req->payload_size = protocol_size;
+        wine_server_add_data( req, protocol_data, protocol_size );
         status = wine_server_call( req );
-        if (!status) *batch_id = reply->batch_id;
+        if (!status)
+        {
+            committed_batch_id = reply->batch_id;
+            committed_state = reply->state;
+        }
     }
     SERVER_END_REQ;
     pthread_mutex_unlock( &dcomp_channel_lock );
+    free( protocol_data );
+    if (status) return status;
+
+    __TRY
+    {
+        if (batch_id) *batch_id = committed_batch_id;
+        *state = committed_state;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
     return status;
 }
 

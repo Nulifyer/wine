@@ -4239,13 +4239,15 @@ static void dump_get_dcomp_channel_batch_id_reply( const struct get_dcomp_channe
 static void dump_commit_dcomp_channel_request( const struct commit_dcomp_channel_request *req )
 {
     fprintf( stderr, " channel=%08x", req->channel );
-    dump_uint64( ", length=", &req->length );
+    fprintf( stderr, ", protocol_blocks=%08x", req->protocol_blocks );
+    dump_uint64( ", payload_size=", &req->payload_size );
     dump_varargs_bytes( ", data=", cur_size );
 }
 
 static void dump_commit_dcomp_channel_reply( const struct commit_dcomp_channel_reply *req )
 {
     fprintf( stderr, " batch_id=%08x", req->batch_id );
+    fprintf( stderr, ", state=%08x", req->state );
 }
 
 static void dump_get_d3dkmt_process_scheduling_priority_class_request( const struct get_d3dkmt_process_scheduling_priority_class_request *req )

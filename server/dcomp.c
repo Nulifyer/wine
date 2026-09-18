@@ -37,6 +37,7 @@
 
 #define TOKEN_MANAGER_SECTION_SIZE 0x1000
 #define DCOMP_CHANNEL_MAX_SIZE 0x1000000
+#define DCOMP_PROTOCOL_MAX_SIZE 0x10000
 
 struct dcomp_connection
 {
@@ -800,7 +801,12 @@ DECL_HANDLER(commit_dcomp_channel)
     data_size_t size = get_req_data_size();
 
     if (!(channel = get_dcomp_channel( req->channel ))) return;
-    if (req->length != size || size > channel->size)
+    if (req->payload_size != size || size > DCOMP_PROTOCOL_MAX_SIZE)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+    if (req->protocol_blocks && !process_has_dcomp_consumer_connection( current->process ))
     {
         set_error( STATUS_INVALID_PARAMETER );
         goto done;
@@ -816,6 +822,7 @@ DECL_HANDLER(commit_dcomp_channel)
     batch->size = size;
     list_add_tail( &channel->batches, &batch->entry );
     reply->batch_id = batch->id;
+    reply->state = 0;
     if (channel->connection &&
         queue_dcomp_record( channel->connection, DCOMP_RECORD_BATCH, channel->id, size,
                             0, 0, batch->data, batch->size ))

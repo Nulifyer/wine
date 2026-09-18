@@ -4957,13 +4957,15 @@ struct alpc_message_info
     unsigned int batch_id;
 @END
 
-/* Copy one command-buffer prefix into the server-owned commit queue. */
+/* Copy one validated DirectComposition protocol payload into the commit queue. */
 @REQ(commit_dcomp_channel)
-    unsigned int channel;      /* owner channel ID */
-    mem_size_t   length;       /* committed bytes from the shared buffer */
-    VARARG(data,bytes);        /* stable copy of the committed bytes */
+    unsigned int channel;          /* owner channel ID */
+    unsigned int protocol_blocks;  /* caller supplied the privileged block list */
+    mem_size_t   payload_size;     /* concatenated validated block payload bytes */
+    VARARG(data,bytes);            /* stable copy of protocol payload bytes */
 @REPLY
     unsigned int batch_id;
+    unsigned int state;
 @END
 
 /* Get process GPU scheduling policy after validating PROCESS_SET_INFORMATION access. */

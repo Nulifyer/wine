@@ -66,6 +66,42 @@ struct token_thread_context
     NTSTATUS status;
 };
 
+struct dcomp_test_protocol_list
+{
+    struct
+    {
+        void *next;
+        void *previous;
+    } head;
+    struct
+    {
+        void *next;
+        void *previous;
+        UINT type;
+        UINT size;
+        BYTE data[8];
+    } block;
+};
+
+static void init_dcomp_test_protocol_list( struct dcomp_test_protocol_list *list )
+{
+    memset( list, 0, sizeof(*list) );
+    list->head.next = &list->block;
+    list->head.previous = &list->block;
+    list->block.next = &list->head;
+    list->block.previous = &list->head;
+    list->block.type = 0x200;
+    list->block.size = sizeof(list->block.data);
+    list->block.data[0] = 0x12;
+    list->block.data[1] = 0x34;
+    list->block.data[2] = 0x56;
+    list->block.data[3] = 0x78;
+    list->block.data[4] = 0x9a;
+    list->block.data[5] = 0xbc;
+    list->block.data[6] = 0xde;
+    list->block.data[7] = 0xf0;
+}
+
 static DWORD WINAPI token_thread( void *arg )
 {
     struct token_thread_context *context = arg;
@@ -497,15 +533,18 @@ static void test_connection_lifetime(void)
 
 static void test_channel_lifetime(void)
 {
+    struct dcomp_test_protocol_list protocol_list;
     BYTE *buffer = (BYTE *)0xdeadbeef, *second_buffer = (BYTE *)0xdeadbeef;
     UINT size = 0x1000, second_size = 0x1000;
     UINT channel = 0xcccccccc, second_channel = 0xcccccccc;
     ULONG processed;
-    BYTE released;
+    BYTE released, state;
     UINT batch, selector;
     NTSTATUS status;
     unsigned int i;
     static const UINT flag_values[] = {0x10, 0x80, 0x90, 0xffffffff};
+
+    init_dcomp_test_protocol_list( &protocol_list );
 
     SetLastError( 0xdeadbeef );
     status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
@@ -617,11 +656,24 @@ static void test_channel_lifetime(void)
     }
 
     batch = 0xcccccccc;
+    state = 0xcc;
     SetLastError( 0xdeadbeef );
-    status = NtDCompositionCommitChannel( channel, &batch, buffer, 0, NULL, NULL, NULL, 0 );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
     ok( status == STATUS_SUCCESS, "got commit status %#lx\n", status );
     ok( batch == 2, "got commit batch %u\n", batch );
+    ok( !state, "got commit state %#x\n", state );
     ok( GetLastError() == 0xdeadbeef, "got last error %lu\n", GetLastError() );
+
+    batch = 0xcccccccc;
+    status = NtDCompositionCommitChannel( channel, &batch, NULL, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_INVALID_PARAMETER, "got null-state status %#lx\n", status );
+    ok( batch == 0xcccccccc, "null-state batch changed to %u\n", batch );
+
+    state = 0xcc;
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL,
+                                           &protocol_list.head, NULL, 0 );
+    ok( status == STATUS_INVALID_PARAMETER, "got ordinary protocol-list status %#lx\n", status );
+    ok( state == 0xcc, "ordinary protocol-list state changed to %#x\n", state );
 
     status = NtDCompositionDestroyChannel( channel );
     ok( status == STATUS_SUCCESS, "got destroy status %#lx\n", status );
@@ -640,12 +692,16 @@ static void test_channel_lifetime(void)
 
 static void test_connection_queue(void)
 {
+    struct dcomp_test_protocol_list protocol_list;
     struct dcomposition_connection_batch *record = (void *)0xdeadbeef;
     HANDLE event, connection = NULL;
     BYTE *buffer = (BYTE *)0xdeadbeef;
     UINT channel = 0xcccccccc, size = 0x1000, batch = 0xcccccccc;
     UINT64 cookie = 0x1122334455667788;
+    BYTE state = 0xcc;
     NTSTATUS status;
+
+    init_dcomp_test_protocol_list( &protocol_list );
 
     event = CreateEventW( NULL, FALSE, FALSE, NULL );
     ok( !!event, "failed to create event, error %lu\n", GetLastError() );
@@ -678,12 +734,10 @@ static void test_connection_queue(void)
         ok( !record->u.create.object, "got create object %p\n", record->u.create.object );
     }
 
-    buffer[0] = 0x12;
-    buffer[1] = 0x34;
-    buffer[2] = 0x56;
-    buffer[3] = 0x78;
-    status = NtDCompositionCommitChannel( channel, &batch, buffer, 4, NULL, NULL, NULL, 0 );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL,
+                                           &protocol_list.head, NULL, 0 );
     ok( status == STATUS_SUCCESS, "got commit status %#lx\n", status );
+    ok( !state, "got commit state %#x\n", state );
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
     ok( status == STATUS_SUCCESS, "got batch record status %#lx\n", status );
     ok( !!record, "batch record is null\n" );
@@ -691,11 +745,15 @@ static void test_connection_queue(void)
     {
         ok( record->type == 7, "got batch record type %u\n", record->type );
         ok( record->u.batch.channel == channel, "got batch channel %#x\n", record->u.batch.channel );
-        ok( record->u.batch.size == 4, "got batch size %u\n", record->u.batch.size );
+        ok( record->u.batch.size == 8, "got batch size %u\n", record->u.batch.size );
         ok( record->u.batch.data[0] == 0x12 && record->u.batch.data[1] == 0x34 &&
-            record->u.batch.data[2] == 0x56 && record->u.batch.data[3] == 0x78,
-            "got batch data %02x %02x %02x %02x\n", record->u.batch.data[0],
-            record->u.batch.data[1], record->u.batch.data[2], record->u.batch.data[3] );
+            record->u.batch.data[2] == 0x56 && record->u.batch.data[3] == 0x78 &&
+            record->u.batch.data[4] == 0x9a && record->u.batch.data[5] == 0xbc &&
+            record->u.batch.data[6] == 0xde && record->u.batch.data[7] == 0xf0,
+            "got batch data %02x %02x %02x %02x %02x %02x %02x %02x\n",
+            record->u.batch.data[0], record->u.batch.data[1], record->u.batch.data[2],
+            record->u.batch.data[3], record->u.batch.data[4], record->u.batch.data[5],
+            record->u.batch.data[6], record->u.batch.data[7] );
     }
 
     status = NtDCompositionDestroyChannel( channel );

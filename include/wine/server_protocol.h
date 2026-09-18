@@ -7303,14 +7303,16 @@ struct commit_dcomp_channel_request
 {
     struct request_header __header;
     unsigned int channel;
-    mem_size_t   length;
+    unsigned int protocol_blocks;
+    char __pad_20[4];
+    mem_size_t   payload_size;
     /* VARARG(data,bytes); */
 };
 struct commit_dcomp_channel_reply
 {
     struct reply_header __header;
     unsigned int batch_id;
-    char __pad_12[4];
+    unsigned int state;
 };
 
 
@@ -8552,6 +8554,6 @@ union generic_reply
     struct register_manipulation_thread_reply register_manipulation_thread_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1023
+#define SERVER_PROTOCOL_VERSION 1024
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

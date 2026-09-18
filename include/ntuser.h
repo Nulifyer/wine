@@ -810,9 +810,9 @@ W32KAPI NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UIN
 W32KAPI NTSTATUS WINAPI NtDCompositionGetDeletedResources( UINT channel, UINT capacity,
                                                             void **resources, UINT *count );
 W32KAPI NTSTATUS WINAPI NtDCompositionReleaseAllResources( UINT channel, BYTE *result );
-W32KAPI NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *buffer,
-                                                      ULONG length, HANDLE resource,
-                                                      const void *resource_data, const UINT *resources,
+W32KAPI NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *state,
+                                                      ULONG flags, HANDLE sync_object,
+                                                      const void *protocol_blocks, const UINT *resources,
                                                       UINT resource_count );
 struct dcomposition_frame_statistics
 {
