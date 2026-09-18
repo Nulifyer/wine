@@ -591,6 +591,7 @@ struct restricted_error_info
 {
     IRestrictedErrorInfo IRestrictedErrorInfo_iface;
     IErrorInfo IErrorInfo_iface;
+    IRestrictedErrorInfo *previous;
     BSTR description;
     BSTR restricted_description;
     HRESULT code;
@@ -640,6 +641,7 @@ static ULONG WINAPI restricted_error_info_Release(IRestrictedErrorInfo *iface)
 
     if (!ref)
     {
+        if (impl->previous) IRestrictedErrorInfo_Release(impl->previous);
         SysFreeString(impl->description);
         SysFreeString(impl->restricted_description);
         free(impl);
@@ -766,7 +768,7 @@ static const IErrorInfoVtbl error_info_vtbl =
 };
 
 static HRESULT restricted_error_info_create(HRESULT code, ULONG len_msg, const WCHAR *message, ULONG len_desc,
-                                     const WCHAR *desc, IErrorInfo **info)
+                                     const WCHAR *desc, IRestrictedErrorInfo *previous, IErrorInfo **info)
 {
     struct restricted_error_info *impl;
 
@@ -774,10 +776,13 @@ static HRESULT restricted_error_info_create(HRESULT code, ULONG len_msg, const W
 
     impl->IRestrictedErrorInfo_iface.lpVtbl = &restricted_error_info_vtbl;
     impl->IErrorInfo_iface.lpVtbl = &error_info_vtbl;
+    impl->previous = previous;
+    if (previous) IRestrictedErrorInfo_AddRef(previous);
     impl->code = code;
     impl->ref = 1;
     if (!(impl->description = SysAllocStringLen(desc, len_desc)))
     {
+        if (previous) IRestrictedErrorInfo_Release(previous);
         free(impl);
         return E_OUTOFMEMORY;
     }
@@ -789,6 +794,7 @@ static HRESULT restricted_error_info_create(HRESULT code, ULONG len_msg, const W
     }
     if (!(impl->restricted_description = SysAllocStringLen(message, len_msg)))
     {
+        if (previous) IRestrictedErrorInfo_Release(previous);
         SysFreeString(impl->description);
         free(impl);
         return E_OUTOFMEMORY;
@@ -985,7 +991,7 @@ BOOL WINAPI RoOriginateErrorW(HRESULT error, UINT max_len, const WCHAR *message)
         IErrorInfo *info = NULL;
         HRESULT hr;
 
-        if (FAILED(restricted_error_info_create(error, len_msg, message, len_desc, desc, &info)))
+        if (FAILED(restricted_error_info_create(error, len_msg, message, len_desc, desc, NULL, &info)))
             ret = FALSE;
         /* If restricted_error_info_create failed, this clears the current error object. */
         if (FAILED(hr = set_error_info(info)))
@@ -1019,6 +1025,139 @@ BOOL WINAPI RoOriginateErrorW(HRESULT error, UINT max_len, const WCHAR *message)
         }
         __ENDTRY;
         free(str);
+    }
+
+    return ret;
+}
+
+/***********************************************************************
+ *      RoClearError (combase.@)
+ */
+void WINAPI RoClearError(void)
+{
+    struct tlsdata *data = NtCurrentTeb()->ReservedForOle;
+
+    TRACE("\n");
+
+    if (!data || !data->errorinfo) return;
+    IErrorInfo_Release(data->errorinfo);
+    data->errorinfo = NULL;
+}
+
+static LONG WINAPI rotransform_handler(EXCEPTION_POINTERS *ptrs)
+{
+    EXCEPTION_RECORD *rec = ptrs->ExceptionRecord;
+    return (rec->ExceptionCode == EXCEPTION_RO_TRANSFORMERROR) ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH;
+}
+
+static IRestrictedErrorInfo *get_matching_previous_error(HRESULT old_error)
+{
+    IRestrictedErrorInfo *previous = NULL;
+    BSTR description = NULL, restricted = NULL, sid = NULL;
+    HRESULT code = S_OK, hr;
+
+    hr = GetRestrictedErrorInfo(&previous);
+    if (hr != S_OK || !previous) return NULL;
+
+    hr = IRestrictedErrorInfo_GetErrorDetails(previous, &description, &code, &restricted, &sid);
+    SysFreeString(description);
+    SysFreeString(restricted);
+    SysFreeString(sid);
+    if (FAILED(hr) || code != old_error)
+    {
+        IRestrictedErrorInfo_Release(previous);
+        return NULL;
+    }
+    return previous;
+}
+
+/***********************************************************************
+ *      RoTransformError (combase.@)
+ */
+BOOL WINAPI RoTransformError(HRESULT old_error, HRESULT new_error, HSTRING message)
+{
+    const WCHAR *buf;
+    UINT32 len;
+
+    TRACE("%#lx, %#lx, %s\n", old_error, new_error, debugstr_hstring(message));
+
+    buf = WindowsGetStringRawBuffer(message, &len);
+    return RoTransformErrorW(old_error, new_error, len, buf);
+}
+
+/***********************************************************************
+ *      RoTransformErrorW (combase.@)
+ */
+BOOL WINAPI RoTransformErrorW(HRESULT old_error, HRESULT new_error, UINT max_len, const WCHAR *message)
+{
+    IRestrictedErrorInfo *previous = NULL;
+    BOOL set_error, raise_exception, ret = TRUE;
+    UINT32 flags, len_msg = 0, len_desc;
+    WCHAR desc[512];
+
+    TRACE("%#lx, %#lx, %u, %p\n", old_error, new_error, max_len, message);
+
+    if (old_error == new_error || (SUCCEEDED(old_error) && SUCCEEDED(new_error))) return FALSE;
+    if (SUCCEEDED(new_error)) RoClearError();
+
+    RoGetErrorReportingFlags(&flags);
+    set_error = flags & RO_ERROR_REPORTING_USESETERRORINFO && !(flags & RO_ERROR_REPORTING_SUPPRESSSETERRORINFO);
+    raise_exception = (IsDebuggerPresent() && !(flags & RO_ERROR_REPORTING_SUPPRESSEXCEPTIONS)) ||
+                      (flags & RO_ERROR_REPORTING_FORCEEXCEPTIONS);
+    if (set_error || raise_exception)
+    {
+        if (!(len_desc = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, NULL, new_error, 0, desc, ARRAY_SIZE(desc), NULL)))
+            len_desc = swprintf(desc, ARRAY_SIZE(desc), L"Error code '%#lx'.\r\n", new_error);
+        if (message)
+        {
+            max_len = max_len ? min(max_len, 512) : 512;
+            while (len_msg < max_len && message[len_msg]) len_msg++;
+        }
+    }
+
+    if (raise_exception)
+    {
+        const WCHAR *src = len_msg ? message : desc;
+        ULONG len = len_msg ? len_msg : len_desc;
+        WCHAR *str;
+
+        if ((str = malloc(sizeof(WCHAR) * (len + 1))))
+        {
+            memcpy(str, src, len * sizeof(WCHAR));
+            str[len] = L'\0';
+            __TRY
+            {
+                ULONG_PTR args[4];
+
+                args[0] = old_error;
+                args[1] = new_error;
+                args[2] = len;
+                args[3] = (ULONG_PTR)str;
+                RaiseException(EXCEPTION_RO_TRANSFORMERROR, 0, 4, args);
+            }
+            __EXCEPT(rotransform_handler)
+            {
+            }
+            __ENDTRY;
+            free(str);
+        }
+    }
+
+    if (set_error && FAILED(new_error))
+    {
+        IErrorInfo *info = NULL;
+        HRESULT hr;
+
+        previous = get_matching_previous_error(old_error);
+        if (FAILED(restricted_error_info_create(new_error, len_msg, message, len_desc, desc, previous, &info)))
+            ret = FALSE;
+        if (FAILED(hr = set_error_info(info)))
+        {
+            FIXME("Failed to set transformed error: %#lx\n", hr);
+            ret = FALSE;
+        }
+        if (info) IErrorInfo_Release(info);
+        if (previous) IRestrictedErrorInfo_Release(previous);
     }
 
     return ret;

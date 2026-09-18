@@ -40,6 +40,7 @@ typedef enum
 #define EXCEPTION_RO_TRANSFORMERROR 0x40080202
 
 HRESULT WINAPI GetRestrictedErrorInfo(IRestrictedErrorInfo **info);
+void    WINAPI RoClearError(void);
 HRESULT WINAPI RoGetMatchingRestrictedErrorInfo(HRESULT error, IRestrictedErrorInfo **info);
 void    WINAPI RoFailFastWithErrorContext(HRESULT hr);
 HRESULT WINAPI RoGetErrorReportingFlags(UINT32 *flags);
@@ -48,6 +49,8 @@ BOOL    WINAPI RoOriginateErrorW(HRESULT error, UINT max_len, const WCHAR *messa
 BOOL    WINAPI RoOriginateLanguageException(HRESULT error, HSTRING message, IUnknown *language_exception);
 HRESULT WINAPI RoReportUnhandledError(IRestrictedErrorInfo *info);
 HRESULT WINAPI RoSetErrorReportingFlags(UINT32 flags);
+BOOL    WINAPI RoTransformError(HRESULT old_error, HRESULT new_error, HSTRING message);
+BOOL    WINAPI RoTransformErrorW(HRESULT old_error, HRESULT new_error, UINT max_len, const WCHAR *message);
 HRESULT WINAPI SetRestrictedErrorInfo(IRestrictedErrorInfo *info);
 
 #ifdef __cplusplus

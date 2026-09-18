@@ -1146,6 +1146,102 @@ static void test_IRestrictedErrorInfo_(int line, IRestrictedErrorInfo *r_info, H
     ok_(__FILE__, line)(count == 0, "Got unexpected count %lu.\n", count);
 }
 
+static BOOL transform_exception_caught;
+static HRESULT transform_old_error, transform_new_error;
+
+static LONG WINAPI transform_exception_handler(EXCEPTION_POINTERS *ptr)
+{
+    const EXCEPTION_RECORD *rec = ptr->ExceptionRecord;
+
+    if (rec->ExceptionCode != EXCEPTION_RO_TRANSFORMERROR) return EXCEPTION_CONTINUE_SEARCH;
+    transform_exception_caught = TRUE;
+    ok(rec->NumberParameters == 4, "Got unexpected NumberParameters %lu.\n", rec->NumberParameters);
+    ok(rec->ExceptionInformation[0] == (ULONG_PTR)transform_old_error,
+            "Got old error %#Ix, expected %#lx.\n", rec->ExceptionInformation[0], transform_old_error);
+    ok(rec->ExceptionInformation[1] == (ULONG_PTR)transform_new_error,
+            "Got new error %#Ix, expected %#lx.\n", rec->ExceptionInformation[1], transform_new_error);
+    ok(rec->ExceptionInformation[2] == wcslen((WCHAR *)rec->ExceptionInformation[3]),
+            "Got message length %Iu for %s.\n", rec->ExceptionInformation[2],
+            debugstr_w((WCHAR *)rec->ExceptionInformation[3]));
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void test_RoTransformError(void)
+{
+    IRestrictedErrorInfo *info, *previous;
+    HSTRING message;
+    HRESULT hr;
+    void *handler;
+    BOOL ret;
+
+    set_error_reporting_flags(RO_ERROR_REPORTING_USESETERRORINFO);
+    RoClearError();
+
+    ret = RoOriginateErrorW(E_INVALIDARG, 0, L"old");
+    ok(ret, "RoOriginateErrorW returned %d.\n", ret);
+    ret = RoTransformErrorW(E_INVALIDARG, E_INVALIDARG, 0, L"same");
+    ok(!ret, "Same-error RoTransformErrorW returned %d.\n", ret);
+    hr = GetRestrictedErrorInfo(&info);
+    ok(hr == S_OK, "GetRestrictedErrorInfo returned %#lx.\n", hr);
+    if (hr == S_OK) test_IRestrictedErrorInfo(info, E_INVALIDARG, L"old", NULL);
+
+    ret = RoTransformErrorW(S_OK, S_FALSE, 0, L"success");
+    ok(!ret, "Success-only RoTransformErrorW returned %d.\n", ret);
+
+    ret = RoOriginateErrorW(E_INVALIDARG, 0, L"clear me");
+    ok(ret, "RoOriginateErrorW returned %d.\n", ret);
+    ret = RoTransformErrorW(E_INVALIDARG, S_OK, 0, L"recovered");
+    ok(ret, "Success-transform RoTransformErrorW returned %d.\n", ret);
+    info = (void *)0xdeadbeef;
+    hr = GetRestrictedErrorInfo(&info);
+    ok(hr == S_FALSE, "GetRestrictedErrorInfo returned %#lx.\n", hr);
+    ok(!info, "Got unexpected error info %p.\n", info);
+
+    ret = RoOriginateErrorW(E_INVALIDARG, 0, L"previous");
+    ok(ret, "RoOriginateErrorW returned %d.\n", ret);
+    hr = GetRestrictedErrorInfo(&previous);
+    ok(hr == S_OK, "GetRestrictedErrorInfo returned %#lx.\n", hr);
+    hr = SetRestrictedErrorInfo(previous);
+    ok(hr == S_OK, "SetRestrictedErrorInfo returned %#lx.\n", hr);
+    ret = RoTransformErrorW(E_INVALIDARG, E_ACCESSDENIED, 3, L"denied");
+    ok(ret, "RoTransformErrorW returned %d.\n", ret);
+    hr = GetRestrictedErrorInfo(&info);
+    ok(hr == S_OK, "GetRestrictedErrorInfo returned %#lx.\n", hr);
+    if (hr == S_OK) test_IRestrictedErrorInfo(info, E_ACCESSDENIED, L"den", NULL);
+    test_IRestrictedErrorInfo(previous, E_INVALIDARG, L"previous", NULL);
+
+    ret = RoTransformErrorW(E_FAIL, E_ACCESSDENIED, 0, NULL);
+    ok(ret, "Null-message RoTransformErrorW returned %d.\n", ret);
+    hr = GetRestrictedErrorInfo(&info);
+    ok(hr == S_OK, "GetRestrictedErrorInfo returned %#lx.\n", hr);
+    if (hr == S_OK) test_IRestrictedErrorInfo(info, E_ACCESSDENIED, NULL, NULL);
+
+    hr = WindowsCreateString(L"hstring", 7, &message);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    ret = RoTransformError(E_FAIL, E_BOUNDS, message);
+    ok(ret, "RoTransformError returned %d.\n", ret);
+    WindowsDeleteString(message);
+    hr = GetRestrictedErrorInfo(&info);
+    ok(hr == S_OK, "GetRestrictedErrorInfo returned %#lx.\n", hr);
+    if (hr == S_OK) test_IRestrictedErrorInfo(info, E_BOUNDS, L"hstring", NULL);
+
+    handler = RtlAddVectoredExceptionHandler(1, transform_exception_handler);
+    ok(!!handler, "RtlAddVectoredExceptionHandler returned NULL.\n");
+    transform_exception_caught = FALSE;
+    transform_old_error = E_FAIL;
+    transform_new_error = E_ACCESSDENIED;
+    set_error_reporting_flags(RO_ERROR_REPORTING_USESETERRORINFO | RO_ERROR_REPORTING_FORCEEXCEPTIONS);
+    ret = RoTransformErrorW(transform_old_error, transform_new_error, 0, L"exception");
+    ok(ret, "Exception RoTransformErrorW returned %d.\n", ret);
+    ok(transform_exception_caught, "Transform exception was not observed.\n");
+    RtlRemoveVectoredExceptionHandler(handler);
+    hr = GetRestrictedErrorInfo(&info);
+    ok(hr == S_OK, "GetRestrictedErrorInfo returned %#lx.\n", hr);
+    if (hr == S_OK) test_IRestrictedErrorInfo(info, E_ACCESSDENIED, L"exception", NULL);
+    set_error_reporting_flags(RO_ERROR_REPORTING_USESETERRORINFO);
+    RoClearError();
+}
+
 static void test_SetRestrictedErrorInfo(void)
 {
     IRestrictedErrorInfo *r_info = NULL, *r_info2 = NULL;
@@ -1492,6 +1588,7 @@ START_TEST(roapi)
     test_RoGetErrorReportingFlags();
     test_RoSetErrorReportingFlags();
     test_GetRestrictedErrorInfo();
+    test_RoTransformError();
     test_SetRestrictedErrorInfo();
     test_error_reporting();
 
