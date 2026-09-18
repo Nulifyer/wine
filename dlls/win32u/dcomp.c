@@ -65,6 +65,8 @@ struct dcomp_resource_view
     struct list entry;
     UINT id;
     UINT type;
+    BOOL announced;
+    BOOL released;
 };
 
 struct dcomp_connection_batch_view
@@ -99,6 +101,16 @@ static struct dcomp_channel_view *find_dcomp_channel_view( UINT channel )
 }
 
 static struct dcomp_resource_view *find_dcomp_resource_view( struct dcomp_channel_view *view, UINT id )
+{
+    struct dcomp_resource_view *resource;
+
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+        if (resource->id == id && !resource->released) return resource;
+    return NULL;
+}
+
+static struct dcomp_resource_view *find_any_dcomp_resource_view( struct dcomp_channel_view *view,
+                                                                 UINT id )
 {
     struct dcomp_resource_view *resource;
 
@@ -202,7 +214,7 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
             memcpy( &id, buffer + 4, sizeof(id) );
             memcpy( &type, buffer + 8, sizeof(type) );
             if (!id || !type || type > 0xc1) return STATUS_INVALID_PARAMETER;
-            if (find_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
+            if (find_any_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
             resource->id = id;
             resource->type = type;
@@ -212,8 +224,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
         {
             memcpy( &id, buffer + 4, sizeof(id) );
             if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
-            list_remove( &resource->entry );
-            free( resource );
+            if (resource->announced) resource->released = TRUE;
+            else
+            {
+                list_remove( &resource->entry );
+                free( resource );
+            }
             view->released_resources = TRUE;
         }
         else if (type >= 6 && type <= 23)
@@ -278,6 +294,11 @@ static NTSTATUS copy_dcomp_protocol_blocks( const void *list, BYTE **data,
         }
         __ENDTRY
         if (status) break;
+        if (header.type != 0x200)
+        {
+            status = STATUS_NOT_SUPPORTED;
+            break;
+        }
         if (header.size < 8 || (header.size & 3) ||
             header.size > DCOMP_PROTOCOL_MAX_SIZE - size)
         {
@@ -312,6 +333,69 @@ static NTSTATUS copy_dcomp_protocol_blocks( const void *list, BYTE **data,
     }
     *data_size = size;
     return STATUS_SUCCESS;
+}
+
+static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
+                                             BYTE **data, data_size_t *data_size )
+{
+    struct dcomp_resource_view *resource;
+    data_size_t resource_size = 0;
+    BYTE *new_data, *cursor;
+
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        if (!resource->announced) resource_size += 16;
+        else if (resource->released) resource_size += 12;
+    }
+    if (resource_size > DCOMP_PROTOCOL_MAX_SIZE - *data_size) return STATUS_INVALID_PARAMETER;
+    if (!resource_size) return STATUS_SUCCESS;
+    if (!(new_data = malloc( resource_size + *data_size ))) return STATUS_NO_MEMORY;
+
+    cursor = new_data;
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        UINT command[4];
+
+        if (resource->announced || resource->released) continue;
+        command[0] = sizeof(command);
+        command[1] = 0x28; /* MILCMD_CHANNEL_CREATERESOURCE */
+        command[2] = resource->id;
+        command[3] = resource->type;
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    memcpy( cursor, *data, *data_size );
+    cursor += *data_size;
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        UINT command[3];
+
+        if (!resource->announced || !resource->released) continue;
+        command[0] = sizeof(command);
+        command[1] = 0x29; /* MILCMD_CHANNEL_RELEASERESOURCE */
+        command[2] = resource->id;
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    free( *data );
+    *data = new_data;
+    *data_size += resource_size;
+    return STATUS_SUCCESS;
+}
+
+static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
+{
+    struct dcomp_resource_view *resource, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE( resource, next, &view->resources, struct dcomp_resource_view, entry )
+    {
+        if (resource->released)
+        {
+            list_remove( &resource->entry );
+            free( resource );
+        }
+        else resource->announced = TRUE;
+    }
 }
 
 static UINT get_composition_refresh_rate(void)
@@ -1050,6 +1134,12 @@ NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE 
         free( protocol_data );
         return STATUS_ACCESS_DENIED;
     }
+    if ((status = build_dcomp_commit_payload( view, &protocol_data, &protocol_size )))
+    {
+        pthread_mutex_unlock( &dcomp_channel_lock );
+        free( protocol_data );
+        return status;
+    }
 
     SERVER_START_REQ( commit_dcomp_channel )
     {
@@ -1062,6 +1152,7 @@ NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE 
         {
             committed_batch_id = reply->batch_id;
             committed_state = reply->state;
+            commit_dcomp_resource_views( view );
         }
     }
     SERVER_END_REQ;

@@ -692,13 +692,22 @@ static void test_channel_lifetime(void)
 
 static void test_connection_queue(void)
 {
+    static const BYTE expected_resource_batch[] = {
+        0x10, 0, 0, 0, 0x28, 0, 0, 0, 1, 0, 0, 0, 13, 0, 0, 0,
+        0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+    };
+    static const BYTE expected_release_batch[] = {
+        0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+        0x0c, 0, 0, 0, 0x29, 0, 0, 0, 1, 0, 0, 0,
+    };
     struct dcomp_test_protocol_list protocol_list;
     struct dcomposition_connection_batch *record = (void *)0xdeadbeef;
     HANDLE event, connection = NULL;
     BYTE *buffer = (BYTE *)0xdeadbeef;
     UINT channel = 0xcccccccc, size = 0x1000, batch = 0xcccccccc;
     UINT64 cookie = 0x1122334455667788;
-    BYTE state = 0xcc;
+    ULONG processed;
+    BYTE released, state = 0xcc;
     NTSTATUS status;
 
     init_dcomp_test_protocol_list( &protocol_list );
@@ -734,6 +743,14 @@ static void test_connection_queue(void)
         ok( !record->u.create.object, "got create object %p\n", record->u.create.object );
     }
 
+    ((UINT *)buffer)[0] = 2;
+    ((UINT *)buffer)[1] = 1;
+    ((UINT *)buffer)[2] = 13;
+    ((UINT *)buffer)[3] = 0;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got resource process status %#lx\n", status );
+    ok( processed == 1, "got resource process count %lu\n", processed );
+
     status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL,
                                            &protocol_list.head, NULL, 0 );
     ok( status == STATUS_SUCCESS, "got commit status %#lx\n", status );
@@ -745,15 +762,92 @@ static void test_connection_queue(void)
     {
         ok( record->type == 7, "got batch record type %u\n", record->type );
         ok( record->u.batch.channel == channel, "got batch channel %#x\n", record->u.batch.channel );
-        ok( record->u.batch.size == 8, "got batch size %u\n", record->u.batch.size );
-        ok( record->u.batch.data[0] == 0x12 && record->u.batch.data[1] == 0x34 &&
-            record->u.batch.data[2] == 0x56 && record->u.batch.data[3] == 0x78 &&
-            record->u.batch.data[4] == 0x9a && record->u.batch.data[5] == 0xbc &&
-            record->u.batch.data[6] == 0xde && record->u.batch.data[7] == 0xf0,
-            "got batch data %02x %02x %02x %02x %02x %02x %02x %02x\n",
-            record->u.batch.data[0], record->u.batch.data[1], record->u.batch.data[2],
-            record->u.batch.data[3], record->u.batch.data[4], record->u.batch.data[5],
-            record->u.batch.data[6], record->u.batch.data[7] );
+        ok( record->u.batch.size == sizeof(expected_resource_batch),
+            "got batch size %u\n", record->u.batch.size );
+        ok( record->u.batch.size != sizeof(expected_resource_batch) ||
+            !memcmp( record->u.batch.data, expected_resource_batch,
+                     sizeof(expected_resource_batch) ),
+            "got unexpected resource-prefixed batch\n" );
+    }
+
+    batch = 0xcccccccc;
+    state = 0xcc;
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL,
+                                           &protocol_list.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got repeated commit status %#lx\n", status );
+    ok( !state, "got repeated commit state %#x\n", state );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got repeated batch record status %#lx\n", status );
+    ok( !!record, "repeated batch record is null\n" );
+    if (record)
+    {
+        ok( record->type == 7, "got repeated batch record type %u\n", record->type );
+        ok( record->u.batch.size == sizeof(protocol_list.block.data),
+            "got repeated batch size %u\n", record->u.batch.size );
+        ok( record->u.batch.size != sizeof(protocol_list.block.data) ||
+            !memcmp( record->u.batch.data, protocol_list.block.data,
+                     sizeof(protocol_list.block.data) ),
+            "repeated batch unexpectedly recreated the resource\n" );
+    }
+
+    protocol_list.block.type = 0x201;
+    state = 0xcc;
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL,
+                                           &protocol_list.head, NULL, 0 );
+    ok( status == STATUS_NOT_SUPPORTED, "got unsupported protocol status %#lx\n", status );
+    ok( state == 0xcc, "unsupported protocol changed state to %#x\n", state );
+    protocol_list.block.type = 0x200;
+
+    ((UINT *)buffer)[0] = 4;
+    ((UINT *)buffer)[1] = 1;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 8, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got resource release status %#lx\n", status );
+    ok( processed == 1, "got resource release count %lu\n", processed );
+    ok( released == 1, "got resource release flag %#x\n", released );
+
+    state = 0xcc;
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL,
+                                           &protocol_list.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got release commit status %#lx\n", status );
+    ok( !state, "got release commit state %#x\n", state );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got release batch record status %#lx\n", status );
+    ok( !!record, "release batch record is null\n" );
+    if (record)
+    {
+        ok( record->type == 7, "got release batch record type %u\n", record->type );
+        ok( record->u.batch.size == sizeof(expected_release_batch),
+            "got release batch size %u\n", record->u.batch.size );
+        ok( record->u.batch.size != sizeof(expected_release_batch) ||
+            !memcmp( record->u.batch.data, expected_release_batch,
+                     sizeof(expected_release_batch) ),
+            "got unexpected release batch\n" );
+    }
+
+    ((UINT *)buffer)[0] = 2;
+    ((UINT *)buffer)[1] = 1;
+    ((UINT *)buffer)[2] = 13;
+    ((UINT *)buffer)[3] = 0;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got reused resource process status %#lx\n", status );
+    ok( processed == 1, "got reused resource process count %lu\n", processed );
+
+    state = 0xcc;
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL,
+                                           &protocol_list.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got reused resource commit status %#lx\n", status );
+    ok( !state, "got reused resource commit state %#x\n", state );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got reused resource batch status %#lx\n", status );
+    ok( !!record, "reused resource batch is null\n" );
+    if (record)
+    {
+        ok( record->u.batch.size == sizeof(expected_resource_batch),
+            "got reused resource batch size %u\n", record->u.batch.size );
+        ok( record->u.batch.size != sizeof(expected_resource_batch) ||
+            !memcmp( record->u.batch.data, expected_resource_batch,
+                     sizeof(expected_resource_batch) ),
+            "reused resource was not recreated\n" );
     }
 
     status = NtDCompositionDestroyChannel( channel );
