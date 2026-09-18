@@ -98,7 +98,7 @@
 2584 stub -noname EnableModernAppWindowKeyboardIntercept  # NtUserEnableModernAppWindowKeyboardIntercept
 2585 stub -noname UpdateWindowTrackingInfo  # NtUserUpdateWindowTrackingInfo
 2586 stub -noname SetInputServiceState  # NtUserSetInputServiceState
-2587 stub @
+2587 stdcall -noname InitDManipHookEx(long)
 2588 stub -noname AcquireInteractiveControlBackgroundAccess  # NtUserAcquireInteractiveControlBackgroundAccess
 2589 stub -noname GetInteractiveControlInfo  # NtUserGetInteractiveControlInfo
 2590 stub -noname GetInteractiveControlDeviceInfo  # NtUserGetInteractiveControlDeviceInfo
@@ -743,7 +743,7 @@
 @ stdcall InSendMessageEx(ptr)
 @ stdcall InflateRect(ptr long long)
 # @ stub InheritWindowMonitor
-# @ stub InitDManipHook
+@ stdcall InitDManipHook()
 # @ stub InitializeGenericHidInjection
 # @ stub InitializeInputDeviceInjection
 # @ stub InitializeLpkHooks

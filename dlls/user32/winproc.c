@@ -25,6 +25,7 @@
 #include "dbt.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
+#include "wine/exception.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msg);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
@@ -102,12 +103,19 @@ static WPARAM map_wparam_char_WtoA( WPARAM wParam, DWORD len )
 /* call a 32-bit window procedure */
 static LRESULT call_window_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT *result, void *arg )
 {
+    struct dmanip_hook_call hook_call = {0};
     WNDPROC proc = arg;
 
     TRACE_(relay)( "\1Call window proc %p (hwnd=%p,msg=%s,wp=%08Ix,lp=%08Ix)\n",
                    proc, hwnd, SPY_GetMsgName(msg, hwnd), wp, lp );
 
-    *result = WINPROC_wrapper( proc, hwnd, msg, wp, lp );
+    __TRY
+    {
+        dmanip_hook_begin( hwnd, msg, wp, lp, result, &hook_call );
+        if (!hook_call.handled) *result = WINPROC_wrapper( proc, hwnd, msg, wp, lp );
+        dmanip_hook_post( *result, &hook_call );
+    }
+    __FINALLY_CTX( dmanip_hook_end, &hook_call )
 
     TRACE_(relay)( "\1Ret  window proc %p (hwnd=%p,msg=%s,wp=%08Ix,lp=%08Ix) retval=%08Ix\n",
                    proc, hwnd, SPY_GetMsgName(msg, hwnd), wp, lp, *result );

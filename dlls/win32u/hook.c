@@ -81,6 +81,53 @@ static BOOL valid_user_api_hook_string( const UNICODE_STRING *str )
 static LONG user_api_hook_generation;
 static LONG user_api_hook_registered;
 
+static const WCHAR dmanip_hook_module[] =
+    {'C',':','\\','w','i','n','d','o','w','s','\\','s','y','s','t','e','m','3','2','\\',
+     'd','i','r','e','c','t','m','a','n','i','p','u','l','a','t','i','o','n','.','d','l','l',0};
+static const WCHAR dmanip_hook_proc[] =
+    {'I','n','i','t','i','a','l','i','z','e','D','M','a','n','i','p','H','o','o','k',0};
+
+/***********************************************************************
+ *           NtUserRegisterDManipHook   (win32u.@)
+ */
+BOOL WINAPI NtUserRegisterDManipHook(void)
+{
+    BOOL ret;
+
+    SERVER_START_REQ( register_dmanip_hook )
+    {
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    TRACE( "Direct Manipulation registration %s\n", ret ? "succeeded" : "failed" );
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserGetDManipHookInitFunction   (win32u.@)
+ */
+BOOL WINAPI NtUserGetDManipHookInitFunction( WCHAR *module, WCHAR *proc )
+{
+    BOOL registered = FALSE;
+
+    if (!module || !proc)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    SERVER_START_REQ( get_dmanip_hook )
+    {
+        if (!wine_server_call_err( req )) registered = reply->registered;
+    }
+    SERVER_END_REQ;
+    if (!registered) return FALSE;
+
+    memcpy( module, dmanip_hook_module, sizeof(dmanip_hook_module) );
+    memcpy( proc, dmanip_hook_proc, sizeof(dmanip_hook_proc) );
+    return TRUE;
+}
+
 static unsigned int get_user_api_hook_generation(void)
 {
     struct object_lock lock = OBJECT_LOCK_INIT;

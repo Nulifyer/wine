@@ -143,6 +143,42 @@ static user_api_hook_init_proc modern_hook_init;
 static UINT modern_hook_generation;
 static BOOL modern_hook_loading;
 static struct modern_user_api_hook modern_hook_table;
+static BOOL uninit_dmanip_hook(void);
+
+struct dmanip_hook_table
+{
+    DWORD size;
+    DWORD reserved;
+    BOOL (CDECL *pre_dispatch)( MSG *msg, LRESULT *result, void **context );
+    void (CDECL *post_dispatch)( LRESULT result, const MSG *original_msg,
+                                 const MSG *current_msg, void *context );
+    const BYTE *message_mask;
+    DWORD message_mask_size;
+    DWORD flags;
+};
+
+typedef BOOL (CDECL *dmanip_hook_init_proc)( DWORD mode, struct dmanip_hook_table *hook );
+
+static CRITICAL_SECTION dmanip_hook_cs;
+static CRITICAL_SECTION_DEBUG dmanip_hook_cs_debug =
+{
+    0, 0, &dmanip_hook_cs,
+    { &dmanip_hook_cs_debug.ProcessLocksList, &dmanip_hook_cs_debug.ProcessLocksList },
+    0, 0, { (DWORD_PTR)(__FILE__ ": dmanip_hook_cs") }
+};
+static CRITICAL_SECTION dmanip_hook_cs = { &dmanip_hook_cs_debug, -1, 0, 0, 0, 0 };
+
+static HMODULE dmanip_hook_module;
+static struct dmanip_hook_table dmanip_hook_table;
+static BYTE dmanip_hook_message_mask[0x80];
+static unsigned int dmanip_hook_calls;
+static unsigned int dmanip_hook_state;
+
+#ifdef _WIN64
+C_ASSERT( sizeof(struct dmanip_hook_table) == 0x28 );
+#else
+C_ASSERT( sizeof(struct dmanip_hook_table) == 0x1c );
+#endif
 
 #ifdef _WIN64
 C_ASSERT( sizeof(struct modern_user_api_hook) == 0xe8 );
@@ -336,7 +372,139 @@ void user_api_hook_ensure_loaded(void)
 void user_api_hook_process_detach( BOOL process_terminating )
 {
     if (process_terminating) return;
+    uninit_dmanip_hook();
     unload_modern_user_api_hook( 2 );
+}
+
+static BOOL uninit_dmanip_hook(void)
+{
+    HMODULE module = NULL;
+
+    EnterCriticalSection( &dmanip_hook_cs );
+    if (dmanip_hook_calls)
+        dmanip_hook_state = 2;
+    else if (dmanip_hook_state)
+    {
+        module = dmanip_hook_module;
+        dmanip_hook_module = NULL;
+        dmanip_hook_state = 0;
+        memset( &dmanip_hook_table, 0, sizeof(dmanip_hook_table) );
+        memset( dmanip_hook_message_mask, 0, sizeof(dmanip_hook_message_mask) );
+    }
+    LeaveCriticalSection( &dmanip_hook_cs );
+    if (module) FreeLibrary( module );
+    return TRUE;
+}
+
+BOOL WINAPI InitDManipHookEx( BOOL enable )
+{
+    WCHAR module_name[MAX_PATH], proc_name[MAX_PATH];
+    struct dmanip_hook_table table = { .size = sizeof(table) };
+    dmanip_hook_init_proc init;
+    HMODULE module = NULL;
+    char proc[MAX_PATH];
+    DWORD mask_size;
+    BOOL ret = FALSE;
+
+    if (!enable) return uninit_dmanip_hook();
+    if (!NtUserGetDManipHookInitFunction( module_name, proc_name )) return FALSE;
+    if (!GetModuleHandleExW( 0, module_name, &module )) return FALSE;
+    if (!WideCharToMultiByte( CP_ACP, 0, proc_name, -1, proc, sizeof(proc), NULL, NULL ) ||
+        !(init = (dmanip_hook_init_proc)GetProcAddress( module, proc ))) goto done;
+    if (!init( 0, &table ) || table.size != sizeof(table) ||
+        !table.pre_dispatch || !table.post_dispatch ||
+        (table.message_mask_size && !table.message_mask)) goto done;
+
+    mask_size = min( table.message_mask_size, sizeof(dmanip_hook_message_mask) );
+    EnterCriticalSection( &dmanip_hook_cs );
+    if (!dmanip_hook_state)
+    {
+        dmanip_hook_table = table;
+        dmanip_hook_table.message_mask = mask_size ? dmanip_hook_message_mask : NULL;
+        dmanip_hook_table.message_mask_size = mask_size;
+        if (mask_size) memcpy( dmanip_hook_message_mask, table.message_mask, mask_size );
+        dmanip_hook_module = module;
+        dmanip_hook_state = 1;
+        module = NULL;
+        ret = TRUE;
+    }
+    else if (dmanip_hook_table.size == table.size &&
+             dmanip_hook_table.reserved == table.reserved &&
+             dmanip_hook_table.pre_dispatch == table.pre_dispatch &&
+             dmanip_hook_table.post_dispatch == table.post_dispatch &&
+             dmanip_hook_table.message_mask_size == mask_size &&
+             dmanip_hook_table.flags == table.flags &&
+             (!mask_size || !memcmp( dmanip_hook_message_mask, table.message_mask, mask_size )))
+    {
+        dmanip_hook_state = 1;
+        ret = TRUE;
+    }
+    LeaveCriticalSection( &dmanip_hook_cs );
+
+done:
+    if (module) FreeLibrary( module );
+    TRACE( "Direct Manipulation hook initialization %s\n", ret ? "succeeded" : "failed" );
+    return ret;
+}
+
+BOOL WINAPI InitDManipHook(void)
+{
+    return InitDManipHookEx( TRUE );
+}
+
+void dmanip_hook_begin( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+                        LRESULT *result, struct dmanip_hook_call *call )
+{
+    BOOL (CDECL *pre_dispatch)( MSG *, LRESULT *, void ** ) = NULL;
+    unsigned int byte = msg >> 3;
+
+    memset( call, 0, sizeof(*call) );
+    EnterCriticalSection( &dmanip_hook_cs );
+    if (dmanip_hook_state == 1 && byte < dmanip_hook_table.message_mask_size &&
+        (dmanip_hook_message_mask[byte] & (1u << (msg & 7))))
+    {
+        ++dmanip_hook_calls;
+        call->active = TRUE;
+        call->post_proc = dmanip_hook_table.post_dispatch;
+        pre_dispatch = dmanip_hook_table.pre_dispatch;
+    }
+    LeaveCriticalSection( &dmanip_hook_cs );
+    if (!pre_dispatch) return;
+
+    call->original_msg.hwnd = hwnd;
+    call->original_msg.message = msg;
+    call->original_msg.wParam = wparam;
+    call->original_msg.lParam = lparam;
+    call->current_msg = call->original_msg;
+    call->handled = pre_dispatch( &call->current_msg, result, &call->context );
+}
+
+void dmanip_hook_post( LRESULT result, struct dmanip_hook_call *call )
+{
+    if (call->active && !call->handled)
+        ((void (CDECL *)(LRESULT, const MSG *, const MSG *, void *))call->post_proc)
+            ( result, &call->original_msg, &call->current_msg, call->context );
+}
+
+void CALLBACK dmanip_hook_end( BOOL normal, void *context )
+{
+    struct dmanip_hook_call *call = context;
+    HMODULE module = NULL;
+
+    (void)normal;
+    if (!call->active) return;
+
+    EnterCriticalSection( &dmanip_hook_cs );
+    if (!--dmanip_hook_calls && dmanip_hook_state == 2)
+    {
+        module = dmanip_hook_module;
+        dmanip_hook_module = NULL;
+        dmanip_hook_state = 0;
+        memset( &dmanip_hook_table, 0, sizeof(dmanip_hook_table) );
+        memset( dmanip_hook_message_mask, 0, sizeof(dmanip_hook_message_mask) );
+    }
+    LeaveCriticalSection( &dmanip_hook_cs );
+    if (module) FreeLibrary( module );
 }
 
 

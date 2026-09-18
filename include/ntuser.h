@@ -1107,6 +1107,7 @@ W32KAPI BOOL    WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrg
 W32KAPI ATOM    WINAPI NtUserRegisterClassExWOW( const WNDCLASSEXW *wc, UNICODE_STRING *name, UNICODE_STRING *version,
                                                  struct client_menu_name *menu_name, DWORD fnid, DWORD flags, DWORD *wow );
 W32KAPI BOOL    WINAPI NtUserRegisterDManipHook(void);
+W32KAPI BOOL    WINAPI NtUserGetDManipHookInitFunction( WCHAR *module, WCHAR *proc );
 W32KAPI BOOL    WINAPI NtUserRegisterUserApiHook( UNICODE_STRING *module64, UNICODE_STRING *proc64,
                                                   UNICODE_STRING *module32, UNICODE_STRING *proc32 );
 W32KAPI BOOL    WINAPI NtUserRegisterBSDRWindow( HWND hwnd, DWORD flags );

@@ -3114,6 +3114,18 @@ enum coords_relative
 @END
 
 
+/* Register the session Direct Manipulation hook provider */
+@REQ(register_dmanip_hook)
+@END
+
+
+/* Query whether the session Direct Manipulation hook provider is registered */
+@REQ(get_dmanip_hook)
+@REPLY
+    unsigned int registered;      /* nonzero if the hook provider is registered */
+@END
+
+
 /* Enumerate window stations and desktops */
 @REQ(enum_winstation)
     obj_handle_t handle;          /* handle to the window station */

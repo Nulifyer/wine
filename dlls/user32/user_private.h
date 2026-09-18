@@ -162,6 +162,19 @@ extern int bitmap_info_size( const BITMAPINFO * info, WORD coloruse );
 extern BOOL get_icon_size( HICON handle, SIZE *size );
 
 extern struct user_api_hook *user_api;
+struct dmanip_hook_call
+{
+    MSG original_msg;
+    MSG current_msg;
+    void *context;
+    void *post_proc;
+    BOOL active;
+    BOOL handled;
+};
+void dmanip_hook_begin( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+                        LRESULT *result, struct dmanip_hook_call *call );
+void dmanip_hook_post( LRESULT result, struct dmanip_hook_call *call );
+void CALLBACK dmanip_hook_end( BOOL normal, void *context );
 BOOL user_api_hook_load( const struct load_user_api_hook_params *params, ULONG size );
 void user_api_hook_ensure_loaded(void);
 void user_api_hook_process_detach( BOOL process_terminating );

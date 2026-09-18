@@ -31,6 +31,8 @@ typedef void (WINAPI *internal_enum_child_windows_fn)(HWND, WNDENUMPROC, LPARAM)
 typedef BOOL (WINAPI *broadcast_theme_change_event_fn)(DWORD, LONG);
 typedef DWORD (WINAPI *get_queue_status_readonly_fn)(UINT);
 typedef BOOL (WINAPI *register_user_api_hook_fn)(const struct user_api_hook_descriptor *);
+typedef BOOL (WINAPI *register_dmanip_hook_fn)(void);
+typedef BOOL (WINAPI *init_dmanip_hook_ex_fn)(BOOL);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 
@@ -698,6 +700,28 @@ static void test_register_user_api_hook(HMODULE module)
        "unprivileged registration set error %#lx.\n", GetLastError());
 }
 
+static void test_dmanip_hook_registration(HMODULE module)
+{
+    register_dmanip_hook_fn register_hook;
+    init_dmanip_hook_ex_fn init_hook;
+    BOOL ret;
+
+    register_hook = (void *)GetProcAddress(module, "RegisterDManipHook");
+    init_hook = (void *)GetProcAddress(module, (const char *)2587);
+    ok(!!register_hook, "RegisterDManipHook is unavailable.\n");
+    ok(!!init_hook, "ordinal 2587 is unavailable.\n");
+    if (!register_hook || !init_hook) return;
+
+    SetLastError(0x13579bdf);
+    ret = register_hook();
+    ok(!ret, "unprivileged Direct Manipulation registration returned %d.\n", ret);
+    ok(GetLastError() == ERROR_ACCESS_DENIED,
+       "unprivileged Direct Manipulation registration set error %#lx.\n", GetLastError());
+
+    ret = init_hook(FALSE);
+    ok(ret, "Direct Manipulation teardown returned %d.\n", ret);
+}
+
 START_TEST(native_ordinals)
 {
     char **argv;
@@ -724,6 +748,7 @@ START_TEST(native_ordinals)
     test_thread_desktop_composited(module);
     test_current_dpi_info_for_window(module);
     test_register_user_api_hook(module);
+    test_dmanip_hook_registration(module);
 
     pGetProcessUIContextInformation = (void *)GetProcAddress(module,
                                                              "GetProcessUIContextInformation");

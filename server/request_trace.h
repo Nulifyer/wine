@@ -2164,6 +2164,19 @@ static void dump_unregister_user_api_hook_reply( const struct unregister_user_ap
     fprintf( stderr, " generation=%08x", req->generation );
 }
 
+static void dump_register_dmanip_hook_request( const struct register_dmanip_hook_request *req )
+{
+}
+
+static void dump_get_dmanip_hook_request( const struct get_dmanip_hook_request *req )
+{
+}
+
+static void dump_get_dmanip_hook_reply( const struct get_dmanip_hook_reply *req )
+{
+    fprintf( stderr, " registered=%08x", req->registered );
+}
+
 static void dump_enum_winstation_request( const struct enum_winstation_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -4459,6 +4472,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_register_user_api_hook_request,
     (dump_func)dump_get_user_api_hook_request,
     (dump_func)dump_unregister_user_api_hook_request,
+    (dump_func)dump_register_dmanip_hook_request,
+    (dump_func)dump_get_dmanip_hook_request,
     (dump_func)dump_enum_winstation_request,
     (dump_func)dump_create_desktop_request,
     (dump_func)dump_open_desktop_request,
@@ -4844,6 +4859,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_register_user_api_hook_reply,
     (dump_func)dump_get_user_api_hook_reply,
     (dump_func)dump_unregister_user_api_hook_reply,
+    NULL,
+    (dump_func)dump_get_dmanip_hook_reply,
     (dump_func)dump_enum_winstation_reply,
     (dump_func)dump_create_desktop_reply,
     (dump_func)dump_open_desktop_reply,
@@ -5229,6 +5246,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "register_user_api_hook",
     "get_user_api_hook",
     "unregister_user_api_hook",
+    "register_dmanip_hook",
+    "get_dmanip_hook",
     "enum_winstation",
     "create_desktop",
     "open_desktop",

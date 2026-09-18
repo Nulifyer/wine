@@ -150,6 +150,7 @@ static bool winstation_init( struct object *obj, const void *init_data )
     winstation->bsdr_window = NULL;
     winstation->bsdr_flags = 0;
     winstation->user_api_hook_owner = 0;
+    winstation->dmanip_hook_owner = 0;
     winstation->user_api_hook_generation = 1;
     winstation->user_api_hook_size = 0;
     memset( winstation->user_api_hook_len, 0, sizeof(winstation->user_api_hook_len) );
@@ -240,6 +241,8 @@ void cleanup_process_winstation_state( struct process *process )
             winstation->user_api_hook_data = NULL;
             update_user_api_hook_generation( winstation );
         }
+        if (winstation->dmanip_hook_owner == process->id)
+            winstation->dmanip_hook_owner = 0;
     }
 }
 
@@ -899,6 +902,36 @@ DECL_HANDLER(unregister_user_api_hook)
     winstation->user_api_hook_data = NULL;
     update_user_api_hook_generation( winstation );
     reply->generation = winstation->user_api_hook_generation;
+    release_object( winstation );
+}
+
+/* Register the Direct Manipulation hook provider for the calling process' session. */
+DECL_HANDLER(register_dmanip_hook)
+{
+    struct winstation *winstation;
+
+    if (!equal_sid( token_get_user( current->process->token ), &local_system_sid ) ||
+        !thread_single_check_privilege( current, SeTcbPrivilege ))
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!(winstation = get_process_winstation( current->process, 0 ))) return;
+    if (winstation->dmanip_hook_owner &&
+        winstation->dmanip_hook_owner != current->process->id)
+        set_error( STATUS_ACCESS_DENIED );
+    else
+        winstation->dmanip_hook_owner = current->process->id;
+    release_object( winstation );
+}
+
+/* Report whether the session Direct Manipulation hook provider is registered. */
+DECL_HANDLER(get_dmanip_hook)
+{
+    struct winstation *winstation;
+
+    if (!(winstation = get_process_winstation( current->process, 0 ))) return;
+    reply->registered = !!winstation->dmanip_hook_owner;
     release_object( winstation );
 }
 

@@ -52,6 +52,7 @@ struct winstation
     struct window     *bsdr_window;        /* blocked-shutdown resolver window */
     unsigned int       bsdr_flags;         /* blocked-shutdown resolver registration flags */
     process_id_t       user_api_hook_owner;/* process owning the session user API hook */
+    process_id_t       dmanip_hook_owner;  /* process owning the session Direct Manipulation hook */
     unsigned int       user_api_hook_generation; /* session hook generation */
     data_size_t        user_api_hook_size; /* packed user API hook string bytes */
     data_size_t        user_api_hook_len[4]; /* packed string lengths */

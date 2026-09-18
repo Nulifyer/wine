@@ -4234,6 +4234,32 @@ struct unregister_user_api_hook_reply
 
 
 
+struct register_dmanip_hook_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct register_dmanip_hook_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct get_dmanip_hook_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_dmanip_hook_reply
+{
+    struct reply_header __header;
+    unsigned int registered;
+    char __pad_12[4];
+};
+
+
+
 struct enum_winstation_request
 {
     struct request_header __header;
@@ -7546,6 +7572,8 @@ enum request
     REQ_register_user_api_hook,
     REQ_get_user_api_hook,
     REQ_unregister_user_api_hook,
+    REQ_register_dmanip_hook,
+    REQ_get_dmanip_hook,
     REQ_enum_winstation,
     REQ_create_desktop,
     REQ_open_desktop,
@@ -7934,6 +7962,8 @@ union generic_request
     struct register_user_api_hook_request register_user_api_hook_request;
     struct get_user_api_hook_request get_user_api_hook_request;
     struct unregister_user_api_hook_request unregister_user_api_hook_request;
+    struct register_dmanip_hook_request register_dmanip_hook_request;
+    struct get_dmanip_hook_request get_dmanip_hook_request;
     struct enum_winstation_request enum_winstation_request;
     struct create_desktop_request create_desktop_request;
     struct open_desktop_request open_desktop_request;
@@ -8320,6 +8350,8 @@ union generic_reply
     struct register_user_api_hook_reply register_user_api_hook_reply;
     struct get_user_api_hook_reply get_user_api_hook_reply;
     struct unregister_user_api_hook_reply unregister_user_api_hook_reply;
+    struct register_dmanip_hook_reply register_dmanip_hook_reply;
+    struct get_dmanip_hook_reply get_dmanip_hook_reply;
     struct enum_winstation_reply enum_winstation_reply;
     struct create_desktop_reply create_desktop_reply;
     struct open_desktop_reply open_desktop_reply;
@@ -8520,6 +8552,6 @@ union generic_reply
     struct register_manipulation_thread_reply register_manipulation_thread_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1022
+#define SERVER_PROTOCOL_VERSION 1023
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
