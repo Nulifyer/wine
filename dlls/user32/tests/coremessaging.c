@@ -9,12 +9,17 @@
  * version 2.1 of the License, or (at your option) any later version.
  */
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include <windows.h>
 
 #include "wine/test.h"
+#include "winternl.h"
 
 typedef HANDLE (WINAPI *init_thread_coremessaging_iocp2_fn)( HWND, DWORD * );
 typedef ULONG_PTR (WINAPI *drain_thread_coremessaging_completions2_fn)( HWND );
+typedef NTSTATUS (WINAPI *nt_set_io_completion_fn)( HANDLE, ULONG_PTR, ULONG_PTR,
+                                                    NTSTATUS, ULONG_PTR );
 
 static const char window_class[] = "CoreMessagingTestWindow";
 
@@ -23,6 +28,12 @@ struct foreign_window_state
     HANDLE ready;
     HANDLE release;
     HWND hwnd;
+};
+
+struct core_messaging_completion
+{
+    struct core_messaging_completion *next;
+    ULONG_PTR local_handle;
 };
 
 static LRESULT CALLBACK window_proc( HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam )
@@ -46,16 +57,24 @@ static void test_init_thread_coremessaging_iocp2(void)
 {
     init_thread_coremessaging_iocp2_fn init;
     drain_thread_coremessaging_completions2_fn drain;
+    nt_set_io_completion_fn set_io_completion;
     struct foreign_window_state foreign = {0};
+    struct core_messaging_completion completion1 = {0}, completion2 = {0}, completion3 = {0};
+    void *completion_lists[3] = {0};
     WNDCLASSA cls = {0};
     HANDLE first, second, third, thread;
-    HWND hwnd1, hwnd2, destroyed;
+    ULONG_PTR saved_completion_lists;
+    HWND hwnd1, hwnd2, hwnd3, destroyed;
     DWORD mode, flags, error;
     ULONG_PTR drain_ret;
+    NTSTATUS status;
+    MSG msg;
     BOOL ret;
 
     init = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2669 ));
     drain = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2670 ));
+    set_io_completion = (void *)GetProcAddress( GetModuleHandleA( "ntdll.dll" ),
+                                                "NtSetIoCompletion" );
     if (!init || !drain)
     {
         win_skip( "CoreMessaging thread integration exports are not available.\n" );
@@ -71,7 +90,10 @@ static void test_init_thread_coremessaging_iocp2(void)
                              HWND_MESSAGE, NULL, cls.hInstance, NULL );
     hwnd2 = CreateWindowExA( 0, window_class, "", 0, 0, 0, 0, 0,
                              HWND_MESSAGE, NULL, cls.hInstance, NULL );
-    ok( !!hwnd1 && !!hwnd2, "Failed to create test windows, error %lu.\n", GetLastError() );
+    hwnd3 = CreateWindowExA( 0, window_class, "", 0, 0, 0, 0, 0,
+                             HWND_MESSAGE, NULL, cls.hInstance, NULL );
+    ok( !!hwnd1 && !!hwnd2 && !!hwnd3, "Failed to create test windows, error %lu.\n",
+        GetLastError() );
 
     SetLastError( 0xdeadbeef );
     drain_ret = drain( NULL );
@@ -119,10 +141,58 @@ static void test_init_thread_coremessaging_iocp2(void)
     ok( mode == 1, "Expected subsequent mode 1, got %#lx.\n", mode );
     ok( GetLastError() == 0xdeadbeef, "Expected unchanged error, got %lu.\n", GetLastError() );
 
+    mode = 0xcccccccc;
+    SetLastError( 0xdeadbeef );
+    second = init( hwnd3, &mode );
+    ok( !second, "Third registration returned %p.\n", second );
+    ok( mode == 0xcccccccc, "Third registration changed mode to %#lx.\n", mode );
+    ok( GetLastError() == ERROR_ALREADY_REGISTERED, "Expected error 1242, got %lu.\n",
+        GetLastError() );
+
     SetLastError( 0xdeadbeef );
     drain_ret = drain( hwnd2 );
     ok( drain_ret == TRUE, "Registered second window returned %Ix.\n", drain_ret );
     ok( GetLastError() == 0xdeadbeef, "Expected unchanged error, got %lu.\n", GetLastError() );
+
+    if (set_io_completion)
+    {
+        saved_completion_lists = NtCurrentTeb()->Win32ClientInfo[61];
+        NtCurrentTeb()->Win32ClientInfo[61] = (ULONG_PTR)completion_lists;
+
+        completion1.local_handle = 0x1111;
+        completion2.local_handle = 0x2222;
+        status = set_io_completion( first, (ULONG_PTR)&completion1, 0,
+                                    STATUS_SUCCESS, 0 );
+        ok( status == STATUS_SUCCESS, "NtSetIoCompletion failed, status %#lx.\n", status );
+        status = set_io_completion( first, (ULONG_PTR)&completion2, 0,
+                                    STATUS_SUCCESS, 0 );
+        ok( status == STATUS_SUCCESS, "NtSetIoCompletion failed, status %#lx.\n", status );
+        drain_ret = drain( hwnd1 );
+        ok( drain_ret == TRUE, "Completion drain returned %Ix.\n", drain_ret );
+        ok( completion_lists[1] == &completion2, "Expected completion2 at head, got %p.\n",
+            completion_lists[1] );
+        ok( completion2.next == &completion1, "Expected completion1 next, got %p.\n",
+            completion2.next );
+        ok( !completion1.next, "Expected a null tail, got %p.\n", completion1.next );
+        completion_lists[1] = NULL;
+
+        while (PeekMessageA( &msg, hwnd2, 0x60, 0x60, PM_REMOVE )) {}
+        completion3.local_handle = 0x3333;
+        status = set_io_completion( first, (ULONG_PTR)&completion3, 1,
+                                    STATUS_SUCCESS, 0 );
+        ok( status == STATUS_SUCCESS, "NtSetIoCompletion failed, status %#lx.\n", status );
+        drain_ret = drain( hwnd1 );
+        ok( drain_ret == TRUE, "Cross-context completion drain returned %Ix.\n", drain_ret );
+        ok( completion_lists[2] == &completion3, "Expected completion3 at head, got %p.\n",
+            completion_lists[2] );
+        ok( PeekMessageA( &msg, hwnd2, 0x60, 0x60, PM_REMOVE ),
+            "Expected a CoreMessaging notification.\n" );
+        ok( msg.wParam == 1 && !msg.lParam, "Unexpected notification parameters %Ix/%Ix.\n",
+            msg.wParam, msg.lParam );
+
+        NtCurrentTeb()->Win32ClientInfo[61] = saved_completion_lists;
+    }
+    else win_skip( "NtSetIoCompletion is not available.\n" );
 
     SetLastError( 0xdeadbeef );
     ret = CloseHandle( first );
@@ -166,6 +236,7 @@ static void test_init_thread_coremessaging_iocp2(void)
     CloseHandle( thread );
     CloseHandle( foreign.release );
     CloseHandle( foreign.ready );
+    DestroyWindow( hwnd3 );
     DestroyWindow( hwnd2 );
     DestroyWindow( hwnd1 );
 }
