@@ -125,6 +125,156 @@ struct message_state
     struct dispatch_params params;
 };
 
+struct server_security
+{
+    IServerSecurity IServerSecurity_iface;
+    LONG refs;
+    RPC_BINDING_HANDLE binding;
+    BOOL active;
+    BOOL impersonating;
+};
+
+static inline struct server_security *impl_from_IServerSecurity(IServerSecurity *iface)
+{
+    return CONTAINING_RECORD(iface, struct server_security, IServerSecurity_iface);
+}
+
+static HRESULT WINAPI server_security_QueryInterface(IServerSecurity *iface, REFIID iid, void **out)
+{
+    if (!out) return E_POINTER;
+
+    if (IsEqualIID(iid, &IID_IUnknown) || IsEqualIID(iid, &IID_IServerSecurity))
+    {
+        *out = iface;
+        IServerSecurity_AddRef(iface);
+        return S_OK;
+    }
+
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI server_security_AddRef(IServerSecurity *iface)
+{
+    struct server_security *security = impl_from_IServerSecurity(iface);
+    return InterlockedIncrement(&security->refs);
+}
+
+static ULONG WINAPI server_security_Release(IServerSecurity *iface)
+{
+    struct server_security *security = impl_from_IServerSecurity(iface);
+    ULONG refs = InterlockedDecrement(&security->refs);
+
+    if (!refs) free(security);
+    return refs;
+}
+
+static HRESULT WINAPI server_security_QueryBlanket(IServerSecurity *iface, DWORD *authn_service,
+        DWORD *authz_service, OLECHAR **server_principal, DWORD *authn_level, DWORD *imp_level,
+        void **privs, DWORD *capabilities)
+{
+    struct server_security *security = impl_from_IServerSecurity(iface);
+    RPC_WSTR rpc_principal = NULL;
+    RPC_STATUS status;
+    SIZE_T size;
+
+    if (privs) *privs = NULL;
+    if (server_principal) *server_principal = NULL;
+    if (authn_service) *authn_service = RPC_C_AUTHN_WINNT;
+    if (authn_level) *authn_level = RPC_C_AUTHN_LEVEL_PKT_PRIVACY;
+    if (imp_level) *imp_level = RPC_C_IMP_LEVEL_IDENTIFY;
+    if (authz_service) *authz_service = RPC_C_AUTHZ_NONE;
+    if (capabilities) *capabilities = 0;
+
+    if (!security->active) return RPC_E_CALL_COMPLETE;
+
+    status = RpcBindingInqAuthClientW(security->binding, privs,
+            server_principal ? &rpc_principal : NULL, authn_level, authn_service, authz_service);
+    if (status != RPC_S_OK) return HRESULT_FROM_WIN32(status);
+
+    if (server_principal && rpc_principal)
+    {
+        size = (lstrlenW((WCHAR *)rpc_principal) + 1) * sizeof(WCHAR);
+        if (!(*server_principal = CoTaskMemAlloc(size)))
+        {
+            RpcStringFreeW(&rpc_principal);
+            return E_OUTOFMEMORY;
+        }
+        memcpy(*server_principal, rpc_principal, size);
+        RpcStringFreeW(&rpc_principal);
+    }
+
+    return S_OK;
+}
+
+static HRESULT WINAPI server_security_ImpersonateClient(IServerSecurity *iface)
+{
+    struct server_security *security = impl_from_IServerSecurity(iface);
+    RPC_STATUS status;
+
+    if (!security->active) return RPC_E_CALL_COMPLETE;
+    if (security->impersonating) return S_OK;
+
+    status = RpcImpersonateClient(security->binding);
+    if (status != RPC_S_OK) return HRESULT_FROM_WIN32(status);
+    security->impersonating = TRUE;
+    return S_OK;
+}
+
+static HRESULT WINAPI server_security_RevertToSelf(IServerSecurity *iface)
+{
+    struct server_security *security = impl_from_IServerSecurity(iface);
+    RPC_STATUS status;
+
+    if (!security->active) return RPC_E_CALL_COMPLETE;
+    if (!security->impersonating) return S_OK;
+
+    status = RpcRevertToSelfEx(security->binding);
+    if (status != RPC_S_OK) return HRESULT_FROM_WIN32(status);
+    security->impersonating = FALSE;
+    return S_OK;
+}
+
+static BOOL WINAPI server_security_IsImpersonating(IServerSecurity *iface)
+{
+    struct server_security *security = impl_from_IServerSecurity(iface);
+    return security->active && security->impersonating;
+}
+
+static const IServerSecurityVtbl server_security_vtbl =
+{
+    server_security_QueryInterface,
+    server_security_AddRef,
+    server_security_Release,
+    server_security_QueryBlanket,
+    server_security_ImpersonateClient,
+    server_security_RevertToSelf,
+    server_security_IsImpersonating,
+};
+
+static struct server_security *server_security_create(RPC_BINDING_HANDLE binding)
+{
+    struct server_security *security;
+
+    if (!(security = calloc(1, sizeof(*security)))) return NULL;
+    security->IServerSecurity_iface.lpVtbl = &server_security_vtbl;
+    security->refs = 1;
+    security->binding = binding;
+    security->active = TRUE;
+    return security;
+}
+
+static void server_security_end_call(struct server_security *security)
+{
+    if (security->impersonating)
+    {
+        RpcRevertToSelfEx(security->binding);
+        security->impersonating = FALSE;
+    }
+    security->active = FALSE;
+    IServerSecurity_Release(&security->IServerSecurity_iface);
+}
+
 typedef struct
 {
     ULONG conformance; /* NDR */
@@ -1949,12 +2099,14 @@ static HRESULT unmarshal_ORPCTHAT(RPC_MESSAGE *msg, ORPCTHAT *orpcthat,
 void rpc_execute_call(struct dispatch_params *params)
 {
     struct message_state *message_state = NULL;
+    struct server_security *server_security = NULL;
     RPC_MESSAGE *msg = (RPC_MESSAGE *)params->msg;
     char *original_buffer = msg->Buffer;
     ORPCTHIS orpcthis;
     ORPC_EXTENT_ARRAY orpc_ext_array;
     WIRE_ORPC_EXTENT *first_wire_orpc_extent;
     GUID old_causality_id;
+    IUnknown *old_call_state;
     struct tlsdata *tlsdata;
     struct apartment *apt;
 
@@ -1997,6 +2149,14 @@ void rpc_execute_call(struct dispatch_params *params)
 
     msg->Handle = message_state;
     msg->BufferLength -= message_state->prefix_data_len;
+
+    if (!(server_security = server_security_create(message_state->binding_handle)))
+    {
+        params->hr = E_OUTOFMEMORY;
+        goto exit_reset_state;
+    }
+    old_call_state = tlsdata->call_state;
+    tlsdata->call_state = (IUnknown *)&server_security->IServerSecurity_iface;
 
     /* call message filter */
 
@@ -2054,11 +2214,20 @@ void rpc_execute_call(struct dispatch_params *params)
     tlsdata->pending_call_count_server--;
     tlsdata->causality_id = old_causality_id;
 
+    tlsdata->call_state = old_call_state;
+    server_security_end_call(server_security);
+    server_security = NULL;
+
     /* the invoke allocated a new buffer, so free the old one */
     if (message_state->bypass_rpcrt && original_buffer != msg->Buffer)
         free(original_buffer);
 
 exit_reset_state:
+    if (server_security)
+    {
+        tlsdata->call_state = old_call_state;
+        server_security_end_call(server_security);
+    }
     message_state = msg->Handle;
     msg->Handle = message_state->binding_handle;
     msg->Buffer = (char *)msg->Buffer - message_state->prefix_data_len;

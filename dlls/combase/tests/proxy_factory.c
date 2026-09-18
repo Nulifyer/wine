@@ -105,6 +105,13 @@ struct activation_factory_object
     IActivationFactory IActivationFactory_iface;
     LONG refcount;
     LONG activate_count;
+    HRESULT call_context_hr;
+    HRESULT impersonate_hr;
+    HRESULT revert_hr;
+    BOOL impersonating_before;
+    BOOL impersonating_during;
+    BOOL impersonating_after;
+    IServerSecurity *retained_security;
 };
 
 static inline struct activation_factory_object *impl_from_IActivationFactory(IActivationFactory *iface)
@@ -163,9 +170,20 @@ static HRESULT WINAPI activation_factory_GetTrustLevel(IActivationFactory *iface
 static HRESULT WINAPI activation_factory_ActivateInstance(IActivationFactory *iface, IInspectable **instance)
 {
     struct activation_factory_object *impl = impl_from_IActivationFactory(iface);
+    IServerSecurity *security = NULL;
 
     if (!instance) return E_POINTER;
     InterlockedIncrement(&impl->activate_count);
+    impl->call_context_hr = CoGetCallContext(&IID_IServerSecurity, (void **)&security);
+    if (SUCCEEDED(impl->call_context_hr))
+    {
+        impl->impersonating_before = IServerSecurity_IsImpersonating(security);
+        impl->impersonate_hr = CoImpersonateClient();
+        impl->impersonating_during = IServerSecurity_IsImpersonating(security);
+        impl->revert_hr = CoRevertToSelf();
+        impl->impersonating_after = IServerSecurity_IsImpersonating(security);
+        impl->retained_security = security;
+    }
     IInspectable_AddRef((*instance = &inspectable.IInspectable_iface));
     return S_OK;
 }
@@ -509,6 +527,25 @@ static void test_activation_factory_proxy(void)
         ok(args.activate_hr == S_OK, "ActivateInstance returned %#lx.\n", args.activate_hr);
         ok(activation_factory.activate_count == 1, "ActivateInstance was called %ld times.\n",
                 activation_factory.activate_count);
+        ok(activation_factory.call_context_hr == S_OK, "CoGetCallContext returned %#lx.\n",
+                activation_factory.call_context_hr);
+        ok(!activation_factory.impersonating_before, "call started impersonating.\n");
+        ok(activation_factory.impersonate_hr == S_OK, "CoImpersonateClient returned %#lx.\n",
+                activation_factory.impersonate_hr);
+        ok(activation_factory.impersonating_during, "call was not impersonating.\n");
+        ok(activation_factory.revert_hr == S_OK, "CoRevertToSelf returned %#lx.\n",
+                activation_factory.revert_hr);
+        ok(!activation_factory.impersonating_after, "call remained impersonating.\n");
+        ok(!!activation_factory.retained_security, "missing retained call context.\n");
+        if (activation_factory.retained_security)
+        {
+            ok(!IServerSecurity_IsImpersonating(activation_factory.retained_security),
+                    "completed call remained impersonating.\n");
+            hr = IServerSecurity_ImpersonateClient(activation_factory.retained_security);
+            ok(hr == RPC_E_CALL_COMPLETE, "completed call impersonation returned %#lx.\n", hr);
+            IServerSecurity_Release(activation_factory.retained_security);
+            activation_factory.retained_security = NULL;
+        }
     }
 
     hr = RoGetAgileReference(AGILEREFERENCE_DEFAULT, &IID_IActivationFactory,
