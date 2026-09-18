@@ -24,6 +24,7 @@
 
 #include "config.h"
 
+#include <limits.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,9 +53,18 @@ C_ASSERT( sizeof(struct token_manager_thread_info) == 24 );
 struct dcomp_channel_view
 {
     struct list entry;
+    struct list resources;
     UINT channel;
     void *address;
     SIZE_T size;
+    BOOL released_resources;
+};
+
+struct dcomp_resource_view
+{
+    struct list entry;
+    UINT id;
+    UINT type;
 };
 
 struct dcomp_connection_batch_view
@@ -75,6 +85,136 @@ static struct dcomp_channel_view *find_dcomp_channel_view( UINT channel )
     LIST_FOR_EACH_ENTRY( view, &dcomp_channel_views, struct dcomp_channel_view, entry )
         if (view->channel == channel) return view;
     return NULL;
+}
+
+static struct dcomp_resource_view *find_dcomp_resource_view( struct dcomp_channel_view *view, UINT id )
+{
+    struct dcomp_resource_view *resource;
+
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+        if (resource->id == id) return resource;
+    return NULL;
+}
+
+static void free_dcomp_resource_views( struct dcomp_channel_view *view )
+{
+    struct dcomp_resource_view *resource, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE( resource, next, &view->resources, struct dcomp_resource_view, entry )
+    {
+        list_remove( &resource->entry );
+        free( resource );
+    }
+}
+
+static BOOL dcomp_command_size( const BYTE *buffer, UINT remaining, UINT *size )
+{
+    UINT count, type, total;
+
+    if (remaining < sizeof(type)) return FALSE;
+    memcpy( &type, buffer, sizeof(type) );
+    switch (type)
+    {
+    case 0:   total = 24; break; /* indirect command buffer */
+    case 1:   total = 8; break;  /* activate trigger */
+    case 2:   total = 16; break; /* create resource */
+    case 3:   total = 24; break; /* open shared resource */
+    case 4:   total = 8; break;  /* release resource */
+    case 5:   total = 16; break; /* channel property */
+    case 6:   total = 24; break;
+    case 7:   total = 24; break;
+    case 8:   total = 12; break;
+    case 9:   total = 16; break;
+    case 10:  total = 12; break;
+    case 11:  total = 24; break;
+    case 12:  total = 16; break;
+    case 13:  total = 24; break;
+    case 14:
+        if (remaining < 16) return FALSE;
+        memcpy( &count, buffer + 12, sizeof(count) );
+        if (count > (UINT_MAX - 16) / 8) return FALSE;
+        total = 16 + count * 8;
+        break;
+    case 15:
+        if (remaining < 16) return FALSE;
+        memcpy( &count, buffer + 12, sizeof(count) );
+        if (count > UINT_MAX - 3) return FALSE;
+        count = (count + 3) & ~3u;
+        if (count > UINT_MAX - 16) return FALSE;
+        total = 16 + count;
+        break;
+    case 16:  total = 16; break;
+    case 17:
+        if (remaining < 16) return FALSE;
+        memcpy( &count, buffer + 12, sizeof(count) );
+        if (count > (UINT_MAX - 16) / 4) return FALSE;
+        total = 16 + count * 4;
+        break;
+    case 18:  total = 16; break;
+    case 19:  total = 16; break;
+    case 20:  total = 20; break;
+    case 21:  total = 72; break;
+    case 22:  total = 16; break;
+    case 23:  total = 12; break;
+    default: return FALSE;
+    }
+    if (total > remaining) return FALSE;
+    *size = total;
+    return TRUE;
+}
+
+static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const BYTE *buffer,
+                                        UINT length, BOOL allow_indirect, ULONG *processed )
+{
+    struct dcomp_resource_view *resource;
+    UINT command_size, id, indirect_size, type;
+    const BYTE *indirect;
+    NTSTATUS status;
+
+    while (length)
+    {
+        ++*processed;
+        if (!dcomp_command_size( buffer, length, &command_size )) return STATUS_INVALID_PARAMETER;
+        memcpy( &type, buffer, sizeof(type) );
+
+        if (!type)
+        {
+            if (!allow_indirect) return STATUS_INVALID_PARAMETER;
+            memcpy( &indirect, buffer + 8, sizeof(indirect) );
+            memcpy( &indirect_size, buffer + 16, sizeof(indirect_size) );
+            if (!indirect || !indirect_size) return STATUS_INVALID_PARAMETER;
+            status = process_dcomp_commands( view, indirect, indirect_size, FALSE, processed );
+            if (status) return status;
+        }
+        else if (type == 2)
+        {
+            memcpy( &id, buffer + 4, sizeof(id) );
+            memcpy( &type, buffer + 8, sizeof(type) );
+            if (!id || !type || type > 0xc1) return STATUS_INVALID_PARAMETER;
+            if (find_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
+            if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
+            resource->id = id;
+            resource->type = type;
+            list_add_tail( &view->resources, &resource->entry );
+        }
+        else if (type == 4)
+        {
+            memcpy( &id, buffer + 4, sizeof(id) );
+            if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
+            list_remove( &resource->entry );
+            free( resource );
+            view->released_resources = TRUE;
+        }
+        else if (type >= 6 && type <= 23)
+        {
+            memcpy( &id, buffer + 4, sizeof(id) );
+            if (!find_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
+        }
+
+        buffer += command_size;
+        length -= command_size;
+    }
+    return STATUS_SUCCESS;
 }
 
 static struct dcomp_connection_batch_view *find_dcomp_connection_batch_view( HANDLE connection )
@@ -528,6 +668,7 @@ NTSTATUS WINAPI NtDCompositionCreateChannel( UINT *channel, UINT *section_size,
     view->channel = id;
     view->address = address;
     view->size = view_size;
+    list_init( &view->resources );
     pthread_mutex_lock( &dcomp_channel_lock );
     list_add_tail( &dcomp_channel_views, &view->entry );
     pthread_mutex_unlock( &dcomp_channel_lock );
@@ -568,10 +709,66 @@ NTSTATUS WINAPI NtDCompositionDestroyChannel( UINT channel )
     pthread_mutex_unlock( &dcomp_channel_lock );
     if (view)
     {
+        free_dcomp_resource_views( view );
         NtUnmapViewOfSection( GetCurrentProcess(), view->address );
         free( view );
     }
     return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI NtDCompositionProcessChannelBatchBuffer( UINT channel, UINT length,
+                                                          ULONG *processed, BYTE *released )
+{
+    struct dcomp_channel_view *view;
+    ULONG command_count = 0;
+    BYTE released_resources = 0;
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
+
+    TRACE( "channel %#x, length %u, processed %p, released %p\n",
+           channel, length, processed, released );
+
+    if (!processed || !released) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        *processed = 0;
+        *released = 0;
+    }
+    __EXCEPT
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+
+    pthread_mutex_lock( &dcomp_channel_lock );
+    if (!(view = find_dcomp_channel_view( channel ))) status = STATUS_ACCESS_DENIED;
+    else if (length > view->size) status = STATUS_INVALID_PARAMETER;
+    else
+    {
+        __TRY
+        {
+            status = process_dcomp_commands( view, view->address, length, TRUE, &command_count );
+            released_resources = view->released_resources;
+            view->released_resources = FALSE;
+        }
+        __EXCEPT
+        {
+            status = STATUS_INVALID_PARAMETER;
+        }
+        __ENDTRY
+    }
+    pthread_mutex_unlock( &dcomp_channel_lock );
+
+    __TRY
+    {
+        *processed = command_count;
+        *released = released_resources;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
 }
 
 NTSTATUS WINAPI NtDCompositionGetBatchId( UINT channel, UINT selector, UINT *batch_id )

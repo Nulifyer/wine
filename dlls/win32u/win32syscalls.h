@@ -45,7 +45,7 @@
     SYSCALL_ENTRY( 0x1029, NtDCompositionGetStatistics, 0 ) \
     SYSCALL_ENTRY( 0x102a, NtDCompositionGetTargetStatistics, 0 ) \
     SYSCALL_ENTRY( 0x102b, NtDCompositionNotifySuperWetInkWork, 0 ) \
-    SYSCALL_ENTRY( 0x102c, NtDCompositionProcessChannelBatchBuffer, 0 ) \
+    SYSCALL_ENTRY( 0x102c, NtDCompositionProcessChannelBatchBuffer, 16 ) \
     SYSCALL_ENTRY( 0x102d, NtDCompositionReferenceSharedResourceOnDwmChannel, 0 ) \
     SYSCALL_ENTRY( 0x102e, NtDCompositionRegisterThumbnailVisual, 0 ) \
     SYSCALL_ENTRY( 0x102f, NtDCompositionRegisterVirtualDesktopVisual, 0 ) \
@@ -1587,7 +1587,7 @@
     SYSCALL_ENTRY( 0x1029, NtDCompositionGetStatistics, 0 ) \
     SYSCALL_ENTRY( 0x102a, NtDCompositionGetTargetStatistics, 0 ) \
     SYSCALL_ENTRY( 0x102b, NtDCompositionNotifySuperWetInkWork, 0 ) \
-    SYSCALL_ENTRY( 0x102c, NtDCompositionProcessChannelBatchBuffer, 0 ) \
+    SYSCALL_ENTRY( 0x102c, NtDCompositionProcessChannelBatchBuffer, 32 ) \
     SYSCALL_ENTRY( 0x102d, NtDCompositionReferenceSharedResourceOnDwmChannel, 0 ) \
     SYSCALL_ENTRY( 0x102e, NtDCompositionRegisterThumbnailVisual, 0 ) \
     SYSCALL_ENTRY( 0x102f, NtDCompositionRegisterVirtualDesktopVisual, 0 ) \
@@ -3117,7 +3117,6 @@
     SYSCALL_STUB( NtDCompositionGetStatistics ) \
     SYSCALL_STUB( NtDCompositionGetTargetStatistics ) \
     SYSCALL_STUB( NtDCompositionNotifySuperWetInkWork ) \
-    SYSCALL_STUB( NtDCompositionProcessChannelBatchBuffer ) \
     SYSCALL_STUB( NtDCompositionReferenceSharedResourceOnDwmChannel ) \
     SYSCALL_STUB( NtDCompositionRegisterThumbnailVisual ) \
     SYSCALL_STUB( NtDCompositionRegisterVirtualDesktopVisual ) \

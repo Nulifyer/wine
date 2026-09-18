@@ -43,7 +43,7 @@
 @ stub -syscall NtDCompositionGetStatistics
 @ stub -syscall NtDCompositionGetTargetStatistics
 @ stub -syscall NtDCompositionNotifySuperWetInkWork
-@ stub -syscall NtDCompositionProcessChannelBatchBuffer
+@ stdcall -syscall NtDCompositionProcessChannelBatchBuffer(long long ptr ptr)
 @ stub -syscall NtDCompositionReferenceSharedResourceOnDwmChannel
 @ stub -syscall NtDCompositionRegisterThumbnailVisual
 @ stub -syscall NtDCompositionRegisterVirtualDesktopVisual

@@ -500,6 +500,8 @@ static void test_channel_lifetime(void)
     BYTE *buffer = (BYTE *)0xdeadbeef, *second_buffer = (BYTE *)0xdeadbeef;
     UINT size = 0x1000, second_size = 0x1000;
     UINT channel = 0xcccccccc, second_channel = 0xcccccccc;
+    ULONG processed;
+    BYTE released;
     UINT batch, selector;
     NTSTATUS status;
     unsigned int i;
@@ -524,6 +526,71 @@ static void test_channel_lifetime(void)
         ok( status == STATUS_SUCCESS, "selector %u got status %#lx\n", selector, status );
         ok( batch == (selector ? 0 : 1), "selector %u got batch %u\n", selector, batch );
     }
+
+    processed = 0xcccccccc;
+    released = 0xcc;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 0, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got empty process status %#lx\n", status );
+    ok( !processed, "got empty processed count %lu\n", processed );
+    ok( !released, "got empty released flag %#x\n", released );
+
+    ((UINT *)buffer)[0] = 2;
+    ((UINT *)buffer)[1] = 1;
+    ((UINT *)buffer)[2] = 13;
+    ((UINT *)buffer)[3] = 0;
+    processed = 0xcccccccc;
+    released = 0xcc;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got create process status %#lx\n", status );
+    ok( processed == 1, "got create processed count %lu\n", processed );
+    ok( !released, "got create released flag %#x\n", released );
+
+    ((UINT *)buffer)[0] = 11;
+    ((UINT *)buffer)[1] = 1;
+    ((UINT *)buffer)[2] = 2;
+    ((UINT *)buffer)[3] = 0x55667788;
+    ((UINT *)buffer)[4] = 0x11223344;
+    ((UINT *)buffer)[5] = 0;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 24, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got property process status %#lx\n", status );
+    ok( processed == 1, "got property processed count %lu\n", processed );
+
+    ((UINT *)buffer)[0] = 4;
+    ((UINT *)buffer)[1] = 1;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 8, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got release process status %#lx\n", status );
+    ok( processed == 1, "got release processed count %lu\n", processed );
+    ok( released == 1, "got release flag %#x\n", released );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 8, &processed, &released );
+    ok( status == STATUS_ACCESS_DENIED, "got repeated release status %#lx\n", status );
+    ok( processed == 1, "got repeated release processed count %lu\n", processed );
+
+    ((UINT *)buffer)[0] = 0xffffffff;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 4, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got unknown command status %#lx\n", status );
+    ok( processed == 1, "got unknown command processed count %lu\n", processed );
+    status = NtDCompositionProcessChannelBatchBuffer( 0xdeadbeef, 0, &processed, &released );
+    ok( status == STATUS_ACCESS_DENIED, "got invalid-channel process status %#lx\n", status );
+
+    processed = 0xcccccccc;
+    released = 0xcc;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, size + 1, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got oversized process status %#lx\n", status );
+    ok( !processed, "got oversized processed count %lu\n", processed );
+    ok( !released, "got oversized released flag %#x\n", released );
+
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 0, NULL, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got null-processed status %#lx\n", status );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 0, &processed, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null-released status %#lx\n", status );
+
+    ((UINT *)buffer)[0] = 15;
+    ((UINT *)buffer)[1] = 1;
+    ((UINT *)buffer)[2] = 2;
+    ((UINT *)buffer)[3] = UINT_MAX;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got malformed-variable process status %#lx\n", status );
+    ok( processed == 1, "got malformed-variable processed count %lu\n", processed );
 
     status = NtDCompositionCreateChannel( &second_channel, &second_size, (void **)&second_buffer, 0 );
     ok( status == STATUS_SUCCESS, "got second status %#lx\n", status );
