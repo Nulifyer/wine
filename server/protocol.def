@@ -5150,3 +5150,10 @@ struct alpc_message_info
     obj_handle_t event;           /* event with modify-state access */
     int internal;                 /* DComp internal pending-batch mode */
 @END
+
+/* Query a stable desktop identity for the authenticated session compositor. */
+@REQ(get_dwm_desktop_id)
+    unsigned int selector;        /* 1=input, 2=default/shell, 4=logon */
+@REPLY
+    object_id_t id;               /* zero when the selected role is absent */
+@END

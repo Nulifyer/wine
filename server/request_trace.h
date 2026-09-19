@@ -4456,6 +4456,16 @@ static void dump_set_dcomp_channel_completion_event_request( const struct set_dc
     fprintf( stderr, ", internal=%d", req->internal );
 }
 
+static void dump_get_dwm_desktop_id_request( const struct get_dwm_desktop_id_request *req )
+{
+    fprintf( stderr, " selector=%08x", req->selector );
+}
+
+static void dump_get_dwm_desktop_id_reply( const struct get_dwm_desktop_id_reply *req )
+{
+    dump_uint64( " id=", &req->id );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4861,6 +4871,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_destroy_dcomp_window_target_request,
     (dump_func)dump_validate_dcomp_window_target_request,
     (dump_func)dump_set_dcomp_channel_completion_event_request,
+    (dump_func)dump_get_dwm_desktop_id_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5266,6 +5277,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     NULL,
+    (dump_func)dump_get_dwm_desktop_id_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -5671,6 +5683,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "destroy_dcomp_window_target",
     "validate_dcomp_window_target",
     "set_dcomp_channel_completion_event",
+    "get_dwm_desktop_id",
 };
 
 static const struct

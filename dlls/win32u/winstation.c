@@ -138,6 +138,24 @@ NTSTATUS WINAPI NtUserRemoteConnect( void *connect_info, ULONG operation, void *
     return STATUS_SUCCESS;
 }
 
+BOOL WINAPI NtUserGetDesktopID( UINT selector, UINT64 *id )
+{
+    object_id_t desktop_id = 0;
+    NTSTATUS status;
+
+    SERVER_START_REQ( get_dwm_desktop_id )
+    {
+        req->selector = selector;
+        status = wine_server_call_err( req );
+        if (!status) desktop_id = reply->id;
+    }
+    SERVER_END_REQ;
+
+    if (status || !desktop_id) return FALSE;
+    *id = desktop_id;
+    return TRUE;
+}
+
 void shared_object_acquire_seqlock( const shared_object_t *object, UINT64 *seq )
 {
     while ((*seq = ReadNoFence64( &object->seq )) & 1) YieldProcessor();

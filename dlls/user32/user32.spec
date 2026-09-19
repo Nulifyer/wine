@@ -545,7 +545,7 @@
 @ stdcall GetDC(long) NtUserGetDC
 @ stdcall GetDCEx(long long long) NtUserGetDCEx
 # @ stub GetDCompositionHwndBitmap
-# @ stub GetDesktopID
+@ stdcall GetDesktopID(long ptr) NtUserGetDesktopID
 @ stdcall GetDesktopWindow()
 @ stdcall GetDialogBaseUnits()
 # @ stub GetDialogControlDpiChangeBehavior

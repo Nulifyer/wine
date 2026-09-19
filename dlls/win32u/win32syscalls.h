@@ -1008,7 +1008,7 @@
     SYSCALL_ENTRY( 0x13ec, NtUserGetDCEx, 12 ) \
     SYSCALL_ENTRY( 0x13ed, NtUserGetDCompositionHwndBitmap, 0 ) \
     SYSCALL_ENTRY( 0x13ee, NtUserGetDManipHookInitFunction, 8 ) \
-    SYSCALL_ENTRY( 0x13ef, NtUserGetDesktopID, 0 ) \
+    SYSCALL_ENTRY( 0x13ef, NtUserGetDesktopID, 8 ) \
     SYSCALL_ENTRY( 0x13f0, NtUserGetDesktopVisualTransform, 0 ) \
     SYSCALL_ENTRY( 0x13f1, NtUserGetDeviceChangeInfo, 0 ) \
     SYSCALL_ENTRY( 0x13f2, NtUserGetDisplayAutoRotationPreferences, 0 ) \
@@ -2550,7 +2550,7 @@
     SYSCALL_ENTRY( 0x13ec, NtUserGetDCEx, 24 ) \
     SYSCALL_ENTRY( 0x13ed, NtUserGetDCompositionHwndBitmap, 0 ) \
     SYSCALL_ENTRY( 0x13ee, NtUserGetDManipHookInitFunction, 16 ) \
-    SYSCALL_ENTRY( 0x13ef, NtUserGetDesktopID, 0 ) \
+    SYSCALL_ENTRY( 0x13ef, NtUserGetDesktopID, 16 ) \
     SYSCALL_ENTRY( 0x13f0, NtUserGetDesktopVisualTransform, 0 ) \
     SYSCALL_ENTRY( 0x13f1, NtUserGetDeviceChangeInfo, 0 ) \
     SYSCALL_ENTRY( 0x13f2, NtUserGetDisplayAutoRotationPreferences, 0 ) \
@@ -3735,7 +3735,6 @@
     SYSCALL_STUB( NtUserGetControlBrush ) \
     SYSCALL_STUB( NtUserGetControlColor ) \
     SYSCALL_STUB( NtUserGetDCompositionHwndBitmap ) \
-    SYSCALL_STUB( NtUserGetDesktopID ) \
     SYSCALL_STUB( NtUserGetDesktopVisualTransform ) \
     SYSCALL_STUB( NtUserGetDeviceChangeInfo ) \
     SYSCALL_STUB( NtUserGetDisplayAutoRotationPreferences ) \

@@ -1007,6 +1007,7 @@ W32KAPI HWND    WINAPI NtUserGetClipboardViewer(void);
 W32KAPI BOOL    WINAPI NtUserGetCurrentDpiInfoForWindow( HWND hwnd,
                                                          struct ntgdi_current_dpi_info *info );
 W32KAPI BOOL    WINAPI NtUserGetCurrentInputMessageSource( INPUT_MESSAGE_SOURCE *source );
+W32KAPI BOOL    WINAPI NtUserGetDesktopID( UINT selector, UINT64 *id );
 W32KAPI HCURSOR WINAPI NtUserGetCursor(void);
 W32KAPI HCURSOR WINAPI NtUserGetCursorFrameInfo( HCURSOR hCursor, DWORD istep, DWORD *rate_jiffies,
                                                  DWORD *num_steps );

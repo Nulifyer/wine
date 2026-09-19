@@ -1688,6 +1688,11 @@ BOOL SYSCALL_API NtUserGetCurrentInputMessageSource( INPUT_MESSAGE_SOURCE *sourc
     SYSCALL_FUNC( NtUserGetCurrentInputMessageSource );
 }
 
+BOOL SYSCALL_API NtUserGetDesktopID( UINT selector, UINT64 *id )
+{
+    SYSCALL_FUNC( NtUserGetDesktopID );
+}
+
 HCURSOR SYSCALL_API NtUserGetCursor(void)
 {
     SYSCALL_FUNC( NtUserGetCursor );

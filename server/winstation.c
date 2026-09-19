@@ -315,6 +315,22 @@ struct desktop *get_input_desktop( struct winstation *winstation )
     return (struct desktop *)grab_object( desktop );
 }
 
+static struct desktop *find_named_desktop( struct winstation *winstation,
+                                           const WCHAR *name, data_size_t name_len )
+{
+    struct desktop *desktop;
+
+    LIST_FOR_EACH_ENTRY( desktop, &winstation->desktops, struct desktop, entry )
+    {
+        data_size_t len;
+        const WCHAR *desktop_name = get_object_name( &desktop->obj, &len );
+
+        if (desktop_name && len == name_len && !memicmp_strW( desktop_name, name, len ))
+            return (struct desktop *)grab_object( desktop );
+    }
+    return NULL;
+}
+
 /* changes the winstation current input desktop and update its input time */
 int set_input_desktop( struct winstation *winstation, struct desktop *new_desktop )
 {
@@ -1072,6 +1088,43 @@ DECL_HANDLER(set_input_desktop)
         release_object( desktop );
     }
 
+    release_object( winstation );
+}
+
+
+/* Return the stable identities used by the authenticated desktop compositor. */
+DECL_HANDLER(get_dwm_desktop_id)
+{
+    static const WCHAR defaultW[] = {'D','e','f','a','u','l','t'};
+    static const WCHAR winlogonW[] = {'W','i','n','l','o','g','o','n'};
+    struct winstation *winstation;
+    struct desktop *desktop = NULL;
+
+    if (!current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!(winstation = get_process_winstation( current->process, 0 ))) return;
+
+    switch (req->selector)
+    {
+    case 1:
+        desktop = get_input_desktop( winstation );
+        break;
+    case 2:
+        desktop = find_named_desktop( winstation, defaultW, sizeof(defaultW) );
+        break;
+    case 4:
+        desktop = find_named_desktop( winstation, winlogonW, sizeof(winlogonW) );
+        break;
+    }
+
+    if (desktop)
+    {
+        reply->id = get_shared_object_locator( desktop->shared ).id;
+        release_object( desktop );
+    }
     release_object( winstation );
 }
 

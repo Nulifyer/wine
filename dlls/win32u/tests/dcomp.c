@@ -24,9 +24,12 @@
 #include "wine/test.h"
 
 #include "winbase.h"
+#include "wingdi.h"
 #include "winuser.h"
 #include "winternl.h"
 #include "ntuser.h"
+
+#define DESKTOP_ALL_ACCESS 0x01ff
 
 struct kst_test
 {
@@ -2157,6 +2160,7 @@ static void test_token_manager_lifetime(void)
 
 static void test_dwm_session_message_delivery(void)
 {
+    BOOL (WINAPI *pGetDesktopID)(UINT, UINT64 *);
     ALPC_PORT_ATTRIBUTES attributes = {0};
     OBJECT_ATTRIBUTES object_attributes;
     struct dwm_session_message message = {0}, received = {0};
@@ -2165,10 +2169,22 @@ static void test_dwm_session_message_delivery(void)
     LARGE_INTEGER timeout = {0};
     BOOLEAN previous, ignored;
     DWORD session_id;
+    UINT64 input_id, repeated_id, default_id, logon_id;
+    HDESK logon_desktop = NULL;
     HANDLE port = NULL;
     BOOL registered;
     NTSTATUS status;
     SIZE_T size;
+
+    pGetDesktopID = (void *)GetProcAddress( GetModuleHandleW( L"user32.dll" ), "GetDesktopID" );
+    ok( !!pGetDesktopID, "GetDesktopID is not exported\n" );
+
+    input_id = 0xdeadbeefdeadbeefULL;
+    SetLastError( 0xdeadbeef );
+    registered = NtUserGetDesktopID( 1, &input_id );
+    ok( !registered, "unauthenticated NtUserGetDesktopID succeeded\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "got error %lu\n", GetLastError() );
+    ok( input_id == 0xdeadbeefdeadbeefULL, "output changed to %#I64x\n", input_id );
 
     if (!ProcessIdToSessionId( GetCurrentProcessId(), &session_id ))
     {
@@ -2201,6 +2217,43 @@ static void test_dwm_session_message_delivery(void)
     ok( registered, "NtUserRegisterSessionPort failed, error %lu\n", GetLastError() );
     ok( !registered || GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
     if (!registered) goto done;
+
+    input_id = 0;
+    SetLastError( 0xdeadbeef );
+    ok( NtUserGetDesktopID( 1, &input_id ), "input desktop query failed, error %lu\n", GetLastError() );
+    ok( input_id != 0, "input desktop ID is zero\n" );
+    ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+
+    repeated_id = 0;
+    ok( NtUserGetDesktopID( 1, &repeated_id ), "repeated input desktop query failed, error %lu\n", GetLastError() );
+    ok( repeated_id == input_id, "desktop ID changed from %#I64x to %#I64x\n", input_id, repeated_id );
+
+    default_id = 0;
+    ok( NtUserGetDesktopID( 2, &default_id ), "default desktop query failed, error %lu\n", GetLastError() );
+    ok( default_id != 0, "default desktop ID is zero\n" );
+
+    logon_desktop = CreateDesktopW( L"Winlogon", NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL );
+    ok( !!logon_desktop, "CreateDesktopW failed, error %lu\n", GetLastError() );
+    if (logon_desktop)
+    {
+        logon_id = 0;
+        ok( NtUserGetDesktopID( 4, &logon_id ), "logon desktop query failed, error %lu\n", GetLastError() );
+        ok( logon_id != 0, "logon desktop ID is zero\n" );
+        ok( logon_id != default_id, "logon and default desktops have ID %#I64x\n", logon_id );
+    }
+
+    repeated_id = 0xdeadbeefdeadbeefULL;
+    SetLastError( 0xdeadbeef );
+    ok( !NtUserGetDesktopID( 3, &repeated_id ), "invalid selector succeeded\n" );
+    ok( repeated_id == 0xdeadbeefdeadbeefULL, "invalid selector changed output to %#I64x\n", repeated_id );
+    ok( GetLastError() == 0xdeadbeef, "invalid selector changed last error to %lu\n", GetLastError() );
+
+    if (pGetDesktopID)
+    {
+        repeated_id = 0;
+        ok( pGetDesktopID( 1, &repeated_id ), "USER32 GetDesktopID failed, error %lu\n", GetLastError() );
+        ok( repeated_id == input_id, "USER32 returned %#I64x, expected %#I64x\n", repeated_id, input_id );
+    }
 
     message.header.DataLength = 8;
     message.header.TotalLength = sizeof(message.header) + message.header.DataLength;
@@ -2237,6 +2290,7 @@ static void test_dwm_session_message_delivery(void)
         "got ready payload %#lx, %#lx\n", received.data[0], received.data[1] );
 
 done:
+    if (logon_desktop) CloseDesktop( logon_desktop );
     if (port)
     {
         NtUserDwmKernelShutdown();

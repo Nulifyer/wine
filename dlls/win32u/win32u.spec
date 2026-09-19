@@ -1006,7 +1006,7 @@
 @ stdcall -syscall NtUserGetDCEx(long long long)
 @ stub -syscall NtUserGetDCompositionHwndBitmap
 @ stdcall -syscall NtUserGetDManipHookInitFunction(ptr ptr)
-@ stub -syscall NtUserGetDesktopID
+@ stdcall -syscall NtUserGetDesktopID(long ptr)
 @ stub -syscall NtUserGetDesktopVisualTransform
 @ stub -syscall NtUserGetDeviceChangeInfo
 @ stub -syscall NtUserGetDisplayAutoRotationPreferences

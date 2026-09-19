@@ -7657,6 +7657,18 @@ struct set_dcomp_channel_completion_event_reply
 };
 
 
+struct get_dwm_desktop_id_request
+{
+    struct request_header __header;
+    unsigned int selector;
+};
+struct get_dwm_desktop_id_reply
+{
+    struct reply_header __header;
+    object_id_t id;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -8060,6 +8072,7 @@ enum request
     REQ_destroy_dcomp_window_target,
     REQ_validate_dcomp_window_target,
     REQ_set_dcomp_channel_completion_event,
+    REQ_get_dwm_desktop_id,
     REQ_NB_REQUESTS
 };
 
@@ -8468,6 +8481,7 @@ union generic_request
     struct destroy_dcomp_window_target_request destroy_dcomp_window_target_request;
     struct validate_dcomp_window_target_request validate_dcomp_window_target_request;
     struct set_dcomp_channel_completion_event_request set_dcomp_channel_completion_event_request;
+    struct get_dwm_desktop_id_request get_dwm_desktop_id_request;
 };
 union generic_reply
 {
@@ -8874,8 +8888,9 @@ union generic_reply
     struct destroy_dcomp_window_target_reply destroy_dcomp_window_target_reply;
     struct validate_dcomp_window_target_reply validate_dcomp_window_target_reply;
     struct set_dcomp_channel_completion_event_reply set_dcomp_channel_completion_event_reply;
+    struct get_dwm_desktop_id_reply get_dwm_desktop_id_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1038
+#define SERVER_PROTOCOL_VERSION 1039
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
