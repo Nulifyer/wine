@@ -1086,6 +1086,143 @@ static void check_dcomp_batch_payload( const struct dcomposition_connection_batc
         "%s got unexpected batch payload\n", context );
 }
 
+static NTSTATUS process_dcomp_test_command( UINT channel, BYTE *buffer,
+                                             const UINT *command, UINT size )
+{
+    ULONG processed;
+    BYTE released;
+
+    memcpy( buffer, command, size );
+    return NtDCompositionProcessChannelBatchBuffer( channel, size, &processed, &released );
+}
+
+static void test_expression_graph(void)
+{
+    static const UINT expected[] = {
+        16, 0x28, 1, 0x7c,
+        16, 0x28, 2, 0x9d,
+        16, 0x28, 3, 0x3c,
+        32, 0x135, 1, 0, 0, 0x12, 1, 0x3f800000,
+        92, 0x135, 1, 1, 4, 0x109, 1,
+            0x3f800000, 0, 0, 0,
+            0, 0x3f800000, 0, 0,
+            0, 0, 0x3f800000, 0,
+            0, 0, 0, 0x3f800000,
+        44, 0x11, 3, 0x7c, 1, 7, 0, 0, 0, 0, 0x109,
+        16, 0x12, 3, 0,
+        24, 0x89, 3, 1, 1, 1,
+        40, 0x88, 3, 1, 1, 5, 0x109, 0x20, 0x30, 0x40,
+        24, 0x86, 3, 2, 0x100, 0x20,
+    };
+    static const UINT expected_property_update[] = {
+        32, 0x135, 1, 0, 0, 0x12, 0, 0x3f000000,
+    };
+    static const UINT create[] = {
+        2, 1, 0x7c, 0,
+        2, 2, 0x9d, 0,
+        2, 3, 0x3c, 0,
+    };
+    static const UINT property[] = {15, 1, 1, 16, 0, 0, 0x12, 0x3f800000};
+    static const UINT matrix_property[] = {
+        15, 1, 1, 76, 1, 4, 0x109,
+        0x3f800000, 0, 0, 0,
+        0, 0x3f800000, 0, 0,
+        0, 0, 0x3f800000, 0,
+        0, 0, 0, 0x3f800000,
+    };
+    static const UINT property_update[] = {15, 1, 2, 16, 0, 0, 0x12, 0x3f000000};
+    static const UINT shared_reference[] = {16, 3, 0x0a, 2};
+    static const UINT node_offset[] = {11, 3, 0x0b, 0, 0x100, 0};
+    static const UINT node_size[] = {11, 3, 0x0c, 0, 0x20, 0};
+    static const UINT expression_type[] = {11, 3, 0, 0, 0x109, 0};
+    static const UINT sources[] = {17, 3, 0x0d, 1, 1};
+    static const UINT reference_info[] = {15, 3, 0x0e, 20, 5, 0x109, 0x20, 0x30, 0x40};
+    static const UINT property_reference[] = {16, 3, 2, 1};
+    static const UINT property_index[] = {11, 3, 3, 0, 7, 0};
+    static const UINT property_enabled[] = {11, 3, 1, 0, 1, 0};
+    static const UINT empty_metadata[] = {15, 3, 5, 0};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = NULL, state;
+    UINT channel = 0, size = 0x1000, batch;
+    UINT64 cookie = 0;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create expression event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got expression connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got expression channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got expression bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got expression create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    status = process_dcomp_test_command( channel, buffer, create, sizeof(create) );
+    ok( status == STATUS_SUCCESS, "got expression create status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, property, sizeof(property) );
+    ok( status == STATUS_SUCCESS, "got property-set status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, matrix_property,
+                                         sizeof(matrix_property) );
+    ok( status == STATUS_SUCCESS, "got matrix property-set status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, shared_reference,
+                                         sizeof(shared_reference) );
+    ok( status == STATUS_SUCCESS, "got shared reference status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, node_offset, sizeof(node_offset) );
+    ok( status == STATUS_SUCCESS, "got node-offset status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, node_size, sizeof(node_size) );
+    ok( status == STATUS_SUCCESS, "got node-size status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, expression_type,
+                                         sizeof(expression_type) );
+    ok( status == STATUS_SUCCESS, "got expression-type status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, sources, sizeof(sources) );
+    ok( status == STATUS_SUCCESS, "got expression sources status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, reference_info,
+                                         sizeof(reference_info) );
+    ok( status == STATUS_SUCCESS, "got reference-info status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, property_reference,
+                                         sizeof(property_reference) );
+    ok( status == STATUS_SUCCESS, "got property reference status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, property_index,
+                                         sizeof(property_index) );
+    ok( status == STATUS_SUCCESS, "got property index status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, property_enabled,
+                                         sizeof(property_enabled) );
+    ok( status == STATUS_SUCCESS, "got property enabled status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, empty_metadata,
+                                         sizeof(empty_metadata) );
+    ok( status == STATUS_SUCCESS, "got expression metadata status %#lx\n", status );
+
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got expression commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got expression batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected, sizeof(expected), "expression graph" );
+
+    status = process_dcomp_test_command( channel, buffer, property_update,
+                                         sizeof(property_update) );
+    ok( status == STATUS_SUCCESS, "got property update status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got property update commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got property update batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_property_update,
+                               sizeof(expected_property_update), "property update" );
+
+    status = process_dcomp_test_command( channel, buffer, sources, sizeof(sources) );
+    ok( status == STATUS_ACCESS_DENIED, "got repeated expression sources status %#lx\n", status );
+
+done:
+    if (buffer) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_visual_target_root_lifecycle(void)
 {
     static const UINT expected_initial[] = {
@@ -1107,6 +1244,33 @@ static void test_visual_target_root_lifecycle(void)
         16, 0x197, 3, 0x100,
         20, 0x19b, 3, 0x3f800000, 0x3f800000,
     };
+    static const UINT expected_visual_content[] = {
+        16, 0x28, 5, 0xa6,
+        16, 0x28, 6, 0x16,
+        16, 0x28, 7, 0x7f,
+        16, 0x28, 8, 0x1e,
+        28, 0x31, 6, 0x3f800000, 0x3f000000, 0x3e800000, 0x3f800000,
+        48, 0x13f, 7, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        16, 0x13d, 7, 0x3f800000,
+        16, 0x142, 7, 0x40000000,
+        16, 0x140, 7, 0x40400000,
+        16, 0x13c, 7, 0x40800000,
+        20, 0x3d, 8, 0, 0,
+        24, 0x3e, 8, 0, 0, 0,
+        24, 0x3f, 8, 0, 0, 0,
+        28, 0x40, 8, 0, 0, 0, 0x3f800000,
+        24, 0x42, 8, 0, 0, 0x3f800000,
+        16, 0x41, 8, 0,
+        24, 0x43, 8, 0x3f800000, 0x3f800000, 0x3f800000,
+        76, 0x44, 8,
+            0x3f800000, 0, 0, 0,
+            0, 0x3f800000, 0, 0,
+            0, 0, 0x3f800000, 0,
+            0, 0, 0, 0x3f800000,
+        16, 0x1a0, 3, 8,
+        16, 0x18c, 3, 7,
+        16, 0x16e, 5, 6,
+    };
     static const UINT expected_visual_clear[] = {12, 0x187, 3};
     static const UINT expected_clear[] = {
         12, 0x187, 1,
@@ -1125,7 +1289,7 @@ static void test_visual_target_root_lifecycle(void)
     struct dcomposition_connection_batch *record = NULL;
     HANDLE event, connection = NULL, target_handle = NULL;
     BYTE *buffer = NULL, state;
-    UINT channel = 0, size = 0x1000, batch, command[32];
+    UINT channel = 0, size = 0x1000, batch, command[64];
     UINT64 cookie = 0, shared;
     ULONG processed;
     BYTE released;
@@ -1195,6 +1359,56 @@ static void test_visual_target_root_lifecycle(void)
     ok( status == STATUS_SUCCESS, "got visual update batch status %#lx\n", status );
     check_dcomp_batch_payload( record, channel, expected_visual_update,
                                sizeof(expected_visual_update), "visual update" );
+
+    command[0] = 2; command[1] = 5; command[2] = 0xa6; command[3] = 0;
+    command[4] = 2; command[5] = 6; command[6] = 0x16; command[7] = 0;
+    command[8] = 2; command[9] = 7; command[10] = 0x7f; command[11] = 0;
+    command[12] = 2; command[13] = 8; command[14] = 0x1e; command[15] = 0;
+    command[16] = 15; command[17] = 6; command[18] = 0; command[19] = 16;
+    command[20] = 0x3f800000; command[21] = 0x3f000000;
+    command[22] = 0x3e800000; command[23] = 0x3f800000;
+    command[24] = 11; command[25] = 7; command[26] = 0x15; command[27] = 0;
+    command[28] = 1; command[29] = 0;
+    command[30] = 15; command[31] = 7; command[32] = 0x11; command[33] = 16;
+    command[34] = 0x3f800000; command[35] = 0x40000000;
+    command[36] = 0x40400000; command[37] = 0x40800000;
+    command[38] = 16; command[39] = 3; command[40] = 4; command[41] = 8;
+    command[42] = 16; command[43] = 3; command[44] = 7; command[45] = 7;
+    command[46] = 16; command[47] = 5; command[48] = 0x34; command[49] = 6;
+    memcpy( buffer, command, 200 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 200, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got visual content process status %#lx\n", status );
+    ok( processed == 10, "got visual content process count %lu\n", processed );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got visual content commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got visual content batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_visual_content,
+                               sizeof(expected_visual_content), "visual content" );
+
+    command[0] = 16; command[1] = 5; command[2] = 0x34; command[3] = 8;
+    memcpy( buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got invalid sprite content status %#lx\n", status );
+    command[1] = 3; command[2] = 4; command[3] = 7;
+    memcpy( buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got invalid visual transform status %#lx\n", status );
+    command[2] = 7; command[3] = 8;
+    memcpy( buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got invalid visual clip status %#lx\n", status );
+    command[0] = 15; command[1] = 6; command[2] = 0; command[3] = 8;
+    command[4] = 0; command[5] = 0;
+    memcpy( buffer, command, 24 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 24, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got invalid color buffer status %#lx\n", status );
+    command[0] = 11; command[1] = 7; command[2] = 0x15; command[3] = 0;
+    command[4] = 1; command[5] = 0;
+    memcpy( buffer, command, 24 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 24, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got repeated rectangle mode status %#lx\n", status );
 
     command[0] = 23; command[1] = 3; command[2] = 0;
     memcpy( buffer, command, 12 );
@@ -1760,6 +1974,7 @@ START_TEST(dcomp)
     test_hwnd_target_lifecycle();
     test_connection_queue();
     test_visual_target_root_lifecycle();
+    test_expression_graph();
     test_shared_section_lifecycle();
     test_frame_lifecycle();
     test_resource_retirement();

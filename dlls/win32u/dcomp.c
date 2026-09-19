@@ -60,6 +60,16 @@ struct dcomp_channel_view
     BOOL released_resources;
 };
 
+struct dcomp_property_value
+{
+    UINT offset;
+    UINT type;
+    UINT size;
+    BYTE data[64];
+    BOOL dirty;
+    BOOL added;
+};
+
 struct dcomp_resource_view
 {
     struct list entry;
@@ -67,6 +77,10 @@ struct dcomp_resource_view
     UINT type;
     UINT references;
     struct dcomp_resource_view *root;
+    struct dcomp_resource_view *visual_transform;
+    struct dcomp_resource_view *visual_clip;
+    struct dcomp_resource_view *sprite_content;
+    struct dcomp_resource_view *expression_shared_section;
     struct dcomp_resource_view *parent;
     struct dcomp_resource_view *first_child;
     struct dcomp_resource_view *next_sibling;
@@ -75,6 +89,9 @@ struct dcomp_resource_view
     BOOL released;
     BOOL visual;
     BOOL visual_target;
+    BOOL visual_transform_dirty;
+    BOOL visual_clip_dirty;
+    BOOL sprite_content_dirty;
     BOOL root_dirty;
     BOOL children_clear_dirty;
     BOOL connection_announced;
@@ -94,6 +111,34 @@ struct dcomp_resource_view
     BOOL visual_size_dirty;
     float visual_relative_size[2];
     float visual_size[2];
+    BOOL color_dirty;
+    float color[4];
+    UINT rectangle_dirty;
+    float rectangle[12];
+    BYTE rectangle_mode;
+    BYTE rectangle_expression_mode;
+    BYTE rectangle_flag;
+    struct dcomp_property_value *properties;
+    UINT property_count;
+    UINT property_data_size;
+    UINT expression_property_resource_id;
+    UINT *expression_sources;
+    UINT expression_source_count;
+    BYTE *expression_reference_info;
+    UINT expression_reference_count;
+    UINT expression_type;
+    UINT expression_property_3;
+    UINT expression_property_4;
+    UINT64 expression_node_offset;
+    UINT64 expression_node_size;
+    BYTE expression_metadata[16];
+    UINT expression_metadata_size;
+    BOOL expression_property_enabled;
+    BOOL expression_base_dirty;
+    BOOL expression_property_4_dirty;
+    BOOL expression_sources_dirty;
+    BOOL expression_reference_info_dirty;
+    BOOL expression_nodes_dirty;
     BOOL shared_section_bound;
     BOOL shared_section_announced;
 };
@@ -146,7 +191,7 @@ static struct dcomp_resource_view *find_dcomp_resource_view( struct dcomp_channe
 
 static void release_dcomp_resource_reference( struct dcomp_resource_view *resource )
 {
-    struct dcomp_resource_view *child, *root;
+    struct dcomp_resource_view *child, *reference, *root;
     BOOL clear_children = FALSE;
 
     if (--resource->references) return;
@@ -156,6 +201,26 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
         resource->root = NULL;
         resource->root_dirty = TRUE;
         release_dcomp_resource_reference( root );
+    }
+    if ((reference = resource->visual_transform))
+    {
+        resource->visual_transform = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->visual_clip))
+    {
+        resource->visual_clip = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->sprite_content))
+    {
+        resource->sprite_content = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->expression_shared_section))
+    {
+        resource->expression_shared_section = NULL;
+        release_dcomp_resource_reference( reference );
     }
     while ((child = resource->first_child))
     {
@@ -170,6 +235,14 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
     resource->released = TRUE;
 }
 
+static void free_dcomp_resource_view( struct dcomp_resource_view *resource )
+{
+    free( resource->properties );
+    free( resource->expression_sources );
+    free( resource->expression_reference_info );
+    free( resource );
+}
+
 static void remove_unannounced_dcomp_resources( struct dcomp_channel_view *view )
 {
     struct dcomp_resource_view *resource, *next;
@@ -179,7 +252,7 @@ static void remove_unannounced_dcomp_resources( struct dcomp_channel_view *view 
         if (!resource->announced && resource->released)
         {
             list_remove( &resource->entry );
-            free( resource );
+            free_dcomp_resource_view( resource );
         }
     }
 }
@@ -205,6 +278,117 @@ static BOOL is_dcomp_visual_resource_type( UINT type )
     }
 }
 
+static BOOL is_dcomp_transform3d_resource_type( UINT type )
+{
+    /* Descendants of MIL_RESOURCE_TYPE 0xaf in the Windows resource-parent table. */
+    switch (type)
+    {
+    case 0x1e:
+    case 0x6a:
+    case 0x6d:
+    case 0x6e:
+    case 0x88:
+    case 0x89:
+    case 0x8c:
+    case 0x8d:
+    case 0xa1:
+    case 0xae:
+    case 0xaf:
+    case 0xb0:
+    case 0xb1:
+    case 0xb2:
+    case 0xb3:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static BOOL is_dcomp_clip_resource_type( UINT type )
+{
+    /* Descendants of MIL_RESOURCE_TYPE 0x43 in the Windows resource-parent table. */
+    switch (type)
+    {
+    case 0x1b:
+    case 0x3b:
+    case 0x43:
+    case 0x46:
+    case 0x66:
+    case 0x73:
+    case 0x7d:
+    case 0x7f:
+    case 0x82:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static BOOL is_dcomp_brush_resource_type( UINT type )
+{
+    /* Descendants of MIL_RESOURCE_TYPE 0x11 in the Windows resource-parent table. */
+    switch (type)
+    {
+    case 0x09:
+    case 0x0f:
+    case 0x11:
+    case 0x15:
+    case 0x16:
+    case 0x25:
+    case 0x39:
+    case 0x49:
+    case 0x63:
+    case 0x6b:
+    case 0x71:
+    case 0x7e:
+    case 0xa9:
+    case 0xbf:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static BOOL is_dcomp_base_resource_type( UINT type )
+{
+    /* Windows' MIL resource-parent table, rooted at MIL_RESOURCE_TYPE 0x87. */
+    static const BYTE parent[0xc2] =
+    {
+        0xc2, 0x3d, 0x0a, 0x7b, 0x87, 0x7b, 0x3d, 0x2f,
+        0x87, 0x11, 0x87, 0x72, 0x87, 0x55, 0x3d, 0x11,
+        0x3d, 0x87, 0x55, 0x87, 0x86, 0x11, 0x00, 0x87,
+        0x3d, 0x87, 0x00, 0x43, 0x72, 0x7b, 0xaf, 0x3d,
+        0x24, 0x00, 0x2f, 0xac, 0x87, 0x11, 0x87, 0x24,
+        0x7b, 0x24, 0x2f, 0xac, 0x87, 0x0b, 0xb5, 0x87,
+        0x9e, 0x00, 0xb8, 0x87, 0x86, 0xa8, 0x87, 0x28,
+        0x7b, 0x11, 0x38, 0x43, 0x0b, 0x38, 0x87, 0x3d,
+        0x00, 0x87, 0xa8, 0x7b, 0x87, 0x44, 0x43, 0x87,
+        0x2f, 0x11, 0x5f, 0x72, 0x00, 0x87, 0x00, 0x3d,
+        0x5f, 0x87, 0x86, 0x0b, 0x2f, 0x87, 0x72, 0x00,
+        0x0b, 0xb8, 0x87, 0x00, 0x86, 0x60, 0x87, 0x49,
+        0x4a, 0x3d, 0x43, 0x86, 0x00, 0x72, 0xae, 0x11,
+        0x87, 0xae, 0xaf, 0x44, 0x0b, 0x11, 0x87, 0x43,
+        0x87, 0x00, 0x2f, 0x00, 0x7b, 0x00, 0x72, 0x7b,
+        0x43, 0x49, 0x43, 0x87, 0xb8, 0x43, 0x86, 0x00,
+        0x2f, 0x87, 0xc2, 0xae, 0xaf, 0x3d, 0x0a, 0xae,
+        0xaf, 0x96, 0x87, 0x00, 0x96, 0x98, 0x97, 0x2c,
+        0x96, 0x87, 0x8f, 0x8e, 0x90, 0xb8, 0x3d, 0xb8,
+        0x9e, 0x87, 0x00, 0xae, 0x2f, 0x87, 0x5f, 0xb5,
+        0xb8, 0x00, 0x2f, 0x11, 0xa8, 0x3d, 0x87, 0xb8,
+        0xaf, 0x38, 0xaf, 0xae, 0x00, 0xaf, 0x3d, 0x87,
+        0x00, 0x14, 0x7b, 0x2f, 0x86, 0x87, 0x00, 0xbc,
+        0x87, 0x11, 0xb8, 0x2f,
+    };
+    UINT count = 0;
+
+    while (type < ARRAY_SIZE(parent) && count++ < ARRAY_SIZE(parent))
+    {
+        if (type == 0x87) return TRUE;
+        type = parent[type];
+    }
+    return FALSE;
+}
+
 static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource,
                                              UINT id, UINT type )
 {
@@ -212,6 +396,62 @@ static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource
     resource->type = type;
     resource->references = 1;
     resource->visual = is_dcomp_visual_resource_type( type );
+    if (type == 0x7f)
+    {
+        resource->rectangle[0] = resource->rectangle[1] = -2097152.0f;
+        resource->rectangle[2] = resource->rectangle[3] = 2097152.0f;
+    }
+    if (type == 0x3c) resource->expression_base_dirty = resource->expression_property_4_dirty = TRUE;
+}
+
+static void replace_dcomp_resource_reference( struct dcomp_resource_view **slot,
+                                               struct dcomp_resource_view *resource )
+{
+    struct dcomp_resource_view *previous = *slot;
+
+    if (previous == resource) return;
+    if (resource) resource->references++;
+    *slot = resource;
+    if (previous) release_dcomp_resource_reference( previous );
+}
+
+static NTSTATUS set_dcomp_visual_reference_property( struct dcomp_channel_view *view,
+                                                      struct dcomp_resource_view *resource,
+                                                      UINT property, UINT reference_id )
+{
+    struct dcomp_resource_view *reference = NULL;
+
+    if (reference_id && !(reference = find_dcomp_resource_view( view, reference_id )))
+        return STATUS_ACCESS_DENIED;
+
+    if (resource->type == 0xa6 && property == 0x34)
+    {
+        if (reference && !is_dcomp_brush_resource_type( reference->type ))
+            return STATUS_INVALID_PARAMETER;
+        replace_dcomp_resource_reference( &resource->sprite_content, reference );
+        resource->sprite_content_dirty = TRUE;
+        remove_unannounced_dcomp_resources( view );
+        return STATUS_SUCCESS;
+    }
+    if (property == 4)
+    {
+        if (reference && !is_dcomp_transform3d_resource_type( reference->type ))
+            return STATUS_INVALID_PARAMETER;
+        replace_dcomp_resource_reference( &resource->visual_transform, reference );
+        resource->visual_transform_dirty = TRUE;
+        remove_unannounced_dcomp_resources( view );
+        return STATUS_SUCCESS;
+    }
+    if (property == 7)
+    {
+        if (reference && !is_dcomp_clip_resource_type( reference->type ))
+            return STATUS_INVALID_PARAMETER;
+        replace_dcomp_resource_reference( &resource->visual_clip, reference );
+        resource->visual_clip_dirty = TRUE;
+        remove_unannounced_dcomp_resources( view );
+        return STATUS_SUCCESS;
+    }
+    return STATUS_NOT_SUPPORTED;
 }
 
 static NTSTATUS add_dcomp_visual_child( struct dcomp_channel_view *view,
@@ -369,6 +609,282 @@ static NTSTATUS set_dcomp_visual_buffer_property( struct dcomp_resource_view *re
     return STATUS_NOT_SUPPORTED;
 }
 
+static NTSTATUS set_dcomp_color_brush_buffer_property( struct dcomp_resource_view *resource,
+                                                        UINT property, const BYTE *data, UINT size )
+{
+    if (property || size != sizeof(resource->color)) return STATUS_INVALID_PARAMETER;
+    memcpy( resource->color, data, size );
+    resource->color_dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static float clamp_dcomp_rectangle_value( float value )
+{
+    if (value <= -2097152.0f) return -2097152.0f;
+    if (value <= 2097152.0f) return value;
+    return 2097152.0f;
+}
+
+static NTSTATUS set_dcomp_rectangle_integer_property( struct dcomp_resource_view *resource,
+                                                       UINT property, INT64 value )
+{
+    if (property == 0x15)
+    {
+        if (resource->rectangle_mode || resource->rectangle_expression_mode || !value)
+            return STATUS_INVALID_PARAMETER;
+        resource->rectangle_mode = TRUE;
+        resource->rectangle_dirty |= 1;
+        return STATUS_SUCCESS;
+    }
+    if (property == 0x16)
+    {
+        if (resource->rectangle_expression_mode || resource->rectangle_mode || !value)
+            return STATUS_INVALID_PARAMETER;
+        resource->rectangle_expression_mode = TRUE;
+        memset( resource->rectangle, 0, 4 * sizeof(float) );
+        resource->rectangle_dirty |= 0x1f;
+        return STATUS_SUCCESS;
+    }
+    if (property == 0x17)
+    {
+        if (resource->rectangle_flag == !!value) return STATUS_SUCCESS;
+        resource->rectangle_flag = !!value;
+        resource->rectangle_dirty |= 1;
+        return STATUS_SUCCESS;
+    }
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS set_dcomp_rectangle_buffer_property( struct dcomp_resource_view *resource,
+                                                      UINT property, const BYTE *data, UINT size )
+{
+    float rectangle[4];
+    UINT i;
+
+    if (property != 0x11 || size != sizeof(rectangle) || resource->rectangle_expression_mode)
+        return STATUS_INVALID_PARAMETER;
+    memcpy( rectangle, data, sizeof(rectangle) );
+    for (i = 0; i < ARRAY_SIZE(rectangle); ++i)
+    {
+        rectangle[i] = clamp_dcomp_rectangle_value( rectangle[i] );
+        if (resource->rectangle[i] == rectangle[i]) continue;
+        resource->rectangle[i] = rectangle[i];
+        resource->rectangle_dirty |= 2 << i;
+    }
+    return STATUS_SUCCESS;
+}
+
+static UINT dcomp_property_value_size( UINT type )
+{
+    switch (type)
+    {
+    case 0x11:
+    case 0x12:  return 4;
+    case 0x23:  return 8;
+    case 0x34:  return 12;
+    case 0x45:
+    case 0x46:
+    case 0x47:  return 16;
+    case 0x68:  return 24;
+    case 0x109: return 64;
+    default:    return 0;
+    }
+}
+
+static NTSTATUS set_dcomp_property_set_buffer_property( struct dcomp_resource_view *resource,
+                                                         UINT property, const BYTE *data, UINT size )
+{
+    struct dcomp_property_value *values, *value;
+    UINT index, offset, type, value_size;
+
+    if ((property != 1 && property != 2) || size < 12) return STATUS_INVALID_PARAMETER;
+    memcpy( &index, data, sizeof(index) );
+    memcpy( &offset, data + 4, sizeof(offset) );
+    memcpy( &type, data + 8, sizeof(type) );
+    if (!(value_size = dcomp_property_value_size( type )) || size != value_size + 12)
+        return STATUS_INVALID_PARAMETER;
+
+    if (property == 1)
+    {
+        if (index != resource->property_count || offset != resource->property_data_size)
+            return STATUS_INVALID_PARAMETER;
+        if (!(values = realloc( resource->properties,
+                                (resource->property_count + 1) * sizeof(*values) )))
+            return STATUS_NO_MEMORY;
+        resource->properties = values;
+        value = &values[resource->property_count++];
+        memset( value, 0, sizeof(*value) );
+        value->offset = offset;
+        value->type = type;
+        value->size = value_size;
+        value->added = TRUE;
+        resource->property_data_size += value_size;
+    }
+    else
+    {
+        if (index >= resource->property_count) return STATUS_INVALID_PARAMETER;
+        value = &resource->properties[index];
+        if (value->offset != offset || value->type != type || value->size != value_size)
+            return STATUS_INVALID_PARAMETER;
+    }
+    memcpy( value->data, data + 12, value_size );
+    value->dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static BOOL is_dcomp_expression_type( UINT type )
+{
+    switch (type)
+    {
+    case 0x0b:
+    case 0x11:
+    case 0x12:
+    case 0x23:
+    case 0x2a:
+    case 0x34:
+    case 0x45:
+    case 0x46:
+    case 0x47:
+    case 0x68:
+    case 0x109:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static NTSTATUS set_dcomp_expression_integer_property( struct dcomp_resource_view *resource,
+                                                        UINT property, INT64 value )
+{
+    switch (property)
+    {
+    case 0:
+        if (!is_dcomp_expression_type( value )) return STATUS_INVALID_PARAMETER;
+        if (resource->expression_type == value) return STATUS_SUCCESS;
+        resource->expression_type = value;
+        resource->expression_base_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 1:
+        if (resource->expression_property_enabled == !!value) return STATUS_SUCCESS;
+        resource->expression_property_enabled = !!value;
+        resource->expression_base_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 3:
+        if (resource->expression_property_3 == (UINT)value) return STATUS_SUCCESS;
+        resource->expression_property_3 = value;
+        resource->expression_base_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 4:
+        if (resource->expression_property_4 == (UINT)value) return STATUS_SUCCESS;
+        resource->expression_property_4 = value;
+        resource->expression_property_4_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 0x0b:
+        if (resource->expression_node_offset == value) return STATUS_SUCCESS;
+        resource->expression_node_offset = value;
+        resource->expression_nodes_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 0x0c:
+        if (resource->expression_node_size == value) return STATUS_SUCCESS;
+        resource->expression_node_size = value;
+        resource->expression_nodes_dirty = TRUE;
+        return STATUS_SUCCESS;
+    default:
+        return STATUS_NOT_SUPPORTED;
+    }
+}
+
+static NTSTATUS set_dcomp_expression_buffer_property( struct dcomp_resource_view *resource,
+                                                       UINT property, const BYTE *data, UINT size )
+{
+    BYTE *copy;
+    UINT metadata_type;
+
+    if (property == 5)
+    {
+        if (resource->expression_metadata_size) return STATUS_ACCESS_DENIED;
+        if (size != 0 && size != 12 && size != 16) return STATUS_INVALID_PARAMETER;
+        if (size)
+        {
+            memcpy( &metadata_type, data, sizeof(metadata_type) );
+            if ((size == 12 && metadata_type != 1) ||
+                (size == 16 && metadata_type != 2)) return STATUS_INVALID_PARAMETER;
+        }
+        if (size) memcpy( resource->expression_metadata, data, size );
+        resource->expression_metadata_size = size;
+        resource->expression_base_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    if (property != 0x0e || resource->expression_reference_info)
+        return property == 0x0e ? STATUS_ACCESS_DENIED : STATUS_NOT_SUPPORTED;
+    if (size % 20) return STATUS_INVALID_PARAMETER;
+    if (size)
+    {
+        if (!(copy = malloc( size ))) return STATUS_NO_MEMORY;
+        memcpy( copy, data, size );
+        resource->expression_reference_info = copy;
+    }
+    resource->expression_reference_count = size / 20;
+    resource->expression_reference_info_dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_expression_reference_property( struct dcomp_channel_view *view,
+                                                          struct dcomp_resource_view *resource,
+                                                          UINT property, UINT reference_id )
+{
+    struct dcomp_resource_view *reference = NULL;
+
+    if (reference_id && !(reference = find_dcomp_resource_view( view, reference_id )))
+        return STATUS_ACCESS_DENIED;
+    if (property == 2)
+    {
+        if (reference && !is_dcomp_base_resource_type( reference->type ))
+            return STATUS_INVALID_PARAMETER;
+        resource->expression_property_resource_id = reference_id;
+        resource->expression_base_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    if (property == 0x0a)
+    {
+        if (reference && resource->type == 0x3c && reference->type != 0x9d)
+            return STATUS_INVALID_PARAMETER;
+        replace_dcomp_resource_reference( &resource->expression_shared_section, reference );
+        resource->expression_nodes_dirty = TRUE;
+        remove_unannounced_dcomp_resources( view );
+        return STATUS_SUCCESS;
+    }
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS set_dcomp_expression_reference_array_property( struct dcomp_channel_view *view,
+                                                                struct dcomp_resource_view *resource,
+                                                                UINT property, const BYTE *data,
+                                                                UINT count )
+{
+    struct dcomp_resource_view *reference;
+    UINT *sources, i, id;
+
+    if (property != 0x0d || !data) return STATUS_INVALID_PARAMETER;
+    if (resource->expression_sources) return STATUS_ACCESS_DENIED;
+    if (count > UINT_MAX / sizeof(*sources)) return STATUS_NO_MEMORY;
+    if (count && !(sources = malloc( count * sizeof(*sources) ))) return STATUS_NO_MEMORY;
+    for (i = 0; i < count; ++i)
+    {
+        memcpy( &id, data + i * sizeof(id), sizeof(id) );
+        if (!id || !(reference = find_dcomp_resource_view( view, id )))
+        {
+            free( sources );
+            return id ? STATUS_ACCESS_DENIED : STATUS_INVALID_PARAMETER;
+        }
+        sources[i] = id;
+    }
+    resource->expression_sources = count ? sources : NULL;
+    resource->expression_source_count = count;
+    resource->expression_sources_dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS set_dcomp_visual_target_root( struct dcomp_channel_view *view,
                                                struct dcomp_resource_view *target,
                                                UINT property, UINT root_id )
@@ -444,7 +960,7 @@ static void free_dcomp_resource_views( struct dcomp_channel_view *view )
     LIST_FOR_EACH_ENTRY_SAFE( resource, next, &view->resources, struct dcomp_resource_view, entry )
     {
         list_remove( &resource->entry );
-        free( resource );
+        free_dcomp_resource_view( resource );
     }
 }
 
@@ -598,6 +1114,16 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
                 status = set_dcomp_visual_integer_property( resource, property, value );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 0x7f)
+            {
+                status = set_dcomp_rectangle_integer_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+            else if (resource->type == 0x3c)
+            {
+                status = set_dcomp_expression_integer_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
         }
         else if (type == 15)
         {
@@ -612,6 +1138,30 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
                 status = set_dcomp_visual_buffer_property( resource, property, buffer + 16, size );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 0x16)
+            {
+                if ((status = set_dcomp_color_brush_buffer_property( resource, property,
+                                                                      buffer + 16, size )))
+                    return status;
+            }
+            else if (resource->type == 0x7f)
+            {
+                if ((status = set_dcomp_rectangle_buffer_property( resource, property,
+                                                                    buffer + 16, size )))
+                    return status;
+            }
+            else if (resource->type == 0x7c)
+            {
+                if ((status = set_dcomp_property_set_buffer_property( resource, property,
+                                                                       buffer + 16, size )))
+                    return status;
+            }
+            else if (resource->type == 0x3c)
+            {
+                status = set_dcomp_expression_buffer_property( resource, property,
+                                                                buffer + 16, size );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
         }
         else if (type == 16)
         {
@@ -621,9 +1171,37 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
             memcpy( &property, buffer + 8, sizeof(property) );
             memcpy( &root_id, buffer + 12, sizeof(root_id) );
             if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
-            if (resource->visual_target &&
-                (status = set_dcomp_visual_target_root( view, resource, property, root_id )))
-                return status;
+            if (resource->visual_target)
+            {
+                if ((status = set_dcomp_visual_target_root( view, resource, property, root_id )))
+                    return status;
+            }
+            else if (resource->visual)
+            {
+                status = set_dcomp_visual_reference_property( view, resource, property, root_id );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+            else if (resource->type == 0x3c)
+            {
+                status = set_dcomp_expression_reference_property( view, resource,
+                                                                   property, root_id );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+        }
+        else if (type == 17)
+        {
+            UINT count, property;
+
+            memcpy( &id, buffer + 4, sizeof(id) );
+            memcpy( &property, buffer + 8, sizeof(property) );
+            memcpy( &count, buffer + 12, sizeof(count) );
+            if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
+            if (resource->type == 0x3c)
+            {
+                status = set_dcomp_expression_reference_array_property( view, resource, property,
+                                                                         buffer + 16, count );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
         }
         else if (type == 20)
         {
@@ -748,6 +1326,230 @@ static NTSTATUS copy_dcomp_protocol_blocks( const void *list, BYTE **data,
     return STATUS_SUCCESS;
 }
 
+static data_size_t dcomp_rectangle_update_size( const struct dcomp_resource_view *resource )
+{
+    UINT dirty = resource->announced ? resource->rectangle_dirty : 0x1f;
+    data_size_t size = 0;
+
+    if (dirty & 1) size += 48;
+    if (dirty & 2) size += 16;
+    if (dirty & 4) size += 16;
+    if (dirty & 8) size += 16;
+    if (dirty & 0x10) size += 16;
+    return size;
+}
+
+static BYTE *emit_dcomp_reference_update( BYTE *cursor, UINT opcode, UINT id,
+                                           const struct dcomp_resource_view *reference )
+{
+    UINT command[4] = {16, opcode, id, reference ? reference->id : 0};
+
+    memcpy( cursor, command, sizeof(command) );
+    return cursor + sizeof(command);
+}
+
+static BYTE *emit_dcomp_rectangle_updates( BYTE *cursor,
+                                            const struct dcomp_resource_view *resource )
+{
+    static const UINT edge_opcodes[4] = {0x13d, 0x142, 0x140, 0x13c};
+    UINT dirty = resource->announced ? resource->rectangle_dirty : 0x1f;
+    UINT command[12], i;
+
+    if (dirty & 1)
+    {
+        memset( command, 0, sizeof(command) );
+        command[0] = sizeof(command);
+        command[1] = 0x13f;
+        command[2] = resource->id;
+        memcpy( command + 3, resource->rectangle + 4, 8 * sizeof(float) );
+        ((BYTE *)&command[11])[0] = resource->rectangle_mode;
+        ((BYTE *)&command[11])[1] = resource->rectangle_expression_mode;
+        ((BYTE *)&command[11])[2] = resource->rectangle_flag;
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    for (i = 0; i < 4; ++i)
+    {
+        if (!(dirty & (2 << i))) continue;
+        command[0] = 16;
+        command[1] = edge_opcodes[i];
+        command[2] = resource->id;
+        memcpy( command + 3, resource->rectangle + i, sizeof(float) );
+        memcpy( cursor, command, 16 );
+        cursor += 16;
+    }
+    return cursor;
+}
+
+static BYTE *emit_dcomp_component_transform3d_defaults( BYTE *cursor, UINT id )
+{
+    UINT command[19];
+
+    memset( command, 0, sizeof(command) );
+    command[0] = 20; command[1] = 0x3d; command[2] = id;
+    memcpy( cursor, command, 20 ); cursor += 20;
+    command[0] = 24; command[1] = 0x3e;
+    memcpy( cursor, command, 24 ); cursor += 24;
+    command[1] = 0x3f;
+    memcpy( cursor, command, 24 ); cursor += 24;
+    command[0] = 28; command[1] = 0x40; command[6] = 0x3f800000;
+    memcpy( cursor, command, 28 ); cursor += 28;
+    memset( command + 3, 0, 4 * sizeof(UINT) );
+    command[0] = 24; command[1] = 0x42; command[5] = 0x3f800000;
+    memcpy( cursor, command, 24 ); cursor += 24;
+    command[0] = 16; command[1] = 0x41; command[3] = 0;
+    memcpy( cursor, command, 16 ); cursor += 16;
+    command[0] = 24; command[1] = 0x43;
+    command[3] = command[4] = command[5] = 0x3f800000;
+    memcpy( cursor, command, 24 ); cursor += 24;
+    memset( command, 0, sizeof(command) );
+    command[0] = sizeof(command); command[1] = 0x44; command[2] = id;
+    command[3] = command[8] = command[13] = command[18] = 0x3f800000;
+    memcpy( cursor, command, sizeof(command) );
+    return cursor + sizeof(command);
+}
+
+static data_size_t dcomp_property_set_update_size( const struct dcomp_resource_view *resource )
+{
+    data_size_t size = 0;
+    UINT i;
+
+    for (i = 0; i < resource->property_count; ++i)
+        if (resource->properties[i].dirty) size += 28 + resource->properties[i].size;
+    return size;
+}
+
+static BYTE *emit_dcomp_property_set_updates( BYTE *cursor,
+                                               const struct dcomp_resource_view *resource )
+{
+    const struct dcomp_property_value *value;
+    UINT command[7], i;
+
+    for (i = 0; i < resource->property_count; ++i)
+    {
+        value = &resource->properties[i];
+        if (!value->dirty) continue;
+        memset( command, 0, sizeof(command) );
+        command[0] = sizeof(command) + value->size;
+        command[1] = 0x135;
+        command[2] = resource->id;
+        command[3] = i;
+        command[4] = value->offset;
+        command[5] = value->type;
+        ((BYTE *)&command[6])[0] = value->added;
+        memcpy( cursor, command, sizeof(command) );
+        memcpy( cursor + sizeof(command), value->data, value->size );
+        cursor += sizeof(command) + value->size;
+    }
+    return cursor;
+}
+
+static data_size_t dcomp_expression_update_size( const struct dcomp_resource_view *resource )
+{
+    data_size_t size = 0;
+
+    if (resource->expression_base_dirty) size += 44;
+    if (resource->expression_property_4_dirty) size += 16;
+    if (resource->expression_sources_dirty) size += 20 + 4 * resource->expression_source_count;
+    if (resource->expression_reference_info_dirty)
+        size += 20 + 20 * resource->expression_reference_count;
+    if (resource->expression_nodes_dirty && resource->expression_shared_section &&
+        resource->expression_node_size) size += 24;
+    return size;
+}
+
+static BYTE *emit_dcomp_expression_updates( struct dcomp_channel_view *view, BYTE *cursor,
+                                             const struct dcomp_resource_view *resource )
+{
+    struct dcomp_resource_view *reference;
+    UINT command[11], i, metadata_kind = 0;
+    UINT64 metadata_value = 0;
+
+    if (resource->expression_base_dirty)
+    {
+        memset( command, 0, sizeof(command) );
+        command[0] = sizeof(command);
+        command[1] = 0x11;
+        command[2] = resource->id;
+        if (resource->expression_property_enabled &&
+            (reference = find_dcomp_resource_view( view,
+                                                    resource->expression_property_resource_id )))
+        {
+            command[3] = reference->type;
+            command[4] = reference->id;
+        }
+        command[5] = resource->expression_property_3;
+        if (resource->expression_metadata_size)
+        {
+            memcpy( &metadata_kind, resource->expression_metadata, sizeof(metadata_kind) );
+            if (metadata_kind == 1)
+                metadata_value = resource->expression_metadata[8];
+            else if (metadata_kind == 2)
+                memcpy( &metadata_value, resource->expression_metadata + 8,
+                        sizeof(metadata_value) );
+            memcpy( command + 7, &metadata_value, sizeof(metadata_value) );
+            ((USHORT *)&command[9])[0] = resource->expression_metadata[4];
+            memcpy( (BYTE *)command + 38, resource->expression_metadata, sizeof(USHORT) );
+        }
+        command[10] = resource->expression_type;
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    if (resource->expression_property_4_dirty)
+    {
+        UINT property_command[4] = {16, 0x12, resource->id,
+                                    resource->expression_property_4};
+
+        memcpy( cursor, property_command, sizeof(property_command) );
+        cursor += sizeof(property_command);
+    }
+    if (resource->expression_sources_dirty)
+    {
+        command[0] = 20 + 4 * resource->expression_source_count;
+        command[1] = 0x89;
+        command[2] = resource->id;
+        command[3] = resource->expression_source_count;
+        command[4] = resource->expression_source_count;
+        memcpy( cursor, command, 20 );
+        cursor += 20;
+        for (i = 0; i < resource->expression_source_count; ++i)
+        {
+            UINT id = 0;
+
+            if ((reference = find_dcomp_resource_view( view,
+                                                        resource->expression_sources[i] )))
+                id = reference->id;
+            memcpy( cursor, &id, sizeof(id) );
+            cursor += sizeof(id);
+        }
+    }
+    if (resource->expression_reference_info_dirty)
+    {
+        command[0] = 20 + 20 * resource->expression_reference_count;
+        command[1] = 0x88;
+        command[2] = resource->id;
+        command[3] = resource->expression_reference_count;
+        command[4] = resource->expression_reference_count;
+        memcpy( cursor, command, 20 );
+        cursor += 20;
+        memcpy( cursor, resource->expression_reference_info,
+                20 * resource->expression_reference_count );
+        cursor += 20 * resource->expression_reference_count;
+    }
+    if (resource->expression_nodes_dirty && resource->expression_shared_section &&
+        resource->expression_node_size)
+    {
+        UINT nodes_command[6] = {24, 0x86, resource->id,
+                                 resource->expression_shared_section->id,
+                                 resource->expression_node_offset,
+                                 resource->expression_node_size};
+
+        memcpy( cursor, nodes_command, sizeof(nodes_command) );
+        cursor += sizeof(nodes_command);
+    }
+    return cursor;
+}
+
 static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
                                              BYTE **data, data_size_t *data_size )
 {
@@ -770,6 +1572,18 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         if (resource->visual_flags_dirty) resource_size += 16;
         if (resource->visual_relative_size_dirty) resource_size += 20;
         if (resource->visual_size_dirty) resource_size += 20;
+        if (!resource->released && resource->color_dirty) resource_size += 28;
+        if (!resource->released && resource->type == 0x7f)
+            resource_size += dcomp_rectangle_update_size( resource );
+        if (!resource->released && resource->type == 0x1e && !resource->announced)
+            resource_size += 236;
+        if (!resource->released && resource->type == 0x7c)
+            resource_size += dcomp_property_set_update_size( resource );
+        if (!resource->released && resource->type == 0x3c)
+            resource_size += dcomp_expression_update_size( resource );
+        if (!resource->released && resource->visual_transform_dirty) resource_size += 16;
+        if (!resource->released && resource->visual_clip_dirty) resource_size += 16;
+        if (!resource->released && resource->sprite_content_dirty) resource_size += 16;
         if (resource->released) resource_size += 12;
     }
     if (resource_size > DCOMP_PROTOCOL_MAX_SIZE - *data_size) return STATUS_INVALID_PARAMETER;
@@ -911,6 +1725,39 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             cursor += sizeof(command);
         }
     }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        UINT command[7] = {28, 0x31, resource->id};
+
+        if (resource->released) continue;
+        if (resource->color_dirty)
+        {
+            memcpy( command + 3, resource->color, sizeof(resource->color) );
+            memcpy( cursor, command, sizeof(command) );
+            cursor += sizeof(command);
+        }
+        if (resource->type == 0x7f)
+            cursor = emit_dcomp_rectangle_updates( cursor, resource );
+        if (resource->type == 0x1e && !resource->announced)
+            cursor = emit_dcomp_component_transform3d_defaults( cursor, resource->id );
+        if (resource->type == 0x7c)
+            cursor = emit_dcomp_property_set_updates( cursor, resource );
+        if (resource->type == 0x3c)
+            cursor = emit_dcomp_expression_updates( view, cursor, resource );
+    }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        if (resource->released) continue;
+        if (resource->visual_transform_dirty)
+            cursor = emit_dcomp_reference_update( cursor, 0x1a0, resource->id,
+                                                   resource->visual_transform );
+        if (resource->visual_clip_dirty)
+            cursor = emit_dcomp_reference_update( cursor, 0x18c, resource->id,
+                                                   resource->visual_clip );
+        if (resource->sprite_content_dirty)
+            cursor = emit_dcomp_reference_update( cursor, 0x16e, resource->id,
+                                                   resource->sprite_content );
+    }
     memcpy( cursor, *data, *data_size );
     cursor += *data_size;
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
@@ -942,7 +1789,7 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
         if (resource->released)
         {
             list_remove( &resource->entry );
-            free( resource );
+            free_dcomp_resource_view( resource );
         }
         else
         {
@@ -954,6 +1801,26 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
             resource->visual_flags_dirty = FALSE;
             resource->visual_relative_size_dirty = FALSE;
             resource->visual_size_dirty = FALSE;
+            resource->color_dirty = FALSE;
+            resource->rectangle_dirty = 0;
+            resource->visual_transform_dirty = FALSE;
+            resource->visual_clip_dirty = FALSE;
+            resource->sprite_content_dirty = FALSE;
+            if (resource->type == 0x7c)
+            {
+                UINT i;
+
+                for (i = 0; i < resource->property_count; ++i)
+                {
+                    resource->properties[i].dirty = FALSE;
+                    resource->properties[i].added = FALSE;
+                }
+            }
+            resource->expression_base_dirty = FALSE;
+            resource->expression_property_4_dirty = FALSE;
+            resource->expression_sources_dirty = FALSE;
+            resource->expression_reference_info_dirty = FALSE;
+            resource->expression_nodes_dirty = FALSE;
             if (resource->shared_section_bound) resource->shared_section_announced = TRUE;
         }
     }
