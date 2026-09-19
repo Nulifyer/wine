@@ -1223,6 +1223,197 @@ done:
     CloseHandle( event );
 }
 
+static void test_shared_manipulation_transform(void)
+{
+    struct dcomposition_connection_batch *record = NULL;
+    static const float components[12] =
+    {
+        1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f,
+        7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f,
+    };
+    static const float update[3] = {13.0f, 14.0f, 15.0f};
+    BYTE expected_owner[92] = {0}, expected_update[60] = {0};
+    UINT owner_command[16], reader_command[6], expected_begin[4], expected_reader[3];
+    HANDLE event, connection = NULL, shared = NULL;
+    BYTE *owner_buffer = NULL, *reader_buffer = NULL, state, released;
+    UINT owner_channel = 0, reader_channel = 0, owner_size = 0x1000, reader_size = 0x1000;
+    UINT batch, property, expected[15];
+    UINT64 cookie = 0;
+    ULONG processed;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create shared-transform event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got shared-transform connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &owner_channel, &owner_size,
+                                           (void **)&owner_buffer, 0x90 );
+    ok( status == STATUS_SUCCESS, "got owner channel status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &reader_channel, &reader_size,
+                                           (void **)&reader_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got reader channel status %#lx\n", status );
+    if (!owner_buffer || !reader_buffer) goto done;
+    status = NtDCompositionSetChannelConnectionId( reader_channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got reader bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got reader create status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    owner_command[0] = 2;
+    owner_command[1] = 1;
+    owner_command[2] = 0x6a;
+    owner_command[3] = 1;
+    memcpy( owner_buffer, owner_command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( owner_channel, 16,
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got shared-transform create status %#lx\n", status );
+    owner_command[0] = 15;
+    owner_command[1] = 1;
+    owner_command[2] = 1;
+    owner_command[3] = 8;
+    memcpy( owner_buffer, owner_command, 24 );
+    status = NtDCompositionProcessChannelBatchBuffer( owner_channel, 24,
+                                                       &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got short property status %#lx\n", status );
+    owner_command[2] = 5;
+    owner_command[3] = 12;
+    memcpy( owner_buffer, owner_command, 28 );
+    status = NtDCompositionProcessChannelBatchBuffer( owner_channel, 28,
+                                                       &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got unknown property status %#lx\n", status );
+    for (property = 1; property <= 4; ++property)
+    {
+        owner_command[0] = 15;
+        owner_command[1] = 1;
+        owner_command[2] = property;
+        owner_command[3] = 12;
+        memcpy( owner_command + 4, components + (property - 1) * 3, 12 );
+        memcpy( owner_buffer, owner_command, 28 );
+        status = NtDCompositionProcessChannelBatchBuffer( owner_channel, 28,
+                                                           &processed, &released );
+        ok( status == STATUS_SUCCESS, "property %u got status %#lx\n", property, status );
+    }
+    owner_command[0] = 11;
+    owner_command[1] = 1;
+    owner_command[2] = 6;
+    owner_command[3] = 0;
+    owner_command[4] = 0x12345678;
+    owner_command[5] = 0;
+    memcpy( owner_buffer, owner_command, 24 );
+    status = NtDCompositionProcessChannelBatchBuffer( owner_channel, 24,
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got tracing-cookie status %#lx\n", status );
+    status = NtDCompositionCommitChannel( owner_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got owner commit status %#lx\n", status );
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && !record,
+        "unpublished owner returned status %#lx record %p\n", status, record );
+
+    owner_command[0] = 9;
+    owner_command[1] = 1;
+    owner_command[2] = owner_command[3] = 0;
+    memcpy( owner_buffer, owner_command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( owner_channel, 16,
+                                                       &processed, &released );
+    memcpy( &shared, owner_buffer + 8, sizeof(shared) );
+    ok( status == STATUS_SUCCESS, "got publish status %#lx\n", status );
+    ok( !!shared, "got null published handle\n" );
+
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got owner create status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+    if (record) ok( record->u.create.channel == owner_channel,
+                    "got owner create channel %#x\n", record->u.create.channel );
+
+    expected[0] = 16; expected[1] = 0x28; expected[2] = 1; expected[3] = 0x6a;
+    memcpy( expected_owner, expected, 16 );
+    expected[0] = 60; expected[1] = 0xf4; expected[2] = 1;
+    memcpy( expected + 3, components, sizeof(components) );
+    memcpy( expected_owner + 16, expected, 60 );
+    expected[0] = 16; expected[1] = 0xf5; expected[2] = 1; expected[3] = 0x12345678;
+    memcpy( expected_owner + 76, expected, 16 );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got owner payload status %#lx\n", status );
+    check_dcomp_batch_payload( record, owner_channel, (const UINT *)expected_owner,
+                               sizeof(expected_owner), "shared-transform owner" );
+
+    reader_command[0] = 3;
+    reader_command[1] = 0x11;
+    memcpy( reader_command + 2, &shared, sizeof(shared) );
+    reader_command[4] = 0x6a;
+    reader_command[5] = 1;
+    memcpy( reader_buffer, reader_command, sizeof(reader_command) );
+    status = NtDCompositionProcessChannelBatchBuffer( reader_channel,
+                                                       sizeof(reader_command),
+                                                       &processed, &released );
+    ok( status == STATUS_NOT_SUPPORTED, "got unsupported shared mode status %#lx\n", status );
+    reader_command[4] = 0x6b;
+    reader_command[5] = 0;
+    memcpy( reader_buffer, reader_command, sizeof(reader_command) );
+    status = NtDCompositionProcessChannelBatchBuffer( reader_channel,
+                                                       sizeof(reader_command),
+                                                       &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got mismatched shared type status %#lx\n", status );
+    reader_command[4] = 0x6a;
+    memcpy( reader_buffer, reader_command, sizeof(reader_command) );
+    status = NtDCompositionProcessChannelBatchBuffer( reader_channel,
+                                                       sizeof(reader_command),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got shared open status %#lx\n", status );
+    expected_begin[0] = 16;
+    expected_begin[1] = 0x26;
+    expected_begin[2] = 1;
+    expected_begin[3] = reader_channel;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got begin-duplicate status %#lx\n", status );
+    check_dcomp_batch_payload( record, owner_channel, expected_begin,
+                               sizeof(expected_begin), "shared-transform begin" );
+
+    status = NtDCompositionCommitChannel( reader_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got reader commit status %#lx\n", status );
+    expected_reader[0] = 12;
+    expected_reader[1] = 0x27;
+    expected_reader[2] = 0x11;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got complete-duplicate status %#lx\n", status );
+    check_dcomp_batch_payload( record, reader_channel, expected_reader,
+                               sizeof(expected_reader), "shared-transform complete" );
+
+    owner_command[0] = 15;
+    owner_command[1] = 1;
+    owner_command[2] = 2;
+    owner_command[3] = 12;
+    memcpy( owner_command + 4, update, sizeof(update) );
+    memcpy( owner_buffer, owner_command, 28 );
+    status = NtDCompositionProcessChannelBatchBuffer( owner_channel, 28,
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got shared update status %#lx\n", status );
+    status = NtDCompositionCommitChannel( owner_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got shared update commit status %#lx\n", status );
+    expected[0] = 60; expected[1] = 0xf4; expected[2] = 1;
+    memcpy( expected + 3, components, sizeof(components) );
+    memcpy( expected + 6, update, sizeof(update) );
+    memcpy( expected_update, expected, sizeof(expected_update) );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got shared update payload status %#lx\n", status );
+    check_dcomp_batch_payload( record, owner_channel, (const UINT *)expected_update,
+                               sizeof(expected_update), "shared-transform update" );
+
+done:
+    if (shared) CloseHandle( shared );
+    if (reader_channel) NtDCompositionDestroyChannel( reader_channel );
+    if (owner_channel) NtDCompositionDestroyChannel( owner_channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_visual_target_root_lifecycle(void)
 {
     static const UINT expected_initial[] = {
@@ -1975,6 +2166,7 @@ START_TEST(dcomp)
     test_connection_queue();
     test_visual_target_root_lifecycle();
     test_expression_graph();
+    test_shared_manipulation_transform();
     test_shared_section_lifecycle();
     test_frame_lifecycle();
     test_resource_retirement();

@@ -7338,6 +7338,34 @@ struct release_dcomp_shared_section_reply
 };
 
 
+struct publish_dcomp_resource_request
+{
+    struct request_header __header;
+    unsigned int channel;
+    unsigned int resource;
+    unsigned int type;
+};
+struct publish_dcomp_resource_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+struct begin_dcomp_resource_duplicate_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int channel;
+    unsigned int type;
+};
+struct begin_dcomp_resource_duplicate_reply
+{
+    struct reply_header __header;
+};
+
+
 struct get_dcomp_connection_batch_request
 {
     struct request_header __header;
@@ -8009,6 +8037,8 @@ enum request
     REQ_create_dcomp_shared_section,
     REQ_get_dcomp_shared_section_update,
     REQ_release_dcomp_shared_section,
+    REQ_publish_dcomp_resource,
+    REQ_begin_dcomp_resource_duplicate,
     REQ_get_dcomp_connection_batch,
     REQ_release_all_dcomp_resources,
     REQ_get_deleted_dcomp_resources,
@@ -8415,6 +8445,8 @@ union generic_request
     struct create_dcomp_shared_section_request create_dcomp_shared_section_request;
     struct get_dcomp_shared_section_update_request get_dcomp_shared_section_update_request;
     struct release_dcomp_shared_section_request release_dcomp_shared_section_request;
+    struct publish_dcomp_resource_request publish_dcomp_resource_request;
+    struct begin_dcomp_resource_duplicate_request begin_dcomp_resource_duplicate_request;
     struct get_dcomp_connection_batch_request get_dcomp_connection_batch_request;
     struct release_all_dcomp_resources_request release_all_dcomp_resources_request;
     struct get_deleted_dcomp_resources_request get_deleted_dcomp_resources_request;
@@ -8819,6 +8851,8 @@ union generic_reply
     struct create_dcomp_shared_section_reply create_dcomp_shared_section_reply;
     struct get_dcomp_shared_section_update_reply get_dcomp_shared_section_update_reply;
     struct release_dcomp_shared_section_reply release_dcomp_shared_section_reply;
+    struct publish_dcomp_resource_reply publish_dcomp_resource_reply;
+    struct begin_dcomp_resource_duplicate_reply begin_dcomp_resource_duplicate_reply;
     struct get_dcomp_connection_batch_reply get_dcomp_connection_batch_reply;
     struct release_all_dcomp_resources_reply release_all_dcomp_resources_reply;
     struct get_deleted_dcomp_resources_reply get_deleted_dcomp_resources_reply;
@@ -8842,6 +8876,6 @@ union generic_reply
     struct set_dcomp_channel_completion_event_reply set_dcomp_channel_completion_event_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1037
+#define SERVER_PROTOCOL_VERSION 1038
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

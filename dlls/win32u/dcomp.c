@@ -141,6 +141,12 @@ struct dcomp_resource_view
     BOOL expression_nodes_dirty;
     BOOL shared_section_bound;
     BOOL shared_section_announced;
+    BOOL shared_write;
+    BOOL shared_duplicate;
+    float manipulation_components[12];
+    UINT manipulation_tracing_cookie;
+    BOOL manipulation_components_dirty;
+    BOOL manipulation_cookie_dirty;
 };
 
 struct dcomp_connection_batch_view
@@ -402,6 +408,34 @@ static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource
         resource->rectangle[2] = resource->rectangle[3] = 2097152.0f;
     }
     if (type == 0x3c) resource->expression_base_dirty = resource->expression_property_4_dirty = TRUE;
+    if (type == 0x6a)
+    {
+        resource->manipulation_components[6] = 1.0f;
+        resource->manipulation_components[7] = 1.0f;
+        resource->manipulation_components[8] = 1.0f;
+        resource->manipulation_components_dirty = TRUE;
+        resource->manipulation_cookie_dirty = TRUE;
+    }
+}
+
+static NTSTATUS set_dcomp_manipulation_integer_property( struct dcomp_resource_view *resource,
+                                                          UINT property, INT64 value )
+{
+    if (property != 6) return STATUS_NOT_SUPPORTED;
+    resource->manipulation_tracing_cookie = value;
+    resource->manipulation_cookie_dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_manipulation_buffer_property( struct dcomp_resource_view *resource,
+                                                         UINT property, const BYTE *data,
+                                                         UINT size )
+{
+    if (property < 1 || property > 4 || size != 3 * sizeof(float))
+        return STATUS_INVALID_PARAMETER;
+    memcpy( resource->manipulation_components + (property - 1) * 3, data, size );
+    resource->manipulation_components_dirty = TRUE;
+    return STATUS_SUCCESS;
 }
 
 static void replace_dcomp_resource_reference( struct dcomp_resource_view **slot,
@@ -953,6 +987,38 @@ static NTSTATUS get_dcomp_shared_section_update( UINT channel, UINT resource,
     return status;
 }
 
+static NTSTATUS publish_dcomp_resource( UINT channel, UINT resource, UINT type, HANDLE *handle )
+{
+    NTSTATUS status;
+
+    *handle = NULL;
+    SERVER_START_REQ( publish_dcomp_resource )
+    {
+        req->channel = channel;
+        req->resource = resource;
+        req->type = type;
+        status = wine_server_call( req );
+        if (!status) *handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS begin_dcomp_resource_duplicate( HANDLE handle, UINT channel, UINT type )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( begin_dcomp_resource_duplicate )
+    {
+        req->handle = wine_server_obj_handle( handle );
+        req->channel = channel;
+        req->type = type;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 static void free_dcomp_resource_views( struct dcomp_channel_view *view )
 {
     struct dcomp_resource_view *resource, *next;
@@ -1034,12 +1100,12 @@ static NTSTATUS validate_dcomp_window_target( HANDLE handle, UINT resource_type 
     return status;
 }
 
-static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const BYTE *buffer,
+static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *buffer,
                                         UINT length, BOOL allow_indirect, ULONG *processed )
 {
     struct dcomp_resource_view *resource;
     UINT command_size, id, indirect_size, type;
-    const BYTE *indirect;
+    BYTE *indirect;
     NTSTATUS status;
 
     while (length)
@@ -1059,29 +1125,41 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
         }
         else if (type == 2)
         {
+            UINT flags;
+
             memcpy( &id, buffer + 4, sizeof(id) );
             memcpy( &type, buffer + 8, sizeof(type) );
+            memcpy( &flags, buffer + 12, sizeof(flags) );
             if (!id || !type || type > 0xc1) return STATUS_INVALID_PARAMETER;
             if (find_any_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
             initialize_dcomp_resource_view( resource, id, type );
+            resource->shared_write = !!flags;
             list_add_tail( &view->resources, &resource->entry );
         }
         else if (type == 3)
         {
             HANDLE handle;
-            UINT resource_type;
+            UINT mode, resource_type;
 
             memcpy( &id, buffer + 4, sizeof(id) );
             memcpy( &handle, buffer + 8, sizeof(handle) );
             memcpy( &resource_type, buffer + 16, sizeof(resource_type) );
+            memcpy( &mode, buffer + 20, sizeof(mode) );
             if (!id || !handle || !resource_type) return STATUS_INVALID_PARAMETER;
             if (find_any_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
             if (resource_type == 0xb8 &&
                 (status = validate_dcomp_window_target( handle, resource_type ))) return status;
+            if (resource_type != 0xb8)
+            {
+                if (mode) return STATUS_NOT_SUPPORTED;
+                if ((status = begin_dcomp_resource_duplicate( handle, view->channel,
+                                                               resource_type ))) return status;
+            }
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
             initialize_dcomp_resource_view( resource, id, resource_type );
             resource->visual_target = resource_type == 0xb8;
+            resource->shared_duplicate = resource_type != 0xb8;
             if (resource->visual_target) resource->visual = FALSE;
             list_add_tail( &view->resources, &resource->entry );
         }
@@ -1124,6 +1202,11 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
                 status = set_dcomp_expression_integer_property( resource, property, value );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 0x6a && !resource->shared_duplicate)
+            {
+                status = set_dcomp_manipulation_integer_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
         }
         else if (type == 15)
         {
@@ -1162,6 +1245,23 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
                                                                 buffer + 16, size );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 0x6a && !resource->shared_duplicate)
+            {
+                if ((status = set_dcomp_manipulation_buffer_property( resource, property,
+                                                                       buffer + 16, size )))
+                    return status;
+            }
+        }
+        else if (type == 9)
+        {
+            HANDLE handle;
+
+            memcpy( &id, buffer + 4, sizeof(id) );
+            if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
+            if (!resource->shared_write) return STATUS_INVALID_PARAMETER;
+            if ((status = publish_dcomp_resource( view->channel, resource->id,
+                                                   resource->type, &handle ))) return status;
+            memcpy( buffer + 8, &handle, sizeof(handle) );
         }
         else if (type == 16)
         {
@@ -1444,6 +1544,39 @@ static BYTE *emit_dcomp_property_set_updates( BYTE *cursor,
     return cursor;
 }
 
+static data_size_t dcomp_manipulation_update_size( const struct dcomp_resource_view *resource )
+{
+    data_size_t size = 0;
+
+    if (resource->shared_duplicate) return 0;
+    if (resource->manipulation_components_dirty) size += 60;
+    if (resource->manipulation_cookie_dirty) size += 16;
+    return size;
+}
+
+static BYTE *emit_dcomp_manipulation_updates( BYTE *cursor,
+                                               const struct dcomp_resource_view *resource )
+{
+    if (resource->manipulation_components_dirty)
+    {
+        UINT command[15] = {60, 0xf4, resource->id};
+
+        memcpy( command + 3, resource->manipulation_components,
+                sizeof(resource->manipulation_components) );
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    if (resource->manipulation_cookie_dirty)
+    {
+        UINT command[4] = {16, 0xf5, resource->id,
+                           resource->manipulation_tracing_cookie};
+
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    return cursor;
+}
+
 static data_size_t dcomp_expression_update_size( const struct dcomp_resource_view *resource )
 {
     data_size_t size = 0;
@@ -1560,7 +1693,7 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
 
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
     {
-        if (!resource->announced) resource_size += 16;
+        if (!resource->announced) resource_size += resource->shared_duplicate ? 12 : 16;
         if (resource->shared_section_bound && !resource->shared_section_announced &&
             !resource->released) resource_size += 28;
         if (resource->remove_dirty) resource_size += 16;
@@ -1581,6 +1714,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             resource_size += dcomp_property_set_update_size( resource );
         if (!resource->released && resource->type == 0x3c)
             resource_size += dcomp_expression_update_size( resource );
+        if (!resource->released && resource->type == 0x6a)
+            resource_size += dcomp_manipulation_update_size( resource );
         if (!resource->released && resource->visual_transform_dirty) resource_size += 16;
         if (!resource->released && resource->visual_clip_dirty) resource_size += 16;
         if (!resource->released && resource->sprite_content_dirty) resource_size += 16;
@@ -1596,12 +1731,23 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         UINT command[4];
 
         if (resource->announced || resource->released) continue;
-        command[0] = sizeof(command);
-        command[1] = 0x28; /* MILCMD_CHANNEL_CREATERESOURCE */
-        command[2] = resource->id;
-        command[3] = resource->type;
-        memcpy( cursor, command, sizeof(command) );
-        cursor += sizeof(command);
+        if (resource->shared_duplicate)
+        {
+            command[0] = 12;
+            command[1] = 0x27; /* MILCMD_CHANNEL_COMPLETEDUPLICATERESOURCE */
+            command[2] = resource->id;
+            memcpy( cursor, command, 12 );
+            cursor += 12;
+        }
+        else
+        {
+            command[0] = sizeof(command);
+            command[1] = 0x28; /* MILCMD_CHANNEL_CREATERESOURCE */
+            command[2] = resource->id;
+            command[3] = resource->type;
+            memcpy( cursor, command, sizeof(command) );
+            cursor += sizeof(command);
+        }
     }
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
     {
@@ -1744,6 +1890,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             cursor = emit_dcomp_property_set_updates( cursor, resource );
         if (resource->type == 0x3c)
             cursor = emit_dcomp_expression_updates( view, cursor, resource );
+        if (resource->type == 0x6a)
+            cursor = emit_dcomp_manipulation_updates( cursor, resource );
     }
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
     {
@@ -1821,6 +1969,8 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
             resource->expression_sources_dirty = FALSE;
             resource->expression_reference_info_dirty = FALSE;
             resource->expression_nodes_dirty = FALSE;
+            resource->manipulation_components_dirty = FALSE;
+            resource->manipulation_cookie_dirty = FALSE;
             if (resource->shared_section_bound) resource->shared_section_announced = TRUE;
         }
     }

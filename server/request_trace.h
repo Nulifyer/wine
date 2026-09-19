@@ -4251,6 +4251,25 @@ static void dump_release_dcomp_shared_section_request( const struct release_dcom
     fprintf( stderr, ", resource=%08x", req->resource );
 }
 
+static void dump_publish_dcomp_resource_request( const struct publish_dcomp_resource_request *req )
+{
+    fprintf( stderr, " channel=%08x", req->channel );
+    fprintf( stderr, ", resource=%08x", req->resource );
+    fprintf( stderr, ", type=%08x", req->type );
+}
+
+static void dump_publish_dcomp_resource_reply( const struct publish_dcomp_resource_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_begin_dcomp_resource_duplicate_request( const struct begin_dcomp_resource_duplicate_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", channel=%08x", req->channel );
+    fprintf( stderr, ", type=%08x", req->type );
+}
+
 static void dump_get_dcomp_connection_batch_request( const struct get_dcomp_connection_batch_request *req )
 {
     fprintf( stderr, " connection=%04x", req->connection );
@@ -4819,6 +4838,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_shared_section_request,
     (dump_func)dump_get_dcomp_shared_section_update_request,
     (dump_func)dump_release_dcomp_shared_section_request,
+    (dump_func)dump_publish_dcomp_resource_request,
+    (dump_func)dump_begin_dcomp_resource_duplicate_request,
     (dump_func)dump_get_dcomp_connection_batch_request,
     (dump_func)dump_release_all_dcomp_resources_request,
     (dump_func)dump_get_deleted_dcomp_resources_request,
@@ -5221,6 +5242,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_create_dcomp_shared_section_reply,
     (dump_func)dump_get_dcomp_shared_section_update_reply,
+    NULL,
+    (dump_func)dump_publish_dcomp_resource_reply,
     NULL,
     (dump_func)dump_get_dcomp_connection_batch_reply,
     (dump_func)dump_release_all_dcomp_resources_reply,
@@ -5625,6 +5648,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "create_dcomp_shared_section",
     "get_dcomp_shared_section_update",
     "release_dcomp_shared_section",
+    "publish_dcomp_resource",
+    "begin_dcomp_resource_duplicate",
     "get_dcomp_connection_batch",
     "release_all_dcomp_resources",
     "get_deleted_dcomp_resources",

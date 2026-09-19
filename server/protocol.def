@@ -4980,6 +4980,22 @@ struct alpc_message_info
     unsigned int resource;     /* shared-section resource ID */
 @END
 
+/* Publish a channel resource through a process handle. */
+@REQ(publish_dcomp_resource)
+    unsigned int channel;      /* owner channel ID */
+    unsigned int resource;     /* owner-local resource ID */
+    unsigned int type;         /* MIL resource type */
+@REPLY
+    obj_handle_t handle;       /* shared-resource handle */
+@END
+
+/* Begin duplicating a published resource into another channel. */
+@REQ(begin_dcomp_resource_duplicate)
+    obj_handle_t handle;       /* published shared-resource handle */
+    unsigned int channel;      /* target channel ID */
+    unsigned int type;         /* expected MIL resource type */
+@END
+
 /* Pop one record from a DWM connection's pending batch queue. */
 @REQ(get_dcomp_connection_batch)
     obj_handle_t connection;   /* DWM connection handle */

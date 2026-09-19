@@ -121,6 +121,14 @@ struct dcomp_shared_section
     mem_size_t size;
 };
 
+struct dcomp_shared_resource
+{
+    struct object obj;
+    struct dcomp_channel *channel;
+    unsigned int resource;
+    unsigned int type;
+};
+
 struct dcomp_surface
 {
     struct object obj;
@@ -184,6 +192,8 @@ static void dcomp_channel_dump( struct object *obj, int verbose );
 static void dcomp_channel_destroy( struct object *obj );
 static void dcomp_surface_dump( struct object *obj, int verbose );
 static void dcomp_surface_destroy( struct object *obj );
+static void dcomp_shared_resource_dump( struct object *obj, int verbose );
+static void dcomp_shared_resource_destroy( struct object *obj );
 static void dcomp_token_dump( struct object *obj, int verbose );
 static void dcomp_token_destroy( struct object *obj );
 static void dcomp_window_target_dump( struct object *obj, int verbose );
@@ -212,6 +222,14 @@ static const struct object_ops dcomp_surface_ops =
     .type    = &no_type,
     .dump    = dcomp_surface_dump,
     .destroy = dcomp_surface_destroy,
+};
+
+static const struct object_ops dcomp_shared_resource_ops =
+{
+    .size    = sizeof(struct dcomp_shared_resource),
+    .type    = &no_type,
+    .dump    = dcomp_shared_resource_dump,
+    .destroy = dcomp_shared_resource_destroy,
 };
 
 static const struct object_ops dcomp_token_ops =
@@ -260,6 +278,23 @@ static void dcomp_surface_dump( struct object *obj, int verbose )
     assert( obj->ops == &dcomp_surface_ops );
     fprintf( stderr, "DirectComposition surface session=%u binding=%llu bound=%u\n",
              surface->session_id, (unsigned long long)surface->binding_id, surface->bound );
+}
+
+static void dcomp_shared_resource_dump( struct object *obj, int verbose )
+{
+    struct dcomp_shared_resource *resource = (struct dcomp_shared_resource *)obj;
+
+    assert( obj->ops == &dcomp_shared_resource_ops );
+    fprintf( stderr, "DirectComposition shared resource channel=%#x resource=%#x type=%#x\n",
+             resource->channel->id, resource->resource, resource->type );
+}
+
+static void dcomp_shared_resource_destroy( struct object *obj )
+{
+    struct dcomp_shared_resource *resource = (struct dcomp_shared_resource *)obj;
+
+    assert( obj->ops == &dcomp_shared_resource_ops );
+    release_object( resource->channel );
 }
 
 static void dcomp_surface_destroy( struct object *obj )
@@ -490,6 +525,33 @@ static int queue_dcomp_record( struct dcomp_connection *connection, unsigned int
     record->size = size;
     list_add_tail( &connection->records, &record->entry );
     set_event( connection->work_event );
+    return 1;
+}
+
+static int attach_internal_dcomp_channel( struct dcomp_channel *channel )
+{
+    struct dcomp_connection *connection;
+    struct dcomp_batch *batch, *next;
+
+    if (!(connection = channel->connection))
+    {
+        if (!(connection = find_dcomp_consumer_connection( channel->owner->session_id )))
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            return 0;
+        }
+        if (!queue_dcomp_record( connection, DCOMP_RECORD_CREATE, channel->id, channel->flags,
+                                 0, 0, NULL, 0 )) return 0;
+        channel->connection = (struct dcomp_connection *)grab_object( connection );
+    }
+    LIST_FOR_EACH_ENTRY_SAFE( batch, next, &channel->batches, struct dcomp_batch, entry )
+    {
+        if (!queue_dcomp_record( connection, DCOMP_RECORD_BATCH, channel->id, batch->size,
+                                 0, 0, batch->data, batch->size )) return 0;
+        list_remove( &batch->entry );
+        free( batch->data );
+        free( batch );
+    }
     return 1;
 }
 
@@ -1024,6 +1086,61 @@ DECL_HANDLER(release_dcomp_shared_section)
     else
         release_dcomp_shared_section( section );
     release_object( channel );
+}
+
+DECL_HANDLER(publish_dcomp_resource)
+{
+    struct dcomp_shared_resource *resource;
+    struct dcomp_channel *channel;
+
+    reply->handle = 0;
+    if (!req->resource || !req->type)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(channel = get_dcomp_channel( req->channel ))) return;
+    if (!attach_internal_dcomp_channel( channel )) goto done;
+    if (!(resource = alloc_object( &dcomp_shared_resource_ops ))) goto done;
+    resource->channel = (struct dcomp_channel *)grab_object( channel );
+    resource->resource = req->resource;
+    resource->type = req->type;
+    reply->handle = alloc_handle_no_access_check( current->process, resource, 0, 0 );
+    release_object( resource );
+
+done:
+    release_object( channel );
+}
+
+DECL_HANDLER(begin_dcomp_resource_duplicate)
+{
+    struct dcomp_shared_resource *resource;
+    struct dcomp_channel *target;
+    unsigned int command[4];
+
+    if (!(resource = (struct dcomp_shared_resource *)get_handle_obj( current->process,
+            req->handle, 0, &dcomp_shared_resource_ops ))) return;
+    if (!(target = get_dcomp_channel( req->channel ))) goto done;
+    if (resource->type != req->type ||
+        resource->channel->owner->session_id != target->owner->session_id)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done_target;
+    }
+    if (!resource->channel->connection && !attach_internal_dcomp_channel( resource->channel ))
+        goto done_target;
+    command[0] = sizeof(command);
+    command[1] = 0x26; /* MILCMD_CHANNEL_BEGINDUPLICATERESOURCE */
+    command[2] = resource->resource;
+    command[3] = target->id;
+    if (!queue_dcomp_record( resource->channel->connection, DCOMP_RECORD_BATCH,
+                             resource->channel->id, sizeof(command), 0, 0,
+                             command, sizeof(command) )) goto done_target;
+
+done_target:
+    release_object( target );
+done:
+    release_object( resource );
 }
 
 DECL_HANDLER(get_dcomp_connection_batch)
