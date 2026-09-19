@@ -5160,6 +5160,20 @@ BOOL WINAPI NtUserGetDpiForMonitor( HMONITOR monitor, UINT type, UINT *x, UINT *
     return TRUE;
 }
 
+/***********************************************************************
+ *           NtUserGetUniformSpaceMapping   (win32u.@)
+ *
+ * Uniform-space mapping is an optional Windows DWM mode used to remap
+ * mixed-DPI monitor rectangles.  Wine does not enable that mode, matching
+ * the native disabled-mode contract: return FALSE without touching the
+ * caller's mapping.
+ */
+BOOL WINAPI NtUserGetUniformSpaceMapping( HMONITOR monitor, RECT *mapping )
+{
+    TRACE( "monitor %p, mapping %p, uniform-space mapping disabled\n", monitor, mapping );
+    return FALSE;
+}
+
 /**********************************************************************
  *           LogicalToPhysicalPointForPerMonitorDPI   (win32u.@)
  */

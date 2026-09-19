@@ -152,7 +152,7 @@
 2649 stub -noname SetForegroundWindowForApplication  # NtUserSetForegroundWindowForApplication
 2650 stub -noname GetInputContainerId  # NtUserGetInputContainerId
 2651 stub -noname DownlevelTouchpad  # NtUserDownlevelTouchpad
-2652 stub -noname GetUniformSpaceMapping  # NtUserGetUniformSpaceMapping
+2652 stdcall -noname GetUniformSpaceMapping(long ptr) NtUserGetUniformSpaceMapping
 2653 stub -noname GetPointerProprietaryId  # NtUserGetPointerProprietaryId
 
 2656 stub -noname EnableMouseInPointerForWindow  # NtUserEnableMouseInPointerForWindow

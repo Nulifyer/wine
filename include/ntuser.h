@@ -1022,6 +1022,7 @@ W32KAPI LONG    WINAPI NtUserGetDisplayConfigBufferSizes( UINT32 flags, UINT32 *
 W32KAPI UINT    WINAPI NtUserGetDoubleClickTime(void);
 W32KAPI ULONG   WINAPI NtUserGetActiveProcessesDpis(void);
 W32KAPI BOOL    WINAPI NtUserGetDpiForMonitor( HMONITOR monitor, UINT type, UINT *x, UINT *y );
+W32KAPI BOOL    WINAPI NtUserGetUniformSpaceMapping( HMONITOR monitor, RECT *mapping );
 W32KAPI HWND    WINAPI NtUserGetForegroundWindow(void);
 W32KAPI BOOL    WINAPI NtUserGetGUIThreadInfo( DWORD id, GUITHREADINFO *info );
 W32KAPI BOOL    WINAPI NtUserGetIconInfo( HICON icon, ICONINFO *info, UNICODE_STRING *module,

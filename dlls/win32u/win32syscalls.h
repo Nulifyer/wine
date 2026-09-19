@@ -1108,7 +1108,7 @@
     SYSCALL_ENTRY( 0x1450, NtUserGetTopLevelWindow, 0 ) \
     SYSCALL_ENTRY( 0x1451, NtUserGetTouchInputInfo, 0 ) \
     SYSCALL_ENTRY( 0x1452, NtUserGetTouchValidationStatus, 0 ) \
-    SYSCALL_ENTRY( 0x1453, NtUserGetUniformSpaceMapping, 0 ) \
+    SYSCALL_ENTRY( 0x1453, NtUserGetUniformSpaceMapping, 8 ) \
     SYSCALL_ENTRY( 0x1454, NtUserGetUnpredictedMessagePos, 0 ) \
     SYSCALL_ENTRY( 0x1455, NtUserGetUpdateRect, 12 ) \
     SYSCALL_ENTRY( 0x1456, NtUserGetUpdateRgn, 12 ) \
@@ -2650,7 +2650,7 @@
     SYSCALL_ENTRY( 0x1450, NtUserGetTopLevelWindow, 0 ) \
     SYSCALL_ENTRY( 0x1451, NtUserGetTouchInputInfo, 0 ) \
     SYSCALL_ENTRY( 0x1452, NtUserGetTouchValidationStatus, 0 ) \
-    SYSCALL_ENTRY( 0x1453, NtUserGetUniformSpaceMapping, 0 ) \
+    SYSCALL_ENTRY( 0x1453, NtUserGetUniformSpaceMapping, 16 ) \
     SYSCALL_ENTRY( 0x1454, NtUserGetUnpredictedMessagePos, 0 ) \
     SYSCALL_ENTRY( 0x1455, NtUserGetUpdateRect, 24 ) \
     SYSCALL_ENTRY( 0x1456, NtUserGetUpdateRgn, 24 ) \
@@ -3788,7 +3788,6 @@
     SYSCALL_STUB( NtUserGetTopLevelWindow ) \
     SYSCALL_STUB( NtUserGetTouchInputInfo ) \
     SYSCALL_STUB( NtUserGetTouchValidationStatus ) \
-    SYSCALL_STUB( NtUserGetUniformSpaceMapping ) \
     SYSCALL_STUB( NtUserGetUnpredictedMessagePos ) \
     SYSCALL_STUB( NtUserGetWOWClass ) \
     SYSCALL_STUB( NtUserGetWinStationInfo ) \

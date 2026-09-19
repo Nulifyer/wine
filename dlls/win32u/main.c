@@ -1740,6 +1740,11 @@ BOOL SYSCALL_API NtUserGetDpiForMonitor( HMONITOR monitor, UINT type, UINT *x, U
     SYSCALL_FUNC( NtUserGetDpiForMonitor );
 }
 
+BOOL SYSCALL_API NtUserGetUniformSpaceMapping( HMONITOR monitor, RECT *mapping )
+{
+    SYSCALL_FUNC( NtUserGetUniformSpaceMapping );
+}
+
 HWND SYSCALL_API NtUserGetForegroundWindow(void)
 {
     SYSCALL_FUNC( NtUserGetForegroundWindow );

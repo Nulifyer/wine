@@ -56,6 +56,7 @@ static UINT (WINAPI *pGetDpiForSystem)(void);
 static UINT (WINAPI *pGetDpiForWindow)(HWND);
 static BOOL (WINAPI *pLogicalToPhysicalPointForPerMonitorDPI)(HWND,POINT*);
 static BOOL (WINAPI *pPhysicalToLogicalPointForPerMonitorDPI)(HWND,POINT*);
+static BOOL (WINAPI *pGetUniformSpaceMapping)(HMONITOR,RECT*);
 
 static NTSTATUS (WINAPI *pD3DKMTCloseAdapter)(const D3DKMT_CLOSEADAPTER*);
 static NTSTATUS (WINAPI *pD3DKMTOpenAdapterFromGdiDisplayName)(D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME*);
@@ -82,6 +83,9 @@ static void init_function_pointers(void)
     GET_PROC(user32, GetDpiForWindow)
     GET_PROC(user32, LogicalToPhysicalPointForPerMonitorDPI)
     GET_PROC(user32, PhysicalToLogicalPointForPerMonitorDPI)
+    pGetUniformSpaceMapping = (void *)GetProcAddress(user32, (const char *)2652);
+    if (!pGetUniformSpaceMapping)
+        trace("GetProcAddress(user32, 2652) failed.\n");
 
     GET_PROC(gdi32, D3DKMTCloseAdapter)
     GET_PROC(gdi32, D3DKMTOpenAdapterFromGdiDisplayName)
@@ -121,6 +125,41 @@ static unsigned int get_primary_dpi(void)
     pGetDpiForMonitorInternal(monitor, 0, &dpi_x, &dpi_y);
     pSetThreadDpiAwarenessContext(old_context);
     return dpi_y;
+}
+
+static void test_uniform_space_mapping(void)
+{
+    const RECT sentinel = {0x11111111, 0x22222222, 0x33333333, 0x44444444};
+    HMONITOR monitor;
+    RECT mapping;
+    BOOL ret;
+
+    if (!pGetUniformSpaceMapping)
+    {
+        win_skip("GetUniformSpaceMapping is unavailable.\n");
+        return;
+    }
+
+    mapping = sentinel;
+    SetLastError(0xdeadbeef);
+    ret = pGetUniformSpaceMapping(NULL, &mapping);
+    ok(!ret, "null monitor returned %d.\n", ret);
+    ok(EqualRect(&mapping, &sentinel), "null monitor changed mapping to %s.\n", wine_dbgstr_rect(&mapping));
+    ok(GetLastError() == 0xdeadbeef, "null monitor changed last error to %lu.\n", GetLastError());
+
+    monitor = MonitorFromPoint((POINT){0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    ok(!!monitor, "failed to get primary monitor, error %lu.\n", GetLastError());
+    if (!monitor) return;
+
+    mapping = sentinel;
+    SetLastError(0xdeadbeef);
+    ret = pGetUniformSpaceMapping(monitor, &mapping);
+    if (ret)
+        ok(mapping.right > mapping.left && mapping.bottom > mapping.top,
+           "invalid uniform-space mapping %s.\n", wine_dbgstr_rect(&mapping));
+    else
+        ok(EqualRect(&mapping, &sentinel), "disabled mode changed mapping to %s.\n", wine_dbgstr_rect(&mapping));
+    ok(GetLastError() == 0xdeadbeef, "call changed last error to %lu.\n", GetLastError());
 }
 
 static int get_bitmap_stride(int width, int bpp)
@@ -4161,6 +4200,7 @@ START_TEST(monitor)
     test_ChangeDisplaySettingsEx(myARGC, myARGV);
     test_DisplayConfigSetDeviceInfo();
     test_EnumDisplayMonitors();
+    test_uniform_space_mapping();
     test_monitor_dpi();
     test_monitors();
     test_work_area();

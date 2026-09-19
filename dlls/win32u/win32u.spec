@@ -1106,7 +1106,7 @@
 @ stub -syscall NtUserGetTopLevelWindow
 @ stub -syscall NtUserGetTouchInputInfo
 @ stub -syscall NtUserGetTouchValidationStatus
-@ stub -syscall NtUserGetUniformSpaceMapping
+@ stdcall -syscall NtUserGetUniformSpaceMapping(long ptr)
 @ stub -syscall NtUserGetUnpredictedMessagePos
 @ stdcall -syscall NtUserGetUpdateRect(long ptr long)
 @ stdcall -syscall NtUserGetUpdateRgn(long long long)
