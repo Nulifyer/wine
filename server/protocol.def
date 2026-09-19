@@ -5103,3 +5103,10 @@ struct alpc_message_info
     obj_handle_t handle;          /* shared system-visual handle */
     unsigned int resource_type;   /* expected MIL resource type */
 @END
+
+/* Retain the event signaled when one channel batch is consumed. */
+@REQ(set_dcomp_channel_completion_event)
+    unsigned int channel;         /* owner channel ID */
+    obj_handle_t event;           /* event with modify-state access */
+    int internal;                 /* DComp internal pending-batch mode */
+@END

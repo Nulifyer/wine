@@ -1266,6 +1266,24 @@ NTSTATUS WINAPI NtDCompositionSetChannelConnectionId( UINT channel, INT connecti
     return status;
 }
 
+NTSTATUS WINAPI NtDCompositionSetChannelCommitCompletionEvent( UINT channel, HANDLE event,
+                                                                BOOL internal )
+{
+    NTSTATUS status;
+
+    TRACE( "channel %#x, event %p, internal %u\n", channel, event, internal );
+    if (!event) return STATUS_INVALID_PARAMETER;
+    SERVER_START_REQ( set_dcomp_channel_completion_event )
+    {
+        req->channel = channel;
+        req->event = wine_server_obj_handle( event );
+        req->internal = !!internal;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *batch_id,
                                                     struct dcomposition_connection_batch **batch )
 {

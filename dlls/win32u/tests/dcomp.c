@@ -536,6 +536,7 @@ static void test_channel_lifetime(void)
 {
     struct dcomp_test_protocol_list protocol_list;
     BYTE *buffer = (BYTE *)0xdeadbeef, *second_buffer = (BYTE *)0xdeadbeef;
+    HANDLE internal_event = NULL;
     UINT size = 0x1000, second_size = 0x1000;
     UINT channel = 0xcccccccc, second_channel = 0xcccccccc;
     ULONG processed;
@@ -636,6 +637,12 @@ static void test_channel_lifetime(void)
     ok( status == STATUS_SUCCESS, "got second status %#lx\n", status );
     ok( second_channel && second_channel != channel, "got second channel %#x\n", second_channel );
     ok( second_buffer && second_buffer != buffer, "got second buffer %p\n", second_buffer );
+    internal_event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!internal_event, "failed to create internal completion event, error %lu\n", GetLastError() );
+    status = NtDCompositionSetChannelCommitCompletionEvent( second_channel, internal_event, TRUE );
+    ok( status == STATUS_SUCCESS, "got internal completion-event status %#lx\n", status );
+    CloseHandle( internal_event );
+    internal_event = NULL;
 
     for (i = 0; i < ARRAY_SIZE(flag_values); ++i)
     {
@@ -689,6 +696,7 @@ static void test_channel_lifetime(void)
 
     status = NtDCompositionDestroyChannel( second_channel );
     ok( status == STATUS_SUCCESS, "got second destroy status %#lx\n", status );
+    if (internal_event) CloseHandle( internal_event );
 }
 
 static void test_connection_queue(void)
@@ -703,7 +711,7 @@ static void test_connection_queue(void)
     };
     struct dcomp_test_protocol_list protocol_list;
     struct dcomposition_connection_batch *record = (void *)0xdeadbeef;
-    HANDLE event, connection = NULL;
+    HANDLE event, connection = NULL, completion_event = NULL, completion_wait = NULL;
     BYTE *buffer = (BYTE *)0xdeadbeef;
     UINT channel = 0xcccccccc, size = 0x1000, batch = 0xcccccccc;
     UINT64 cookie = 0x1122334455667788;
@@ -724,6 +732,26 @@ static void test_connection_queue(void)
     status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0x90 );
     ok( status == STATUS_SUCCESS, "got channel status %#lx\n", status );
     if (status) goto done;
+
+    status = NtDCompositionSetChannelCommitCompletionEvent( channel, NULL, FALSE );
+    ok( status == STATUS_INVALID_PARAMETER, "got null completion-event status %#lx\n", status );
+    status = NtDCompositionSetChannelCommitCompletionEvent( 0xdeadbeef, event, FALSE );
+    ok( status == STATUS_ACCESS_DENIED, "got invalid-channel completion status %#lx\n", status );
+    status = NtDCompositionSetChannelCommitCompletionEvent( channel, (HANDLE)0xdeadbeef, FALSE );
+    ok( status == STATUS_INVALID_HANDLE, "got invalid completion-event status %#lx\n", status );
+    completion_event = CreateEventW( NULL, TRUE, FALSE, NULL );
+    ok( !!completion_event, "failed to create completion event, error %lu\n", GetLastError() );
+    ok( DuplicateHandle( GetCurrentProcess(), completion_event, GetCurrentProcess(), &completion_wait,
+                         SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, 0 ),
+        "failed to duplicate completion event, error %lu\n", GetLastError() );
+    status = NtDCompositionSetChannelCommitCompletionEvent( channel, completion_event, FALSE );
+    ok( status == STATUS_SUCCESS, "got completion-event status %#lx\n", status );
+    status = NtDCompositionSetChannelCommitCompletionEvent( channel, (HANDLE)0xdeadbeef, TRUE );
+    ok( status == STATUS_ACCESS_DENIED, "got duplicate completion-event status %#lx\n", status );
+    CloseHandle( completion_event );
+    completion_event = NULL;
+    ok( WaitForSingleObject( completion_wait, 0 ) == WAIT_TIMEOUT,
+        "completion event was initially signaled\n" );
 
     status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
     ok( status == STATUS_SUCCESS, "got bind status %#lx\n", status );
@@ -772,8 +800,12 @@ static void test_connection_queue(void)
                                            &protocol_list.head, NULL, 0 );
     ok( status == STATUS_SUCCESS, "got commit status %#lx\n", status );
     ok( !state, "got commit state %#x\n", state );
+    ok( WaitForSingleObject( completion_wait, 0 ) == WAIT_TIMEOUT,
+        "completion event signaled before consumer dequeue\n" );
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
     ok( status == STATUS_SUCCESS, "got batch record status %#lx\n", status );
+    ok( WaitForSingleObject( completion_wait, 0 ) == WAIT_OBJECT_0,
+        "completion event was not signaled after consumer dequeue\n" );
     ok( !!record, "batch record is null\n" );
     if (record)
     {
@@ -885,6 +917,8 @@ static void test_connection_queue(void)
 done:
     if (buffer && buffer != (BYTE *)0xdeadbeef) NtDCompositionDestroyChannel( channel );
     if (connection) NtDCompositionDestroyConnection( connection );
+    if (completion_wait) CloseHandle( completion_wait );
+    if (completion_event) CloseHandle( completion_event );
     CloseHandle( event );
 }
 

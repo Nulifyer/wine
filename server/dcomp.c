@@ -102,6 +102,8 @@ struct dcomp_channel
     struct list batches;
     struct process *owner;
     struct dcomp_connection *connection;
+    struct event *commit_completion_event;
+    int commit_completion_internal;
     obj_handle_t owner_handle;
     unsigned int id;
     client_ptr_t connection_ids[2];
@@ -233,10 +235,13 @@ static void dcomp_channel_dump( struct object *obj, int verbose )
     struct dcomp_channel *channel = (struct dcomp_channel *)obj;
 
     assert( obj->ops == &dcomp_channel_ops );
-    fprintf( stderr, "DirectComposition channel id=%#x connections=%#llx/%#llx size=%llu flags=%#x next_batch=%u\n",
+    fprintf( stderr, "DirectComposition channel id=%#x connections=%#llx/%#llx completion_event=%p "
+             "internal=%u size=%llu flags=%#x next_batch=%u\n",
              channel->id, (unsigned long long)channel->connection_ids[0],
              (unsigned long long)channel->connection_ids[1],
-             (unsigned long long)channel->size, channel->flags, channel->batch_ids[0] );
+             channel->commit_completion_event, channel->commit_completion_internal,
+             (unsigned long long)channel->size,
+             channel->flags, channel->batch_ids[0] );
 }
 
 static void dcomp_surface_dump( struct object *obj, int verbose )
@@ -355,6 +360,7 @@ static void dcomp_channel_destroy( struct object *obj )
         free( batch->data );
         free( batch );
     }
+    if (channel->commit_completion_event) release_object( channel->commit_completion_event );
     list_remove( &channel->entry );
     release_object( channel->owner );
     release_object( channel->section );
@@ -368,6 +374,15 @@ static struct dcomp_channel *get_dcomp_channel( unsigned int id )
         if (channel->id == id && channel->owner == current->process)
             return (struct dcomp_channel *)grab_object( channel );
     set_error( STATUS_ACCESS_DENIED );
+    return NULL;
+}
+
+static struct dcomp_channel *find_dcomp_channel( unsigned int id )
+{
+    struct dcomp_channel *channel;
+
+    LIST_FOR_EACH_ENTRY( channel, &dcomp_channels, struct dcomp_channel, entry )
+        if (channel->id == id) return channel;
     return NULL;
 }
 
@@ -809,6 +824,8 @@ DECL_HANDLER(create_dcomp_channel)
     channel->section = section;
     channel->owner = (struct process *)grab_object( current->process );
     channel->connection = NULL;
+    channel->commit_completion_event = NULL;
+    channel->commit_completion_internal = 0;
     channel->owner_handle = 0;
     channel->id = id;
     channel->connection_ids[0] = 0;
@@ -934,6 +951,13 @@ DECL_HANDLER(get_dcomp_connection_batch)
     reply->value = record->value;
     reply->connection = record->connection;
     reply->object = record->object;
+    if (record->type == DCOMP_RECORD_BATCH)
+    {
+        struct dcomp_channel *channel = find_dcomp_channel( record->channel );
+
+        if (channel && channel->commit_completion_event)
+            set_event( channel->commit_completion_event );
+    }
     list_remove( &record->entry );
     free( record->data );
     free( record );
@@ -1014,6 +1038,25 @@ DECL_HANDLER(commit_dcomp_channel)
         free( batch->data );
         free( batch );
     }
+
+done:
+    release_object( channel );
+}
+
+DECL_HANDLER(set_dcomp_channel_completion_event)
+{
+    struct dcomp_channel *channel;
+    struct event *event;
+
+    if (!(channel = get_dcomp_channel( req->channel ))) return;
+    if (channel->commit_completion_event)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto done;
+    }
+    if (!(event = get_event_obj( current->process, req->event, EVENT_MODIFY_STATE ))) goto done;
+    channel->commit_completion_event = event;
+    channel->commit_completion_internal = !!req->internal;
 
 done:
     release_object( channel );

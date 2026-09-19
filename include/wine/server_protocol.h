@@ -7571,6 +7571,19 @@ struct validate_dcomp_window_target_reply
 };
 
 
+struct set_dcomp_channel_completion_event_request
+{
+    struct request_header __header;
+    unsigned int channel;
+    obj_handle_t event;
+    int internal;
+};
+struct set_dcomp_channel_completion_event_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -7968,6 +7981,7 @@ enum request
     REQ_create_dcomp_window_target,
     REQ_destroy_dcomp_window_target,
     REQ_validate_dcomp_window_target,
+    REQ_set_dcomp_channel_completion_event,
     REQ_NB_REQUESTS
 };
 
@@ -8370,6 +8384,7 @@ union generic_request
     struct create_dcomp_window_target_request create_dcomp_window_target_request;
     struct destroy_dcomp_window_target_request destroy_dcomp_window_target_request;
     struct validate_dcomp_window_target_request validate_dcomp_window_target_request;
+    struct set_dcomp_channel_completion_event_request set_dcomp_channel_completion_event_request;
 };
 union generic_reply
 {
@@ -8770,8 +8785,9 @@ union generic_reply
     struct create_dcomp_window_target_reply create_dcomp_window_target_reply;
     struct destroy_dcomp_window_target_reply destroy_dcomp_window_target_reply;
     struct validate_dcomp_window_target_reply validate_dcomp_window_target_reply;
+    struct set_dcomp_channel_completion_event_reply set_dcomp_channel_completion_event_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1035
+#define SERVER_PROTOCOL_VERSION 1036
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -4400,6 +4400,13 @@ static void dump_validate_dcomp_window_target_request( const struct validate_dco
     fprintf( stderr, ", resource_type=%08x", req->resource_type );
 }
 
+static void dump_set_dcomp_channel_completion_event_request( const struct set_dcomp_channel_completion_event_request *req )
+{
+    fprintf( stderr, " channel=%08x", req->channel );
+    fprintf( stderr, ", event=%04x", req->event );
+    fprintf( stderr, ", internal=%d", req->internal );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4799,6 +4806,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_window_target_request,
     (dump_func)dump_destroy_dcomp_window_target_request,
     (dump_func)dump_validate_dcomp_window_target_request,
+    (dump_func)dump_set_dcomp_channel_completion_event_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5196,6 +5204,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_token_reply,
     NULL,
     (dump_func)dump_create_dcomp_window_target_reply,
+    NULL,
     NULL,
     NULL,
 };
@@ -5597,6 +5606,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "create_dcomp_window_target",
     "destroy_dcomp_window_target",
     "validate_dcomp_window_target",
+    "set_dcomp_channel_completion_event",
 };
 
 static const struct

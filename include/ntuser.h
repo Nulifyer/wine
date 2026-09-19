@@ -779,6 +779,8 @@ W32KAPI NTSTATUS WINAPI NtDCompositionProcessChannelBatchBuffer( UINT channel, U
                                                                   ULONG *processed, BYTE *released );
 W32KAPI NTSTATUS WINAPI NtDCompositionSetChannelConnectionId( UINT channel, INT connection_id,
                                                                UINT64 connection );
+W32KAPI NTSTATUS WINAPI NtDCompositionSetChannelCommitCompletionEvent( UINT channel, HANDLE event,
+                                                                        BOOL internal );
 struct dcomposition_connection_batch
 {
     UINT type;

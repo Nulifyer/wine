@@ -51,7 +51,7 @@
 @ stub -syscall NtDCompositionRemoveCrossDeviceVisualChild
 @ stub -syscall NtDCompositionRetireFrame
 @ stub -syscall NtDCompositionSetBlurredWallpaperSurface
-@ stub -syscall NtDCompositionSetChannelCommitCompletionEvent
+@ stdcall -syscall NtDCompositionSetChannelCommitCompletionEvent(long long long)
 @ stdcall -syscall NtDCompositionSetChannelConnectionId(long long long)
 @ stub -syscall NtDCompositionSetChildRootVisual
 @ stub -syscall NtDCompositionSetDebugCounter
