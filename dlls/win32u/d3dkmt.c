@@ -168,8 +168,32 @@ struct d3dkmt_disp_mgr_operation
     UINT reserved2;
 };
 
+struct d3dkmt_disp_mgr_target_operation
+{
+    UINT operation;
+    UINT reserved;
+    HANDLE manager;
+    LUID adapter_luid;
+    UINT target_id;
+    UINT reserved2;
+    UINT64 data[3];
+};
+
+struct displayconfig_target_info_internal
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY output_technology;
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY base_output_technology;
+    UINT usage;
+    UINT flags;
+};
+
 C_ASSERT( offsetof(struct d3dkmt_disp_mgr_create, handle) == sizeof(void *) + 2 * sizeof(UINT) );
 C_ASSERT( offsetof(struct d3dkmt_disp_mgr_operation, manager) == 8 );
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_target_operation, manager) == 8 );
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_target_operation, adapter_luid) == 16 );
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_target_operation, data) == 32 );
+C_ASSERT( sizeof(struct d3dkmt_disp_mgr_target_operation) == 56 );
 
 struct d3dkmt_mutex
 {
@@ -393,6 +417,8 @@ NTSTATUS WINAPI NtDxgkDispMgrOperation( void *arg )
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
+    TRACE( "operation %#x manager %p port %p connect %u returned %#x\n",
+           desc->operation, desc->manager, desc->port, desc->connect, status );
     return status;
 }
 
@@ -404,8 +430,41 @@ NTSTATUS WINAPI NtGdiDdDDIDispMgrSourceOperation( void *desc )
 
 NTSTATUS WINAPI NtGdiDdDDIDispMgrTargetOperation( void *desc )
 {
-    FIXME( "unsupported target operation %p\n", desc );
-    return desc ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
+    struct d3dkmt_disp_mgr_target_operation *operation = desc;
+    struct displayconfig_target_info_internal target_info = {0};
+    NTSTATUS status;
+
+    TRACE( "desc %p\n", desc );
+
+    if (!operation) return STATUS_INVALID_PARAMETER;
+    if (operation->operation < 1 || operation->operation > 5) return STATUS_INVALID_PARAMETER;
+    if (operation->operation > 3) return STATUS_NOT_SUPPORTED;
+
+    target_info.header.type = -13; /* DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INFO_INTERNAL */
+    target_info.header.size = sizeof(target_info);
+    target_info.header.adapterId = operation->adapter_luid;
+    target_info.header.id = operation->target_id;
+    if (NtUserDisplayConfigGetDeviceInfo( &target_info.header ))
+        return STATUS_GRAPHICS_INVALID_VIDEO_PRESENT_TARGET;
+    if (operation->operation == 1 && target_info.usage != (UINT)operation->data[0])
+        return STATUS_RETRY;
+
+    SERVER_START_REQ( d3dkmt_disp_mgr_target_operation )
+    {
+        req->manager = wine_server_obj_handle( operation->manager );
+        req->operation = operation->operation;
+        req->adapter_low = operation->adapter_luid.LowPart;
+        req->adapter_high = operation->adapter_luid.HighPart;
+        req->target_id = operation->target_id;
+        req->other_manager = wine_server_obj_handle( (HANDLE)(ULONG_PTR)operation->data[0] );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    TRACE( "operation %#x manager %p adapter %08x:%08x target %u data0 %llx returned %#x\n",
+           operation->operation, operation->manager, operation->adapter_luid.HighPart,
+           operation->adapter_luid.LowPart, operation->target_id,
+           (unsigned long long)operation->data[0], status );
+    return status;
 }
 
 static NTSTATUS d3dkmt_object_update( struct d3dkmt_object *object, const void *runtime, UINT runtime_size )

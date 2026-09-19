@@ -329,6 +329,7 @@ DECL_HANDLER(get_inproc_alert_fd);
 DECL_HANDLER(d3dkmt_object_create);
 DECL_HANDLER(d3dkmt_disp_mgr_create);
 DECL_HANDLER(d3dkmt_disp_mgr_operation);
+DECL_HANDLER(d3dkmt_disp_mgr_target_operation);
 DECL_HANDLER(d3dkmt_object_update);
 DECL_HANDLER(d3dkmt_object_query);
 DECL_HANDLER(d3dkmt_object_open);
@@ -720,6 +721,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_d3dkmt_object_create,
     (req_handler)req_d3dkmt_disp_mgr_create,
     (req_handler)req_d3dkmt_disp_mgr_operation,
+    (req_handler)req_d3dkmt_disp_mgr_target_operation,
     (req_handler)req_d3dkmt_object_update,
     (req_handler)req_d3dkmt_object_query,
     (req_handler)req_d3dkmt_object_open,
@@ -2612,6 +2614,13 @@ C_ASSERT( offsetof(struct d3dkmt_disp_mgr_operation_request, operation) == 16 );
 C_ASSERT( offsetof(struct d3dkmt_disp_mgr_operation_request, port) == 20 );
 C_ASSERT( offsetof(struct d3dkmt_disp_mgr_operation_request, connect) == 24 );
 C_ASSERT( sizeof(struct d3dkmt_disp_mgr_operation_request) == 32 );
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_target_operation_request, manager) == 12 );
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_target_operation_request, operation) == 16 );
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_target_operation_request, adapter_low) == 20 );
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_target_operation_request, adapter_high) == 24 );
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_target_operation_request, target_id) == 28 );
+C_ASSERT( offsetof(struct d3dkmt_disp_mgr_target_operation_request, other_manager) == 32 );
+C_ASSERT( sizeof(struct d3dkmt_disp_mgr_target_operation_request) == 40 );
 C_ASSERT( offsetof(struct d3dkmt_object_update_request, type) == 12 );
 C_ASSERT( offsetof(struct d3dkmt_object_update_request, global) == 16 );
 C_ASSERT( sizeof(struct d3dkmt_object_update_request) == 24 );

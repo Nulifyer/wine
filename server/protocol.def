@@ -4460,6 +4460,17 @@ enum inproc_sync_type
 @END
 
 
+/* Acquire, release, or transfer ownership of a display target */
+@REQ(d3dkmt_disp_mgr_target_operation)
+    obj_handle_t        manager;         /* display manager handle */
+    unsigned int        operation;       /* target operation selector */
+    unsigned int        adapter_low;     /* adapter LUID low part */
+    int                 adapter_high;    /* adapter LUID high part */
+    unsigned int        target_id;       /* video present target id */
+    obj_handle_t        other_manager;   /* transfer destination manager */
+@END
+
+
 /* Update a global/shared d3dkmt object runtime data */
 @REQ(d3dkmt_object_update)
     unsigned int        type;           /* d3dkmt object type */

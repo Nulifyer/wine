@@ -33,7 +33,6 @@
 #include "handle.h"
 #include "process.h"
 #include "request.h"
-#include "security.h"
 
 struct d3dkmt_object
 {
@@ -118,9 +117,23 @@ struct dxgk_display_manager
     struct object  obj;
     struct process *owner;
     struct object  *port;
+    struct list     targets;
     unsigned int    session_id;
     unsigned int    flags;
 };
+
+struct dxgk_display_target
+{
+    struct list                  entry;
+    struct list                  manager_entry;
+    struct dxgk_display_manager *manager;
+    unsigned int                 session_id;
+    unsigned int                 adapter_low;
+    int                          adapter_high;
+    unsigned int                 target_id;
+};
+
+static struct list dxgk_display_targets = LIST_INIT( dxgk_display_targets );
 
 struct dxgk_display_manager_init_data
 {
@@ -158,6 +171,7 @@ static bool dxgk_display_manager_init( struct object *obj, const void *init_data
 
     manager->owner = (struct process *)grab_object( data->owner );
     manager->port = NULL;
+    list_init( &manager->targets );
     manager->session_id = data->session_id;
     manager->flags = data->flags;
     return true;
@@ -166,10 +180,32 @@ static bool dxgk_display_manager_init( struct object *obj, const void *init_data
 static void dxgk_display_manager_destroy( struct object *obj )
 {
     struct dxgk_display_manager *manager = (struct dxgk_display_manager *)obj;
+    struct dxgk_display_target *target, *next;
 
     assert( obj->ops == &dxgk_display_manager_ops );
+    LIST_FOR_EACH_ENTRY_SAFE( target, next, &manager->targets, struct dxgk_display_target, manager_entry )
+    {
+        list_remove( &target->manager_entry );
+        list_remove( &target->entry );
+        free( target );
+    }
     if (manager->port) release_object( manager->port );
     release_object( manager->owner );
+}
+
+static struct dxgk_display_target *find_dxgk_display_target( unsigned int session_id,
+                                                             unsigned int adapter_low, int adapter_high,
+                                                             unsigned int target_id )
+{
+    struct dxgk_display_target *target;
+
+    LIST_FOR_EACH_ENTRY( target, &dxgk_display_targets, struct dxgk_display_target, entry )
+    {
+        if (target->session_id == session_id && target->adapter_low == adapter_low &&
+            target->adapter_high == adapter_high && target->target_id == target_id)
+            return target;
+    }
+    return NULL;
 }
 
 #define DXGK_SHARED_SYNC_QUERY_STATE  0x0001
@@ -662,7 +698,11 @@ DECL_HANDLER(d3dkmt_disp_mgr_operation)
         goto done;
     }
     if (!(port = get_alpc_port_obj( current->process, req->port, ALPC_PORT_ALL_ACCESS ))) goto done;
-    if (req->connect && !equal_sid( token_get_user( current->process->token ), &local_system_sid ))
+    /* dxgkrnl admits the connection when win32k identifies the caller as the
+     * DWM process (or when its separate desktop-display-broker policy is
+     * enabled).  Native startup already establishes the equivalent process
+     * identity by authenticating ownership of the per-session DWM port. */
+    if (req->connect && !current->process->native_dwm_owner)
     {
         set_error( STATUS_ACCESS_DENIED );
         release_object( port );
@@ -673,6 +713,79 @@ DECL_HANDLER(d3dkmt_disp_mgr_operation)
     manager->port = port;
 
 done:
+    release_object( manager );
+}
+
+DECL_HANDLER(d3dkmt_disp_mgr_target_operation)
+{
+    struct dxgk_display_manager *manager, *other = NULL;
+    struct dxgk_display_target *target;
+
+    if (!(manager = (struct dxgk_display_manager *)get_handle_obj( current->process, req->manager,
+                                                                   READ_CONTROL,
+                                                                   &dxgk_display_manager_ops ))) return;
+    if (manager->session_id != current->process->session_id)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto done;
+    }
+    if (req->operation < 1 || req->operation > 3)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+    if (req->operation == 3)
+    {
+        if (!(other = (struct dxgk_display_manager *)get_handle_obj( current->process,
+                                                                     req->other_manager, READ_CONTROL,
+                                                                     &dxgk_display_manager_ops ))) goto done;
+        if (other->session_id != manager->session_id)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto done;
+        }
+    }
+
+    target = find_dxgk_display_target( manager->session_id, req->adapter_low,
+                                       req->adapter_high, req->target_id );
+    switch (req->operation)
+    {
+    case 1:
+        if (target && target->manager != manager) set_error( STATUS_ACCESS_DENIED );
+        else if (!target)
+        {
+            if (!(target = mem_alloc( sizeof(*target) ))) break;
+            target->manager = manager;
+            target->session_id = manager->session_id;
+            target->adapter_low = req->adapter_low;
+            target->adapter_high = req->adapter_high;
+            target->target_id = req->target_id;
+            list_add_tail( &dxgk_display_targets, &target->entry );
+            list_add_tail( &manager->targets, &target->manager_entry );
+        }
+        break;
+    case 2:
+        if (!target || target->manager != manager) set_error( STATUS_NOT_FOUND );
+        else
+        {
+            list_remove( &target->manager_entry );
+            list_remove( &target->entry );
+            free( target );
+        }
+        break;
+    case 3:
+        if (!target || target->manager != manager) set_error( STATUS_NOT_FOUND );
+        else if (other != manager)
+        {
+            list_remove( &target->manager_entry );
+            target->manager = other;
+            list_add_tail( &other->targets, &target->manager_entry );
+        }
+        break;
+    }
+
+done:
+    if (other) release_object( other );
     release_object( manager );
 }
 

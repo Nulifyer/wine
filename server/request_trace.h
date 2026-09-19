@@ -3653,6 +3653,16 @@ static void dump_d3dkmt_disp_mgr_operation_request( const struct d3dkmt_disp_mgr
     fprintf( stderr, ", connect=%d", req->connect );
 }
 
+static void dump_d3dkmt_disp_mgr_target_operation_request( const struct d3dkmt_disp_mgr_target_operation_request *req )
+{
+    fprintf( stderr, " manager=%04x", req->manager );
+    fprintf( stderr, ", operation=%08x", req->operation );
+    fprintf( stderr, ", adapter_low=%08x", req->adapter_low );
+    fprintf( stderr, ", adapter_high=%d", req->adapter_high );
+    fprintf( stderr, ", target_id=%08x", req->target_id );
+    fprintf( stderr, ", other_manager=%04x", req->other_manager );
+}
+
 static void dump_d3dkmt_object_update_request( const struct d3dkmt_object_update_request *req )
 {
     fprintf( stderr, " type=%08x", req->type );
@@ -4653,6 +4663,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_object_create_request,
     (dump_func)dump_d3dkmt_disp_mgr_create_request,
     (dump_func)dump_d3dkmt_disp_mgr_operation_request,
+    (dump_func)dump_d3dkmt_disp_mgr_target_operation_request,
     (dump_func)dump_d3dkmt_object_update_request,
     (dump_func)dump_d3dkmt_object_query_request,
     (dump_func)dump_d3dkmt_object_open_request,
@@ -5045,6 +5056,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_disp_mgr_create_reply,
     NULL,
     NULL,
+    NULL,
     (dump_func)dump_d3dkmt_object_query_reply,
     (dump_func)dump_d3dkmt_object_open_reply,
     (dump_func)dump_d3dkmt_share_objects_reply,
@@ -5435,6 +5447,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "d3dkmt_object_create",
     "d3dkmt_disp_mgr_create",
     "d3dkmt_disp_mgr_operation",
+    "d3dkmt_disp_mgr_target_operation",
     "d3dkmt_object_update",
     "d3dkmt_object_query",
     "d3dkmt_object_open",

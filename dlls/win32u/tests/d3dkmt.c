@@ -82,6 +82,17 @@ struct d3dkmt_disp_mgr_operation
     UINT reserved2;
 };
 
+struct d3dkmt_disp_mgr_target_operation
+{
+    UINT operation;
+    UINT reserved;
+    HANDLE manager;
+    LUID adapter_luid;
+    UINT target_id;
+    UINT reserved2;
+    UINT64 data[3];
+};
+
 struct d3dkmt_ddisplay_enum_adapter
 {
     LUID adapter_luid;
@@ -167,6 +178,7 @@ struct displayconfig_monitor_internal_info
 C_ASSERT( sizeof(struct d3dkmt_disp_mgr_create) == 24 );
 C_ASSERT( sizeof(struct displayconfig_target_inverted_internal) == 24 );
 C_ASSERT( sizeof(struct d3dkmt_disp_mgr_operation) == 32 );
+C_ASSERT( sizeof(struct d3dkmt_disp_mgr_target_operation) == 56 );
 C_ASSERT( sizeof(struct d3dkmt_ddisplay_enum_adapter) == 0x238 );
 C_ASSERT( sizeof(struct d3dkmt_ddisplay_enum_target) == 0x440 );
 C_ASSERT( sizeof(struct displayconfig_target_info_internal) == 0x24 );
@@ -971,12 +983,16 @@ static void test_D3DKMTDisplayManager(void)
     NTSTATUS (WINAPI *pD3DKMTDispMgrSourceOperation)( void *desc );
     NTSTATUS (WINAPI *pD3DKMTDispMgrTargetOperation)( void *desc );
     struct d3dkmt_disp_mgr_create create = {0};
+    struct d3dkmt_disp_mgr_create create_other = {0};
     struct d3dkmt_disp_mgr_operation operation = {0};
+    struct d3dkmt_disp_mgr_target_operation target_operation = {0};
     struct d3dkmt_ddisplay_enum enumeration = {0};
     ALPC_PORT_ATTRIBUTES port_attributes;
     OBJECT_ATTRIBUTES object_attributes;
     HANDLE gdi32, listener = NULL, event;
     ULONG display_generation, adapter_generation, monitor_generation;
+    UINT target_usage = 0;
+    BOOL have_target = FALSE;
     NTSTATUS status;
     UINT i;
 
@@ -1076,6 +1092,13 @@ static void test_D3DKMTDisplayManager(void)
             "target %u base technology %#x does not match %#x\n", i,
             target_info.base_output_technology, target_info.output_technology );
         ok( target_info.usage <= 2, "target %u got invalid usage %u\n", i, target_info.usage );
+        if (!i)
+        {
+            target_operation.adapter_luid = enumeration.targets[i].adapter_luid;
+            target_operation.target_id = enumeration.targets[i].target_id;
+            target_usage = target_info.usage;
+            have_target = TRUE;
+        }
 
         inverted_info.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INVERTED_INTERNAL;
         inverted_info.header.size = sizeof(inverted_info);
@@ -1115,6 +1138,12 @@ static void test_D3DKMTDisplayManager(void)
     ok_nt( STATUS_SUCCESS, status );
     ok( create.handle && create.handle != (HANDLE)0xdeadbeef, "got manager handle %p\n", create.handle );
 
+    create_other.object_attributes = &object_attributes;
+    create_other.access = STANDARD_RIGHTS_ALL;
+    status = pD3DKMTDispMgrCreate( &create_other );
+    ok_nt( STATUS_SUCCESS, status );
+    ok( !!create_other.handle, "got manager handle %p\n", create_other.handle );
+
     operation.manager = create.handle;
     operation.operation = 2;
     status = pD3DKMTDispMgrOperation( &operation );
@@ -1146,9 +1175,73 @@ static void test_D3DKMTDisplayManager(void)
 
     status = pD3DKMTDispMgrSourceOperation( &operation );
     ok_nt( STATUS_NOT_SUPPORTED, status );
-    status = pD3DKMTDispMgrTargetOperation( &operation );
-    ok_nt( STATUS_NOT_SUPPORTED, status );
-    NtClose( create.handle );
+    status = pD3DKMTDispMgrTargetOperation( NULL );
+    ok_nt( STATUS_INVALID_PARAMETER, status );
+    target_operation.operation = 6;
+    status = pD3DKMTDispMgrTargetOperation( &target_operation );
+    ok_nt( STATUS_INVALID_PARAMETER, status );
+
+    if (have_target)
+    {
+        target_operation.operation = 1;
+        target_operation.manager = (HANDLE)0xdeadbeef;
+        target_operation.data[0] = target_usage;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_INVALID_HANDLE, status );
+
+        target_operation.manager = create.handle;
+        target_operation.data[0] = target_usage + 1;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_RETRY, status );
+
+        target_operation.data[0] = target_usage;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_SUCCESS, status );
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_SUCCESS, status );
+
+        target_operation.manager = create_other.handle;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_ACCESS_DENIED, status );
+
+        target_operation.operation = 2;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_NOT_FOUND, status );
+
+        target_operation.operation = 3;
+        target_operation.manager = create.handle;
+        target_operation.data[0] = (UINT_PTR)create_other.handle;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_SUCCESS, status );
+
+        target_operation.operation = 2;
+        target_operation.data[0] = 0;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_NOT_FOUND, status );
+        target_operation.manager = create_other.handle;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_SUCCESS, status );
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_NOT_FOUND, status );
+
+        target_operation.operation = 1;
+        target_operation.manager = create.handle;
+        target_operation.data[0] = target_usage;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_SUCCESS, status );
+        NtClose( create.handle );
+        create.handle = NULL;
+
+        target_operation.manager = create_other.handle;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_SUCCESS, status );
+        target_operation.operation = 2;
+        status = pD3DKMTDispMgrTargetOperation( &target_operation );
+        ok_nt( STATUS_SUCCESS, status );
+    }
+
+    if (create.handle) NtClose( create.handle );
+    NtClose( create_other.handle );
 }
 
 static void test_D3DKMTEnumAdapters3(void)

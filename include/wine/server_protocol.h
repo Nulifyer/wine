@@ -6455,6 +6455,24 @@ struct d3dkmt_disp_mgr_operation_reply
 
 
 
+struct d3dkmt_disp_mgr_target_operation_request
+{
+    struct request_header __header;
+    obj_handle_t        manager;
+    unsigned int        operation;
+    unsigned int        adapter_low;
+    int                 adapter_high;
+    unsigned int        target_id;
+    obj_handle_t        other_manager;
+    char __pad_36[4];
+};
+struct d3dkmt_disp_mgr_target_operation_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct d3dkmt_object_update_request
 {
     struct request_header __header;
@@ -7781,6 +7799,7 @@ enum request
     REQ_d3dkmt_object_create,
     REQ_d3dkmt_disp_mgr_create,
     REQ_d3dkmt_disp_mgr_operation,
+    REQ_d3dkmt_disp_mgr_target_operation,
     REQ_d3dkmt_object_update,
     REQ_d3dkmt_object_query,
     REQ_d3dkmt_object_open,
@@ -8175,6 +8194,7 @@ union generic_request
     struct d3dkmt_object_create_request d3dkmt_object_create_request;
     struct d3dkmt_disp_mgr_create_request d3dkmt_disp_mgr_create_request;
     struct d3dkmt_disp_mgr_operation_request d3dkmt_disp_mgr_operation_request;
+    struct d3dkmt_disp_mgr_target_operation_request d3dkmt_disp_mgr_target_operation_request;
     struct d3dkmt_object_update_request d3dkmt_object_update_request;
     struct d3dkmt_object_query_request d3dkmt_object_query_request;
     struct d3dkmt_object_open_request d3dkmt_object_open_request;
@@ -8567,6 +8587,7 @@ union generic_reply
     struct d3dkmt_object_create_reply d3dkmt_object_create_reply;
     struct d3dkmt_disp_mgr_create_reply d3dkmt_disp_mgr_create_reply;
     struct d3dkmt_disp_mgr_operation_reply d3dkmt_disp_mgr_operation_reply;
+    struct d3dkmt_disp_mgr_target_operation_reply d3dkmt_disp_mgr_target_operation_reply;
     struct d3dkmt_object_update_reply d3dkmt_object_update_reply;
     struct d3dkmt_object_query_reply d3dkmt_object_query_reply;
     struct d3dkmt_object_open_reply d3dkmt_object_open_reply;
@@ -8634,6 +8655,6 @@ union generic_reply
     struct alpc_cancel_message_reply alpc_cancel_message_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1029
+#define SERVER_PROTOCOL_VERSION 1031
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
