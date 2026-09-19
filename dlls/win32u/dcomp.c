@@ -1160,6 +1160,11 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             initialize_dcomp_resource_view( resource, id, resource_type );
             resource->visual_target = resource_type == 0xb8;
             resource->shared_duplicate = resource_type != 0xb8;
+            if (resource->shared_duplicate)
+            {
+                resource->manipulation_components_dirty = FALSE;
+                resource->manipulation_cookie_dirty = FALSE;
+            }
             if (resource->visual_target) resource->visual = FALSE;
             list_add_tail( &view->resources, &resource->entry );
         }
@@ -1557,6 +1562,11 @@ static data_size_t dcomp_manipulation_update_size( const struct dcomp_resource_v
 static BYTE *emit_dcomp_manipulation_updates( BYTE *cursor,
                                                const struct dcomp_resource_view *resource )
 {
+    /* Duplicate state is supplied by its owner channel.  Keep this predicate
+     * paired with dcomp_manipulation_update_size() so the 12-byte
+     * complete-duplicate payload cannot be overrun by owner-only defaults. */
+    if (resource->shared_duplicate) return cursor;
+
     if (resource->manipulation_components_dirty)
     {
         UINT command[15] = {60, 0xf4, resource->id};

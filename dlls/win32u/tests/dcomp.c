@@ -1233,7 +1233,8 @@ static void test_shared_manipulation_transform(void)
     };
     static const float update[3] = {13.0f, 14.0f, 15.0f};
     BYTE expected_owner[92] = {0}, expected_update[60] = {0};
-    UINT owner_command[16], reader_command[6], expected_begin[4], expected_reader[3];
+    struct dcomp_test_protocol_list protocol_list;
+    UINT owner_command[16], reader_command[6], expected_begin[4], expected_reader[5];
     HANDLE event, connection = NULL, shared = NULL;
     BYTE *owner_buffer = NULL, *reader_buffer = NULL, state, released;
     UINT owner_channel = 0, reader_channel = 0, owner_size = 0x1000, reader_size = 0x1000;
@@ -1374,12 +1375,15 @@ static void test_shared_manipulation_transform(void)
     check_dcomp_batch_payload( record, owner_channel, expected_begin,
                                sizeof(expected_begin), "shared-transform begin" );
 
+    init_dcomp_test_protocol_list( &protocol_list );
     status = NtDCompositionCommitChannel( reader_channel, &batch, &state, 0,
-                                           NULL, NULL, NULL, 0 );
+                                           NULL, &protocol_list.head, NULL, 0 );
     ok( status == STATUS_SUCCESS, "got reader commit status %#lx\n", status );
     expected_reader[0] = 12;
     expected_reader[1] = 0x27;
     expected_reader[2] = 0x11;
+    memcpy( expected_reader + 3, protocol_list.block.data,
+            sizeof(protocol_list.block.data) );
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
     ok( status == STATUS_SUCCESS, "got complete-duplicate status %#lx\n", status );
     check_dcomp_batch_payload( record, reader_channel, expected_reader,
