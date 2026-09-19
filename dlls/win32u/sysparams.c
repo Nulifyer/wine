@@ -42,8 +42,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(system);
 
 #define DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO  (-20)
 #define DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO2 (-39)
-#define DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INFO_INTERNAL   (-13)
-#define DISPLAYCONFIG_DEVICE_INFO_GET_MONITOR_INTERNAL_INFO  (-7)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INFO_INTERNAL    (-13)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INVERTED_INTERNAL (-9)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_MONITOR_INTERNAL_INFO    (-7)
 
 #define DISPLAYCONFIG_SESSION_REMOTE_DRIVER       0x01
 #define DISPLAYCONFIG_SESSION_REMOTE_WDDM         0x02
@@ -86,6 +87,12 @@ struct displayconfig_target_info_internal
     UINT flags;
 };
 
+struct displayconfig_target_inverted_internal
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    UINT inverted;
+};
+
 struct displayconfig_monitor_internal_info
 {
     DISPLAYCONFIG_DEVICE_INFO_HEADER header;
@@ -121,6 +128,8 @@ C_ASSERT( offsetof(struct displayconfig_session_info2, terminal_luid) == 28 );
 C_ASSERT( sizeof(struct displayconfig_session_info2) == 36 );
 C_ASSERT( offsetof(struct displayconfig_target_info_internal, output_technology) == 20 );
 C_ASSERT( sizeof(struct displayconfig_target_info_internal) == 36 );
+C_ASSERT( offsetof(struct displayconfig_target_inverted_internal, inverted) == 20 );
+C_ASSERT( sizeof(struct displayconfig_target_inverted_internal) == 24 );
 C_ASSERT( offsetof(struct displayconfig_monitor_internal_info, monitor_unique_name) == 20 );
 C_ASSERT( offsetof(struct displayconfig_monitor_internal_info, brightness_caps) == 592 );
 C_ASSERT( offsetof(struct displayconfig_monitor_internal_info, usage_subclass) == 908 );
@@ -8219,6 +8228,34 @@ NTSTATUS WINAPI NtUserDisplayConfigGetDeviceInfo( DISPLAYCONFIG_DEVICE_INFO_HEAD
             info->base_output_technology = info->output_technology;
             info->usage = 0; /* DISPLAYCONFIG_TARGET_USAGE_STANDARD */
             info->flags = 0;
+            ret = STATUS_SUCCESS;
+            break;
+        }
+
+        unlock_display_devices();
+        return ret;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INVERTED_INTERNAL:
+    {
+        struct displayconfig_target_inverted_internal *info = (void *)packet;
+        struct monitor *monitor;
+
+        TRACE( "DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INVERTED_INTERNAL.\n" );
+
+        if (packet->size != sizeof(*info)) return STATUS_INVALID_PARAMETER;
+        if (!lock_display_devices( FALSE )) return STATUS_UNSUCCESSFUL;
+
+        LIST_FOR_EACH_ENTRY(monitor, &monitors, struct monitor, entry)
+        {
+            if (packet->id != monitor->output_id) continue;
+            if (memcmp( &packet->adapterId, &monitor->source->gpu->luid,
+                        sizeof(monitor->source->gpu->luid) ))
+                continue;
+
+            /* This describes the monitor's fixed panel mounting, not the
+             * current source rotation.  Host-backed desktop monitors have no
+             * inverted mounting metadata, so expose the upright default. */
+            info->inverted = FALSE;
             ret = STATUS_SUCCESS;
             break;
         }

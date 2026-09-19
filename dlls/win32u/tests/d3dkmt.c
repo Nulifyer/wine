@@ -50,8 +50,9 @@
 #define D3DUSAGE_LOCKABLE   0x4000000
 #define D3DUSAGE_OFFSCREEN  0x0400000
 
-#define DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INFO_INTERNAL   (-13)
-#define DISPLAYCONFIG_DEVICE_INFO_GET_MONITOR_INTERNAL_INFO  (-7)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INFO_INTERNAL    (-13)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INVERTED_INTERNAL (-9)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_MONITOR_INTERNAL_INFO    (-7)
 
 static const WCHAR display1W[] = L"\\\\.\\DISPLAY1";
 
@@ -132,6 +133,12 @@ struct displayconfig_target_info_internal
     UINT flags;
 };
 
+struct displayconfig_target_inverted_internal
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    UINT inverted;
+};
+
 struct displayconfig_monitor_internal_info
 {
     DISPLAYCONFIG_DEVICE_INFO_HEADER header;
@@ -158,6 +165,7 @@ struct displayconfig_monitor_internal_info
 };
 
 C_ASSERT( sizeof(struct d3dkmt_disp_mgr_create) == 24 );
+C_ASSERT( sizeof(struct displayconfig_target_inverted_internal) == 24 );
 C_ASSERT( sizeof(struct d3dkmt_disp_mgr_operation) == 32 );
 C_ASSERT( sizeof(struct d3dkmt_ddisplay_enum_adapter) == 0x238 );
 C_ASSERT( sizeof(struct d3dkmt_ddisplay_enum_target) == 0x440 );
@@ -1043,6 +1051,7 @@ static void test_D3DKMTDisplayManager(void)
     for (i = 0; i < enumeration.target_count; ++i)
     {
         struct displayconfig_monitor_internal_info monitor_info = {0};
+        struct displayconfig_target_inverted_internal inverted_info = {0};
         struct displayconfig_target_info_internal target_info = {0};
 
         ok( enumeration.targets[i].adapter_luid.LowPart || enumeration.targets[i].adapter_luid.HighPart,
@@ -1067,6 +1076,16 @@ static void test_D3DKMTDisplayManager(void)
             "target %u base technology %#x does not match %#x\n", i,
             target_info.base_output_technology, target_info.output_technology );
         ok( target_info.usage <= 2, "target %u got invalid usage %u\n", i, target_info.usage );
+
+        inverted_info.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INVERTED_INTERNAL;
+        inverted_info.header.size = sizeof(inverted_info);
+        inverted_info.header.adapterId = enumeration.targets[i].adapter_luid;
+        inverted_info.header.id = enumeration.targets[i].target_id;
+        inverted_info.inverted = 0xdeadbeef;
+        status = NtUserDisplayConfigGetDeviceInfo( &inverted_info.header );
+        ok_nt( STATUS_SUCCESS, status );
+        ok( inverted_info.inverted == FALSE, "target %u got inverted state %#x\n", i,
+            inverted_info.inverted );
 
         monitor_info.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_MONITOR_INTERNAL_INFO;
         monitor_info.header.size = sizeof(monitor_info);
