@@ -17,7 +17,10 @@
  *
  */
 
+#include "ntstatus.h"
 #include "d3d11_private.h"
+#include "ntuser.h"
+#include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d11);
 
@@ -27,11 +30,63 @@ static const GUID IID_ID3D11DeviceFlushCount =
         {0xb79cc8da, 0x337f, 0x400f, {0xb0, 0x9d, 0xb2, 0xed, 0xf8, 0xa8, 0x4e, 0x47}};
 static const GUID d3d11_guard_rect_state_guid =
         {0x9c84b616, 0x366a, 0x4f7b, {0xb0, 0x0b, 0x9a, 0x35, 0x2c, 0xc7, 0x90, 0x4e}};
+static const GUID d3d11_composition_buffer_state_guid =
+        {0xf0f61793, 0x0c39, 0x4fd5, {0x8c, 0x81, 0x89, 0x79, 0x5b, 0x42, 0x4d, 0x73}};
 
 struct d3d11_guard_rect_state
 {
     BOOL guarded;
     RECT rect;
+};
+
+struct d3d11_composition_buffer_state
+{
+    IUnknown IUnknown_iface;
+    LONG refcount;
+    struct d3d_device *device;
+    HANDLE surface;
+};
+
+static inline struct d3d11_composition_buffer_state *composition_state_from_IUnknown(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d11_composition_buffer_state, IUnknown_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE composition_state_QueryInterface(IUnknown *iface, REFIID iid, void **out)
+{
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (!IsEqualGUID(iid, &IID_IUnknown)) return E_NOINTERFACE;
+    *out = iface;
+    IUnknown_AddRef(iface);
+    return S_OK;
+}
+
+static ULONG STDMETHODCALLTYPE composition_state_AddRef(IUnknown *iface)
+{
+    struct d3d11_composition_buffer_state *state = composition_state_from_IUnknown(iface);
+    return InterlockedIncrement(&state->refcount);
+}
+
+static ULONG STDMETHODCALLTYPE composition_state_Release(IUnknown *iface)
+{
+    struct d3d11_composition_buffer_state *state = composition_state_from_IUnknown(iface);
+    ULONG refcount = InterlockedDecrement(&state->refcount);
+
+    if (!refcount)
+    {
+        NtUnBindCompositionSurface(state->surface, TRUE, FALSE);
+        NtClose(state->surface);
+        free(state);
+    }
+    return refcount;
+}
+
+static const IUnknownVtbl composition_state_vtbl =
+{
+    composition_state_QueryInterface,
+    composition_state_AddRef,
+    composition_state_Release,
 };
 
 struct d3d11_device_internal_vtbl
@@ -5765,24 +5820,151 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_internal_CreateCompositionBuffer(I
         UINT width, UINT height, DXGI_FORMAT format, BOOL stereo, UINT buffer_count, UINT flags,
         REFIID iid, void **buffer, void **resource)
 {
-    FIXME("iface %p, width %u, height %u, format %s, stereo %#x, buffer_count %u, flags %#x, "
-            "iid %s, buffer %p, resource %p stub!\n", iface, width, height, debug_dxgi_format(format),
+    struct d3d11_composition_buffer_state *state;
+    struct d3d_device *device = impl_from_ID3D11DeviceInternal(iface);
+    D3D11_TEXTURE2D_DESC desc = {0};
+    BYTE binding_info[0x520] = {0};
+    ID3D11Texture2D *texture = NULL;
+    HANDLE surface;
+    UINT64 binding_id;
+    NTSTATUS status;
+    HRESULT hr;
+
+    TRACE("iface %p, width %u, height %u, format %s, stereo %#x, buffer_count %u, flags %#x, "
+            "iid %s, buffer %p, resource %p.\n", iface, width, height, debug_dxgi_format(format),
             stereo, buffer_count, flags, debugstr_guid(iid), buffer, resource);
 
-    if (buffer)
-        *buffer = NULL;
-    if (resource)
-        *resource = NULL;
-    return E_NOTIMPL;
+    if (!buffer || !resource) return E_INVALIDARG;
+    *buffer = NULL;
+    *resource = NULL;
+    if (!width || !height || !iid) return E_INVALIDARG;
+    if (format != DXGI_FORMAT_R8G8B8A8_UNORM && format != DXGI_FORMAT_R16G16B16A16_FLOAT &&
+        format != DXGI_FORMAT_B8G8R8A8_UNORM && format != DXGI_FORMAT_R8_UNORM &&
+        format != DXGI_FORMAT_R8G8_UNORM && format != DXGI_FORMAT_BC1_UNORM &&
+        format != DXGI_FORMAT_BC1_UNORM_SRGB && format != DXGI_FORMAT_BC2_UNORM &&
+        format != DXGI_FORMAT_BC2_UNORM_SRGB && format != DXGI_FORMAT_BC3_UNORM &&
+        format != DXGI_FORMAT_BC3_UNORM_SRGB && format != DXGI_FORMAT_A8_UNORM)
+        return E_INVALIDARG;
+    if ((flags & ~1u) || (buffer_count & ~0x430u)) return E_INVALIDARG;
+
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = stereo ? 2 : 1;
+    desc.Format = format;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    if (buffer_count & 0x10) desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
+    if (buffer_count & 0x20) desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
+    if (!desc.BindFlags) desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    if (FAILED(hr = ID3D11Device5_CreateTexture2D(&device->ID3D11Device5_iface, &desc, NULL, &texture)))
+        return hr;
+
+    if ((status = NtCreateCompositionSurfaceHandle(NULL, 3, &surface)))
+    {
+        ID3D11Texture2D_Release(texture);
+        return HRESULT_FROM_NT(status);
+    }
+    if ((status = NtBindCompositionSurface(surface, TRUE, 0, FALSE, binding_info, &binding_id)))
+    {
+        NtClose(surface);
+        ID3D11Texture2D_Release(texture);
+        return HRESULT_FROM_NT(status);
+    }
+    if (!(state = calloc(1, sizeof(*state))))
+    {
+        NtUnBindCompositionSurface(surface, TRUE, FALSE);
+        NtClose(surface);
+        ID3D11Texture2D_Release(texture);
+        return E_OUTOFMEMORY;
+    }
+    state->IUnknown_iface.lpVtbl = &composition_state_vtbl;
+    state->refcount = 1;
+    state->device = device;
+    state->surface = surface;
+    if (FAILED(hr = ID3D11Texture2D_SetPrivateDataInterface(texture,
+            &d3d11_composition_buffer_state_guid, &state->IUnknown_iface)))
+    {
+        IUnknown_Release(&state->IUnknown_iface);
+        ID3D11Texture2D_Release(texture);
+        return hr;
+    }
+    IUnknown_Release(&state->IUnknown_iface);
+
+    if (FAILED(hr = ID3D11Texture2D_QueryInterface(texture, iid, resource)))
+    {
+        ID3D11Texture2D_Release(texture);
+        return hr;
+    }
+    *buffer = surface;
+    TRACE("created composition surface %p binding %s resource %p\n",
+            surface, wine_dbgstr_longlong(binding_id), *resource);
+    ID3D11Texture2D_Release(texture);
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_internal_PresentCompositionBuffers(IUnknown *iface,
         void *present_data, IUnknown **buffers, UINT buffer_count)
 {
-    FIXME("iface %p, present_data %p, buffers %p, buffer_count %u stub!\n",
+    struct d3d_device *device = impl_from_ID3D11DeviceInternal(iface);
+    obj_handle_t *surfaces;
+    SIZE_T allocation_size;
+    UINT surface_count = 0, i;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    TRACE("iface %p, present_data %p, buffers %p, buffer_count %u.\n",
             iface, present_data, buffers, buffer_count);
 
-    return E_NOTIMPL;
+    if (!present_data || !buffers || !buffer_count) return E_INVALIDARG;
+    allocation_size = (SIZE_T)buffer_count * sizeof(*surfaces);
+    if (allocation_size / sizeof(*surfaces) != buffer_count) return E_INVALIDARG;
+    if (!(surfaces = malloc(allocation_size))) return E_OUTOFMEMORY;
+
+    for (i = 0; i < buffer_count; ++i)
+    {
+        struct d3d11_composition_buffer_state *state;
+        ID3D11Texture2D *texture;
+        IUnknown *unknown = NULL;
+        UINT size = sizeof(unknown);
+        HRESULT hr;
+
+        if (!buffers[i]) continue;
+        if (FAILED(hr = IUnknown_QueryInterface(buffers[i], &IID_ID3D11Texture2D, (void **)&texture)))
+        {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        hr = ID3D11Texture2D_GetPrivateData(texture, &d3d11_composition_buffer_state_guid,
+                &size, &unknown);
+        ID3D11Texture2D_Release(texture);
+        if (FAILED(hr) || !unknown)
+        {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        state = composition_state_from_IUnknown(unknown);
+        if (state->device != device) status = STATUS_INVALID_PARAMETER;
+        else surfaces[surface_count++] = wine_server_obj_handle(state->surface);
+        IUnknown_Release(unknown);
+        if (status) break;
+    }
+    if (!status && !surface_count) status = STATUS_INVALID_PARAMETER;
+    if (!status)
+    {
+        SERVER_START_REQ(present_dcomp_token)
+        {
+            req->token = wine_server_obj_handle(present_data);
+            wine_server_add_data(req, surfaces, surface_count * sizeof(*surfaces));
+            status = wine_server_call(req);
+        }
+        SERVER_END_REQ;
+    }
+    free(surfaces);
+    if (status) return status == STATUS_INVALID_PARAMETER ? E_INVALIDARG : HRESULT_FROM_NT(status);
+
+    ID3D11DeviceContext4_Flush(&device->immediate_context.ID3D11DeviceContext4_iface);
+    return S_OK;
 }
 
 static void STDMETHODCALLTYPE d3d11_device_internal_GetGuardRect(IUnknown *iface,

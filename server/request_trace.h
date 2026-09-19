@@ -4337,6 +4337,46 @@ static void dump_alpc_cancel_message_request( const struct alpc_cancel_message_r
     fprintf( stderr, ", callback_id=%08x", req->callback_id );
 }
 
+static void dump_create_dcomp_surface_request( const struct create_dcomp_surface_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+}
+
+static void dump_create_dcomp_surface_reply( const struct create_dcomp_surface_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_set_dcomp_surface_bound_request( const struct set_dcomp_surface_bound_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", bound=%d", req->bound );
+}
+
+static void dump_set_dcomp_surface_bound_reply( const struct set_dcomp_surface_bound_reply *req )
+{
+    dump_uint64( " binding_id=", &req->binding_id );
+}
+
+static void dump_create_dcomp_token_request( const struct create_dcomp_token_request *req )
+{
+    fprintf( stderr, " surface_count=%08x", req->surface_count );
+    dump_uint64( ", connection=", &req->connection );
+    dump_uint64( ", device=", &req->device );
+    dump_varargs_bytes( ", updates=", cur_size );
+}
+
+static void dump_create_dcomp_token_reply( const struct create_dcomp_token_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_present_dcomp_token_request( const struct present_dcomp_token_request *req )
+{
+    fprintf( stderr, " token=%04x", req->token );
+    dump_varargs_bytes( ", surfaces=", cur_size );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4729,6 +4769,10 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_register_manipulation_thread_request,
     (dump_func)dump_query_dwm_composition_id_request,
     (dump_func)dump_alpc_cancel_message_request,
+    (dump_func)dump_create_dcomp_surface_request,
+    (dump_func)dump_set_dcomp_surface_bound_request,
+    (dump_func)dump_create_dcomp_token_request,
+    (dump_func)dump_present_dcomp_token_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5120,6 +5164,10 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     (dump_func)dump_query_dwm_composition_id_reply,
+    NULL,
+    (dump_func)dump_create_dcomp_surface_reply,
+    (dump_func)dump_set_dcomp_surface_bound_reply,
+    (dump_func)dump_create_dcomp_token_reply,
     NULL,
 };
 
@@ -5513,6 +5561,10 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "register_manipulation_thread",
     "query_dwm_composition_id",
     "alpc_cancel_message",
+    "create_dcomp_surface",
+    "set_dcomp_surface_bound",
+    "create_dcomp_token",
+    "present_dcomp_token",
 };
 
 static const struct

@@ -792,6 +792,196 @@ NTSTATUS WINAPI NtDCompositionGetFrameSurfaceUpdates( const UINT64 *user_frame_i
     return status;
 }
 
+struct dcomp_surface_update_wire
+{
+    obj_handle_t surface;
+    LONG left;
+    LONG top;
+    LONG right;
+    LONG bottom;
+};
+
+NTSTATUS WINAPI NtCreateCompositionSurfaceHandle( const OBJECT_ATTRIBUTES *attributes,
+                                                   ACCESS_MASK access, HANDLE *surface )
+{
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    NTSTATUS status;
+
+    TRACE( "attributes %p, access %#x, surface %p\n", attributes, (unsigned int)access, surface );
+
+    if (!surface) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        *surface = INVALID_HANDLE_VALUE;
+        if (attributes && attributes->Length != sizeof(*attributes))
+            status = STATUS_INVALID_PARAMETER;
+        else if (attributes && attributes->ObjectName)
+            status = STATUS_NOT_SUPPORTED;
+        else status = STATUS_SUCCESS;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status) return status;
+
+    SERVER_START_REQ( create_dcomp_surface )
+    {
+        req->access = access;
+        status = wine_server_call( req );
+        if (!status) handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
+    __TRY
+    {
+        *surface = handle;
+    }
+    __EXCEPT
+    {
+        NtClose( handle );
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
+NTSTATUS WINAPI NtBindCompositionSurface( HANDLE surface, BOOL enable, UINT flags,
+                                           BOOL shared, const void *buffer_info,
+                                           UINT64 *binding_id )
+{
+    volatile const BYTE *info = buffer_info;
+    UINT64 id = 0;
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
+
+    TRACE( "surface %p, enable %u, flags %#x, shared %u, info %p, binding_id %p\n",
+           surface, enable, flags, shared, buffer_info, binding_id );
+
+    if (!buffer_info || !binding_id) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        (void)info[0];
+        (void)info[0x51f];
+        *binding_id = 0;
+        status = STATUS_SUCCESS;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status) return status;
+
+    SERVER_START_REQ( set_dcomp_surface_bound )
+    {
+        req->handle = wine_server_obj_handle( surface );
+        req->bound = TRUE;
+        status = wine_server_call( req );
+        if (!status) id = reply->binding_id;
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
+    __TRY
+    {
+        *binding_id = id;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
+NTSTATUS WINAPI NtUnBindCompositionSurface( HANDLE surface, BOOL release, BOOL shared )
+{
+    NTSTATUS status;
+
+    TRACE( "surface %p, release %u, shared %u\n", surface, release, shared );
+
+    SERVER_START_REQ( set_dcomp_surface_bound )
+    {
+        req->handle = wine_server_obj_handle( surface );
+        req->bound = FALSE;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtTokenManagerCreateCompositionTokenHandle(
+        const struct dcomposition_token_surface_update *user_updates, UINT update_count, UINT surface_count,
+        const UINT64 *user_connection, const UINT64 *user_device, HANDLE *token )
+{
+    struct dcomp_surface_update_wire *updates = NULL;
+    UINT64 connection = 0, device = 0;
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
+    SIZE_T size;
+    UINT i;
+
+    TRACE( "updates %p, update_count %u, surface_count %u, connection %p, device %p, token %p\n",
+           user_updates, update_count, surface_count, user_connection, user_device, token );
+
+    if (!user_updates || !update_count || !surface_count || surface_count > update_count ||
+        !user_connection || !user_device || !token ||
+        update_count > ~(data_size_t)0 / sizeof(*updates))
+        return STATUS_INVALID_PARAMETER;
+    size = update_count * sizeof(*updates);
+    if (!(updates = malloc( size ))) return STATUS_NO_MEMORY;
+    __TRY
+    {
+        connection = *user_connection;
+        device = *user_device;
+        *token = INVALID_HANDLE_VALUE;
+        for (i = 0; i < update_count; ++i)
+        {
+            updates[i].surface = wine_server_obj_handle( user_updates[i].surface );
+            updates[i].left = user_updates[i].left;
+            updates[i].top = user_updates[i].top;
+            updates[i].right = user_updates[i].right;
+            updates[i].bottom = user_updates[i].bottom;
+        }
+        status = STATUS_SUCCESS;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status) goto done;
+
+    SERVER_START_REQ( create_dcomp_token )
+    {
+        req->surface_count = surface_count;
+        req->connection = connection;
+        req->device = device;
+        wine_server_add_data( req, updates, size );
+        status = wine_server_call( req );
+        if (!status) handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    if (status) goto done;
+
+    __TRY
+    {
+        *token = handle;
+    }
+    __EXCEPT
+    {
+        NtClose( handle );
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+
+done:
+    free( updates );
+    return status;
+}
+
 NTSTATUS WINAPI NtDCompositionCreateChannel( UINT *channel, UINT *section_size,
                                               void **mapped_address, UINT flags )
 {

@@ -1,5 +1,5 @@
 @ extern -arch=win32 Wow64Transition __wine_syscall_dispatcher
-@ stub -syscall NtBindCompositionSurface
+@ stdcall -syscall NtBindCompositionSurface(long long long long ptr ptr)
 @ stub -syscall NtCloseCompositionInputSink
 @ stub -syscall NtCompositionInputThread
 @ stub -syscall NtCompositionSetDropTarget
@@ -9,7 +9,7 @@
 @ stub -syscall NtConfigureInputSpace
 @ stub -syscall NtConfirmCompositionSurfaceIndependentFlipEntry
 @ stub -syscall NtCreateCompositionInputSink
-@ stub -syscall NtCreateCompositionSurfaceHandle
+@ stdcall -syscall NtCreateCompositionSurfaceHandle(ptr long ptr)
 @ stub -syscall NtCreateImplicitCompositionInputSink
 @ stub -syscall NtDCompositionAddCrossDeviceVisualChild
 @ stdcall -syscall NtDCompositionBeginFrame(long ptr ptr)
@@ -781,14 +781,14 @@
 @ stub -syscall NtSetPointerDeviceInputSpace
 @ stub -syscall NtSetShellCursorState
 @ stub -syscall NtTokenManagerConfirmOutstandingAnalogToken
-@ stub -syscall NtTokenManagerCreateCompositionTokenHandle
+@ stdcall -syscall NtTokenManagerCreateCompositionTokenHandle(ptr long long ptr ptr ptr)
 @ stub -syscall NtTokenManagerCreateFlipObjectReturnTokenHandle
 @ stub -syscall NtTokenManagerCreateFlipObjectTokenHandle
 @ stub -syscall NtTokenManagerGetAnalogExclusiveSurfaceUpdates
 @ stub -syscall NtTokenManagerGetAnalogExclusiveTokenEvent
 @ stdcall -syscall NtTokenManagerOpenSectionAndEvents(ptr ptr ptr ptr)
 @ stdcall -syscall NtTokenManagerThread(ptr)
-@ stub -syscall NtUnBindCompositionSurface
+@ stdcall -syscall NtUnBindCompositionSurface(long long long)
 @ stub -syscall NtUpdateInputSinkTransforms
 @ stub -syscall NtUserAcquireIAMKey
 @ stub -syscall NtUserAcquireInteractiveControlBackgroundAccess

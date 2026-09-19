@@ -24,12 +24,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include "ntstatus.h"
 #define COBJMACROS
 #include "initguid.h"
 #include "d3d11_4.h"
 #include "d3dcompiler.h"
 #include "dxva.h"
 #include "winternl.h"
+#include "ntuser.h"
 #include "wine/wined3d.h"
 #include "wine/test.h"
 
@@ -73,8 +75,11 @@ struct device_internal_vtbl
     void *OfferResourcesInternal;
     void *ReclaimResourcesInternal;
     void *GetPartnerCaps;
-    void *CreateCompositionBuffer;
-    void *PresentCompositionBuffers;
+    HRESULT (STDMETHODCALLTYPE *CreateCompositionBuffer)(struct device_internal *iface,
+            UINT width, UINT height, DXGI_FORMAT format, BOOL stereo, UINT buffer_count, UINT flags,
+            REFIID iid, void **buffer, void **resource);
+    HRESULT (STDMETHODCALLTYPE *PresentCompositionBuffers)(struct device_internal *iface,
+            void *present_data, IUnknown **buffers, UINT buffer_count);
     void (STDMETHODCALLTYPE *GetGuardRect)(struct device_internal *iface,
             ID3D11Texture2D *texture, BOOL *guarded, RECT *rect);
 };
@@ -2483,20 +2488,27 @@ static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
 
 static void test_native_d2d_device_contracts(void)
 {
+    struct dcomposition_token_surface_update updates[2];
     ID3D11Multithread *device_multithread, *context_multithread;
+    D3D11_TEXTURE2D_DESC composition_desc;
     D3D11_TEXTURE2D_DESC texture_desc = {0};
     struct device_flush_count *flush_count;
     struct device_internal *device_internal;
+    IUnknown *composition_resource, *composition_buffers[1];
     IUnknown *device_identity, *private_identity;
     ID3DDeviceContextState *context_state;
+    ID3D11Texture2D *composition_texture;
     ID3D11Texture2D *texture;
     ID3D11DeviceContext *context;
     D3D_FEATURE_LEVEL feature_level;
     ID3D11Device1 *device1;
     ID3D11Device *device;
+    UINT64 composition_connection = 1, composition_device = 2;
+    HANDLE composition_surface, composition_token;
     RECT rect, returned_rect;
     UINT64 count, new_count;
     BOOL enabled, guarded;
+    NTSTATUS status;
     HRESULT hr;
 
     if (!(device = create_device(NULL)))
@@ -2585,6 +2597,70 @@ static void test_native_d2d_device_contracts(void)
             &texture_desc, NULL, &texture);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
     ok(!texture, "Got unexpected texture %p.\n", texture);
+
+    composition_resource = (IUnknown *)0xdeadbeef;
+    hr = device_internal->lpVtbl->CreateCompositionBuffer(device_internal, 32, 32,
+            DXGI_FORMAT_A8_UNORM, FALSE, 0x30, 0, &IID_ID3D11Texture2D,
+            NULL, (void **)&composition_resource);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    composition_surface = (HANDLE)0xdeadbeef;
+    composition_resource = (IUnknown *)0xdeadbeef;
+    hr = device_internal->lpVtbl->CreateCompositionBuffer(device_internal, 32, 32,
+            DXGI_FORMAT_UNKNOWN, FALSE, 0x30, 0, &IID_ID3D11Texture2D,
+            (void **)&composition_surface, (void **)&composition_resource);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!composition_surface, "Got unexpected surface %p.\n", composition_surface);
+    ok(!composition_resource, "Got unexpected resource %p.\n", composition_resource);
+
+    hr = device_internal->lpVtbl->CreateCompositionBuffer(device_internal, 32, 32,
+            DXGI_FORMAT_A8_UNORM, FALSE, 0x30, 0, &IID_ID3D11Texture2D,
+            (void **)&composition_surface, (void **)&composition_resource);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(composition_surface && composition_surface != INVALID_HANDLE_VALUE,
+            "Got unexpected surface %p.\n", composition_surface);
+    ok(!!composition_resource, "Got null composition resource.\n");
+    if (SUCCEEDED(hr))
+    {
+        composition_texture = (ID3D11Texture2D *)composition_resource;
+        ID3D11Texture2D_GetDesc(composition_texture, &composition_desc);
+        ok(composition_desc.Width == 32 && composition_desc.Height == 32,
+                "Got dimensions %ux%u.\n", composition_desc.Width, composition_desc.Height);
+        ok(composition_desc.Format == DXGI_FORMAT_A8_UNORM,
+                "Got format %u.\n", composition_desc.Format);
+        ok(composition_desc.BindFlags == (D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET),
+                "Got bind flags %#x.\n", composition_desc.BindFlags);
+
+        composition_buffers[0] = (IUnknown *)device;
+        hr = device_internal->lpVtbl->PresentCompositionBuffers(device_internal,
+                composition_surface, composition_buffers, 1);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        memset(updates, 0, sizeof(updates));
+        updates[0].surface = composition_surface;
+        updates[0].right = 16;
+        updates[0].bottom = 32;
+        updates[1] = updates[0];
+        updates[1].left = 16;
+        updates[1].right = 32;
+        composition_token = INVALID_HANDLE_VALUE;
+        status = NtTokenManagerCreateCompositionTokenHandle(updates, 2, 1,
+                &composition_connection, &composition_device, &composition_token);
+        ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+        ok(composition_token && composition_token != INVALID_HANDLE_VALUE,
+                "Got unexpected token %p.\n", composition_token);
+        if (!status)
+        {
+            composition_buffers[0] = composition_resource;
+            hr = device_internal->lpVtbl->PresentCompositionBuffers(device_internal,
+                    composition_token, composition_buffers, 1);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+            NtClose(composition_token);
+        }
+
+        IUnknown_Release(composition_resource);
+        status = NtUnBindCompositionSurface(composition_surface, TRUE, FALSE);
+        ok(status == STATUS_INVALID_HANDLE, "Got unexpected status %#lx.\n", status);
+    }
     device_internal->lpVtbl->Release(device_internal);
 
     hr = ID3D11Device_QueryInterface(device, &IID_ID3D11Device1, (void **)&device1);

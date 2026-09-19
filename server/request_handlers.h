@@ -395,6 +395,10 @@ DECL_HANDLER(open_coremsg_kernel_connection);
 DECL_HANDLER(register_manipulation_thread);
 DECL_HANDLER(query_dwm_composition_id);
 DECL_HANDLER(alpc_cancel_message);
+DECL_HANDLER(create_dcomp_surface);
+DECL_HANDLER(set_dcomp_surface_bound);
+DECL_HANDLER(create_dcomp_token);
+DECL_HANDLER(present_dcomp_token);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -787,6 +791,10 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_register_manipulation_thread,
     (req_handler)req_query_dwm_composition_id,
     (req_handler)req_alpc_cancel_message,
+    (req_handler)req_create_dcomp_surface,
+    (req_handler)req_set_dcomp_surface_bound,
+    (req_handler)req_create_dcomp_token,
+    (req_handler)req_present_dcomp_token,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -2966,3 +2974,20 @@ C_ASSERT( offsetof(struct alpc_cancel_message_request, message_context) == 24 );
 C_ASSERT( offsetof(struct alpc_cancel_message_request, message_id) == 32 );
 C_ASSERT( offsetof(struct alpc_cancel_message_request, callback_id) == 36 );
 C_ASSERT( sizeof(struct alpc_cancel_message_request) == 40 );
+C_ASSERT( offsetof(struct create_dcomp_surface_request, access) == 12 );
+C_ASSERT( sizeof(struct create_dcomp_surface_request) == 16 );
+C_ASSERT( offsetof(struct create_dcomp_surface_reply, handle) == 8 );
+C_ASSERT( sizeof(struct create_dcomp_surface_reply) == 16 );
+C_ASSERT( offsetof(struct set_dcomp_surface_bound_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_dcomp_surface_bound_request, bound) == 16 );
+C_ASSERT( sizeof(struct set_dcomp_surface_bound_request) == 24 );
+C_ASSERT( offsetof(struct set_dcomp_surface_bound_reply, binding_id) == 8 );
+C_ASSERT( sizeof(struct set_dcomp_surface_bound_reply) == 16 );
+C_ASSERT( offsetof(struct create_dcomp_token_request, surface_count) == 12 );
+C_ASSERT( offsetof(struct create_dcomp_token_request, connection) == 16 );
+C_ASSERT( offsetof(struct create_dcomp_token_request, device) == 24 );
+C_ASSERT( sizeof(struct create_dcomp_token_request) == 32 );
+C_ASSERT( offsetof(struct create_dcomp_token_reply, handle) == 8 );
+C_ASSERT( sizeof(struct create_dcomp_token_reply) == 16 );
+C_ASSERT( offsetof(struct present_dcomp_token_request, token) == 12 );
+C_ASSERT( sizeof(struct present_dcomp_token_request) == 16 );

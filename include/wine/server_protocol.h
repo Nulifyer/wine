@@ -7475,6 +7475,61 @@ struct alpc_cancel_message_reply
 };
 
 
+struct create_dcomp_surface_request
+{
+    struct request_header __header;
+    unsigned int access;
+};
+struct create_dcomp_surface_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+struct set_dcomp_surface_bound_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    int          bound;
+    char __pad_20[4];
+};
+struct set_dcomp_surface_bound_reply
+{
+    struct reply_header __header;
+    unsigned __int64 binding_id;
+};
+
+
+struct create_dcomp_token_request
+{
+    struct request_header __header;
+    unsigned int surface_count;
+    client_ptr_t connection;
+    client_ptr_t device;
+    /* VARARG(updates,bytes); */
+};
+struct create_dcomp_token_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+struct present_dcomp_token_request
+{
+    struct request_header __header;
+    obj_handle_t token;
+    /* VARARG(surfaces,bytes); */
+};
+struct present_dcomp_token_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -7865,6 +7920,10 @@ enum request
     REQ_register_manipulation_thread,
     REQ_query_dwm_composition_id,
     REQ_alpc_cancel_message,
+    REQ_create_dcomp_surface,
+    REQ_set_dcomp_surface_bound,
+    REQ_create_dcomp_token,
+    REQ_present_dcomp_token,
     REQ_NB_REQUESTS
 };
 
@@ -8260,6 +8319,10 @@ union generic_request
     struct register_manipulation_thread_request register_manipulation_thread_request;
     struct query_dwm_composition_id_request query_dwm_composition_id_request;
     struct alpc_cancel_message_request alpc_cancel_message_request;
+    struct create_dcomp_surface_request create_dcomp_surface_request;
+    struct set_dcomp_surface_bound_request set_dcomp_surface_bound_request;
+    struct create_dcomp_token_request create_dcomp_token_request;
+    struct present_dcomp_token_request present_dcomp_token_request;
 };
 union generic_reply
 {
@@ -8653,8 +8716,12 @@ union generic_reply
     struct register_manipulation_thread_reply register_manipulation_thread_reply;
     struct query_dwm_composition_id_reply query_dwm_composition_id_reply;
     struct alpc_cancel_message_reply alpc_cancel_message_reply;
+    struct create_dcomp_surface_reply create_dcomp_surface_reply;
+    struct set_dcomp_surface_bound_reply set_dcomp_surface_bound_reply;
+    struct create_dcomp_token_reply create_dcomp_token_reply;
+    struct present_dcomp_token_reply present_dcomp_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1031
+#define SERVER_PROTOCOL_VERSION 1034
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

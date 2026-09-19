@@ -854,6 +854,23 @@ W32KAPI NTSTATUS WINAPI NtDCompositionGetFrameLegacyTokens( const UINT64 *frame_
                                                              UINT *token_count, BOOL *has_more );
 W32KAPI NTSTATUS WINAPI NtDCompositionGetFrameSurfaceUpdates( const UINT64 *frame_id,
                                                               UINT *update_count, BOOL *has_more );
+struct dcomposition_token_surface_update
+{
+    HANDLE surface;
+    LONG left;
+    LONG top;
+    LONG right;
+    LONG bottom;
+};
+W32KAPI NTSTATUS WINAPI NtCreateCompositionSurfaceHandle( const OBJECT_ATTRIBUTES *attributes,
+                                                           ACCESS_MASK access, HANDLE *surface );
+W32KAPI NTSTATUS WINAPI NtBindCompositionSurface( HANDLE surface, BOOL enable, UINT flags,
+                                                   BOOL shared, const void *buffer_info,
+                                                   UINT64 *binding_id );
+W32KAPI NTSTATUS WINAPI NtUnBindCompositionSurface( HANDLE surface, BOOL release, BOOL shared );
+W32KAPI NTSTATUS WINAPI NtTokenManagerCreateCompositionTokenHandle(
+        const struct dcomposition_token_surface_update *updates, UINT update_count, UINT surface_count,
+        const UINT64 *connection, const UINT64 *device, HANDLE *token );
 W32KAPI NTSTATUS WINAPI NtTokenManagerOpenSectionAndEvents( HANDLE *section, SIZE_T *section_size,
                                                              HANDLE *event_a, HANDLE *event_b );
 struct token_manager_adapter_info

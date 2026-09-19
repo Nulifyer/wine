@@ -5052,3 +5052,34 @@ struct alpc_message_info
     unsigned int message_id;      /* received message id */
     unsigned int callback_id;     /* received callback id, zero matches any */
 @END
+
+/* Create one process-owned DirectComposition surface handle. */
+@REQ(create_dcomp_surface)
+    unsigned int access;          /* requested handle access mask */
+@REPLY
+    obj_handle_t handle;          /* composition surface handle */
+@END
+
+/* Bind or unbind the resource associated with a composition surface. */
+@REQ(set_dcomp_surface_bound)
+    obj_handle_t handle;          /* composition surface handle */
+    int          bound;           /* nonzero binds, zero unbinds */
+@REPLY
+    unsigned __int64 binding_id;  /* stable surface binding identity */
+@END
+
+/* Create one composition token from packed surface-update records. */
+@REQ(create_dcomp_token)
+    unsigned int surface_count;   /* unique surface count represented by updates */
+    client_ptr_t connection;      /* opaque DirectComposition connection value */
+    client_ptr_t device;          /* opaque device value */
+    VARARG(updates,bytes);         /* surface handle plus update rectangle records */
+@REPLY
+    obj_handle_t handle;          /* composition token handle */
+@END
+
+/* Present the resources represented by one composition token. */
+@REQ(present_dcomp_token)
+    obj_handle_t token;           /* composition token handle */
+    VARARG(surfaces,bytes);        /* packed obj_handle_t surface handles */
+@END

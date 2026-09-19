@@ -1027,6 +1027,70 @@ static void test_resource_retirement(void)
     ok( count == 0xcccccccc, "stale deleted-resource count changed to %#x\n", count );
 }
 
+static void test_composition_surface_lifecycle(void)
+{
+    struct dcomposition_token_surface_update updates[2] = {0};
+    OBJECT_ATTRIBUTES attributes = {0};
+    UINT64 connection = 1, device = 2, binding_id, second_binding_id;
+    BYTE buffer_info[0x520] = {0};
+    HANDLE surface, token, second_token;
+    NTSTATUS status;
+
+    status = NtCreateCompositionSurfaceHandle(NULL, 3, NULL);
+    ok(status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status);
+
+    attributes.Length = sizeof(attributes) - 1;
+    surface = (HANDLE)0xdeadbeef;
+    status = NtCreateCompositionSurfaceHandle(&attributes, 3, &surface);
+    ok(status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status);
+    ok(surface == INVALID_HANDLE_VALUE, "got surface %p\n", surface);
+
+    status = NtCreateCompositionSurfaceHandle(NULL, 3, &surface);
+    ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
+    ok(surface && surface != INVALID_HANDLE_VALUE, "got surface %p\n", surface);
+    if (status) return;
+
+    binding_id = 0xdeadbeef;
+    status = NtBindCompositionSurface(surface, TRUE, 0, FALSE, NULL, &binding_id);
+    ok(status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status);
+    status = NtBindCompositionSurface(surface, TRUE, 0, FALSE, buffer_info, &binding_id);
+    ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
+    ok(binding_id != 0, "got binding id %I64u\n", binding_id);
+
+    updates[0].surface = surface;
+    updates[0].right = 16;
+    updates[0].bottom = 16;
+    updates[1] = updates[0];
+    updates[1].left = 16;
+    updates[1].right = 32;
+    token = (HANDLE)0xdeadbeef;
+    status = NtTokenManagerCreateCompositionTokenHandle(updates, 2, 0,
+            &connection, &device, &token);
+    ok(status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status);
+    ok(token == (HANDLE)0xdeadbeef, "got token %p\n", token);
+
+    status = NtTokenManagerCreateCompositionTokenHandle(updates, 2, 1,
+            &connection, &device, &token);
+    ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
+    ok(token && token != INVALID_HANDLE_VALUE, "got token %p\n", token);
+
+    status = NtUnBindCompositionSurface(surface, TRUE, FALSE);
+    ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
+    second_token = (HANDLE)0xdeadbeef;
+    status = NtTokenManagerCreateCompositionTokenHandle(updates, 2, 1,
+            &connection, &device, &second_token);
+    ok(status == STATUS_ACCESS_DENIED, "got status %#lx\n", status);
+    ok(second_token == INVALID_HANDLE_VALUE, "got token %p\n", second_token);
+
+    status = NtBindCompositionSurface(surface, TRUE, 0, FALSE, buffer_info, &second_binding_id);
+    ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
+    ok(second_binding_id == binding_id, "got binding ids %I64u and %I64u\n",
+            binding_id, second_binding_id);
+
+    if (token && token != INVALID_HANDLE_VALUE) NtClose(token);
+    NtClose(surface);
+}
+
 static void test_token_manager_lifetime(void)
 {
     HANDLE work_event, ordinary_connection = NULL, dwm_connection = NULL;
@@ -1153,6 +1217,7 @@ START_TEST(dcomp)
     test_connection_queue();
     test_frame_lifecycle();
     test_resource_retirement();
+    test_composition_surface_lifecycle();
     test_connection_lifetime();
     test_token_manager_lifetime();
 }

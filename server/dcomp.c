@@ -108,15 +108,60 @@ struct dcomp_channel
     unsigned int batch_ids[4];
 };
 
+struct dcomp_surface
+{
+    struct object obj;
+    struct process *owner;
+    unsigned int session_id;
+    unsigned __int64 binding_id;
+    int bound;
+};
+
+struct dcomp_surface_update
+{
+    struct dcomp_surface *surface;
+    int left;
+    int top;
+    int right;
+    int bottom;
+};
+
+struct dcomp_token
+{
+    struct object obj;
+    struct process *owner;
+    struct dcomp_surface_update *updates;
+    struct dcomp_surface **surfaces;
+    unsigned int session_id;
+    unsigned int update_count;
+    unsigned int surface_count;
+    client_ptr_t connection;
+    client_ptr_t device;
+};
+
+struct dcomp_surface_update_wire
+{
+    obj_handle_t surface;
+    int left;
+    int top;
+    int right;
+    int bottom;
+};
+
 static struct list dcomp_connections = LIST_INIT( dcomp_connections );
 static struct list dcomp_channels = LIST_INIT( dcomp_channels );
 static struct list token_managers = LIST_INIT( token_managers );
 static unsigned int next_dcomp_channel_id = 1;
+static unsigned __int64 next_dcomp_surface_binding_id = 1;
 
 static void dcomp_connection_dump( struct object *obj, int verbose );
 static void dcomp_connection_destroy( struct object *obj );
 static void dcomp_channel_dump( struct object *obj, int verbose );
 static void dcomp_channel_destroy( struct object *obj );
+static void dcomp_surface_dump( struct object *obj, int verbose );
+static void dcomp_surface_destroy( struct object *obj );
+static void dcomp_token_dump( struct object *obj, int verbose );
+static void dcomp_token_destroy( struct object *obj );
 static int process_has_dcomp_consumer_connection( const struct process *process );
 
 static const struct object_ops dcomp_connection_ops =
@@ -133,6 +178,22 @@ static const struct object_ops dcomp_channel_ops =
     .type    = &no_type,
     .dump    = dcomp_channel_dump,
     .destroy = dcomp_channel_destroy,
+};
+
+static const struct object_ops dcomp_surface_ops =
+{
+    .size    = sizeof(struct dcomp_surface),
+    .type    = &no_type,
+    .dump    = dcomp_surface_dump,
+    .destroy = dcomp_surface_destroy,
+};
+
+static const struct object_ops dcomp_token_ops =
+{
+    .size    = sizeof(struct dcomp_token),
+    .type    = &no_type,
+    .dump    = dcomp_token_dump,
+    .destroy = dcomp_token_destroy,
 };
 
 static void dcomp_connection_dump( struct object *obj, int verbose )
@@ -152,6 +213,45 @@ static void dcomp_channel_dump( struct object *obj, int verbose )
     fprintf( stderr, "DirectComposition channel id=%#x connection_id=%d size=%llu flags=%#x next_batch=%u\n",
              channel->id, channel->connection_id, (unsigned long long)channel->size,
              channel->flags, channel->batch_ids[0] );
+}
+
+static void dcomp_surface_dump( struct object *obj, int verbose )
+{
+    struct dcomp_surface *surface = (struct dcomp_surface *)obj;
+
+    assert( obj->ops == &dcomp_surface_ops );
+    fprintf( stderr, "DirectComposition surface session=%u binding=%llu bound=%u\n",
+             surface->session_id, (unsigned long long)surface->binding_id, surface->bound );
+}
+
+static void dcomp_surface_destroy( struct object *obj )
+{
+    struct dcomp_surface *surface = (struct dcomp_surface *)obj;
+
+    assert( obj->ops == &dcomp_surface_ops );
+    release_object( surface->owner );
+}
+
+static void dcomp_token_dump( struct object *obj, int verbose )
+{
+    struct dcomp_token *token = (struct dcomp_token *)obj;
+
+    assert( obj->ops == &dcomp_token_ops );
+    fprintf( stderr, "DirectComposition token session=%u updates=%u surfaces=%u\n",
+             token->session_id, token->update_count, token->surface_count );
+}
+
+static void dcomp_token_destroy( struct object *obj )
+{
+    struct dcomp_token *token = (struct dcomp_token *)obj;
+    unsigned int i;
+
+    assert( obj->ops == &dcomp_token_ops );
+    for (i = 0; i < token->update_count; ++i)
+        release_object( token->updates[i].surface );
+    free( token->surfaces );
+    free( token->updates );
+    release_object( token->owner );
 }
 
 static void dcomp_channel_destroy( struct object *obj )
@@ -884,4 +984,140 @@ DECL_HANDLER(register_manipulation_thread)
     if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
         fprintf( stderr, "linuxnt: server manipulation-thread winpid=%04x wintid=%04x session=%u\n",
                  current->process->id, current->id, current->process->session_id );
+}
+
+DECL_HANDLER(create_dcomp_surface)
+{
+    struct dcomp_surface *surface;
+
+    if (!(surface = alloc_object( &dcomp_surface_ops ))) return;
+    surface->owner = (struct process *)grab_object( current->process );
+    surface->session_id = current->process->session_id;
+    if (!(surface->binding_id = next_dcomp_surface_binding_id++))
+        surface->binding_id = next_dcomp_surface_binding_id++;
+    surface->bound = 0;
+    reply->handle = alloc_handle_no_access_check( current->process, surface, req->access, 0 );
+    release_object( surface );
+}
+
+DECL_HANDLER(set_dcomp_surface_bound)
+{
+    struct dcomp_surface *surface;
+
+    if (!(surface = (struct dcomp_surface *)get_handle_obj( current->process, req->handle,
+                                                            0, &dcomp_surface_ops ))) return;
+    if (surface->owner != current->process || surface->session_id != current->process->session_id)
+        set_error( STATUS_ACCESS_DENIED );
+    else
+    {
+        surface->bound = !!req->bound;
+        reply->binding_id = surface->binding_id;
+    }
+    release_object( surface );
+}
+
+DECL_HANDLER(create_dcomp_token)
+{
+    const struct dcomp_surface_update_wire *wire = get_req_data();
+    struct dcomp_token *token = NULL;
+    data_size_t size = get_req_data_size();
+    unsigned int count, i;
+
+    if (!size || size % sizeof(*wire))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    count = size / sizeof(*wire);
+    if (!(token = alloc_object( &dcomp_token_ops ))) return;
+    token->owner = (struct process *)grab_object( current->process );
+    token->updates = NULL;
+    token->surfaces = NULL;
+    token->session_id = current->process->session_id;
+    token->update_count = 0;
+    token->surface_count = 0;
+    token->connection = req->connection;
+    token->device = req->device;
+    if (!req->surface_count || req->surface_count > count)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+    if (!(token->updates = mem_alloc( count * sizeof(*token->updates) ))) goto done;
+    if (!(token->surfaces = mem_alloc( req->surface_count * sizeof(*token->surfaces) ))) goto done;
+
+    for (i = 0; i < count; ++i)
+    {
+        struct dcomp_surface *surface;
+        unsigned int j;
+
+        if (!(surface = (struct dcomp_surface *)get_handle_obj( current->process, wire[i].surface,
+                                                                0, &dcomp_surface_ops ))) goto done;
+        if (surface->owner != current->process || surface->session_id != token->session_id ||
+            !surface->bound)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            release_object( surface );
+            goto done;
+        }
+        token->updates[i].surface = surface;
+        token->updates[i].left = wire[i].left;
+        token->updates[i].top = wire[i].top;
+        token->updates[i].right = wire[i].right;
+        token->updates[i].bottom = wire[i].bottom;
+        token->update_count++;
+        for (j = 0; j < token->surface_count; ++j)
+            if (token->surfaces[j] == surface) break;
+        if (j == token->surface_count)
+        {
+            if (token->surface_count == req->surface_count)
+            {
+                set_error( STATUS_INVALID_PARAMETER );
+                goto done;
+            }
+            token->surfaces[token->surface_count++] = surface;
+        }
+    }
+    if (token->surface_count != req->surface_count)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+    reply->handle = alloc_handle_no_access_check( current->process, token, 0, 0 );
+
+done:
+    release_object( token );
+}
+
+DECL_HANDLER(present_dcomp_token)
+{
+    const obj_handle_t *handles = get_req_data();
+    struct dcomp_token *token;
+    data_size_t size = get_req_data_size();
+    unsigned int count, i;
+
+    if (!size || size % sizeof(*handles))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    count = size / sizeof(*handles);
+    if (!(token = (struct dcomp_token *)get_handle_obj( current->process, req->token,
+                                                        0, &dcomp_token_ops ))) return;
+    if (token->owner != current->process || token->session_id != current->process->session_id)
+        set_error( STATUS_ACCESS_DENIED );
+    else if (count != token->surface_count)
+        set_error( STATUS_INVALID_PARAMETER );
+    else for (i = 0; i < count; ++i)
+    {
+        struct dcomp_surface *surface;
+
+        if (!(surface = (struct dcomp_surface *)get_handle_obj( current->process, handles[i],
+                                                                0, &dcomp_surface_ops ))) break;
+        if (surface != token->surfaces[i] || !surface->bound)
+            set_error( STATUS_INVALID_PARAMETER );
+        release_object( surface );
+        if (get_error()) break;
+    }
+    release_object( token );
 }

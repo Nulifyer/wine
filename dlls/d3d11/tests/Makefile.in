@@ -1,5 +1,5 @@
 TESTDLL = d3d11.dll
-IMPORTS = d3d11 dxgi user32 gdi32 d3dcompiler
+IMPORTS = d3d11 dxgi user32 gdi32 d3dcompiler win32u
 
 SOURCES = \
 	d3d11.c \
