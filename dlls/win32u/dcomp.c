@@ -91,6 +91,12 @@ static pthread_mutex_t dcomp_channel_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct list dcomp_channel_views = LIST_INIT( dcomp_channel_views );
 static struct list dcomp_connection_batch_views = LIST_INIT( dcomp_connection_batch_views );
 
+static void set_last_status( NTSTATUS status )
+{
+    NtCurrentTeb()->LastStatusValue = status;
+    RtlSetLastWin32Error( RtlNtStatusToDosError( status ) );
+}
+
 static struct dcomp_channel_view *find_dcomp_channel_view( UINT channel )
 {
     struct dcomp_channel_view *view;
@@ -186,6 +192,20 @@ static BOOL dcomp_command_size( const BYTE *buffer, UINT remaining, UINT *size )
     return TRUE;
 }
 
+static NTSTATUS validate_dcomp_window_target( HANDLE handle, UINT resource_type )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( validate_dcomp_window_target )
+    {
+        req->handle = wine_server_obj_handle( handle );
+        req->resource_type = resource_type;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const BYTE *buffer,
                                         UINT length, BOOL allow_indirect, ULONG *processed )
 {
@@ -218,6 +238,23 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
             resource->id = id;
             resource->type = type;
+            list_add_tail( &view->resources, &resource->entry );
+        }
+        else if (type == 3)
+        {
+            HANDLE handle;
+            UINT resource_type;
+
+            memcpy( &id, buffer + 4, sizeof(id) );
+            memcpy( &handle, buffer + 8, sizeof(handle) );
+            memcpy( &resource_type, buffer + 16, sizeof(resource_type) );
+            if (!id || !handle || !resource_type) return STATUS_INVALID_PARAMETER;
+            if (find_any_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
+            if (resource_type == 0xb8 &&
+                (status = validate_dcomp_window_target( handle, resource_type ))) return status;
+            if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
+            resource->id = id;
+            resource->type = resource_type;
             list_add_tail( &view->resources, &resource->entry );
         }
         else if (type == 4)
@@ -423,6 +460,67 @@ BOOL WINAPI NtUserRegisterSessionPort( HANDLE port )
     }
     SERVER_END_REQ;
     return ret;
+}
+
+BOOL WINAPI NtUserCreateDCompositionHwndTarget( HWND hwnd, UINT type, HANDLE *handle )
+{
+    HANDLE target = NULL;
+    NTSTATUS status;
+
+    TRACE( "hwnd %p, type %u, handle %p\n", hwnd, type, handle );
+
+    if (!handle || type > 2)
+    {
+        set_last_status( STATUS_INVALID_PARAMETER );
+        return FALSE;
+    }
+    SERVER_START_REQ( create_dcomp_window_target )
+    {
+        req->window = wine_server_user_handle( hwnd );
+        req->type = type;
+        status = wine_server_call( req );
+        if (!status) target = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    if (status)
+    {
+        set_last_status( status );
+        return FALSE;
+    }
+    __TRY
+    {
+        *handle = target;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status)
+    {
+        NtUserDestroyDCompositionHwndTarget( hwnd, type );
+        NtClose( target );
+        set_last_status( status );
+        return FALSE;
+    }
+    return TRUE;
+}
+
+BOOL WINAPI NtUserDestroyDCompositionHwndTarget( HWND hwnd, UINT type )
+{
+    NTSTATUS status;
+
+    TRACE( "hwnd %p, type %u\n", hwnd, type );
+
+    SERVER_START_REQ( destroy_dcomp_window_target )
+    {
+        req->window = wine_server_user_handle( hwnd );
+        req->type = type;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    if (status) set_last_status( status );
+    return !status;
 }
 
 BOOL WINAPI NtUserDwmKernelStartup(void)

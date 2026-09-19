@@ -317,7 +317,7 @@
 @ stdcall CreateAcceleratorTableW(ptr long) NtUserCreateAcceleratorTable
 @ stdcall CreateCaret(long long long long) NtUserCreateCaret
 @ stdcall CreateCursor(long long long long long ptr ptr)
-# @ stub CreateDCompositionHwndTarget
+@ stdcall CreateDCompositionHwndTarget(long long ptr) NtUserCreateDCompositionHwndTarget
 @ stdcall CreateDesktopA(str str ptr long long ptr)
 # @ stub CreateDesktopExA
 # @ stub CreateDesktopExW
@@ -395,7 +395,7 @@
 @ stdcall DestroyAcceleratorTable(long) NtUserDestroyAcceleratorTable
 @ stdcall DestroyCaret() NtUserDestroyCaret
 @ stdcall DestroyCursor(long)
-# @ stub DestroyDCompositionHwndTarget
+@ stdcall DestroyDCompositionHwndTarget(long long) NtUserDestroyDCompositionHwndTarget
 @ stdcall DestroyIcon(long)
 @ stdcall DestroyMenu(long) NtUserDestroyMenu
 # @ stub DestroyReasons

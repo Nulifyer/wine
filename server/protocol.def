@@ -5083,3 +5083,23 @@ struct alpc_message_info
     obj_handle_t token;           /* composition token handle */
     VARARG(surfaces,bytes);        /* packed obj_handle_t surface handles */
 @END
+
+/* Attach one process-owned DirectComposition system visual to an HWND slot. */
+@REQ(create_dcomp_window_target)
+    user_handle_t window;         /* same-process target window */
+    unsigned int type;            /* _HwndTargetType, zero through two */
+@REPLY
+    obj_handle_t handle;          /* shared system-visual handle */
+@END
+
+/* Detach one DirectComposition system visual from an HWND slot. */
+@REQ(destroy_dcomp_window_target)
+    user_handle_t window;         /* same-process target window */
+    unsigned int type;            /* _HwndTargetType, zero through two */
+@END
+
+/* Validate an HWND target handle imported through a channel open command. */
+@REQ(validate_dcomp_window_target)
+    obj_handle_t handle;          /* shared system-visual handle */
+    unsigned int resource_type;   /* expected MIL resource type */
+@END

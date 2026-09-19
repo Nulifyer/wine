@@ -4377,6 +4377,29 @@ static void dump_present_dcomp_token_request( const struct present_dcomp_token_r
     dump_varargs_bytes( ", surfaces=", cur_size );
 }
 
+static void dump_create_dcomp_window_target_request( const struct create_dcomp_window_target_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
+    fprintf( stderr, ", type=%08x", req->type );
+}
+
+static void dump_create_dcomp_window_target_reply( const struct create_dcomp_window_target_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_destroy_dcomp_window_target_request( const struct destroy_dcomp_window_target_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
+    fprintf( stderr, ", type=%08x", req->type );
+}
+
+static void dump_validate_dcomp_window_target_request( const struct validate_dcomp_window_target_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", resource_type=%08x", req->resource_type );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4773,6 +4796,9 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_dcomp_surface_bound_request,
     (dump_func)dump_create_dcomp_token_request,
     (dump_func)dump_present_dcomp_token_request,
+    (dump_func)dump_create_dcomp_window_target_request,
+    (dump_func)dump_destroy_dcomp_window_target_request,
+    (dump_func)dump_validate_dcomp_window_target_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5168,6 +5194,9 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_surface_reply,
     (dump_func)dump_set_dcomp_surface_bound_reply,
     (dump_func)dump_create_dcomp_token_reply,
+    NULL,
+    (dump_func)dump_create_dcomp_window_target_reply,
+    NULL,
     NULL,
 };
 
@@ -5565,6 +5594,9 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_dcomp_surface_bound",
     "create_dcomp_token",
     "present_dcomp_token",
+    "create_dcomp_window_target",
+    "destroy_dcomp_window_target",
+    "validate_dcomp_window_target",
 };
 
 static const struct
@@ -5597,6 +5629,7 @@ static const struct
     { "CONNECTION_REFUSED",          STATUS_CONNECTION_REFUSED },
     { "CONNECTION_RESET",            STATUS_CONNECTION_RESET },
     { "CONTEXT_MISMATCH",            STATUS_CONTEXT_MISMATCH },
+    { "DCOMPOSITION_TARGET_ALREADY_EXISTS", STATUS_DCOMPOSITION_TARGET_ALREADY_EXISTS },
     { "DEBUGGER_INACTIVE",           STATUS_DEBUGGER_INACTIVE },
     { "DEVICE_BUSY",                 STATUS_DEVICE_BUSY },
     { "DEVICE_NOT_READY",            STATUS_DEVICE_NOT_READY },

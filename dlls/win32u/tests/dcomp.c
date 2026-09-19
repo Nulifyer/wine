@@ -24,6 +24,7 @@
 #include "wine/test.h"
 
 #include "winbase.h"
+#include "winuser.h"
 #include "winternl.h"
 #include "ntuser.h"
 
@@ -887,6 +888,129 @@ done:
     CloseHandle( event );
 }
 
+static void test_hwnd_target_lifecycle(void)
+{
+    BYTE *buffer = (BYTE *)0xdeadbeef;
+    HANDLE handles[3] = {NULL, NULL, NULL}, event;
+    UINT channel = 0xcccccccc, size = 0x1000;
+    HWND hwnd, destroyed_hwnd;
+    ULONG processed;
+    BYTE released;
+    NTSTATUS status;
+    BOOL ret;
+
+    hwnd = CreateWindowExA( 0, "static", "dcomp target", WS_POPUP, 0, 0, 32, 32,
+                            NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "failed to create target window, error %lu\n", GetLastError() );
+    if (!hwnd) return;
+
+    ret = NtUserCreateDCompositionHwndTarget( hwnd, 0, NULL );
+    ok( !ret, "null-output create succeeded\n" );
+    ok( RtlGetLastNtStatus() == STATUS_INVALID_PARAMETER, "got status %#lx\n",
+        RtlGetLastNtStatus() );
+    handles[0] = (HANDLE)0xdeadbeef;
+    ret = NtUserCreateDCompositionHwndTarget( hwnd, 3, &handles[0] );
+    ok( !ret, "invalid-type create succeeded\n" );
+    ok( handles[0] == (HANDLE)0xdeadbeef, "invalid create changed handle to %p\n", handles[0] );
+    handles[0] = NULL;
+
+    for (size = 0; size < ARRAY_SIZE(handles); ++size)
+    {
+        ret = NtUserCreateDCompositionHwndTarget( hwnd, size, &handles[size] );
+        ok( ret, "type %u create failed, status %#lx\n", size, RtlGetLastNtStatus() );
+        ok( handles[size] && handles[size] != INVALID_HANDLE_VALUE,
+            "type %u returned handle %p\n", size, handles[size] );
+    }
+    ret = NtUserCreateDCompositionHwndTarget( hwnd, 0, &event );
+    ok( !ret, "duplicate create succeeded\n" );
+    ok( RtlGetLastNtStatus() == STATUS_DCOMPOSITION_TARGET_ALREADY_EXISTS, "got duplicate status %#lx\n",
+        RtlGetLastNtStatus() );
+
+    size = 0x1000;
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got channel status %#lx\n", status );
+    if (!status)
+    {
+        UINT64 shared;
+        UINT command[6] = {3, 1, 0, 0, 0xb8, 0};
+
+        event = CreateEventW( NULL, FALSE, FALSE, NULL );
+        ok( !!event, "failed to create event, error %lu\n", GetLastError() );
+        shared = (UINT_PTR)event;
+        memcpy( command + 2, &shared, sizeof(shared) );
+        memcpy( buffer, command, sizeof(command) );
+        status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(command),
+                                                           &processed, &released );
+        ok( status != STATUS_SUCCESS, "non-target shared handle succeeded\n" );
+        CloseHandle( event );
+
+        shared = (UINT_PTR)handles[0];
+        memcpy( command + 2, &shared, sizeof(shared) );
+        memcpy( buffer, command, sizeof(command) );
+        status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(command),
+                                                           &processed, &released );
+        ok( status == STATUS_SUCCESS, "target open command returned %#lx\n", status );
+        ok( processed == 1, "got target open process count %lu\n", processed );
+
+        command[0] = 10;
+        command[1] = 1;
+        command[2] = 0;
+        memcpy( buffer, command, 12 );
+        status = NtDCompositionProcessChannelBatchBuffer( channel, 12, &processed, &released );
+        ok( status == STATUS_SUCCESS, "target property command returned %#lx\n", status );
+
+        command[0] = 4;
+        command[1] = 1;
+        memcpy( buffer, command, 8 );
+        status = NtDCompositionProcessChannelBatchBuffer( channel, 8, &processed, &released );
+        ok( status == STATUS_SUCCESS, "target release command returned %#lx\n", status );
+
+        destroyed_hwnd = CreateWindowExA( 0, "static", "destroyed dcomp target", WS_POPUP,
+                                          0, 0, 32, 32, NULL, NULL, NULL, NULL );
+        ok( !!destroyed_hwnd, "failed to create teardown window, error %lu\n", GetLastError() );
+        event = NULL;
+        ret = NtUserCreateDCompositionHwndTarget( destroyed_hwnd, 0, &event );
+        ok( ret, "teardown target create failed, status %#lx\n", RtlGetLastNtStatus() );
+        ret = DestroyWindow( destroyed_hwnd );
+        ok( ret, "failed to destroy target window, error %lu\n", GetLastError() );
+        command[0] = 3;
+        command[1] = 2;
+        shared = (UINT_PTR)event;
+        memcpy( command + 2, &shared, sizeof(shared) );
+        command[4] = 0xb8;
+        command[5] = 0;
+        memcpy( buffer, command, sizeof(command) );
+        status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(command),
+                                                           &processed, &released );
+        ok( status == STATUS_ACCESS_DENIED, "destroyed-window target returned %#lx\n", status );
+        CloseHandle( event );
+
+        status = NtDCompositionDestroyChannel( channel );
+        ok( status == STATUS_SUCCESS, "got channel destroy status %#lx\n", status );
+    }
+
+    CloseHandle( handles[0] );
+    handles[0] = NULL;
+    ret = NtUserCreateDCompositionHwndTarget( hwnd, 0, &event );
+    ok( !ret, "target detached when its shared handle closed\n" );
+    ret = NtUserDestroyDCompositionHwndTarget( hwnd, 0 );
+    ok( ret, "target destroy failed, status %#lx\n", RtlGetLastNtStatus() );
+    ret = NtUserCreateDCompositionHwndTarget( hwnd, 0, &handles[0] );
+    ok( ret, "recreate after destroy failed, status %#lx\n", RtlGetLastNtStatus() );
+
+    for (size = 0; size < ARRAY_SIZE(handles); ++size)
+    {
+        CloseHandle( handles[size] );
+        ret = NtUserDestroyDCompositionHwndTarget( hwnd, size );
+        ok( ret, "type %u destroy failed, status %#lx\n", size, RtlGetLastNtStatus() );
+        ret = NtUserDestroyDCompositionHwndTarget( hwnd, size );
+        ok( !ret, "type %u repeated destroy succeeded\n", size );
+        ok( RtlGetLastNtStatus() == STATUS_NOT_FOUND, "type %u got status %#lx\n",
+            size, RtlGetLastNtStatus() );
+    }
+    DestroyWindow( hwnd );
+}
+
 static void test_frame_lifecycle(void)
 {
     struct dcomposition_frame_info frame_info = {0};
@@ -1230,6 +1354,7 @@ START_TEST(dcomp)
     test_kst();
     test_frame_statistics();
     test_channel_lifetime();
+    test_hwnd_target_lifecycle();
     test_connection_queue();
     test_frame_lifecycle();
     test_resource_retirement();

@@ -33,6 +33,8 @@
 #include "object.h"
 #include "process.h"
 #include "request.h"
+#include "thread.h"
+#include "user.h"
 #include "alpc.h"
 
 #define TOKEN_MANAGER_SECTION_SIZE 0x1000
@@ -139,6 +141,16 @@ struct dcomp_token
     client_ptr_t device;
 };
 
+struct dcomp_window_target
+{
+    struct object obj;
+    struct list entry;
+    struct process *owner;
+    user_handle_t window;
+    unsigned int type;
+    int attached;
+};
+
 struct dcomp_surface_update_wire
 {
     obj_handle_t surface;
@@ -151,6 +163,7 @@ struct dcomp_surface_update_wire
 static struct list dcomp_connections = LIST_INIT( dcomp_connections );
 static struct list dcomp_channels = LIST_INIT( dcomp_channels );
 static struct list token_managers = LIST_INIT( token_managers );
+static struct list dcomp_window_targets = LIST_INIT( dcomp_window_targets );
 static unsigned int next_dcomp_channel_id = 1;
 static unsigned __int64 next_dcomp_surface_binding_id = 1;
 
@@ -162,6 +175,8 @@ static void dcomp_surface_dump( struct object *obj, int verbose );
 static void dcomp_surface_destroy( struct object *obj );
 static void dcomp_token_dump( struct object *obj, int verbose );
 static void dcomp_token_destroy( struct object *obj );
+static void dcomp_window_target_dump( struct object *obj, int verbose );
+static void dcomp_window_target_destroy( struct object *obj );
 static int process_has_dcomp_consumer_connection( const struct process *process );
 
 static const struct object_ops dcomp_connection_ops =
@@ -194,6 +209,14 @@ static const struct object_ops dcomp_token_ops =
     .type    = &no_type,
     .dump    = dcomp_token_dump,
     .destroy = dcomp_token_destroy,
+};
+
+static const struct object_ops dcomp_window_target_ops =
+{
+    .size    = sizeof(struct dcomp_window_target),
+    .type    = &no_type,
+    .dump    = dcomp_window_target_dump,
+    .destroy = dcomp_window_target_destroy,
 };
 
 static void dcomp_connection_dump( struct object *obj, int verbose )
@@ -253,6 +276,53 @@ static void dcomp_token_destroy( struct object *obj )
     free( token->surfaces );
     free( token->updates );
     release_object( token->owner );
+}
+
+static void dcomp_window_target_dump( struct object *obj, int verbose )
+{
+    struct dcomp_window_target *target = (struct dcomp_window_target *)obj;
+
+    assert( obj->ops == &dcomp_window_target_ops );
+    fprintf( stderr, "DirectComposition HWND target window=%#x type=%u attached=%u\n",
+             target->window, target->type, target->attached );
+}
+
+static void dcomp_window_target_destroy( struct object *obj )
+{
+    struct dcomp_window_target *target = (struct dcomp_window_target *)obj;
+
+    assert( obj->ops == &dcomp_window_target_ops );
+    assert( !target->attached );
+    release_object( target->owner );
+}
+
+static struct dcomp_window_target *find_dcomp_window_target( struct process *owner,
+                                                              user_handle_t window,
+                                                              unsigned int type )
+{
+    struct dcomp_window_target *target;
+
+    LIST_FOR_EACH_ENTRY( target, &dcomp_window_targets, struct dcomp_window_target, entry )
+        if (target->owner == owner && target->window == window && target->type == type)
+            return target;
+    return NULL;
+}
+
+static void detach_dcomp_window_target( struct dcomp_window_target *target )
+{
+    assert( target->attached );
+    target->attached = 0;
+    list_remove( &target->entry );
+    release_object( target );
+}
+
+void cleanup_dcomp_window_targets( user_handle_t window )
+{
+    struct dcomp_window_target *target, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE( target, next, &dcomp_window_targets,
+                              struct dcomp_window_target, entry )
+        if (target->window == window) detach_dcomp_window_target( target );
 }
 
 static void dcomp_channel_destroy( struct object *obj )
@@ -1133,4 +1203,89 @@ DECL_HANDLER(present_dcomp_token)
         if (get_error()) break;
     }
     release_object( token );
+}
+
+DECL_HANDLER(create_dcomp_window_target)
+{
+    struct dcomp_window_target *target;
+    struct thread *thread;
+
+    if (req->type > 2)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(thread = get_window_thread( req->window )))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (thread->process != current->process)
+    {
+        release_object( thread );
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    release_object( thread );
+    if (find_dcomp_window_target( current->process, req->window, req->type ))
+    {
+        set_error( STATUS_DCOMPOSITION_TARGET_ALREADY_EXISTS );
+        return;
+    }
+    if (!(target = alloc_object( &dcomp_window_target_ops ))) return;
+    target->owner = (struct process *)grab_object( current->process );
+    target->window = req->window;
+    target->type = req->type;
+    target->attached = 1;
+    list_add_tail( &dcomp_window_targets, &target->entry );
+    reply->handle = alloc_handle_no_access_check( current->process, target, 0, 0 );
+    if (!reply->handle) detach_dcomp_window_target( target );
+    /* The allocation reference owns the HWND attachment. The handle owns its
+     * own reference and can close before the target is detached. */
+}
+
+DECL_HANDLER(destroy_dcomp_window_target)
+{
+    struct dcomp_window_target *target;
+    struct thread *thread;
+
+    if (req->type > 2)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(thread = get_window_thread( req->window )))
+    {
+        set_error( STATUS_UNSUCCESSFUL );
+        return;
+    }
+    if (thread->process != current->process)
+    {
+        release_object( thread );
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    release_object( thread );
+    if (!(target = find_dcomp_window_target( current->process, req->window, req->type )))
+    {
+        set_error( STATUS_NOT_FOUND );
+        return;
+    }
+    detach_dcomp_window_target( target );
+}
+
+DECL_HANDLER(validate_dcomp_window_target)
+{
+    struct dcomp_window_target *target;
+
+    if (req->resource_type != 0xb8)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(target = (struct dcomp_window_target *)get_handle_obj( current->process, req->handle,
+                                                                 0, &dcomp_window_target_ops ))) return;
+    if (!target->attached || target->owner != current->process)
+        set_error( STATUS_ACCESS_DENIED );
+    release_object( target );
 }

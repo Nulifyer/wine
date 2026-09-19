@@ -866,7 +866,7 @@
     SYSCALL_ENTRY( 0x135e, NtUserCreateActivationObject, 0 ) \
     SYSCALL_ENTRY( 0x135f, NtUserCreateBaseWindow, 0 ) \
     SYSCALL_ENTRY( 0x1360, NtUserCreateCaret, 16 ) \
-    SYSCALL_ENTRY( 0x1361, NtUserCreateDCompositionHwndTarget, 0 ) \
+    SYSCALL_ENTRY( 0x1361, NtUserCreateDCompositionHwndTarget, 12 ) \
     SYSCALL_ENTRY( 0x1362, NtUserCreateDesktopEx, 24 ) \
     SYSCALL_ENTRY( 0x1363, NtUserCreateEmptyCursorObject, 0 ) \
     SYSCALL_ENTRY( 0x1364, NtUserCreateInputContext, 4 ) \
@@ -897,7 +897,7 @@
     SYSCALL_ENTRY( 0x137d, NtUserDestroyActivationObject, 0 ) \
     SYSCALL_ENTRY( 0x137e, NtUserDestroyCaret, 0 ) \
     SYSCALL_ENTRY( 0x137f, NtUserDestroyCursor, 8 ) \
-    SYSCALL_ENTRY( 0x1380, NtUserDestroyDCompositionHwndTarget, 0 ) \
+    SYSCALL_ENTRY( 0x1380, NtUserDestroyDCompositionHwndTarget, 8 ) \
     SYSCALL_ENTRY( 0x1381, NtUserDestroyInputContext, 4 ) \
     SYSCALL_ENTRY( 0x1382, NtUserDestroyMenu, 4 ) \
     SYSCALL_ENTRY( 0x1383, NtUserDestroyPalmRejectionDelayZone, 0 ) \
@@ -2408,7 +2408,7 @@
     SYSCALL_ENTRY( 0x135e, NtUserCreateActivationObject, 0 ) \
     SYSCALL_ENTRY( 0x135f, NtUserCreateBaseWindow, 0 ) \
     SYSCALL_ENTRY( 0x1360, NtUserCreateCaret, 32 ) \
-    SYSCALL_ENTRY( 0x1361, NtUserCreateDCompositionHwndTarget, 0 ) \
+    SYSCALL_ENTRY( 0x1361, NtUserCreateDCompositionHwndTarget, 24 ) \
     SYSCALL_ENTRY( 0x1362, NtUserCreateDesktopEx, 48 ) \
     SYSCALL_ENTRY( 0x1363, NtUserCreateEmptyCursorObject, 0 ) \
     SYSCALL_ENTRY( 0x1364, NtUserCreateInputContext, 8 ) \
@@ -2439,7 +2439,7 @@
     SYSCALL_ENTRY( 0x137d, NtUserDestroyActivationObject, 0 ) \
     SYSCALL_ENTRY( 0x137e, NtUserDestroyCaret, 0 ) \
     SYSCALL_ENTRY( 0x137f, NtUserDestroyCursor, 16 ) \
-    SYSCALL_ENTRY( 0x1380, NtUserDestroyDCompositionHwndTarget, 0 ) \
+    SYSCALL_ENTRY( 0x1380, NtUserDestroyDCompositionHwndTarget, 16 ) \
     SYSCALL_ENTRY( 0x1381, NtUserDestroyInputContext, 8 ) \
     SYSCALL_ENTRY( 0x1382, NtUserDestroyMenu, 8 ) \
     SYSCALL_ENTRY( 0x1383, NtUserDestroyPalmRejectionDelayZone, 0 ) \
@@ -3667,7 +3667,6 @@
     SYSCALL_STUB( NtUserCreateActivationGroup ) \
     SYSCALL_STUB( NtUserCreateActivationObject ) \
     SYSCALL_STUB( NtUserCreateBaseWindow ) \
-    SYSCALL_STUB( NtUserCreateDCompositionHwndTarget ) \
     SYSCALL_STUB( NtUserCreateEmptyCursorObject ) \
     SYSCALL_STUB( NtUserCreateLocalMemHandle ) \
     SYSCALL_STUB( NtUserCreatePalmRejectionDelayZone ) \
@@ -3687,7 +3686,6 @@
     SYSCALL_STUB( NtUserDeregisterShellHookWindow ) \
     SYSCALL_STUB( NtUserDestroyActivationGroup ) \
     SYSCALL_STUB( NtUserDestroyActivationObject ) \
-    SYSCALL_STUB( NtUserDestroyDCompositionHwndTarget ) \
     SYSCALL_STUB( NtUserDestroyPalmRejectionDelayZone ) \
     SYSCALL_STUB( NtUserDirectedYield ) \
     SYSCALL_STUB( NtUserDisableImmersiveOwner ) \

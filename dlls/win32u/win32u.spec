@@ -864,7 +864,7 @@
 @ stub -syscall NtUserCreateActivationObject
 @ stub -syscall NtUserCreateBaseWindow
 @ stdcall -syscall NtUserCreateCaret(long long long long)
-@ stub -syscall NtUserCreateDCompositionHwndTarget
+@ stdcall -syscall NtUserCreateDCompositionHwndTarget(long long ptr)
 @ stdcall -syscall NtUserCreateDesktopEx(ptr ptr ptr long long long)
 @ stub -syscall NtUserCreateEmptyCursorObject
 @ stdcall -syscall NtUserCreateInputContext(ptr)
@@ -895,7 +895,7 @@
 @ stub -syscall NtUserDestroyActivationObject
 @ stdcall -syscall NtUserDestroyCaret()
 @ stdcall -syscall NtUserDestroyCursor(long long)
-@ stub -syscall NtUserDestroyDCompositionHwndTarget
+@ stdcall -syscall NtUserDestroyDCompositionHwndTarget(long long)
 @ stdcall -syscall NtUserDestroyInputContext(long)
 @ stdcall -syscall NtUserDestroyMenu(long)
 @ stub -syscall NtUserDestroyPalmRejectionDelayZone

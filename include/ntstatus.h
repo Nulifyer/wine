@@ -2792,6 +2792,8 @@
 #define STATUS_VHD_COULD_NOT_COMPUTE_MINIMUM_VIRTUAL_SIZE                   ((NTSTATUS) 0xC03A0032)
 #define STATUS_VHD_ALREADY_AT_OR_BELOW_MINIMUM_VIRTUAL_SIZE                 ((NTSTATUS) 0xC03A0033)
 
+#define STATUS_DCOMPOSITION_TARGET_ALREADY_EXISTS                           ((NTSTATUS) 0x803E0006)
+
 #define STATUS_GDI_HANDLE_LEAK                                              ((NTSTATUS) 0x803F0001)
 
 #define STATUS_RKF_KEY_NOT_FOUND                                            ((NTSTATUS) 0xC0400001)

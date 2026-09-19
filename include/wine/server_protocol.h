@@ -7530,6 +7530,47 @@ struct present_dcomp_token_reply
 };
 
 
+struct create_dcomp_window_target_request
+{
+    struct request_header __header;
+    user_handle_t window;
+    unsigned int type;
+    char __pad_20[4];
+};
+struct create_dcomp_window_target_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+struct destroy_dcomp_window_target_request
+{
+    struct request_header __header;
+    user_handle_t window;
+    unsigned int type;
+    char __pad_20[4];
+};
+struct destroy_dcomp_window_target_reply
+{
+    struct reply_header __header;
+};
+
+
+struct validate_dcomp_window_target_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int resource_type;
+    char __pad_20[4];
+};
+struct validate_dcomp_window_target_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -7924,6 +7965,9 @@ enum request
     REQ_set_dcomp_surface_bound,
     REQ_create_dcomp_token,
     REQ_present_dcomp_token,
+    REQ_create_dcomp_window_target,
+    REQ_destroy_dcomp_window_target,
+    REQ_validate_dcomp_window_target,
     REQ_NB_REQUESTS
 };
 
@@ -8323,6 +8367,9 @@ union generic_request
     struct set_dcomp_surface_bound_request set_dcomp_surface_bound_request;
     struct create_dcomp_token_request create_dcomp_token_request;
     struct present_dcomp_token_request present_dcomp_token_request;
+    struct create_dcomp_window_target_request create_dcomp_window_target_request;
+    struct destroy_dcomp_window_target_request destroy_dcomp_window_target_request;
+    struct validate_dcomp_window_target_request validate_dcomp_window_target_request;
 };
 union generic_reply
 {
@@ -8720,8 +8767,11 @@ union generic_reply
     struct set_dcomp_surface_bound_reply set_dcomp_surface_bound_reply;
     struct create_dcomp_token_reply create_dcomp_token_reply;
     struct present_dcomp_token_reply present_dcomp_token_reply;
+    struct create_dcomp_window_target_reply create_dcomp_window_target_reply;
+    struct destroy_dcomp_window_target_reply destroy_dcomp_window_target_reply;
+    struct validate_dcomp_window_target_reply validate_dcomp_window_target_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1034
+#define SERVER_PROTOCOL_VERSION 1035
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

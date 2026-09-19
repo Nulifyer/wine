@@ -935,12 +935,14 @@ W32KAPI HWND    WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *cla
                                              DWORD flags, HINSTANCE client_instance, const WCHAR *class, BOOL ansi );
 W32KAPI HWINSTA WINAPI NtUserCreateWindowStation( OBJECT_ATTRIBUTES *attr, ACCESS_MASK mask, ULONG arg3,
                                                   ULONG arg4, ULONG arg5, ULONG arg6, ULONG arg7 );
+W32KAPI BOOL    WINAPI NtUserCreateDCompositionHwndTarget( HWND hwnd, UINT type, HANDLE *handle );
 W32KAPI HDWP    WINAPI NtUserDeferWindowPosAndBand( HDWP hdwp, HWND hwnd, HWND after, INT x, INT y,
                                                     INT cx, INT cy, UINT flags, UINT unk1, UINT unk2 );
 W32KAPI BOOL    WINAPI NtUserDeleteMenu( HMENU menu, UINT id, UINT flags );
 W32KAPI BOOL    WINAPI NtUserDestroyAcceleratorTable( HACCEL handle );
 W32KAPI BOOL    WINAPI NtUserDestroyCaret(void);
 W32KAPI BOOL    WINAPI NtUserDestroyCursor( HCURSOR cursor, ULONG arg );
+W32KAPI BOOL    WINAPI NtUserDestroyDCompositionHwndTarget( HWND hwnd, UINT type );
 W32KAPI BOOL    WINAPI NtUserDestroyInputContext( HIMC handle );
 W32KAPI BOOL    WINAPI NtUserDestroyMenu( HMENU menu );
 W32KAPI BOOL    WINAPI NtUserDestroyWindow( HWND hwnd );

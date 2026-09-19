@@ -399,6 +399,9 @@ DECL_HANDLER(create_dcomp_surface);
 DECL_HANDLER(set_dcomp_surface_bound);
 DECL_HANDLER(create_dcomp_token);
 DECL_HANDLER(present_dcomp_token);
+DECL_HANDLER(create_dcomp_window_target);
+DECL_HANDLER(destroy_dcomp_window_target);
+DECL_HANDLER(validate_dcomp_window_target);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -795,6 +798,9 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_dcomp_surface_bound,
     (req_handler)req_create_dcomp_token,
     (req_handler)req_present_dcomp_token,
+    (req_handler)req_create_dcomp_window_target,
+    (req_handler)req_destroy_dcomp_window_target,
+    (req_handler)req_validate_dcomp_window_target,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -2991,3 +2997,14 @@ C_ASSERT( offsetof(struct create_dcomp_token_reply, handle) == 8 );
 C_ASSERT( sizeof(struct create_dcomp_token_reply) == 16 );
 C_ASSERT( offsetof(struct present_dcomp_token_request, token) == 12 );
 C_ASSERT( sizeof(struct present_dcomp_token_request) == 16 );
+C_ASSERT( offsetof(struct create_dcomp_window_target_request, window) == 12 );
+C_ASSERT( offsetof(struct create_dcomp_window_target_request, type) == 16 );
+C_ASSERT( sizeof(struct create_dcomp_window_target_request) == 24 );
+C_ASSERT( offsetof(struct create_dcomp_window_target_reply, handle) == 8 );
+C_ASSERT( sizeof(struct create_dcomp_window_target_reply) == 16 );
+C_ASSERT( offsetof(struct destroy_dcomp_window_target_request, window) == 12 );
+C_ASSERT( offsetof(struct destroy_dcomp_window_target_request, type) == 16 );
+C_ASSERT( sizeof(struct destroy_dcomp_window_target_request) == 24 );
+C_ASSERT( offsetof(struct validate_dcomp_window_target_request, handle) == 12 );
+C_ASSERT( offsetof(struct validate_dcomp_window_target_request, resource_type) == 16 );
+C_ASSERT( sizeof(struct validate_dcomp_window_target_request) == 24 );

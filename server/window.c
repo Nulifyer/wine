@@ -2198,6 +2198,7 @@ void free_window_handle( struct window *win )
     }
     free_hotkeys( win->desktop, win->handle );
     cleanup_clipboard_window( win->desktop, win->handle );
+    cleanup_dcomp_window_targets( win->handle );
     destroy_properties( win );
     if (is_desktop_window(win))
     {
