@@ -602,6 +602,18 @@ NTSTATUS WINAPI wow64_NtAlpcDisconnectPort( UINT *args )
 }
 
 /**********************************************************************
+ *           wow64_NtAlpcCancelMessage
+ */
+NTSTATUS WINAPI wow64_NtAlpcCancelMessage( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    ULONG flags = get_ulong( &args );
+    ALPC_CONTEXT_ATTR32 *context = get_ptr( &args );
+
+    return NtAlpcCancelMessage( handle, flags | 4, (ALPC_CONTEXT_ATTR *)context );
+}
+
+/**********************************************************************
  *           wow64_NtAlpcImpersonateClientOfPort
  */
 NTSTATUS WINAPI wow64_NtAlpcImpersonateClientOfPort( UINT *args )

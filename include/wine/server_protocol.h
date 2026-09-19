@@ -6679,7 +6679,6 @@ struct alpc_get_message_result_reply
 };
 
 
-
 struct alpc_connect_port_request
 {
     struct request_header __header;
@@ -7439,6 +7438,24 @@ struct query_dwm_composition_id_reply
     char __pad_12[4];
 };
 
+/* Cancel an outstanding ALPC message identified by its receive context.
+ * Keep new private requests at the end so focused provider builds do not
+ * renumber the existing wineserver protocol used by other built modules. */
+struct alpc_cancel_message_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int flags;
+    char __pad_20[4];
+    client_ptr_t message_context;
+    unsigned int message_id;
+    unsigned int callback_id;
+};
+struct alpc_cancel_message_reply
+{
+    struct reply_header __header;
+};
+
 
 enum request
 {
@@ -7828,6 +7845,7 @@ enum request
     REQ_open_coremsg_kernel_connection,
     REQ_register_manipulation_thread,
     REQ_query_dwm_composition_id,
+    REQ_alpc_cancel_message,
     REQ_NB_REQUESTS
 };
 
@@ -8221,6 +8239,7 @@ union generic_request
     struct open_coremsg_kernel_connection_request open_coremsg_kernel_connection_request;
     struct register_manipulation_thread_request register_manipulation_thread_request;
     struct query_dwm_composition_id_request query_dwm_composition_id_request;
+    struct alpc_cancel_message_request alpc_cancel_message_request;
 };
 union generic_reply
 {
@@ -8612,8 +8631,9 @@ union generic_reply
     struct open_coremsg_kernel_connection_reply open_coremsg_kernel_connection_reply;
     struct register_manipulation_thread_reply register_manipulation_thread_reply;
     struct query_dwm_composition_id_reply query_dwm_composition_id_reply;
+    struct alpc_cancel_message_reply alpc_cancel_message_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1028
+#define SERVER_PROTOCOL_VERSION 1029
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

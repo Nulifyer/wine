@@ -4318,6 +4318,15 @@ static void dump_query_dwm_composition_id_reply( const struct query_dwm_composit
     fprintf( stderr, " id=%08x", req->id );
 }
 
+static void dump_alpc_cancel_message_request( const struct alpc_cancel_message_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    dump_uint64( ", message_context=", &req->message_context );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", callback_id=%08x", req->callback_id );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4708,6 +4717,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_open_coremsg_kernel_connection_request,
     (dump_func)dump_register_manipulation_thread_request,
     (dump_func)dump_query_dwm_composition_id_request,
+    (dump_func)dump_alpc_cancel_message_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5098,6 +5108,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     (dump_func)dump_query_dwm_composition_id_reply,
+    NULL,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -5488,6 +5499,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "open_coremsg_kernel_connection",
     "register_manipulation_thread",
     "query_dwm_composition_id",
+    "alpc_cancel_message",
 };
 
 static const struct
@@ -5519,6 +5531,7 @@ static const struct
     { "CONNECTION_ACTIVE",           STATUS_CONNECTION_ACTIVE },
     { "CONNECTION_REFUSED",          STATUS_CONNECTION_REFUSED },
     { "CONNECTION_RESET",            STATUS_CONNECTION_RESET },
+    { "CONTEXT_MISMATCH",            STATUS_CONTEXT_MISMATCH },
     { "DEBUGGER_INACTIVE",           STATUS_DEBUGGER_INACTIVE },
     { "DEVICE_BUSY",                 STATUS_DEVICE_BUSY },
     { "DEVICE_NOT_READY",            STATUS_DEVICE_NOT_READY },
@@ -5589,6 +5602,7 @@ static const struct
     { "LPC_REQUESTS_NOT_ALLOWED",    STATUS_LPC_REQUESTS_NOT_ALLOWED },
     { "MAPPED_FILE_SIZE_ZERO",       STATUS_MAPPED_FILE_SIZE_ZERO },
     { "MESSAGE_LOST",                STATUS_MESSAGE_LOST },
+    { "MESSAGE_RETRIEVED",           STATUS_MESSAGE_RETRIEVED },
     { "MORE_ENTRIES",                STATUS_MORE_ENTRIES },
     { "MUTANT_NOT_OWNED",            STATUS_MUTANT_NOT_OWNED },
     { "NAME_TOO_LONG",               STATUS_NAME_TOO_LONG },

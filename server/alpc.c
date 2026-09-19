@@ -146,7 +146,8 @@ struct alpc_request
     struct alpc_message *reply; /* weak, while a released private reply is fetched */
     struct alpc_wait *wait; /* weak; its private handle owns the blocking call */
     unsigned int id, wow64, canceled, released;
-    client_ptr_t message_context;
+    client_ptr_t message_context;         /* context returned to the originating endpoint */
+    client_ptr_t receive_message_context; /* context delivered to the current receiver */
     process_id_t pid;
     thread_id_t tid;
     struct token *token; /* retained after the sending endpoint closes */
@@ -1071,6 +1072,49 @@ static void cancel_message_request( struct alpc_request *request, struct alpc_po
     else free_message_request( request );
 }
 
+/* Explicit cancellation of a delivered request returns a cancellation to the
+ * originating endpoint. Synchronous callers own the result through their
+ * private wait; asynchronous callers receive it through the endpoint queue. */
+static int return_request_cancellation( struct alpc_request *request )
+{
+    struct alpc_port *source = request->source;
+    struct alpc_message *message;
+
+    if (!source)
+    {
+        set_error( STATUS_PORT_DISCONNECTED );
+        return 0;
+    }
+    if (!(message = new_cancellation( request ))) return 0;
+    set_message_destination( message, source, request->message_context );
+    request->canceled = 1;
+
+    if (request->wait)
+    {
+        struct alpc_wait *wait = request->wait;
+
+        request->wait = NULL;
+        wait->request = NULL;
+        wait->info = message->info;
+        wait->reply = message;
+        wait->status = STATUS_SUCCESS;
+        request->released = 1;
+        request->reply = message;
+        message->request = request;
+        signal_sync( wait->sync );
+    }
+    else
+    {
+        struct alpc_port *queue = message_queue( source );
+
+        request->message = message;
+        message->request = request;
+        list_add_tail( &queue->messages, &message->entry );
+        notify_port( queue );
+    }
+    return 1;
+}
+
 static void alpc_wait_dump( struct object *obj, int verbose )
 {
     struct alpc_wait *wait = (struct alpc_wait *)obj;
@@ -1466,6 +1510,7 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
         request->token = message->token ? (struct token *)grab_object( message->token ) : NULL;
         request->impersonation_level = origin->impersonation_level;
         request->message_context = message_context;
+        request->receive_message_context = received_context;
         request->source = origin;
         request->target = target;
         request->queue = queue;
@@ -1825,6 +1870,65 @@ DECL_HANDLER(alpc_get_message_result)
         }
     }
     release_object( wait );
+}
+
+/* Native resolves the global message identity first, then authorizes it
+ * against the supplied communication endpoint or its listener. */
+DECL_HANDLER(alpc_cancel_message)
+{
+    struct alpc_request *request = NULL, *candidate;
+    struct alpc_port *port;
+    unsigned int status;
+
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                    ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
+    if (port->thread->process != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto done;
+    }
+
+    LIST_FOR_EACH_ENTRY( candidate, &message_requests, struct alpc_request, entry )
+        if (candidate->id == req->message_id &&
+            (!req->callback_id || candidate->id == req->callback_id))
+        {
+            request = candidate;
+            break;
+        }
+    if (!request)
+    {
+        set_error( STATUS_INVALID_MESSAGE );
+        goto done;
+    }
+    if (!request->target || (request->target != port && request->target->connection_port != port &&
+                             request->queue != port))
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto done;
+    }
+    if (request->canceled)
+    {
+        set_error( STATUS_REQUEST_CANCELED );
+        goto done;
+    }
+    if ((req->flags & 8) && request->receive_message_context != req->message_context)
+    {
+        set_error( STATUS_CONTEXT_MISMATCH );
+        goto done;
+    }
+
+    status = request->message ? STATUS_PENDING : STATUS_MESSAGE_RETRIEVED;
+    if (req->flags & 1)
+    {
+        set_error( status );
+        goto done;
+    }
+    if (request->message) cancel_message_request( request, request->queue );
+    else if (!return_request_cancellation( request )) goto done;
+    set_error( status );
+
+done:
+    release_object( port );
 }
 
 /* Admission uses the same listening queue, with a pending client reference

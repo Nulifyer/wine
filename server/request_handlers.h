@@ -393,6 +393,7 @@ DECL_HANDLER(set_mit_input_callbacks);
 DECL_HANDLER(open_coremsg_kernel_connection);
 DECL_HANDLER(register_manipulation_thread);
 DECL_HANDLER(query_dwm_composition_id);
+DECL_HANDLER(alpc_cancel_message);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -783,6 +784,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_open_coremsg_kernel_connection,
     (req_handler)req_register_manipulation_thread,
     (req_handler)req_query_dwm_composition_id,
+    (req_handler)req_alpc_cancel_message,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -2949,3 +2951,9 @@ C_ASSERT( sizeof(struct register_manipulation_thread_request) == 16 );
 C_ASSERT( sizeof(struct query_dwm_composition_id_request) == 16 );
 C_ASSERT( offsetof(struct query_dwm_composition_id_reply, id) == 8 );
 C_ASSERT( sizeof(struct query_dwm_composition_id_reply) == 16 );
+C_ASSERT( offsetof(struct alpc_cancel_message_request, handle) == 12 );
+C_ASSERT( offsetof(struct alpc_cancel_message_request, flags) == 16 );
+C_ASSERT( offsetof(struct alpc_cancel_message_request, message_context) == 24 );
+C_ASSERT( offsetof(struct alpc_cancel_message_request, message_id) == 32 );
+C_ASSERT( offsetof(struct alpc_cancel_message_request, callback_id) == 36 );
+C_ASSERT( sizeof(struct alpc_cancel_message_request) == 40 );

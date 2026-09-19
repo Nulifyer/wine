@@ -448,6 +448,51 @@ NTSTATUS WINAPI NtAlpcDisconnectPort( HANDLE port_handle, ULONG flags )
     return status;
 }
 
+NTSTATUS WINAPI NtAlpcCancelMessage( HANDLE port_handle, ULONG flags, ALPC_CONTEXT_ATTR *context )
+{
+    struct alpc_context_attr32
+    {
+        ULONG port_context;
+        ULONG message_context;
+        ULONG sequence;
+        ULONG message_id;
+        ULONG callback_id;
+    };
+    client_ptr_t message_context;
+    ULONG message_id, callback_id;
+    NTSTATUS status;
+
+    if (flags & ~0xf) return STATUS_INVALID_PARAMETER;
+#ifdef _WIN64
+    if (flags & 4)
+    {
+        const struct alpc_context_attr32 *context32 = (const struct alpc_context_attr32 *)context;
+        message_context = context32->message_context;
+        message_id = context32->message_id;
+        callback_id = context32->callback_id;
+    }
+    else
+#endif
+    {
+        message_context = wine_server_client_ptr( context->MessageContext );
+        message_id = context->MessageId;
+        callback_id = context->CallbackId;
+    }
+    if (!message_id) return STATUS_MESSAGE_NOT_FOUND;
+
+    SERVER_START_REQ( alpc_cancel_message )
+    {
+        req->handle = wine_server_obj_handle( port_handle );
+        req->flags = flags & ~4;
+        req->message_context = message_context;
+        req->message_id = message_id;
+        req->callback_id = callback_id;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
                                            ALPC_PORT_MESSAGE *send_msg,
                                            ALPC_MESSAGE_ATTRIBUTES *send_msg_attr,

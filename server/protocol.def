@@ -4613,7 +4613,6 @@ struct alpc_message_info
     VARARG(message,bytes);
 @END
 
-
 /* Begin admission to a named ALPC listener. Payload follows name, SID, and server security descriptor. */
 @REQ(alpc_connect_port)
     obj_handle_t rootdir;
@@ -5030,4 +5029,15 @@ struct alpc_message_info
 @REQ(query_dwm_composition_id)
 @REPLY
     unsigned int id;
+@END
+
+/* Cancel an outstanding ALPC message identified by its receive context.
+ * Keep new private requests at the end so focused provider builds do not
+ * renumber the existing wineserver protocol used by other built modules. */
+@REQ(alpc_cancel_message)
+    obj_handle_t handle;           /* ALPC port */
+    unsigned int flags;           /* cancellation behavior flags */
+    client_ptr_t message_context; /* received message context */
+    unsigned int message_id;      /* received message id */
+    unsigned int callback_id;     /* received callback id, zero matches any */
 @END
