@@ -798,6 +798,30 @@ NTSTATUS WINAPI NtGdiDdDDIQueryAdapterInfo( D3DKMT_QUERYADAPTERINFO *desc )
         *value = KMT_DRIVERVERSION_WDDM_3_1;
         return STATUS_SUCCESS;
     }
+    case KMTQAITYPE_ADAPTERTYPE:
+    {
+        D3DKMT_ADAPTERTYPE *value = desc->pPrivateDriverData;
+        struct d3dkmt_adapter *adapter;
+
+        if (desc->PrivateDriverDataSize < sizeof(*value))
+            return STATUS_INVALID_PARAMETER;
+        if (!(adapter = get_d3dkmt_object( desc->hAdapter, D3DKMT_ADAPTER )))
+            return STATUS_INVALID_PARAMETER;
+
+        value->Value = 0;
+        value->RenderSupported = TRUE;
+        value->DisplaySupported = TRUE;
+        if (adapter->physical_device)
+        {
+            VkPhysicalDeviceProperties properties;
+            struct vulkan_instance *instance = adapter->physical_device->instance;
+
+            instance->p_vkGetPhysicalDeviceProperties( adapter->physical_device->host.physical_device,
+                    &properties );
+            value->SoftwareDevice = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+        }
+        return STATUS_SUCCESS;
+    }
     default:
     {
         FIXME( "type %d not handled.\n", desc->Type );

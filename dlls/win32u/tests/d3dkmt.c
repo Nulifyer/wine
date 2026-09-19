@@ -2134,6 +2134,7 @@ static void test_D3DKMTQueryAdapterInfo(void)
     {
         {KMTQAITYPE_CHECKDRIVERUPDATESTATUS, sizeof(BOOL)},
         {KMTQAITYPE_DRIVERVERSION, sizeof(D3DKMT_DRIVERVERSION)},
+        {KMTQAITYPE_ADAPTERTYPE, sizeof(D3DKMT_ADAPTERTYPE)},
     };
 
     ret = get_primary_adapter_name( open_adapter_desc.DeviceName );
@@ -2184,6 +2185,16 @@ static void test_D3DKMTQueryAdapterInfo(void)
             D3DKMT_DRIVERVERSION *value = query_adapter_info.pPrivateDriverData;
             ok( *value >= KMT_DRIVERVERSION_WDDM_3_1 || broken( *value >= KMT_DRIVERVERSION_WDDM_1_3 ),
                 "Expected %d >= %d.\n", *value, KMT_DRIVERVERSION_WDDM_3_1 );
+            break;
+        }
+        case KMTQAITYPE_ADAPTERTYPE:
+        {
+            D3DKMT_ADAPTERTYPE *value = query_adapter_info.pPrivateDriverData;
+            ok( value->RenderSupported, "Expected rendering support, got flags %#x.\n", value->Value );
+            ok( value->DisplaySupported, "Expected display support, got flags %#x.\n", value->Value );
+            ok( !(value->HybridDiscrete && value->HybridIntegrated),
+                    "Adapter is both hybrid discrete and integrated, flags %#x.\n", value->Value );
+            ok( !value->Reserved, "Expected zero reserved bits, got flags %#x.\n", value->Value );
             break;
         }
         default:
