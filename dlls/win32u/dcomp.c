@@ -65,8 +65,35 @@ struct dcomp_resource_view
     struct list entry;
     UINT id;
     UINT type;
+    UINT references;
+    struct dcomp_resource_view *root;
+    struct dcomp_resource_view *parent;
+    struct dcomp_resource_view *first_child;
+    struct dcomp_resource_view *next_sibling;
     BOOL announced;
+    BOOL client_released;
     BOOL released;
+    BOOL visual;
+    BOOL visual_target;
+    BOOL root_dirty;
+    BOOL children_clear_dirty;
+    BOOL connection_announced;
+    BOOL remove_dirty;
+    UINT remove_parent_id;
+    INT visual_mode_8;
+    INT visual_mode_9;
+    INT visual_mode_10;
+    INT visual_mode_14;
+    INT visual_mode_15;
+    INT visual_mode_16;
+    BYTE visual_flags_134;
+    BYTE visual_flags_135;
+    BOOL visual_modes_dirty;
+    BOOL visual_flags_dirty;
+    BOOL visual_relative_size_dirty;
+    BOOL visual_size_dirty;
+    float visual_relative_size[2];
+    float visual_size[2];
     BOOL shared_section_bound;
     BOOL shared_section_announced;
 };
@@ -113,8 +140,255 @@ static struct dcomp_resource_view *find_dcomp_resource_view( struct dcomp_channe
     struct dcomp_resource_view *resource;
 
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
-        if (resource->id == id && !resource->released) return resource;
+        if (resource->id == id && !resource->client_released) return resource;
     return NULL;
+}
+
+static void release_dcomp_resource_reference( struct dcomp_resource_view *resource )
+{
+    struct dcomp_resource_view *child, *root;
+    BOOL clear_children = FALSE;
+
+    if (--resource->references) return;
+
+    if ((root = resource->root))
+    {
+        resource->root = NULL;
+        resource->root_dirty = TRUE;
+        release_dcomp_resource_reference( root );
+    }
+    while ((child = resource->first_child))
+    {
+        resource->first_child = child->next_sibling;
+        child->next_sibling = NULL;
+        child->parent = NULL;
+        if (child->connection_announced) clear_children = TRUE;
+        child->connection_announced = FALSE;
+        release_dcomp_resource_reference( child );
+    }
+    if (clear_children) resource->children_clear_dirty = TRUE;
+    resource->released = TRUE;
+}
+
+static void remove_unannounced_dcomp_resources( struct dcomp_channel_view *view )
+{
+    struct dcomp_resource_view *resource, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE( resource, next, &view->resources, struct dcomp_resource_view, entry )
+    {
+        if (!resource->announced && resource->released)
+        {
+            list_remove( &resource->entry );
+            free( resource );
+        }
+    }
+}
+
+static BOOL is_dcomp_visual_resource_type( UINT type )
+{
+    /* Descendants of MIL_RESOURCE_TYPE 0xb8 in the Windows resource-parent table. */
+    switch (type)
+    {
+    case 0x32:
+    case 0x5d:
+    case 0x81:
+    case 0x9a:
+    case 0x9c:
+    case 0xa6:
+    case 0xa7:
+    case 0xad:
+    case 0xb8:
+    case 0xc0:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource,
+                                             UINT id, UINT type )
+{
+    resource->id = id;
+    resource->type = type;
+    resource->references = 1;
+    resource->visual = is_dcomp_visual_resource_type( type );
+}
+
+static NTSTATUS add_dcomp_visual_child( struct dcomp_channel_view *view,
+                                        UINT parent_id, UINT child_id,
+                                        INT insert_after, UINT reference_id )
+{
+    struct dcomp_resource_view *parent, *child, *reference = NULL, **cursor;
+
+    if (!(parent = find_dcomp_resource_view( view, parent_id )) ||
+        !(child = find_dcomp_resource_view( view, child_id )))
+        return STATUS_ACCESS_DENIED;
+    if (!parent->visual || !child->visual || child->parent) return STATUS_INVALID_PARAMETER;
+    if (reference_id)
+    {
+        if (!(reference = find_dcomp_resource_view( view, reference_id )))
+            return STATUS_ACCESS_DENIED;
+        if (!reference->visual || reference->parent != parent) return STATUS_INVALID_PARAMETER;
+    }
+
+    if (insert_after)
+    {
+        if (reference)
+        {
+            child->next_sibling = reference->next_sibling;
+            reference->next_sibling = child;
+        }
+        else
+        {
+            child->next_sibling = parent->first_child;
+            parent->first_child = child;
+        }
+    }
+    else
+    {
+        cursor = &parent->first_child;
+        while (*cursor != reference) cursor = &(*cursor)->next_sibling;
+        child->next_sibling = reference;
+        *cursor = child;
+    }
+    child->parent = parent;
+    child->references++;
+    return STATUS_SUCCESS;
+}
+
+static void detach_dcomp_visual_child( struct dcomp_resource_view *parent,
+                                        struct dcomp_resource_view *child,
+                                        struct dcomp_resource_view **cursor )
+{
+    *cursor = child->next_sibling;
+    child->next_sibling = NULL;
+    child->parent = NULL;
+    if (child->connection_announced)
+    {
+        child->remove_dirty = TRUE;
+        child->remove_parent_id = parent->id;
+        child->connection_announced = FALSE;
+    }
+    release_dcomp_resource_reference( child );
+}
+
+static NTSTATUS remove_dcomp_visual_child( struct dcomp_channel_view *view,
+                                           UINT parent_id, UINT child_id )
+{
+    struct dcomp_resource_view *parent, *child, **cursor;
+    BOOL clear_children = FALSE;
+
+    if (!(parent = find_dcomp_resource_view( view, parent_id ))) return STATUS_ACCESS_DENIED;
+    if (!parent->visual) return STATUS_INVALID_PARAMETER;
+
+    cursor = &parent->first_child;
+    if (child_id)
+    {
+        if (!(child = find_dcomp_resource_view( view, child_id ))) return STATUS_ACCESS_DENIED;
+        while (*cursor && *cursor != child) cursor = &(*cursor)->next_sibling;
+        if (!*cursor) return STATUS_INVALID_PARAMETER;
+        detach_dcomp_visual_child( parent, child, cursor );
+    }
+    else
+    {
+        while ((child = *cursor))
+        {
+            if (child->connection_announced) clear_children = TRUE;
+            *cursor = child->next_sibling;
+            child->next_sibling = NULL;
+            child->parent = NULL;
+            child->connection_announced = FALSE;
+            release_dcomp_resource_reference( child );
+        }
+        if (clear_children) parent->children_clear_dirty = TRUE;
+    }
+    remove_unannounced_dcomp_resources( view );
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_visual_integer_property( struct dcomp_resource_view *resource,
+                                                    UINT property, INT64 value )
+{
+    INT int_value = value;
+
+    switch (property)
+    {
+    case 8:
+        if ((value < -1 || value > 1) && value != 6) return STATUS_INVALID_PARAMETER;
+        if (resource->visual_mode_8 == int_value) return STATUS_SUCCESS;
+        resource->visual_mode_8 = int_value;
+        resource->visual_modes_dirty = TRUE;
+        break;
+    case 9:
+        if (value < -1 || value > 1) return STATUS_INVALID_PARAMETER;
+        if (resource->visual_mode_9 == int_value) return STATUS_SUCCESS;
+        resource->visual_mode_9 = int_value;
+        resource->visual_modes_dirty = TRUE;
+        break;
+    case 0xe:
+        if (value < -1 || value > 1) return STATUS_INVALID_PARAMETER;
+        if (resource->visual_mode_14 == int_value) return STATUS_SUCCESS;
+        resource->visual_mode_14 = int_value;
+        resource->visual_modes_dirty = TRUE;
+        break;
+    case 0x1b:
+        if (!!value == !!(resource->visual_flags_134 & 8)) return STATUS_SUCCESS;
+        if (value) resource->visual_flags_134 |= 8;
+        else resource->visual_flags_134 &= ~8;
+        resource->visual_flags_dirty = TRUE;
+        break;
+    case 0x25:
+        if (!!value == !!(resource->visual_flags_134 & 0x10)) return STATUS_SUCCESS;
+        if (value) resource->visual_flags_134 |= 0x10;
+        else resource->visual_flags_134 &= ~0x10;
+        resource->visual_flags_dirty = TRUE;
+        break;
+    default:
+        return STATUS_NOT_SUPPORTED;
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_visual_buffer_property( struct dcomp_resource_view *resource,
+                                                   UINT property, const BYTE *data, UINT size )
+{
+    if (property == 0x1d && size == sizeof(resource->visual_size))
+    {
+        if (!memcmp( resource->visual_size, data, size )) return STATUS_SUCCESS;
+        memcpy( resource->visual_size, data, size );
+        resource->visual_size_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    if (property == 0x1f && size == sizeof(resource->visual_relative_size))
+    {
+        if (!memcmp( resource->visual_relative_size, data, size )) return STATUS_SUCCESS;
+        memcpy( resource->visual_relative_size, data, size );
+        resource->visual_relative_size_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS set_dcomp_visual_target_root( struct dcomp_channel_view *view,
+                                               struct dcomp_resource_view *target,
+                                               UINT property, UINT root_id )
+{
+    struct dcomp_resource_view *root = NULL, *previous;
+
+    if (property != 0x34) return STATUS_INVALID_PARAMETER;
+    if (root_id)
+    {
+        if (!(root = find_dcomp_resource_view( view, root_id ))) return STATUS_ACCESS_DENIED;
+        if (!is_dcomp_visual_resource_type( root->type )) return STATUS_INVALID_PARAMETER;
+        root->references++;
+    }
+
+    previous = target->root;
+    target->root = root;
+    target->root_dirty = TRUE;
+    if (previous) release_dcomp_resource_reference( previous );
+    remove_unannounced_dcomp_resources( view );
+    return STATUS_SUCCESS;
 }
 
 static struct dcomp_resource_view *find_any_dcomp_resource_view( struct dcomp_channel_view *view,
@@ -274,8 +548,7 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
             if (!id || !type || type > 0xc1) return STATUS_INVALID_PARAMETER;
             if (find_any_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
-            resource->id = id;
-            resource->type = type;
+            initialize_dcomp_resource_view( resource, id, type );
             list_add_tail( &view->resources, &resource->entry );
         }
         else if (type == 3)
@@ -291,8 +564,9 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
             if (resource_type == 0xb8 &&
                 (status = validate_dcomp_window_target( handle, resource_type ))) return status;
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
-            resource->id = id;
-            resource->type = resource_type;
+            initialize_dcomp_resource_view( resource, id, resource_type );
+            resource->visual_target = resource_type == 0xb8;
+            if (resource->visual_target) resource->visual = FALSE;
             list_add_tail( &view->resources, &resource->entry );
         }
         else if (type == 4)
@@ -305,13 +579,71 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
                 if (status) return status;
                 resource->shared_section_bound = FALSE;
             }
-            if (resource->announced) resource->released = TRUE;
-            else
-            {
-                list_remove( &resource->entry );
-                free( resource );
-            }
+            resource->client_released = TRUE;
+            release_dcomp_resource_reference( resource );
+            remove_unannounced_dcomp_resources( view );
             view->released_resources = TRUE;
+        }
+        else if (type == 11)
+        {
+            INT64 value;
+            UINT property;
+
+            memcpy( &id, buffer + 4, sizeof(id) );
+            memcpy( &property, buffer + 8, sizeof(property) );
+            memcpy( &value, buffer + 16, sizeof(value) );
+            if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
+            if (resource->visual)
+            {
+                status = set_dcomp_visual_integer_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+        }
+        else if (type == 15)
+        {
+            UINT property, size;
+
+            memcpy( &id, buffer + 4, sizeof(id) );
+            memcpy( &property, buffer + 8, sizeof(property) );
+            memcpy( &size, buffer + 12, sizeof(size) );
+            if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
+            if (resource->visual)
+            {
+                status = set_dcomp_visual_buffer_property( resource, property, buffer + 16, size );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+        }
+        else if (type == 16)
+        {
+            UINT property, root_id;
+
+            memcpy( &id, buffer + 4, sizeof(id) );
+            memcpy( &property, buffer + 8, sizeof(property) );
+            memcpy( &root_id, buffer + 12, sizeof(root_id) );
+            if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
+            if (resource->visual_target &&
+                (status = set_dcomp_visual_target_root( view, resource, property, root_id )))
+                return status;
+        }
+        else if (type == 20)
+        {
+            UINT child_id, insert_after, reference_id;
+
+            memcpy( &id, buffer + 4, sizeof(id) );
+            memcpy( &child_id, buffer + 8, sizeof(child_id) );
+            memcpy( &insert_after, buffer + 12, sizeof(insert_after) );
+            memcpy( &reference_id, buffer + 16, sizeof(reference_id) );
+            if ((status = add_dcomp_visual_child( view, id, child_id,
+                                                   insert_after, reference_id )))
+                return status;
+        }
+        else if (type == 23)
+        {
+            UINT child_id;
+
+            memcpy( &id, buffer + 4, sizeof(id) );
+            memcpy( &child_id, buffer + 8, sizeof(child_id) );
+            if ((status = remove_dcomp_visual_child( view, id, child_id ))) return status;
         }
         else if (type >= 6 && type <= 23)
         {
@@ -419,7 +751,7 @@ static NTSTATUS copy_dcomp_protocol_blocks( const void *list, BYTE **data,
 static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
                                              BYTE **data, data_size_t *data_size )
 {
-    struct dcomp_resource_view *resource;
+    struct dcomp_resource_view *child, *resource;
     data_size_t resource_size = 0;
     BYTE *new_data, *cursor;
     NTSTATUS status;
@@ -429,7 +761,16 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         if (!resource->announced) resource_size += 16;
         if (resource->shared_section_bound && !resource->shared_section_announced &&
             !resource->released) resource_size += 28;
-        else if (resource->released) resource_size += 12;
+        if (resource->remove_dirty) resource_size += 16;
+        if (resource->root_dirty) resource_size += 12 + (resource->root ? 24 : 0);
+        if (resource->children_clear_dirty) resource_size += 12;
+        for (child = resource->first_child; child; child = child->next_sibling)
+            if (!child->connection_announced) resource_size += 24;
+        if (resource->visual_modes_dirty) resource_size += 52;
+        if (resource->visual_flags_dirty) resource_size += 16;
+        if (resource->visual_relative_size_dirty) resource_size += 20;
+        if (resource->visual_size_dirty) resource_size += 20;
+        if (resource->released) resource_size += 12;
     }
     if (resource_size > DCOMP_PROTOCOL_MAX_SIZE - *data_size) return STATUS_INVALID_PARAMETER;
     if (!resource_size) return STATUS_SUCCESS;
@@ -472,6 +813,104 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         memcpy( cursor + 20, &value, sizeof(value) );
         cursor += 28;
     }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        UINT command[4];
+
+        if (!resource->remove_dirty) continue;
+        command[0] = sizeof(command);
+        command[1] = 0x188; /* MILCMD_VISUAL_REMOVECHILD */
+        command[2] = resource->remove_parent_id;
+        command[3] = resource->id;
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        UINT command[6] = {12, 0x187, resource->id};
+
+        if (resource->root_dirty)
+        {
+            memcpy( cursor, command, 12 );
+            cursor += 12;
+            if (resource->root)
+            {
+                command[0] = sizeof(command);
+                command[1] = 0x185;
+                command[2] = resource->id;
+                command[3] = resource->root->id;
+                command[4] = 0;
+                command[5] = 1;
+                memcpy( cursor, command, sizeof(command) );
+                cursor += sizeof(command);
+            }
+        }
+        if (resource->children_clear_dirty)
+        {
+            command[0] = 12;
+            command[1] = 0x187; /* MILCMD_VISUAL_REMOVEALLCHILDREN */
+            command[2] = resource->id;
+            memcpy( cursor, command, 12 );
+            cursor += 12;
+        }
+    }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        UINT previous_id = 0;
+
+        for (child = resource->first_child; child; child = child->next_sibling)
+        {
+            UINT command[6] = {24, 0x185, resource->id, child->id, previous_id, 1};
+
+            if (!child->connection_announced)
+            {
+                memcpy( cursor, command, sizeof(command) );
+                cursor += sizeof(command);
+            }
+            previous_id = child->id;
+        }
+    }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        if (resource->visual_modes_dirty)
+        {
+            UINT command[13] = {52, 0x19c, resource->id, 0x7e,
+                                resource->visual_mode_8, resource->visual_mode_9, 0, 0,
+                                resource->visual_mode_10, resource->visual_mode_14,
+                                resource->visual_mode_15, resource->visual_mode_16, 0};
+
+            memcpy( cursor, command, sizeof(command) );
+            cursor += sizeof(command);
+        }
+        if (resource->visual_flags_dirty)
+        {
+            UINT flags = (!!(resource->visual_flags_134 & 0x10)) |
+                         ((!!(resource->visual_flags_134 & 8)) << 8) |
+                         ((!!(resource->visual_flags_135 & 1)) << 16) |
+                         ((!!(resource->visual_flags_135 & 2)) << 24);
+            UINT command[4] = {16, 0x197, resource->id, flags};
+
+            memcpy( cursor, command, sizeof(command) );
+            cursor += sizeof(command);
+        }
+        if (resource->visual_relative_size_dirty)
+        {
+            UINT command[5] = {20, 0x19b, resource->id};
+
+            memcpy( command + 3, resource->visual_relative_size,
+                    sizeof(resource->visual_relative_size) );
+            memcpy( cursor, command, sizeof(command) );
+            cursor += sizeof(command);
+        }
+        if (resource->visual_size_dirty)
+        {
+            UINT command[5] = {20, 0x19e, resource->id};
+
+            memcpy( command + 3, resource->visual_size, sizeof(resource->visual_size) );
+            memcpy( cursor, command, sizeof(command) );
+            cursor += sizeof(command);
+        }
+    }
     memcpy( cursor, *data, *data_size );
     cursor += *data_size;
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
@@ -495,6 +934,9 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
 {
     struct dcomp_resource_view *resource, *next;
 
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+        if (resource->parent) resource->connection_announced = TRUE;
+
     LIST_FOR_EACH_ENTRY_SAFE( resource, next, &view->resources, struct dcomp_resource_view, entry )
     {
         if (resource->released)
@@ -505,6 +947,13 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
         else
         {
             resource->announced = TRUE;
+            resource->remove_dirty = FALSE;
+            resource->root_dirty = FALSE;
+            resource->children_clear_dirty = FALSE;
+            resource->visual_modes_dirty = FALSE;
+            resource->visual_flags_dirty = FALSE;
+            resource->visual_relative_size_dirty = FALSE;
+            resource->visual_size_dirty = FALSE;
             if (resource->shared_section_bound) resource->shared_section_announced = TRUE;
         }
     }

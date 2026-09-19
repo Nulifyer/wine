@@ -1070,6 +1070,227 @@ done:
     CloseHandle( event );
 }
 
+static void check_dcomp_batch_payload( const struct dcomposition_connection_batch *record,
+                                       UINT channel, const UINT *expected, UINT expected_size,
+                                       const char *context )
+{
+    ok( !!record, "%s batch record is null\n", context );
+    if (!record) return;
+    ok( record->type == 7, "%s got record type %u\n", context, record->type );
+    ok( record->u.batch.channel == channel, "%s got channel %#x\n",
+        context, record->u.batch.channel );
+    ok( record->u.batch.size == expected_size, "%s got batch size %u, expected %u\n",
+        context, record->u.batch.size, expected_size );
+    ok( record->u.batch.size != expected_size ||
+        !memcmp( record->u.batch.data, expected, expected_size ),
+        "%s got unexpected batch payload\n", context );
+}
+
+static void test_visual_target_root_lifecycle(void)
+{
+    static const UINT expected_initial[] = {
+        16, 0x28, 1, 0xb8,
+        16, 0x28, 2, 0xb8,
+        16, 0x28, 3, 0xb8,
+        16, 0x28, 4, 13,
+        12, 0x187, 1,
+        24, 0x185, 1, 2, 0, 1,
+    };
+    static const UINT expected_replace[] = {
+        12, 0x187, 1,
+        24, 0x185, 1, 3, 0, 1,
+        12, 0x29, 2,
+    };
+    static const UINT expected_visual_update[] = {
+        24, 0x185, 3, 2, 0, 1,
+        52, 0x19c, 2, 0x7e, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+        16, 0x197, 3, 0x100,
+        20, 0x19b, 3, 0x3f800000, 0x3f800000,
+    };
+    static const UINT expected_visual_clear[] = {12, 0x187, 3};
+    static const UINT expected_clear[] = {
+        12, 0x187, 1,
+        12, 0x29, 3,
+    };
+    static const UINT expected_recreate[] = {
+        16, 0x28, 2, 0xb8,
+        12, 0x187, 1,
+        24, 0x185, 1, 2, 0, 1,
+    };
+    static const UINT expected_target_release[] = {
+        12, 0x187, 1,
+        12, 0x29, 1,
+    };
+    static const UINT expected_root_release[] = {12, 0x29, 2};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL, target_handle = NULL;
+    BYTE *buffer = NULL, state;
+    UINT channel = 0, size = 0x1000, batch, command[32];
+    UINT64 cookie = 0, shared;
+    ULONG processed;
+    BYTE released;
+    NTSTATUS status;
+    HWND hwnd = NULL;
+    BOOL ret;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create visual-root event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got visual-root connection status %#lx\n", status );
+    hwnd = CreateWindowExA( 0, "static", "visual-root target", WS_POPUP, 0, 0, 32, 32,
+                            NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "failed to create visual-root window, error %lu\n", GetLastError() );
+    ret = hwnd && NtUserCreateDCompositionHwndTarget( hwnd, 0, &target_handle );
+    ok( ret, "failed to create visual-root target, status %#lx\n", RtlGetLastNtStatus() );
+    if (!ret) goto done;
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got visual-root channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got visual-root bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got visual-root create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    command[0] = 3; command[1] = 1;
+    shared = (UINT_PTR)target_handle;
+    memcpy( command + 2, &shared, sizeof(shared) );
+    command[4] = 0xb8; command[5] = 0;
+    command[6] = 2; command[7] = 2; command[8] = 0xb8; command[9] = 0;
+    command[10] = 2; command[11] = 3; command[12] = 0xb8; command[13] = 0;
+    command[14] = 2; command[15] = 4; command[16] = 13; command[17] = 0;
+    command[18] = 16; command[19] = 1; command[20] = 0x34; command[21] = 2;
+    memcpy( buffer, command, 88 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 88,
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got initial visual-root process status %#lx\n", status );
+    ok( processed == 5, "got initial visual-root process count %lu\n", processed );
+    ok( !released, "got initial visual-root released flag %#x\n", released );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got initial visual-root commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got initial visual-root batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_initial, sizeof(expected_initial), "initial visual-root" );
+
+    command[0] = 20; command[1] = 3; command[2] = 2; command[3] = 0; command[4] = 0;
+    command[5] = 15; command[6] = 3; command[7] = 0x1f; command[8] = 8;
+    command[9] = 0x3f800000; command[10] = 0x3f800000;
+    command[11] = 11; command[12] = 2; command[13] = 8; command[14] = 0;
+    command[15] = 1; command[16] = 0;
+    command[17] = 11; command[18] = 2; command[19] = 0xe; command[20] = 0;
+    command[21] = 1; command[22] = 0;
+    command[23] = 11; command[24] = 3; command[25] = 0x1b; command[26] = 0;
+    command[27] = 1; command[28] = 0;
+    memcpy( buffer, command, 116 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 116, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got visual update process status %#lx\n", status );
+    ok( processed == 5, "got visual update process count %lu\n", processed );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got visual update commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got visual update batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_visual_update,
+                               sizeof(expected_visual_update), "visual update" );
+
+    command[0] = 23; command[1] = 3; command[2] = 0;
+    memcpy( buffer, command, 12 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 12, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got visual clear process status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got visual clear commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got visual clear batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_visual_clear,
+                               sizeof(expected_visual_clear), "visual clear" );
+
+    command[0] = 4; command[1] = 2;
+    command[2] = 16; command[3] = 1; command[4] = 0x34; command[5] = 3;
+    memcpy( buffer, command, 24 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 24, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got replacement process status %#lx\n", status );
+    ok( processed == 2, "got replacement process count %lu\n", processed );
+    ok( released == 1, "got replacement released flag %#x\n", released );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got replacement commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got replacement batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_replace, sizeof(expected_replace), "replacement" );
+
+    command[0] = 4; command[1] = 3;
+    command[2] = 16; command[3] = 1; command[4] = 0x34; command[5] = 0;
+    memcpy( buffer, command, 24 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 24, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got root-clear process status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got root-clear commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got root-clear batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_clear, sizeof(expected_clear), "root-clear" );
+
+    command[0] = 16; command[1] = 1; command[2] = 0x35; command[3] = 0;
+    memcpy( buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got invalid root property status %#lx\n", status );
+    command[1] = 4; command[2] = 0x34;
+    memcpy( buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got generic reference-property status %#lx\n", status );
+    command[1] = 1; command[3] = 4;
+    memcpy( buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got invalid root reference status %#lx\n", status );
+
+    command[0] = 2; command[1] = 2; command[2] = 0xb8; command[3] = 0;
+    command[4] = 16; command[5] = 1; command[6] = 0x34; command[7] = 2;
+    memcpy( buffer, command, 32 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 32, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got root recreation process status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got root recreation commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got root recreation batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_recreate, sizeof(expected_recreate), "root recreation" );
+
+    command[0] = 4; command[1] = 1;
+    memcpy( buffer, command, 8 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 8, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got target release process status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got target release commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got target release batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_target_release,
+                               sizeof(expected_target_release), "target release" );
+
+    command[0] = 4; command[1] = 2;
+    memcpy( buffer, command, 8 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 8, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got retained root release process status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got retained root release commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got retained root release batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_root_release,
+                               sizeof(expected_root_release), "retained root release" );
+
+done:
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (target_handle) CloseHandle( target_handle );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    if (hwnd) DestroyWindow( hwnd );
+    CloseHandle( event );
+}
+
 static void test_hwnd_target_lifecycle(void)
 {
     BYTE *buffer = (BYTE *)0xdeadbeef;
@@ -1538,6 +1759,7 @@ START_TEST(dcomp)
     test_channel_lifetime();
     test_hwnd_target_lifecycle();
     test_connection_queue();
+    test_visual_target_root_lifecycle();
     test_shared_section_lifecycle();
     test_frame_lifecycle();
     test_resource_retirement();
