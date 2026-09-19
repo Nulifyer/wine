@@ -4956,6 +4956,30 @@ struct alpc_message_info
     client_ptr_t connection;   /* private 64-bit connection value */
 @END
 
+/* Create an owner-writable section retained by a DirectComposition resource. */
+@REQ(create_dcomp_shared_section)
+    unsigned int channel;      /* owner channel ID */
+    unsigned int resource;     /* shared-section resource ID */
+    mem_size_t   size;         /* requested section size */
+@REPLY
+    obj_handle_t section;      /* owner read/write section handle */
+@END
+
+/* Open a bound shared section read-only in the channel consumer process. */
+@REQ(get_dcomp_shared_section_update)
+    unsigned int channel;      /* owner channel ID */
+    unsigned int resource;     /* shared-section resource ID */
+@REPLY
+    obj_handle_t section;      /* consumer-process read-only section handle */
+    mem_size_t   size;         /* bound section size */
+@END
+
+/* Release the channel's reference to a bound shared section. */
+@REQ(release_dcomp_shared_section)
+    unsigned int channel;      /* owner channel ID */
+    unsigned int resource;     /* shared-section resource ID */
+@END
+
 /* Pop one record from a DWM connection's pending batch queue. */
 @REQ(get_dcomp_connection_batch)
     obj_handle_t connection;   /* DWM connection handle */

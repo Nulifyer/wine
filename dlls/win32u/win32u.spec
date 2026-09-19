@@ -18,7 +18,7 @@
 @ stub -syscall NtDCompositionCommitSynchronizationObject
 @ stdcall -syscall NtDCompositionConfirmFrame(long ptr)
 @ stub -syscall NtDCompositionConnectPipe
-@ stub -syscall NtDCompositionCreateAndBindSharedSection
+@ stdcall -syscall NtDCompositionCreateAndBindSharedSection(long long long ptr)
 @ stdcall -syscall NtDCompositionCreateChannel(ptr ptr ptr long)
 @ stdcall -syscall NtDCompositionCreateConnection(long long ptr)
 @ stub -syscall NtDCompositionCreateDwmChannel

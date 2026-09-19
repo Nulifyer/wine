@@ -382,6 +382,9 @@ DECL_HANDLER(end_token_manager_thread);
 DECL_HANDLER(create_dcomp_channel);
 DECL_HANDLER(destroy_dcomp_channel);
 DECL_HANDLER(set_dcomp_channel_connection);
+DECL_HANDLER(create_dcomp_shared_section);
+DECL_HANDLER(get_dcomp_shared_section_update);
+DECL_HANDLER(release_dcomp_shared_section);
 DECL_HANDLER(get_dcomp_connection_batch);
 DECL_HANDLER(release_all_dcomp_resources);
 DECL_HANDLER(get_deleted_dcomp_resources);
@@ -782,6 +785,9 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_create_dcomp_channel,
     (req_handler)req_destroy_dcomp_channel,
     (req_handler)req_set_dcomp_channel_connection,
+    (req_handler)req_create_dcomp_shared_section,
+    (req_handler)req_get_dcomp_shared_section_update,
+    (req_handler)req_release_dcomp_shared_section,
     (req_handler)req_get_dcomp_connection_batch,
     (req_handler)req_release_all_dcomp_resources,
     (req_handler)req_get_deleted_dcomp_resources,
@@ -2929,6 +2935,21 @@ C_ASSERT( offsetof(struct set_dcomp_channel_connection_request, channel) == 12 )
 C_ASSERT( offsetof(struct set_dcomp_channel_connection_request, connection_id) == 16 );
 C_ASSERT( offsetof(struct set_dcomp_channel_connection_request, connection) == 24 );
 C_ASSERT( sizeof(struct set_dcomp_channel_connection_request) == 32 );
+C_ASSERT( offsetof(struct create_dcomp_shared_section_request, channel) == 12 );
+C_ASSERT( offsetof(struct create_dcomp_shared_section_request, resource) == 16 );
+C_ASSERT( offsetof(struct create_dcomp_shared_section_request, size) == 24 );
+C_ASSERT( sizeof(struct create_dcomp_shared_section_request) == 32 );
+C_ASSERT( offsetof(struct create_dcomp_shared_section_reply, section) == 8 );
+C_ASSERT( sizeof(struct create_dcomp_shared_section_reply) == 16 );
+C_ASSERT( offsetof(struct get_dcomp_shared_section_update_request, channel) == 12 );
+C_ASSERT( offsetof(struct get_dcomp_shared_section_update_request, resource) == 16 );
+C_ASSERT( sizeof(struct get_dcomp_shared_section_update_request) == 24 );
+C_ASSERT( offsetof(struct get_dcomp_shared_section_update_reply, section) == 8 );
+C_ASSERT( offsetof(struct get_dcomp_shared_section_update_reply, size) == 16 );
+C_ASSERT( sizeof(struct get_dcomp_shared_section_update_reply) == 24 );
+C_ASSERT( offsetof(struct release_dcomp_shared_section_request, channel) == 12 );
+C_ASSERT( offsetof(struct release_dcomp_shared_section_request, resource) == 16 );
+C_ASSERT( sizeof(struct release_dcomp_shared_section_request) == 24 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_request, connection) == 12 );
 C_ASSERT( sizeof(struct get_dcomp_connection_batch_request) == 16 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, type) == 8 );

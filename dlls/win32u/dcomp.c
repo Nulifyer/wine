@@ -67,6 +67,8 @@ struct dcomp_resource_view
     UINT type;
     BOOL announced;
     BOOL released;
+    BOOL shared_section_bound;
+    BOOL shared_section_announced;
 };
 
 struct dcomp_connection_batch_view
@@ -123,6 +125,42 @@ static struct dcomp_resource_view *find_any_dcomp_resource_view( struct dcomp_ch
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
         if (resource->id == id) return resource;
     return NULL;
+}
+
+static NTSTATUS release_dcomp_shared_section( UINT channel, UINT resource )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( release_dcomp_shared_section )
+    {
+        req->channel = channel;
+        req->resource = resource;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS get_dcomp_shared_section_update( UINT channel, UINT resource,
+                                                  UINT64 *section, UINT64 *size )
+{
+    NTSTATUS status;
+
+    *section = 0;
+    *size = 0;
+    SERVER_START_REQ( get_dcomp_shared_section_update )
+    {
+        req->channel = channel;
+        req->resource = resource;
+        status = wine_server_call( req );
+        if (!status)
+        {
+            *section = (UINT_PTR)wine_server_ptr_handle( reply->section );
+            *size = reply->size;
+        }
+    }
+    SERVER_END_REQ;
+    return status;
 }
 
 static void free_dcomp_resource_views( struct dcomp_channel_view *view )
@@ -261,6 +299,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, const B
         {
             memcpy( &id, buffer + 4, sizeof(id) );
             if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
+            if (resource->shared_section_bound)
+            {
+                status = release_dcomp_shared_section( view->channel, resource->id );
+                if (status) return status;
+                resource->shared_section_bound = FALSE;
+            }
             if (resource->announced) resource->released = TRUE;
             else
             {
@@ -378,10 +422,13 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
     struct dcomp_resource_view *resource;
     data_size_t resource_size = 0;
     BYTE *new_data, *cursor;
+    NTSTATUS status;
 
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
     {
         if (!resource->announced) resource_size += 16;
+        if (resource->shared_section_bound && !resource->shared_section_announced &&
+            !resource->released) resource_size += 28;
         else if (resource->released) resource_size += 12;
     }
     if (resource_size > DCOMP_PROTOCOL_MAX_SIZE - *data_size) return STATUS_INVALID_PARAMETER;
@@ -400,6 +447,30 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         command[3] = resource->type;
         memcpy( cursor, command, sizeof(command) );
         cursor += sizeof(command);
+    }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        UINT64 section, section_size;
+        UINT value;
+
+        if (!resource->shared_section_bound || resource->shared_section_announced ||
+            resource->released) continue;
+        if ((status = get_dcomp_shared_section_update( view->channel, resource->id,
+                                                        &section, &section_size )))
+        {
+            free( new_data );
+            return status;
+        }
+        memset( cursor, 0, 28 );
+        value = 28;
+        memcpy( cursor, &value, sizeof(value) );
+        value = 0x1d1; /* MILCMD_SHAREDSECTION_UPDATE */
+        memcpy( cursor + 4, &value, sizeof(value) );
+        memcpy( cursor + 8, &resource->id, sizeof(resource->id) );
+        memcpy( cursor + 12, &section, sizeof(section) );
+        value = (UINT)section_size;
+        memcpy( cursor + 20, &value, sizeof(value) );
+        cursor += 28;
     }
     memcpy( cursor, *data, *data_size );
     cursor += *data_size;
@@ -431,7 +502,11 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
             list_remove( &resource->entry );
             free( resource );
         }
-        else resource->announced = TRUE;
+        else
+        {
+            resource->announced = TRUE;
+            if (resource->shared_section_bound) resource->shared_section_announced = TRUE;
+        }
     }
 }
 
@@ -1145,6 +1220,50 @@ failed:
         wine_server_call( req );
     }
     SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionCreateAndBindSharedSection( UINT channel, UINT resource_id,
+                                                            UINT64 size, HANDLE *section_handle )
+{
+    struct dcomp_resource_view *resource;
+    struct dcomp_channel_view *view;
+    HANDLE section = NULL;
+    NTSTATUS status;
+
+    TRACE( "channel %#x, resource %#x, size %s, section_handle %p\n", channel, resource_id,
+           wine_dbgstr_longlong(size), section_handle );
+
+    pthread_mutex_lock( &dcomp_channel_lock );
+    if (!(view = find_dcomp_channel_view( channel ))) status = STATUS_ACCESS_DENIED;
+    else if (!(resource = find_dcomp_resource_view( view, resource_id )) ||
+             resource->type != 0x9d || resource->shared_section_bound)
+        status = STATUS_INVALID_PARAMETER;
+    else
+    {
+        SERVER_START_REQ( create_dcomp_shared_section )
+        {
+            req->channel = channel;
+            req->resource = resource_id;
+            req->size = size;
+            status = wine_server_call( req );
+            if (!status) section = wine_server_ptr_handle( reply->section );
+        }
+        SERVER_END_REQ;
+        if (!status) resource->shared_section_bound = TRUE;
+    }
+    pthread_mutex_unlock( &dcomp_channel_lock );
+    if (status) return status;
+
+    __TRY
+    {
+        *section_handle = section;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
     return status;
 }
 

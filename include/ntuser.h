@@ -771,6 +771,8 @@ W32KAPI NTSTATUS WINAPI NtMITCoreMsgKOpenConnectionTo( UINT selector, const void
 W32KAPI BOOL WINAPI NtMITSetInputCallbacks( void *callback );
 W32KAPI BOOL WINAPI NtUserRegisterManipulationThread( void *registration );
 W32KAPI NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection );
+W32KAPI NTSTATUS WINAPI NtDCompositionCreateAndBindSharedSection( UINT channel, UINT resource_id,
+                                                                   UINT64 size, HANDLE *section );
 W32KAPI NTSTATUS WINAPI NtDCompositionCreateChannel( UINT *channel, UINT *section_size,
                                                       void **mapped_address, UINT flags );
 W32KAPI NTSTATUS WINAPI NtDCompositionDestroyChannel( UINT channel );

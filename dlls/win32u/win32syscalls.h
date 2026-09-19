@@ -20,7 +20,7 @@
     SYSCALL_ENTRY( 0x1010, NtDCompositionCommitSynchronizationObject, 0 ) \
     SYSCALL_ENTRY( 0x1011, NtDCompositionConfirmFrame, 8 ) \
     SYSCALL_ENTRY( 0x1012, NtDCompositionConnectPipe, 0 ) \
-    SYSCALL_ENTRY( 0x1013, NtDCompositionCreateAndBindSharedSection, 0 ) \
+    SYSCALL_ENTRY( 0x1013, NtDCompositionCreateAndBindSharedSection, 16 ) \
     SYSCALL_ENTRY( 0x1014, NtDCompositionCreateChannel, 16 ) \
     SYSCALL_ENTRY( 0x1015, NtDCompositionCreateConnection, 12 ) \
     SYSCALL_ENTRY( 0x1016, NtDCompositionCreateDwmChannel, 0 ) \
@@ -1562,7 +1562,7 @@
     SYSCALL_ENTRY( 0x1010, NtDCompositionCommitSynchronizationObject, 0 ) \
     SYSCALL_ENTRY( 0x1011, NtDCompositionConfirmFrame, 16 ) \
     SYSCALL_ENTRY( 0x1012, NtDCompositionConnectPipe, 0 ) \
-    SYSCALL_ENTRY( 0x1013, NtDCompositionCreateAndBindSharedSection, 0 ) \
+    SYSCALL_ENTRY( 0x1013, NtDCompositionCreateAndBindSharedSection, 32 ) \
     SYSCALL_ENTRY( 0x1014, NtDCompositionCreateChannel, 32 ) \
     SYSCALL_ENTRY( 0x1015, NtDCompositionCreateConnection, 24 ) \
     SYSCALL_ENTRY( 0x1016, NtDCompositionCreateDwmChannel, 0 ) \
@@ -3101,7 +3101,6 @@
     SYSCALL_STUB( NtDCompositionBoostCompositorClock ) \
     SYSCALL_STUB( NtDCompositionCommitSynchronizationObject ) \
     SYSCALL_STUB( NtDCompositionConnectPipe ) \
-    SYSCALL_STUB( NtDCompositionCreateAndBindSharedSection ) \
     SYSCALL_STUB( NtDCompositionCreateDwmChannel ) \
     SYSCALL_STUB( NtDCompositionCreateSharedResourceHandle ) \
     SYSCALL_STUB( NtDCompositionCreateSynchronizationObject ) \

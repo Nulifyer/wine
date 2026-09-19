@@ -922,6 +922,154 @@ done:
     CloseHandle( event );
 }
 
+static void test_shared_section_lifecycle(void)
+{
+    struct dcomp_test_protocol_list protocol_list;
+    struct dcomposition_connection_batch *record = (void *)0xdeadbeef;
+    HANDLE event, connection = NULL, section = (HANDLE)0xdeadbeef, consumer_section = NULL;
+    BYTE *buffer = (BYTE *)0xdeadbeef;
+    UINT channel = 0xcccccccc, channel_size = 0x1000, batch;
+    UINT64 cookie = 0x1122334455667788, consumer_value;
+    SIZE_T view_size;
+    ULONG processed;
+    BYTE released, state;
+    void *address;
+    NTSTATUS status;
+
+    init_dcomp_test_protocol_list( &protocol_list );
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create shared-section event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &channel_size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got create record status %#lx record %p type %u\n", status, record,
+        record ? record->type : 0 );
+
+    ((UINT *)buffer)[0] = 2;
+    ((UINT *)buffer)[1] = 1;
+    ((UINT *)buffer)[2] = 0x9d;
+    ((UINT *)buffer)[3] = 0;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got shared resource process status %#lx\n", status );
+    ((UINT *)buffer)[1] = 2;
+    ((UINT *)buffer)[2] = 13;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got ordinary resource process status %#lx\n", status );
+
+    status = NtDCompositionCreateAndBindSharedSection( 0xdeadbeef, 1, 0x2000, &section );
+    ok( status == STATUS_ACCESS_DENIED, "got invalid-channel status %#lx\n", status );
+    ok( section == (HANDLE)0xdeadbeef, "invalid-channel changed section to %p\n", section );
+    status = NtDCompositionCreateAndBindSharedSection( channel, 3, 0x2000, &section );
+    ok( status == STATUS_INVALID_PARAMETER, "got absent-resource status %#lx\n", status );
+    status = NtDCompositionCreateAndBindSharedSection( channel, 2, 0x2000, &section );
+    ok( status == STATUS_INVALID_PARAMETER, "got wrong-resource-type status %#lx\n", status );
+    ((UINT *)buffer)[0] = 4;
+    ((UINT *)buffer)[1] = 2;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 8, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got ordinary resource cleanup status %#lx\n", status );
+    status = NtDCompositionCreateAndBindSharedSection( channel, 1, 0, &section );
+    ok( status == STATUS_INVALID_PARAMETER, "got zero-size status %#lx\n", status );
+
+    section = NULL;
+    status = NtDCompositionCreateAndBindSharedSection( channel, 1, 0x2000, &section );
+    ok( status == STATUS_SUCCESS, "got create-and-bind status %#lx\n", status );
+    ok( !!section, "got null owner section\n" );
+    status = NtDCompositionCreateAndBindSharedSection( channel, 1, 0x2000, &consumer_section );
+    ok( status == STATUS_INVALID_PARAMETER, "got duplicate-bind status %#lx\n", status );
+    ok( !consumer_section, "duplicate bind changed output to %p\n", consumer_section );
+
+    address = NULL;
+    view_size = 0;
+    status = NtMapViewOfSection( section, GetCurrentProcess(), &address, 0, 0, NULL, &view_size,
+                                 ViewUnmap, 0, PAGE_READWRITE );
+    ok( status == STATUS_SUCCESS, "got owner map status %#lx\n", status );
+    ok( view_size == 0x2000, "got owner map size %Iu\n", view_size );
+    if (!status)
+    {
+        *(UINT *)address = 0x12345678;
+        NtUnmapViewOfSection( GetCurrentProcess(), address );
+    }
+    CloseHandle( section );
+    section = NULL;
+
+    state = 0xcc;
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL,
+                                           &protocol_list.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got shared-section commit status %#lx\n", status );
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 7,
+        "got shared batch status %#lx record %p type %u\n", status, record,
+        record ? record->type : 0 );
+    if (!status && record && record->type == 7)
+    {
+        ok( record->u.batch.size == 52, "got shared batch size %u\n", record->u.batch.size );
+        ok( *(UINT *)(record->u.batch.data + 16) == 28,
+            "got shared update size %u\n", *(UINT *)(record->u.batch.data + 16) );
+        ok( *(UINT *)(record->u.batch.data + 20) == 0x1d1,
+            "got shared update opcode %#x\n", *(UINT *)(record->u.batch.data + 20) );
+        ok( *(UINT *)(record->u.batch.data + 24) == 1,
+            "got shared update resource %#x\n", *(UINT *)(record->u.batch.data + 24) );
+        memcpy( &consumer_value, record->u.batch.data + 28, sizeof(consumer_value) );
+        consumer_section = (HANDLE)(UINT_PTR)consumer_value;
+        ok( !!consumer_section, "got null consumer section\n" );
+        ok( *(UINT *)(record->u.batch.data + 36) == 0x2000,
+            "got shared update section size %#x\n", *(UINT *)(record->u.batch.data + 36) );
+        address = NULL;
+        view_size = 0;
+        status = NtMapViewOfSection( consumer_section, GetCurrentProcess(), &address, 0, 0, NULL,
+                                     &view_size, ViewUnmap, 0, PAGE_READONLY );
+        ok( status == STATUS_SUCCESS, "got consumer map status %#lx\n", status );
+        ok( view_size == 0x2000, "got consumer map size %Iu\n", view_size );
+        if (!status)
+        {
+            ok( *(UINT *)address == 0x12345678, "got shared value %#x\n", *(UINT *)address );
+            NtUnmapViewOfSection( GetCurrentProcess(), address );
+        }
+        address = NULL;
+        view_size = 0;
+        status = NtMapViewOfSection( consumer_section, GetCurrentProcess(), &address, 0, 0, NULL,
+                                     &view_size, ViewUnmap, 0, PAGE_READWRITE );
+        ok( status == STATUS_ACCESS_DENIED, "got consumer write-map status %#lx\n", status );
+        CloseHandle( consumer_section );
+        consumer_section = NULL;
+    }
+
+    ((UINT *)buffer)[0] = 4;
+    ((UINT *)buffer)[1] = 1;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 8, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got shared resource release status %#lx\n", status );
+    state = 0xcc;
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL,
+                                           &protocol_list.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got shared release commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got shared release batch status %#lx\n", status );
+
+    ((UINT *)buffer)[0] = 2;
+    ((UINT *)buffer)[1] = 1;
+    ((UINT *)buffer)[2] = 0x9d;
+    ((UINT *)buffer)[3] = 0;
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got reused shared resource status %#lx\n", status );
+    status = NtDCompositionCreateAndBindSharedSection( channel, 1, 0x1000, &section );
+    ok( status == STATUS_SUCCESS, "got reused shared bind status %#lx\n", status );
+
+done:
+    if (consumer_section) CloseHandle( consumer_section );
+    if (section) CloseHandle( section );
+    if (channel != 0xcccccccc) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_hwnd_target_lifecycle(void)
 {
     BYTE *buffer = (BYTE *)0xdeadbeef;
@@ -1390,6 +1538,7 @@ START_TEST(dcomp)
     test_channel_lifetime();
     test_hwnd_target_lifecycle();
     test_connection_queue();
+    test_shared_section_lifecycle();
     test_frame_lifecycle();
     test_resource_retirement();
     test_composition_surface_lifecycle();

@@ -4221,6 +4221,36 @@ static void dump_set_dcomp_channel_connection_request( const struct set_dcomp_ch
     dump_uint64( ", connection=", &req->connection );
 }
 
+static void dump_create_dcomp_shared_section_request( const struct create_dcomp_shared_section_request *req )
+{
+    fprintf( stderr, " channel=%08x", req->channel );
+    fprintf( stderr, ", resource=%08x", req->resource );
+    dump_uint64( ", size=", &req->size );
+}
+
+static void dump_create_dcomp_shared_section_reply( const struct create_dcomp_shared_section_reply *req )
+{
+    fprintf( stderr, " section=%04x", req->section );
+}
+
+static void dump_get_dcomp_shared_section_update_request( const struct get_dcomp_shared_section_update_request *req )
+{
+    fprintf( stderr, " channel=%08x", req->channel );
+    fprintf( stderr, ", resource=%08x", req->resource );
+}
+
+static void dump_get_dcomp_shared_section_update_reply( const struct get_dcomp_shared_section_update_reply *req )
+{
+    fprintf( stderr, " section=%04x", req->section );
+    dump_uint64( ", size=", &req->size );
+}
+
+static void dump_release_dcomp_shared_section_request( const struct release_dcomp_shared_section_request *req )
+{
+    fprintf( stderr, " channel=%08x", req->channel );
+    fprintf( stderr, ", resource=%08x", req->resource );
+}
+
 static void dump_get_dcomp_connection_batch_request( const struct get_dcomp_connection_batch_request *req )
 {
     fprintf( stderr, " connection=%04x", req->connection );
@@ -4786,6 +4816,9 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_channel_request,
     (dump_func)dump_destroy_dcomp_channel_request,
     (dump_func)dump_set_dcomp_channel_connection_request,
+    (dump_func)dump_create_dcomp_shared_section_request,
+    (dump_func)dump_get_dcomp_shared_section_update_request,
+    (dump_func)dump_release_dcomp_shared_section_request,
     (dump_func)dump_get_dcomp_connection_batch_request,
     (dump_func)dump_release_all_dcomp_resources_request,
     (dump_func)dump_get_deleted_dcomp_resources_request,
@@ -5185,6 +5218,9 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_create_dcomp_channel_reply,
     NULL,
+    NULL,
+    (dump_func)dump_create_dcomp_shared_section_reply,
+    (dump_func)dump_get_dcomp_shared_section_update_reply,
     NULL,
     (dump_func)dump_get_dcomp_connection_batch_reply,
     (dump_func)dump_release_all_dcomp_resources_reply,
@@ -5586,6 +5622,9 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "create_dcomp_channel",
     "destroy_dcomp_channel",
     "set_dcomp_channel_connection",
+    "create_dcomp_shared_section",
+    "get_dcomp_shared_section_update",
+    "release_dcomp_shared_section",
     "get_dcomp_connection_batch",
     "release_all_dcomp_resources",
     "get_deleted_dcomp_resources",

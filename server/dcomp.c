@@ -100,6 +100,7 @@ struct dcomp_channel
     struct list entry;
     struct mapping *section;
     struct list batches;
+    struct list shared_sections;
     struct process *owner;
     struct dcomp_connection *connection;
     struct event *commit_completion_event;
@@ -110,6 +111,14 @@ struct dcomp_channel
     mem_size_t size;
     unsigned int flags;
     unsigned int batch_ids[4];
+};
+
+struct dcomp_shared_section
+{
+    struct list entry;
+    struct mapping *mapping;
+    unsigned int resource;
+    mem_size_t size;
 };
 
 struct dcomp_surface
@@ -334,6 +343,7 @@ static void dcomp_channel_destroy( struct object *obj )
 {
     struct dcomp_channel *channel = (struct dcomp_channel *)obj;
     struct dcomp_batch *batch, *next;
+    struct dcomp_shared_section *section, *section_next;
 
     assert( obj->ops == &dcomp_channel_ops );
     if (channel->connection)
@@ -360,6 +370,13 @@ static void dcomp_channel_destroy( struct object *obj )
         free( batch->data );
         free( batch );
     }
+    LIST_FOR_EACH_ENTRY_SAFE( section, section_next, &channel->shared_sections,
+                              struct dcomp_shared_section, entry )
+    {
+        list_remove( &section->entry );
+        release_object( section->mapping );
+        free( section );
+    }
     if (channel->commit_completion_event) release_object( channel->commit_completion_event );
     list_remove( &channel->entry );
     release_object( channel->owner );
@@ -375,6 +392,23 @@ static struct dcomp_channel *get_dcomp_channel( unsigned int id )
             return (struct dcomp_channel *)grab_object( channel );
     set_error( STATUS_ACCESS_DENIED );
     return NULL;
+}
+
+static struct dcomp_shared_section *find_dcomp_shared_section( struct dcomp_channel *channel,
+                                                               unsigned int resource )
+{
+    struct dcomp_shared_section *section;
+
+    LIST_FOR_EACH_ENTRY( section, &channel->shared_sections, struct dcomp_shared_section, entry )
+        if (section->resource == resource) return section;
+    return NULL;
+}
+
+static void release_dcomp_shared_section( struct dcomp_shared_section *section )
+{
+    list_remove( &section->entry );
+    release_object( section->mapping );
+    free( section );
 }
 
 static struct dcomp_channel *find_dcomp_channel( unsigned int id )
@@ -837,6 +871,7 @@ DECL_HANDLER(create_dcomp_channel)
     channel->batch_ids[2] = 0;
     channel->batch_ids[3] = 0;
     list_init( &channel->batches );
+    list_init( &channel->shared_sections );
     list_add_tail( &dcomp_channels, &channel->entry );
 
     reply->section = alloc_handle_no_access_check( current->process, section,
@@ -919,6 +954,75 @@ DECL_HANDLER(set_dcomp_channel_connection)
     }
 
 done:
+    release_object( channel );
+}
+
+DECL_HANDLER(create_dcomp_shared_section)
+{
+    struct dcomp_shared_section *section;
+    struct dcomp_channel *channel;
+
+    reply->section = 0;
+    if (!(channel = get_dcomp_channel( req->channel ))) return;
+    if (find_dcomp_shared_section( channel, req->resource ))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+    if (!(section = mem_alloc( sizeof(*section) ))) goto done;
+    if (!(section->mapping = create_anonymous_mapping( req->size,
+                                                        FILE_READ_DATA | FILE_WRITE_DATA )))
+    {
+        free( section );
+        goto done;
+    }
+    if (!(reply->section = alloc_handle_no_access_check( current->process, section->mapping,
+                                                          SECTION_MAP_READ | SECTION_MAP_WRITE, 0 )))
+    {
+        release_object( section->mapping );
+        free( section );
+        goto done;
+    }
+    section->resource = req->resource;
+    section->size = req->size;
+    list_add_tail( &channel->shared_sections, &section->entry );
+
+done:
+    release_object( channel );
+}
+
+DECL_HANDLER(get_dcomp_shared_section_update)
+{
+    struct dcomp_shared_section *section;
+    struct dcomp_channel *channel;
+
+    reply->section = 0;
+    reply->size = 0;
+    if (!(channel = get_dcomp_channel( req->channel ))) return;
+    if (!(section = find_dcomp_shared_section( channel, req->resource )))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+    reply->size = section->size;
+    if (channel->connection)
+        reply->section = alloc_handle_no_access_check( channel->connection->owner, section->mapping,
+                                                        SECTION_MAP_READ, 0 );
+
+done:
+    release_object( channel );
+}
+
+DECL_HANDLER(release_dcomp_shared_section)
+{
+    struct dcomp_shared_section *section;
+    struct dcomp_channel *channel;
+
+    if (!(channel = get_dcomp_channel( req->channel ))) return;
+    if (!(section = find_dcomp_shared_section( channel, req->resource )))
+        set_error( STATUS_INVALID_PARAMETER );
+    else
+        release_dcomp_shared_section( section );
     release_object( channel );
 }
 
