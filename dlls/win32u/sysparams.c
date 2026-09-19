@@ -42,6 +42,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(system);
 
 #define DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO  (-20)
 #define DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO2 (-39)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INFO_INTERNAL   (-13)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_MONITOR_INTERNAL_INFO  (-7)
 
 #define DISPLAYCONFIG_SESSION_REMOTE_DRIVER       0x01
 #define DISPLAYCONFIG_SESSION_REMOTE_WDDM         0x02
@@ -75,6 +77,40 @@ struct displayconfig_session_info2
     LUID terminal_luid;
 };
 
+struct displayconfig_target_info_internal
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY output_technology;
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY base_output_technology;
+    UINT usage;
+    UINT flags;
+};
+
+struct displayconfig_monitor_internal_info
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    WCHAR monitor_unique_name[260];
+    LONG red_primary[2];
+    LONG green_primary[2];
+    LONG blue_primary[2];
+    LONG white_point[2];
+    ULONG min_luminance;
+    ULONG max_luminance;
+    ULONG max_full_frame_luminance;
+    UINT colorspace_support;
+    UINT flags;
+    BYTE brightness_caps[316];
+    UINT usage_subclass;
+    UINT display_technology;
+    UINT native_width;
+    UINT native_height;
+    UINT physical_width_mm;
+    UINT physical_height_mm;
+    UINT docked_orientation;
+    UINT display_hdr_certifications;
+    UINT display_hdr_certifications2;
+};
+
 C_ASSERT( offsetof(struct displayconfig_session_info, remote_driver) == 20 );
 C_ASSERT( offsetof(struct displayconfig_session_info, connection) == 44 );
 C_ASSERT( offsetof(struct displayconfig_session_info, terminal_luid) == 48 );
@@ -83,6 +119,12 @@ C_ASSERT( offsetof(struct displayconfig_session_info2, flags) == 20 );
 C_ASSERT( offsetof(struct displayconfig_session_info2, connection) == 24 );
 C_ASSERT( offsetof(struct displayconfig_session_info2, terminal_luid) == 28 );
 C_ASSERT( sizeof(struct displayconfig_session_info2) == 36 );
+C_ASSERT( offsetof(struct displayconfig_target_info_internal, output_technology) == 20 );
+C_ASSERT( sizeof(struct displayconfig_target_info_internal) == 36 );
+C_ASSERT( offsetof(struct displayconfig_monitor_internal_info, monitor_unique_name) == 20 );
+C_ASSERT( offsetof(struct displayconfig_monitor_internal_info, brightness_caps) == 592 );
+C_ASSERT( offsetof(struct displayconfig_monitor_internal_info, usage_subclass) == 908 );
+C_ASSERT( sizeof(struct displayconfig_monitor_internal_info) == 944 );
 
 static LONG dpi_context; /* process DPI awareness context */
 
@@ -104,8 +146,8 @@ static const char devpkey_device_driver_provider[] = "Properties\\{A8B865DD-2E3D
 static const char devpkey_device_bus_number[] = "Properties\\{A45C254E-DF1C-4EFD-8020-67D146A850E0}\\0017";
 static const char devpkey_device_removal_policy[] = "Properties\\{A45C254E-DF1C-4EFD-8020-67D146A850E0}\\0021";
 static const char devpropkey_device_ispresentA[] = "Properties\\{540B947E-8B40-45BC-A8A2-6A0B894CBDA2}\\0005";
-static const char devpropkey_monitor_gpu_luidA[] = "Properties\\{CA085853-16CE-48AA-B114-DE9C72334223}\\0001";
-static const char devpropkey_monitor_output_idA[] = "Properties\\{CA085853-16CE-48AA-B114-DE9C72334223}\\0002";
+static const char devpropkey_monitor_adapter_luidA[] = "Properties\\{CA085853-16CE-48AA-B114-DE9C72334223}\\0001";
+static const char devpropkey_monitor_target_idA[] = "Properties\\{CA085853-16CE-48AA-B114-DE9C72334223}\\0002";
 static const char wine_devpropkey_monitor_rcworkA[] = "Properties\\{233a9ef3-afc4-4abd-b564-c32f21f1535b}\\0004";
 static const char wine_devpropkey_monitor_hdr_enabledA[] = "Properties\\{233a9ef3-afc4-4abd-b564-c32f21f1535b}\\0006";
 
@@ -185,6 +227,7 @@ struct edid_monitor_info
     WCHAR monitor_name[14];
     /* MONITOR_INFO_HAS_PREFERRED_MODE */
     unsigned int preferred_width, preferred_height;
+    unsigned int physical_width_mm, physical_height_mm;
 };
 
 struct monitor
@@ -476,6 +519,8 @@ static void get_monitor_info_from_edid( struct edid_monitor_info *info, const un
     const char *s;
 
     info->flags = 0;
+    info->physical_width_mm = 0;
+    info->physical_height_mm = 0;
     if (!edid || edid_len < 128) return;
 
     w = (edid[8] << 8) | edid[9]; /* Manufacturer ID, big endian. */
@@ -493,6 +538,15 @@ static void get_monitor_info_from_edid( struct edid_monitor_info *info, const un
     snprintf( info->monitor_id_string + 3, sizeof(info->monitor_id_string) - 3, "%04X", w );
     info->flags = MONITOR_INFO_HAS_MONITOR_ID;
     TRACE( "Monitor id %s.\n", info->monitor_id_string );
+
+    /* EDID stores the maximum image dimensions in whole centimetres.  A zero
+     * dimension has aspect-ratio semantics in newer EDID revisions, so only
+     * expose a physical size when both dimensions are directly available. */
+    if (edid[21] && edid[22])
+    {
+        info->physical_width_mm = edid[21] * 10;
+        info->physical_height_mm = edid[22] * 10;
+    }
 
     for (i = 0; i < 4; ++i)
     {
@@ -802,7 +856,7 @@ static BOOL read_monitor_from_registry( struct monitor *monitor )
     if (!(hkey = reg_open_ascii_key( enum_key, monitor->path ))) return FALSE;
 
     /* Output ID */
-    size = query_reg_subkey_value( hkey, devpropkey_monitor_output_idA,
+    size = query_reg_subkey_value( hkey, devpropkey_monitor_target_idA,
                                    value, sizeof(buffer) );
     if (size != sizeof(monitor->output_id))
     {
@@ -1106,7 +1160,8 @@ struct device_manager_ctx
     DEVMODEW primary;
 };
 
-static void link_device( const char *instance, const char *class )
+static void link_device( const char *instance, const char *class, const LUID *adapter_luid,
+                         const UINT *target_id )
 {
     char buffer[MAX_PATH], *ptr;
     HKEY hkey, subkey;
@@ -1116,12 +1171,12 @@ static void link_device( const char *instance, const char *class )
     snprintf( buffer + pos, ARRAY_SIZE(buffer) - pos, "##?#%s#%s", instance, class );
     for (ptr = buffer + pos; *ptr; ptr++) if (*ptr == '\\') *ptr = '#';
 
-    hkey = reg_create_ascii_key( control_key, buffer, 0, NULL );
+    if (!(hkey = reg_create_ascii_key( control_key, buffer, 0, NULL ))) return;
     set_reg_ascii_value( hkey, "DeviceInstance", instance );
 
     subkey = reg_create_ascii_key( hkey, "#", REG_OPTION_VOLATILE, NULL );
     NtClose( hkey );
-    hkey = subkey;
+    if (!(hkey = subkey)) return;
 
     snprintf( buffer, ARRAY_SIZE(buffer), "\\\\?\\%s#%s", instance, class );
     for (ptr = buffer + 4; *ptr; ptr++) if (*ptr == '\\') *ptr = '#';
@@ -1133,6 +1188,25 @@ static void link_device( const char *instance, const char *class )
         set_reg_value( subkey, linkedW, REG_DWORD, &linked, sizeof(linked) );
         NtClose( subkey );
     }
+
+    if (adapter_luid &&
+        (subkey = reg_create_ascii_key( hkey, devpropkey_monitor_adapter_luidA,
+                                        REG_OPTION_VOLATILE, NULL )))
+    {
+        set_reg_value( subkey, NULL, 0xffff0000 | DEVPROP_TYPE_INT64,
+                       adapter_luid, sizeof(*adapter_luid) );
+        NtClose( subkey );
+    }
+    if (target_id &&
+        (subkey = reg_create_ascii_key( hkey, devpropkey_monitor_target_idA,
+                                        REG_OPTION_VOLATILE, NULL )))
+    {
+        set_reg_value( subkey, NULL, 0xffff0000 | DEVPROP_TYPE_UINT32,
+                       target_id, sizeof(*target_id) );
+        NtClose( subkey );
+    }
+
+    NtClose( hkey );
 }
 
 static BOOL read_gpu_from_registry( struct gpu *gpu )
@@ -1699,8 +1773,8 @@ static BOOL write_gpu_to_registry( const struct gpu *gpu, const struct pci_id *p
     NtClose( hkey );
 
 
-    link_device( gpu->path, guid_devinterface_display_adapterA );
-    link_device( gpu->path, guid_display_device_arrivalA );
+    link_device( gpu->path, guid_devinterface_display_adapterA, NULL, NULL );
+    link_device( gpu->path, guid_display_device_arrivalA, NULL, NULL );
 
     snprintf( buffer, sizeof(buffer), "%s\\%s", directx_keyA, gpu->guid );
     hkey = reg_create_ascii_key( NULL, buffer, REG_OPTION_VOLATILE, NULL );
@@ -2015,16 +2089,16 @@ static BOOL write_monitor_to_registry( struct monitor *monitor, const BYTE *edid
         NtClose( subkey );
     }
 
-    /* DEVPROPKEY_MONITOR_GPU_LUID */
-    if ((subkey = reg_create_ascii_key( hkey, devpropkey_monitor_gpu_luidA, 0, NULL )))
+    /* DEVPKEY_Monitor_AdapterLuid */
+    if ((subkey = reg_create_ascii_key( hkey, devpropkey_monitor_adapter_luidA, 0, NULL )))
     {
         set_reg_value( subkey, NULL, 0xffff0000 | DEVPROP_TYPE_INT64,
                        &monitor->source->gpu->luid, sizeof(monitor->source->gpu->luid) );
         NtClose( subkey );
     }
 
-    /* DEVPROPKEY_MONITOR_OUTPUT_ID */
-    if ((subkey = reg_create_ascii_key( hkey, devpropkey_monitor_output_idA, 0, NULL )))
+    /* DEVPKEY_Monitor_TargetId */
+    if ((subkey = reg_create_ascii_key( hkey, devpropkey_monitor_target_idA, 0, NULL )))
     {
         set_reg_value( subkey, NULL, 0xffff0000 | DEVPROP_TYPE_UINT32,
                        &monitor->output_id, sizeof(monitor->output_id) );
@@ -2046,7 +2120,8 @@ static BOOL write_monitor_to_registry( struct monitor *monitor, const BYTE *edid
     if (!(hkey = reg_create_ascii_key( control_key, buffer, 0, NULL ))) return FALSE;
     NtClose( hkey );
 
-    link_device( monitor->path, guid_devinterface_monitorA );
+    link_device( monitor->path, guid_devinterface_monitorA, &monitor->source->gpu->luid,
+                 &monitor->output_id );
 
     return TRUE;
 }
@@ -3697,6 +3772,14 @@ static DISPLAYCONFIG_PIXELFORMAT get_dc_pixelformat( DWORD dmBitsPerPel )
         return DISPLAYCONFIG_PIXELFORMAT_NONGDI;
 }
 
+static DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY get_monitor_output_technology(void)
+{
+    /* Unix display drivers do not currently expose connector metadata.  Use
+     * the same generic external DisplayPort identity throughout DisplayConfig
+     * until that information is added to the host display adapter contract. */
+    return DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL;
+}
+
 static void set_mode_target_info( DISPLAYCONFIG_MODE_INFO *info, const LUID *gpu_luid, UINT32 target_id,
                                   UINT32 flags, const DEVMODEW *devmode )
 {
@@ -3740,7 +3823,7 @@ static void set_path_target_info( DISPLAYCONFIG_PATH_TARGET_INFO *info, const LU
         info->desktopModeInfoIdx = desktop_mode_index;
     }
     else info->modeInfoIdx = mode_index;
-    info->outputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL;
+    info->outputTechnology = get_monitor_output_technology();
     info->rotation = get_dc_rotation( devmode );
     info->scaling = DISPLAYCONFIG_SCALING_IDENTITY;
     info->refreshRate.Numerator = devmode->dmDisplayFrequency;
@@ -8093,7 +8176,7 @@ NTSTATUS WINAPI NtUserDisplayConfigGetDeviceInfo( DISPLAYCONFIG_DEVICE_INFO_HEAD
                         sizeof(monitor->source->gpu->luid) ))
                 continue;
 
-            target_name->outputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL;
+            target_name->outputTechnology = get_monitor_output_technology();
             snprintf( buffer, ARRAY_SIZE(buffer), "Display%u", monitor->output_id + 1 );
             asciiz_to_unicode( target_name->monitorFriendlyDeviceName, buffer );
             monitor_get_interface_name( monitor, target_name->monitorDevicePath );
@@ -8108,6 +8191,75 @@ NTSTATUS WINAPI NtUserDisplayConfigGetDeviceInfo( DISPLAYCONFIG_DEVICE_INFO_HEAD
                 wcscpy( target_name->monitorFriendlyDeviceName, monitor->edid_info.monitor_name );
                 target_name->flags.friendlyNameFromEdid = 1;
             }
+            ret = STATUS_SUCCESS;
+            break;
+        }
+
+        unlock_display_devices();
+        return ret;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INFO_INTERNAL:
+    {
+        struct displayconfig_target_info_internal *info = (void *)packet;
+        struct monitor *monitor;
+
+        TRACE( "DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INFO_INTERNAL.\n" );
+
+        if (packet->size != sizeof(*info)) return STATUS_INVALID_PARAMETER;
+        if (!lock_display_devices( FALSE )) return STATUS_UNSUCCESSFUL;
+
+        LIST_FOR_EACH_ENTRY(monitor, &monitors, struct monitor, entry)
+        {
+            if (packet->id != monitor->output_id) continue;
+            if (memcmp( &packet->adapterId, &monitor->source->gpu->luid,
+                        sizeof(monitor->source->gpu->luid) ))
+                continue;
+
+            info->output_technology = get_monitor_output_technology();
+            info->base_output_technology = info->output_technology;
+            info->usage = 0; /* DISPLAYCONFIG_TARGET_USAGE_STANDARD */
+            info->flags = 0;
+            ret = STATUS_SUCCESS;
+            break;
+        }
+
+        unlock_display_devices();
+        return ret;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_GET_MONITOR_INTERNAL_INFO:
+    {
+        struct displayconfig_monitor_internal_info *info = (void *)packet;
+        struct monitor *monitor;
+
+        TRACE( "DISPLAYCONFIG_DEVICE_INFO_GET_MONITOR_INTERNAL_INFO.\n" );
+
+        if (packet->size != sizeof(*info)) return STATUS_INVALID_PARAMETER;
+        if (!lock_display_devices( FALSE )) return STATUS_UNSUCCESSFUL;
+
+        LIST_FOR_EACH_ENTRY(monitor, &monitors, struct monitor, entry)
+        {
+            if (packet->id != monitor->output_id) continue;
+            if (memcmp( &packet->adapterId, &monitor->source->gpu->luid,
+                        sizeof(monitor->source->gpu->luid) ))
+                continue;
+
+            memset( info->monitor_unique_name, 0,
+                    sizeof(*info) - offsetof(struct displayconfig_monitor_internal_info,
+                                             monitor_unique_name) );
+            monitor_get_interface_name( monitor, info->monitor_unique_name );
+            if (monitor->edid_info.flags & MONITOR_INFO_HAS_PREFERRED_MODE)
+            {
+                info->native_width = monitor->edid_info.preferred_width;
+                info->native_height = monitor->edid_info.preferred_height;
+            }
+            else
+            {
+                info->native_width = monitor->source->current.dmPelsWidth;
+                info->native_height = monitor->source->current.dmPelsHeight;
+            }
+            info->physical_width_mm = monitor->edid_info.physical_width_mm;
+            info->physical_height_mm = monitor->edid_info.physical_height_mm;
+            info->flags = 1u << 10; /* luminance values use system defaults */
             ret = STATUS_SUCCESS;
             break;
         }
@@ -8380,8 +8532,8 @@ struct d3dkmt_ddisplay_enum_target
 {
     LUID adapter_luid;
     UINT target_id;
+    WCHAR stable_monitor_id[260];
     WCHAR device_interface_path[260];
-    WCHAR monitor_friendly_name[260];
     UINT connection_id;
     UINT target_type;
     UINT hpd_awareness;
@@ -8469,19 +8621,16 @@ NTSTATUS WINAPI NtGdiDdDDIDDisplayEnum( void *arg )
         target.adapter_luid = monitor->source->gpu->luid;
         target.target_id = monitor->output_id;
         target.connection_id = monitor->id;
-        target.target_type = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL;
+        target.target_type = get_monitor_output_technology();
         target.default_docking_orientation = get_dc_rotation( &monitor->source->current );
         target.default_monitor_orientation = get_dc_rotation( &monitor->source->current );
         target.flags = 1; /* connected */
+        /* DispBroker's legacy-to-versioned translation preserves these as the
+         * StableMonitorId and DeviceInterfacePath fields, respectively.  Wine's
+         * monitor interface is stable for the lifetime of the display device
+         * and is the canonical identifier understood by cfgmgr32. */
+        monitor_get_interface_name( monitor, target.stable_monitor_id );
         monitor_get_interface_name( monitor, target.device_interface_path );
-        if (monitor->edid_info.flags & MONITOR_INFO_HAS_MONITOR_NAME)
-            memcpy( target.monitor_friendly_name, monitor->edid_info.monitor_name,
-                    sizeof(monitor->edid_info.monitor_name) );
-        else
-        {
-            snprintf( buffer, ARRAY_SIZE(buffer), "Display%u", monitor->output_id + 1 );
-            asciiz_to_unicode( target.monitor_friendly_name, buffer );
-        }
         desc->targets[i++] = target;
     }
 

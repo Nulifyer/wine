@@ -186,6 +186,8 @@ void (WINAPI *pDevFreeObjectProperties)(ULONG, const DEVPROPERTY *);
 const DEVPROPERTY* (WINAPI *pDevFindProperty)(const DEVPROPKEY *, DEVPROPSTORE, PCWSTR, ULONG, const DEVPROPERTY *);
 
 DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
+DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_ADAPTER_LUID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 1);
+DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_TARGET_ID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 2);
 
 static void test_CM_Get_Device_ID_List_setupapi(void)
 {
@@ -2097,6 +2099,75 @@ static void test_DevGetObjectProperties_invalid( void )
 
     hr = pDevGetObjectProperties( DevObjectTypeDeviceInterface, NULL, 0, 0, NULL, NULL, NULL );
     ok( hr == E_INVALIDARG, "got hr %#lx\n", hr );
+}
+
+static void test_DevGetObjectProperties_monitor( void )
+{
+    DEVPROPCOMPKEY keys[] =
+    {
+        { DEVPROPKEY_MONITOR_ADAPTER_LUID, DEVPROP_STORE_SYSTEM, NULL },
+        { DEVPROPKEY_MONITOR_TARGET_ID, DEVPROP_STORE_SYSTEM, NULL },
+    };
+    const DEVPROPERTY *properties = NULL;
+    WCHAR *interfaces;
+    ULONG count, size;
+    CONFIGRET ret;
+    HRESULT hr;
+    GUID guid = GUID_DEVINTERFACE_MONITOR;
+
+    if (!pDevGetObjectProperties || !pDevFreeObjectProperties)
+    {
+        win_skip( "Functions unavailable, skipping test. (%p %p)\n",
+                  pDevGetObjectProperties, pDevFreeObjectProperties );
+        return;
+    }
+
+    ret = CM_Get_Device_Interface_List_SizeW( &size, &guid, NULL,
+                                               CM_GET_DEVICE_INTERFACE_LIST_PRESENT );
+    ok( ret == CR_SUCCESS, "got %#lx\n", ret );
+    if (ret || size <= 1)
+    {
+        win_skip( "No monitor device interface present, skipping test.\n" );
+        return;
+    }
+
+    interfaces = malloc( size * sizeof(*interfaces) );
+    ok( !!interfaces, "failed to allocate interface list\n" );
+    if (!interfaces) return;
+
+    ret = CM_Get_Device_Interface_ListW( &guid, NULL, interfaces, size,
+                                         CM_GET_DEVICE_INTERFACE_LIST_PRESENT );
+    ok( ret == CR_SUCCESS, "got %#lx\n", ret );
+    if (ret)
+    {
+        free( interfaces );
+        return;
+    }
+
+    hr = pDevGetObjectProperties( DevObjectTypeDeviceInterface, interfaces, DevQueryFlagNone,
+                                  ARRAY_SIZE(keys), keys, &count, &properties );
+    ok( hr == S_OK, "got hr %#lx for %s\n", hr, debugstr_w(interfaces) );
+    if (hr == S_OK)
+    {
+        ok( count == ARRAY_SIZE(keys), "got %lu properties\n", count );
+        if (count >= 1)
+        {
+            ok( IsEqualDevPropKey( properties[0].CompKey.Key, DEVPROPKEY_MONITOR_ADAPTER_LUID ),
+                "got key %s\n", debugstr_DEVPROPKEY( &properties[0].CompKey.Key ) );
+            ok( properties[0].Type == DEVPROP_TYPE_INT64, "got type %#lx\n", properties[0].Type );
+            ok( properties[0].BufferSize == sizeof(LUID), "got size %lu\n", properties[0].BufferSize );
+        }
+        if (count >= 2)
+        {
+            ok( IsEqualDevPropKey( properties[1].CompKey.Key, DEVPROPKEY_MONITOR_TARGET_ID ),
+                "got key %s\n", debugstr_DEVPROPKEY( &properties[1].CompKey.Key ) );
+            ok( properties[1].Type == DEVPROP_TYPE_UINT32, "got type %#lx\n", properties[1].Type );
+            ok( properties[1].BufferSize == sizeof(UINT), "got size %lu\n", properties[1].BufferSize );
+        }
+        pDevFreeObjectProperties( count, properties );
+    }
+
+    free( interfaces );
 }
 
 static void test_DevFindProperty_invalid( void )
@@ -4123,6 +4194,7 @@ START_TEST(cfgmgr32)
     pDevFreeObjectProperties = (void *)GetProcAddress(mod, "DevFreeObjectProperties");
     pDevFindProperty = (void *)GetProcAddress(mod, "DevFindProperty");
 
+    test_DevGetObjectProperties_monitor();
     test_CM_MapCrToWin32Err();
     test_CM_Locate_DevNode();
     test_CM_Enumerate_Classes();

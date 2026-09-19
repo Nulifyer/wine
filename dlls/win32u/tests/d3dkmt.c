@@ -50,6 +50,9 @@
 #define D3DUSAGE_LOCKABLE   0x4000000
 #define D3DUSAGE_OFFSCREEN  0x0400000
 
+#define DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INFO_INTERNAL   (-13)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_MONITOR_INTERNAL_INFO  (-7)
+
 static const WCHAR display1W[] = L"\\\\.\\DISPLAY1";
 
 DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
@@ -97,8 +100,8 @@ struct d3dkmt_ddisplay_enum_target
 {
     LUID adapter_luid;
     UINT target_id;
+    WCHAR stable_monitor_id[260];
     WCHAR device_interface_path[260];
-    WCHAR monitor_friendly_name[260];
     UINT connection_id;
     UINT target_type;
     UINT hpd_awareness;
@@ -120,10 +123,48 @@ struct d3dkmt_ddisplay_enum
     struct d3dkmt_ddisplay_enum_target *targets;
 };
 
+struct displayconfig_target_info_internal
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY output_technology;
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY base_output_technology;
+    UINT usage;
+    UINT flags;
+};
+
+struct displayconfig_monitor_internal_info
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    WCHAR monitor_unique_name[260];
+    LONG red_primary[2];
+    LONG green_primary[2];
+    LONG blue_primary[2];
+    LONG white_point[2];
+    ULONG min_luminance;
+    ULONG max_luminance;
+    ULONG max_full_frame_luminance;
+    UINT colorspace_support;
+    UINT flags;
+    BYTE brightness_caps[316];
+    UINT usage_subclass;
+    UINT display_technology;
+    UINT native_width;
+    UINT native_height;
+    UINT physical_width_mm;
+    UINT physical_height_mm;
+    UINT docked_orientation;
+    UINT display_hdr_certifications;
+    UINT display_hdr_certifications2;
+};
+
 C_ASSERT( sizeof(struct d3dkmt_disp_mgr_create) == 24 );
 C_ASSERT( sizeof(struct d3dkmt_disp_mgr_operation) == 32 );
 C_ASSERT( sizeof(struct d3dkmt_ddisplay_enum_adapter) == 0x238 );
 C_ASSERT( sizeof(struct d3dkmt_ddisplay_enum_target) == 0x440 );
+C_ASSERT( sizeof(struct displayconfig_target_info_internal) == 0x24 );
+C_ASSERT( offsetof(struct displayconfig_monitor_internal_info, brightness_caps) == 592 );
+C_ASSERT( offsetof(struct displayconfig_monitor_internal_info, usage_subclass) == 908 );
+C_ASSERT( sizeof(struct displayconfig_monitor_internal_info) == 0x3b0 );
 
 static void init_alpc_attributes( ALPC_PORT_ATTRIBUTES *attributes )
 {
@@ -1001,11 +1042,42 @@ static void test_D3DKMTDisplayManager(void)
     }
     for (i = 0; i < enumeration.target_count; ++i)
     {
+        struct displayconfig_monitor_internal_info monitor_info = {0};
+        struct displayconfig_target_info_internal target_info = {0};
+
         ok( enumeration.targets[i].adapter_luid.LowPart || enumeration.targets[i].adapter_luid.HighPart,
             "target %u has a zero adapter LUID\n", i );
-        ok( enumeration.targets[i].device_interface_path[0], "target %u has no path\n", i );
-        ok( enumeration.targets[i].monitor_friendly_name[0], "target %u has no friendly name\n", i );
+        ok( enumeration.targets[i].stable_monitor_id[0], "target %u has no stable monitor id\n", i );
+        ok( enumeration.targets[i].device_interface_path[0], "target %u has no device interface path\n", i );
+        ok( !wcsncmp( enumeration.targets[i].device_interface_path, L"\\\\?\\", 4 ),
+            "target %u got invalid device interface path %s\n", i,
+            debugstr_w(enumeration.targets[i].device_interface_path) );
         ok( enumeration.targets[i].flags & 1, "target %u is not connected\n", i );
+
+        target_info.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_INFO_INTERNAL;
+        target_info.header.size = sizeof(target_info);
+        target_info.header.adapterId = enumeration.targets[i].adapter_luid;
+        target_info.header.id = enumeration.targets[i].target_id;
+        status = NtUserDisplayConfigGetDeviceInfo( &target_info.header );
+        ok_nt( STATUS_SUCCESS, status );
+        ok( target_info.output_technology == enumeration.targets[i].target_type,
+            "target %u technology %#x does not match enumeration %#x\n", i,
+            target_info.output_technology, enumeration.targets[i].target_type );
+        ok( target_info.base_output_technology == target_info.output_technology,
+            "target %u base technology %#x does not match %#x\n", i,
+            target_info.base_output_technology, target_info.output_technology );
+        ok( target_info.usage <= 2, "target %u got invalid usage %u\n", i, target_info.usage );
+
+        monitor_info.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_MONITOR_INTERNAL_INFO;
+        monitor_info.header.size = sizeof(monitor_info);
+        monitor_info.header.adapterId = enumeration.targets[i].adapter_luid;
+        monitor_info.header.id = enumeration.targets[i].target_id;
+        status = NtUserDisplayConfigGetDeviceInfo( &monitor_info.header );
+        ok_nt( STATUS_SUCCESS, status );
+        ok( monitor_info.monitor_unique_name[0], "target %u has no monitor unique name\n", i );
+        ok( monitor_info.native_width && monitor_info.native_height,
+            "target %u has invalid native size %ux%u\n", i,
+            monitor_info.native_width, monitor_info.native_height );
     }
     free( enumeration.adapters );
     free( enumeration.targets );
