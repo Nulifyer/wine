@@ -726,6 +726,14 @@ static void test_connection_queue(void)
 
     status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
     ok( status == STATUS_SUCCESS, "got bind status %#lx\n", status );
+    status = NtDCompositionSetChannelConnectionId( channel, 1, 2 );
+    ok( status == STATUS_SUCCESS, "got second-slot bind status %#lx\n", status );
+    status = NtDCompositionSetChannelConnectionId( channel, 1, 3 );
+    ok( status == STATUS_INVALID_PARAMETER, "got occupied second-slot bind status %#lx\n", status );
+    status = NtDCompositionSetChannelConnectionId( channel, 1, 0 );
+    ok( status == STATUS_SUCCESS, "got second-slot clear status %#lx\n", status );
+    status = NtDCompositionSetChannelConnectionId( channel, 1, 3 );
+    ok( status == STATUS_SUCCESS, "got second-slot rebind status %#lx\n", status );
     status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
     ok( status == STATUS_INVALID_PARAMETER, "got repeated bind status %#lx\n", status );
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
@@ -742,6 +750,14 @@ static void test_connection_queue(void)
             wine_dbgstr_longlong(record->u.create.connection) );
         ok( !record->u.create.object, "got create object %p\n", record->u.create.object );
     }
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 0 );
+    ok( status == STATUS_SUCCESS, "got first-slot clear status %#lx\n", status );
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 4 );
+    ok( status == STATUS_SUCCESS, "got first-slot rebind status %#lx\n", status );
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got post-rebind queue status %#lx\n", status );
+    ok( !record, "post-rebind queue returned duplicate create record %p\n", record );
 
     ((UINT *)buffer)[0] = 2;
     ((UINT *)buffer)[1] = 1;

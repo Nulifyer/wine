@@ -102,7 +102,7 @@ struct dcomp_channel
     struct dcomp_connection *connection;
     obj_handle_t owner_handle;
     unsigned int id;
-    int connection_id;
+    client_ptr_t connection_ids[2];
     mem_size_t size;
     unsigned int flags;
     unsigned int batch_ids[4];
@@ -210,9 +210,10 @@ static void dcomp_channel_dump( struct object *obj, int verbose )
     struct dcomp_channel *channel = (struct dcomp_channel *)obj;
 
     assert( obj->ops == &dcomp_channel_ops );
-    fprintf( stderr, "DirectComposition channel id=%#x connection_id=%d size=%llu flags=%#x next_batch=%u\n",
-             channel->id, channel->connection_id, (unsigned long long)channel->size,
-             channel->flags, channel->batch_ids[0] );
+    fprintf( stderr, "DirectComposition channel id=%#x connections=%#llx/%#llx size=%llu flags=%#x next_batch=%u\n",
+             channel->id, (unsigned long long)channel->connection_ids[0],
+             (unsigned long long)channel->connection_ids[1],
+             (unsigned long long)channel->size, channel->flags, channel->batch_ids[0] );
 }
 
 static void dcomp_surface_dump( struct object *obj, int verbose )
@@ -740,7 +741,8 @@ DECL_HANDLER(create_dcomp_channel)
     channel->connection = NULL;
     channel->owner_handle = 0;
     channel->id = id;
-    channel->connection_id = -1;
+    channel->connection_ids[0] = 0;
+    channel->connection_ids[1] = 0;
     channel->size = req->size;
     channel->flags = req->flags;
     channel->batch_ids[0] = 1;
@@ -783,8 +785,24 @@ DECL_HANDLER(set_dcomp_channel_connection)
     struct dcomp_connection *connection;
     struct dcomp_channel *channel;
     struct dcomp_batch *batch, *next;
+    unsigned int slot = !!req->connection_id;
 
     if (!(channel = get_dcomp_channel( req->channel ))) return;
+    if (req->connection && channel->connection_ids[slot])
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+    if (!req->connection)
+    {
+        channel->connection_ids[slot] = 0;
+        goto done;
+    }
+    if (channel->connection)
+    {
+        channel->connection_ids[slot] = req->connection;
+        goto done;
+    }
     if (!(connection = find_dcomp_consumer_connection( current->process->session_id )))
     {
         if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
@@ -795,19 +813,14 @@ DECL_HANDLER(set_dcomp_channel_connection)
         set_error( STATUS_ACCESS_DENIED );
         goto done;
     }
-    if (channel->connection)
-    {
-        set_error( STATUS_INVALID_PARAMETER );
-        goto done;
-    }
     if (!queue_dcomp_record( connection, DCOMP_RECORD_CREATE, channel->id, channel->flags,
                              req->connection, 0, NULL, 0 )) goto done;
     channel->connection = (struct dcomp_connection *)grab_object( connection );
-    channel->connection_id = req->connection_id;
+    channel->connection_ids[slot] = req->connection;
     if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
         fprintf( stderr, "linuxnt: server dcomp-bind winpid=%04x session=%u channel=%#x "
                  "slot=%d connection=%#llx consumer=%04x status=0\n", current->process->id,
-                 current->process->session_id, channel->id, channel->connection_id,
+                 current->process->session_id, channel->id, slot,
                  (unsigned long long)req->connection, connection->owner->id );
     LIST_FOR_EACH_ENTRY_SAFE( batch, next, &channel->batches, struct dcomp_batch, entry )
     {
