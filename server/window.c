@@ -36,6 +36,7 @@
 #include "security.h"
 #include "user.h"
 #include "unicode.h"
+#include "alpc.h"
 
 static const struct ratio no_dpi;
 
@@ -81,6 +82,22 @@ struct window
     unsigned int     is_layered : 1;  /* has layered info been set? */
     unsigned int     is_orphan : 1;   /* is window orphaned */
     unsigned int     set_foreground : 1;/* has window been foreground once */
+    unsigned int     is_core_window : 1;/* explicitly marked as a core-window root */
+    unsigned int     dwm_context_id;  /* DWM composition generation containing this HWND */
+    unsigned int     dwm_link_id;     /* DWM composition generation containing its tree link */
+    unsigned __int64 composition_flags; /* boolean private composition attributes */
+    unsigned int     composition_policy; /* non-client rendering policy */
+    unsigned int     composition_theme; /* theme rendering attributes */
+    unsigned int     composition_accent[4]; /* accent policy */
+    unsigned int     composition_visual_owner[2]; /* visual owner identifier */
+    unsigned int     composition_corner_style; /* corner preference */
+    unsigned int     composition_part_color[2]; /* part and color value */
+    unsigned int     composition_backdrop; /* system backdrop type */
+    unsigned int     composition_remote_app; /* remote application policy */
+    unsigned int     composition_accent_background; /* accent background color */
+    unsigned int     composition_border_margins[2]; /* packed border margins */
+    unsigned int     composition_tagged_rect[4]; /* tagged composition rectangle */
+    unsigned int     composition_tagged_rect_valid : 1;
     unsigned int     color_key;       /* color key for a layered window */
     unsigned int     alpha;           /* alpha value for a layered window */
     unsigned int     layered_flags;   /* flags for a layered window */
@@ -179,6 +196,24 @@ static inline int is_desktop_window( const struct window *win )
 static bool is_toplevel( const struct window *win )
 {
     return !win->parent || is_desktop_window( win->parent );
+}
+
+/* Native win32k permits top-level windows and layered child windows to own
+ * window-composition state. */
+static bool is_composition_window( const struct window *win )
+{
+    return is_toplevel( win ) || (win->ex_style & WS_EX_LAYERED);
+}
+
+static bool is_nc_rendering_enabled( const struct window *win )
+{
+    if (!is_composition_window( win ) || (win->composition_flags & (1ull << 11))) return false;
+
+    if (win->composition_policy == 1) return false; /* DWMNCRP_DISABLED */
+    if (win->composition_policy == 2) return true;  /* DWMNCRP_ENABLED */
+
+    return !(win->ex_style & WS_EX_LAYERED) &&
+           (win->style & WS_CAPTION) == WS_CAPTION;
 }
 
 /* check if window is orphaned */
@@ -397,6 +432,31 @@ static void set_window_monitor_dpi( struct window *win )
     SHARED_WRITE_END;
 }
 
+static void set_window_subtree_core_status_unchecked( struct window *win, int enabled )
+{
+    struct window *child;
+
+    SHARED_WRITE_BEGIN( win->shared, window_shm_t )
+    {
+        shared->core_window = enabled;
+    }
+    SHARED_WRITE_END;
+
+    /* Native win32k propagates the effective state through the complete subtree. */
+    LIST_FOR_EACH_ENTRY( child, &win->children, struct window, entry )
+        set_window_subtree_core_status_unchecked( child, enabled );
+    LIST_FOR_EACH_ENTRY( child, &win->unlinked, struct window, entry )
+        set_window_subtree_core_status_unchecked( child, enabled );
+}
+
+static void set_window_subtree_core_status( struct window *win, int enabled )
+{
+    enabled = !!enabled;
+    if (!!win->shared->core_window == enabled) return;
+    if (win->is_core_window && !enabled) return;
+    set_window_subtree_core_status_unchecked( win, enabled );
+}
+
 /* attach or detach the parent window thread input if necessary */
 static void attach_parent_thread( struct window *win, bool attach )
 {
@@ -442,6 +502,8 @@ static int set_parent_window( struct window *win, struct window *parent )
 
         if (win->paint_flags & (PAINT_HAS_PIXEL_FORMAT | PAINT_PIXEL_FORMAT_CHILD))
             update_pixel_format_flags( win );
+
+        set_window_subtree_core_status( win, parent->is_core_window );
     }
     else  /* move it to parent unlinked list */
     {
@@ -449,6 +511,7 @@ static int set_parent_window( struct window *win, struct window *parent )
         list_add_head( &win->parent->unlinked, &win->entry );
         win->is_linked = 0;
         win->is_orphan = 1;
+        set_window_subtree_core_status( win, 0 );
     }
     return 1;
 }
@@ -685,6 +748,22 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->is_layered     = 0;
     win->is_orphan      = 0;
     win->set_foreground = 0;
+    win->is_core_window = 0;
+    win->dwm_context_id = 0;
+    win->dwm_link_id    = 0;
+    win->composition_flags = 0;
+    win->composition_policy = 0; /* DWMNCRP_USEWINDOWSTYLE */
+    win->composition_theme = 0;
+    memset( win->composition_accent, 0, sizeof(win->composition_accent) );
+    memset( win->composition_visual_owner, 0, sizeof(win->composition_visual_owner) );
+    win->composition_corner_style = 0;
+    memset( win->composition_part_color, 0, sizeof(win->composition_part_color) );
+    win->composition_backdrop = 0;
+    win->composition_remote_app = 0;
+    win->composition_accent_background = 0;
+    memset( win->composition_border_margins, 0, sizeof(win->composition_border_margins) );
+    memset( win->composition_tagged_rect, 0, sizeof(win->composition_tagged_rect) );
+    win->composition_tagged_rect_valid = 0;
     win->text           = NULL;
     win->text_len       = 0;
     win->paint_flags    = 0;
@@ -710,6 +789,7 @@ static struct window *create_window( struct window *parent, struct window *owner
         memset( (void *)shared->extra, 0, extra_size );
         shared->info.wndproc    = get_class_wndproc( win->class, &ansi );
         shared->ansi            = ansi;
+        shared->core_window     = parent ? parent->shared->core_window : 0;
     }
     SHARED_WRITE_END;
 
@@ -1115,6 +1195,87 @@ struct thread *get_window_thread( user_handle_t handle )
     struct window *win = get_user_object( handle, NTUSER_OBJ_WINDOW );
     if (!win || !win->thread) return NULL;
     return (struct thread *)grab_object( win->thread );
+}
+
+/* Mirror the server-owned HWND lifetime into the genuine DWM redirection
+ * process. Native win32k creates every context before publishing any tree
+ * links during compositor startup; the replay entry point below preserves
+ * that ordering. */
+static unsigned int sync_dwm_window_context( struct window *win )
+{
+    struct process *process = win->thread ? win->thread->process : NULL;
+    unsigned int parent = win->parent ? win->parent->handle : 0;
+    unsigned int process_id = process ? process->id : 0;
+    unsigned __int64 sequence = process ? process->start_time : 0;
+
+    if (win->parent && !sync_dwm_window_context( win->parent )) return 0;
+    win->dwm_context_id = notify_dwm_window_created( win->desktop, win->dwm_context_id,
+                                                     win->handle, parent, win->style,
+                                                     win->ex_style, &win->window_rect,
+                                                     process_id, sequence );
+    if (win->dwm_link_id != win->dwm_context_id) win->dwm_link_id = 0;
+    return win->dwm_context_id;
+}
+
+static int sync_dwm_window_link( struct window *win )
+{
+    struct window *next;
+    unsigned int insert_before;
+
+    if (!sync_dwm_window_context( win )) return 0;
+    if (!win->parent)
+    {
+        win->dwm_link_id = win->dwm_context_id;
+        return 1;
+    }
+    if (!win->is_linked) return 1;
+    if (win->dwm_link_id == win->dwm_context_id) return 1;
+    if (!sync_dwm_window_context( win->parent )) return 0;
+    /* Native win32k publishes spwndNext here.  Replay walks the sibling list
+     * from bottom to top, so a non-null insertion anchor is already linked. */
+    next = get_next_window( win );
+    insert_before = next ? next->handle : 1;
+    if (!notify_dwm_window_linked( win->desktop, win->dwm_context_id, win->handle,
+                                   win->parent->handle, insert_before, 1 )) return 0;
+    win->dwm_link_id = win->dwm_context_id;
+    return 1;
+}
+
+int ensure_dwm_window_context( user_handle_t handle )
+{
+    struct window *win = get_user_object( handle, NTUSER_OBJ_WINDOW );
+
+    return win && sync_dwm_window_link( win );
+}
+
+static void replay_dwm_window_create_tree( struct window *win )
+{
+    struct window *child;
+
+    sync_dwm_window_context( win );
+    LIST_FOR_EACH_ENTRY_REV( child, &win->children, struct window, entry )
+        replay_dwm_window_create_tree( child );
+    LIST_FOR_EACH_ENTRY_REV( child, &win->unlinked, struct window, entry )
+        replay_dwm_window_create_tree( child );
+}
+
+static void replay_dwm_window_link_tree( struct window *win )
+{
+    struct window *child;
+
+    sync_dwm_window_link( win );
+    LIST_FOR_EACH_ENTRY_REV( child, &win->children, struct window, entry )
+        replay_dwm_window_link_tree( child );
+}
+
+void replay_dwm_window_contexts( struct winstation *winstation )
+{
+    struct desktop *desktop;
+
+    LIST_FOR_EACH_ENTRY( desktop, &winstation->desktops, struct desktop, entry )
+        if (desktop->top_window) replay_dwm_window_create_tree( desktop->top_window );
+    LIST_FOR_EACH_ENTRY( desktop, &winstation->desktops, struct desktop, entry )
+        if (desktop->top_window) replay_dwm_window_link_tree( desktop->top_window );
 }
 
 
@@ -2153,6 +2314,13 @@ void free_window_handle( struct window *win )
 
     assert( win->handle );
 
+    if (win->dwm_link_id)
+    {
+        notify_dwm_window_unlinked( win->desktop, win->dwm_link_id, win->handle,
+                                    win->parent ? win->parent->handle : 0 );
+        win->dwm_link_id = 0;
+    }
+
     /* hide the window */
     if (is_visible(win))
     {
@@ -2199,6 +2367,11 @@ void free_window_handle( struct window *win )
     free_hotkeys( win->desktop, win->handle );
     cleanup_clipboard_window( win->desktop, win->handle );
     cleanup_dcomp_window_targets( win->handle );
+    if (win->dwm_context_id)
+    {
+        notify_dwm_window_destroyed( win->desktop, win->dwm_context_id, win->handle );
+        win->dwm_context_id = 0;
+    }
     destroy_properties( win );
     if (is_desktop_window(win))
     {
@@ -2321,6 +2494,128 @@ DECL_HANDLER(set_window_fnid)
     }
     SHARED_WRITE_END;
     release_class( class );
+}
+
+
+/* set a window's explicit core-window state and propagate its effective state */
+DECL_HANDLER(set_core_window)
+{
+    struct window *win;
+
+    if (!(win = get_window( req->handle )))
+    {
+        set_win32_error( ERROR_INVALID_PARAMETER );
+        return;
+    }
+
+    win->is_core_window = !!req->enabled;
+    set_window_subtree_core_status( win, req->enabled );
+}
+
+
+/* read the server-owned state behind the private USER32 composition family */
+DECL_HANDLER(get_window_composition_attribute)
+{
+    struct window *win;
+    unsigned int *values = &reply->value0;
+
+    memset( values, 0, 5 * sizeof(*values) );
+    if (!(win = get_window( req->handle ))) return;
+    if (!is_composition_window( win )) return set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
+
+    switch (req->attribute)
+    {
+    case 1:  values[0] = is_nc_rendering_enabled( win ); break;
+    case 2:  values[0] = win->composition_policy; break;
+    case 3: case 4: case 6: case 7: case 9: case 11: case 13:
+    case 15: case 16: case 20: case 24: case 25: case 26: case 29: case 36:
+        values[0] = !!(win->composition_flags & (1ull << req->attribute));
+        break;
+    case 5:  /* Wine has no separate DWM-provided caption-button margins. */
+        break;
+    case 10: values[0] = win->composition_theme; break;
+    case 19: memcpy( values, win->composition_accent, sizeof(win->composition_accent) ); break;
+    case 22: memcpy( values, win->composition_visual_owner, sizeof(win->composition_visual_owner) ); break;
+    case 27: values[0] = win->composition_corner_style; break;
+    case 28: memcpy( values, win->composition_part_color, sizeof(win->composition_part_color) ); break;
+    case 30: values[0] = win->composition_backdrop; break;
+    case 31:
+        if (!win->composition_tagged_rect_valid) return set_win32_error( ERROR_INVALID_PARAMETER );
+        memcpy( values, win->composition_tagged_rect, sizeof(win->composition_tagged_rect) );
+        break;
+    case 33: values[0] = win->composition_remote_app; break;
+    case 34: values[0] = win->composition_accent[0] != 0; break;
+    case 35: values[0] = win->composition_accent_background; break;
+    case 37: memcpy( values, win->composition_border_margins, sizeof(win->composition_border_margins) ); break;
+    default:
+        set_win32_error( ERROR_INVALID_PARAMETER );
+        break;
+    }
+}
+
+
+/* update the server-owned state behind the private USER32 composition family */
+DECL_HANDLER(set_window_composition_attribute)
+{
+    struct window *win;
+    const unsigned int *values = &req->value0;
+
+    if (!(win = get_window( req->handle ))) return;
+    if (!is_composition_window( win )) return set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
+
+    switch (req->attribute)
+    {
+    case 2:
+        win->composition_policy = values[0];
+        break;
+    case 3: case 4: case 6: case 7: case 9: case 11: case 13:
+    case 15: case 16: case 20: case 24: case 25: case 26: case 29: case 36:
+        if (values[0]) win->composition_flags |= 1ull << req->attribute;
+        else win->composition_flags &= ~(1ull << req->attribute);
+        break;
+    case 10:
+        win->composition_theme = values[0];
+        break;
+    case 19:
+        memcpy( win->composition_accent, values, sizeof(win->composition_accent) );
+        break;
+    case 22:
+        memcpy( win->composition_visual_owner, values, sizeof(win->composition_visual_owner) );
+        break;
+    case 27:
+        if (values[0] >= 5) return set_win32_error( ERROR_INVALID_PARAMETER );
+        win->composition_corner_style = values[0];
+        break;
+    case 28:
+        if (values[0] > 2 || (values[1] && values[1] != 1 &&
+            (values[1] & 0xff000000) != 0xff000000))
+            return set_win32_error( ERROR_INVALID_PARAMETER );
+        win->composition_part_color[0] = values[0];
+        win->composition_part_color[1] = values[1];
+        break;
+    case 30:
+        win->composition_backdrop = values[0];
+        break;
+    case 31:
+        memcpy( win->composition_tagged_rect, values, sizeof(win->composition_tagged_rect) );
+        win->composition_tagged_rect_valid = 1;
+        break;
+    case 32:
+        win->composition_tagged_rect_valid = 0;
+        break;
+    case 33:
+        win->composition_remote_app = values[0];
+        break;
+    case 35:
+        win->composition_accent_background = values[0];
+        break;
+    case 37:
+        memcpy( win->composition_border_margins, values, sizeof(win->composition_border_margins) );
+        break;
+    default:
+        set_win32_error( ERROR_INVALID_PARAMETER );
+        break;
+    }
 }
 
 
@@ -2785,6 +3080,7 @@ DECL_HANDLER(set_window_pos)
     old_client = win->client_rect;
     set_window_pos( win, previous, flags, &window_rect, &client_rect,
                     &visible_rect, &surface_rect, &valid_rect );
+    sync_dwm_window_link( win );
     if ((win->style & old_style & WS_VISIBLE) && (memcmp( &old_client, &win->client_rect, sizeof(old_client) )
         || memcmp( &old_window, &win->window_rect, sizeof(old_window) )))
         update_cursor_pos( win->desktop );

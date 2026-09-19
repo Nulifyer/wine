@@ -82,8 +82,8 @@
 2568 stub -noname SetModernAppWindow  # NtUserSetModernAppWindow
 2569 stub -noname GetModernAppWindow  # NtUserGetModernAppWindow
 2570 stub @
-2571 stub SetCoreWindow  # NtUserSetCoreWindow
-2572 stub @
+2571 stdcall SetCoreWindow(long long) NtUserSetCoreWindow
+2572 stdcall -noname IsCoreWindow(long)
 2573 stub @
 2574 stub @
 2575 stub @
@@ -697,7 +697,7 @@
 # @ stub GetWinStationInfo
 @ stdcall GetWindow(long long)
 @ stdcall GetWindowBand(long ptr)
-# @ stub GetWindowCompositionAttribute
+@ stdcall GetWindowCompositionAttribute(ptr ptr)
 # @ stub GetWindowCompositionInfo
 @ stdcall GetWindowContextHelpId(long) NtUserGetWindowContextHelpId
 @ stdcall GetWindowDC(long) NtUserGetWindowDC

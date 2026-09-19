@@ -15,11 +15,25 @@
 struct process;
 struct desktop;
 struct object;
+struct rectangle;
+struct winstation;
 
 extern int set_coremsg_input_port_ready( struct process *process, int enabled );
 extern void cleanup_process_coremsg_connections( struct process *process );
 extern void notify_dwm_desktop_created( struct desktop *desktop );
 extern void notify_dwm_desktop_destroyed( struct desktop *desktop );
+extern unsigned int notify_dwm_window_created( struct desktop *desktop, unsigned int generation,
+                                                unsigned int window, unsigned int parent,
+                                                unsigned int style, unsigned int ex_style,
+                                                const struct rectangle *rect, unsigned int process_id,
+                                                unsigned __int64 process_sequence );
+extern int notify_dwm_window_linked( struct desktop *desktop, unsigned int generation,
+                                     unsigned int window, unsigned int parent,
+                                     unsigned int previous, unsigned int band );
+extern void notify_dwm_window_unlinked( struct desktop *desktop, unsigned int generation,
+                                        unsigned int window, unsigned int parent );
+extern void notify_dwm_window_destroyed( struct desktop *desktop, unsigned int generation,
+                                         unsigned int window );
 extern int notify_dwm_window_target_created( unsigned int session_id, unsigned int window,
                                              unsigned int type, struct object *target );
 extern void notify_dwm_window_target_destroyed( unsigned int session_id, unsigned int window,

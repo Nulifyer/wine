@@ -1288,6 +1288,15 @@ BOOL WINAPI IsWindow( HWND hwnd )
 }
 
 
+/*******************************************************************
+ *           IsCoreWindow   (USER32.2572)
+ */
+BOOL WINAPI IsCoreWindow( HWND hwnd )
+{
+    return NtUserIsCoreWindow( hwnd );
+}
+
+
 /***********************************************************************
  *		GetWindowThreadProcessId (USER32.@)
  */
@@ -1718,13 +1727,19 @@ BOOL WINAPI SetWindowDisplayAffinity(HWND hwnd, DWORD affinity)
 }
 
 /**********************************************************************
+ *              GetWindowCompositionAttribute (USER32.@)
+ */
+BOOL WINAPI GetWindowCompositionAttribute(HWND hwnd, struct window_composition_attribute_data *data)
+{
+    return NtUserGetWindowCompositionAttribute(hwnd, data);
+}
+
+/**********************************************************************
  *              SetWindowCompositionAttribute (USER32.@)
  */
-BOOL WINAPI SetWindowCompositionAttribute(HWND hwnd, void *data)
+BOOL WINAPI SetWindowCompositionAttribute(HWND hwnd, struct window_composition_attribute_data *data)
 {
-    FIXME("(%p, %p): stub\n", hwnd, data);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    return NtUserSetWindowCompositionAttribute(hwnd, data);
 }
 
 /**********************************************************************

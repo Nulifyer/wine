@@ -61,7 +61,7 @@ struct coremsg_message
 struct dwm_session_message
 {
     ALPC_PORT_MESSAGE header;
-    DWORD data[6];
+    DWORD data[32];
 };
 
 struct coremsg_registrar_context
@@ -2270,6 +2270,7 @@ static void test_dwm_session_message_delivery(void)
     DWORD session_id;
     UINT64 input_id, repeated_id, default_id, logon_id = 0, desktop_id, lifecycle_id = 0;
     BOOL saw_input = FALSE, saw_default = FALSE, saw_logon = FALSE, saw_startup_begin = FALSE;
+    BOOL saw_window_create = FALSE, saw_window_link = FALSE;
     HDESK lifecycle_desktop = NULL;
     HDESK logon_desktop = NULL;
     HWND target_window = NULL;
@@ -2278,6 +2279,7 @@ static void test_dwm_session_message_delivery(void)
     BOOL registered;
     NTSTATUS status;
     SIZE_T size;
+    unsigned int i;
 
     pGetDesktopID = (void *)GetProcAddress( GetModuleHandleW( L"user32.dll" ), "GetDesktopID" );
     ok( !!pGetDesktopID, "GetDesktopID is not exported\n" );
@@ -2397,16 +2399,32 @@ static void test_dwm_session_message_delivery(void)
             saw_startup_begin = received.data[0] == 0x40000025 && !received.data[1];
             break;
         }
-        ok( received.header.DataLength == 12, "got desktop data length %#x\n", received.header.DataLength );
-        ok( received.data[0] == 0x4000000e, "got desktop command %#lx\n", received.data[0] );
-        memcpy( &desktop_id, received.data + 1, sizeof(desktop_id) );
-        if (desktop_id == input_id) saw_input = TRUE;
-        if (desktop_id == default_id) saw_default = TRUE;
-        if (desktop_id == logon_id) saw_logon = TRUE;
+        if (received.data[0] == 0x4000000e)
+        {
+            ok( received.header.DataLength == 12, "got desktop data length %#x\n", received.header.DataLength );
+            memcpy( &desktop_id, received.data + 1, sizeof(desktop_id) );
+            if (desktop_id == input_id) saw_input = TRUE;
+            if (desktop_id == default_id) saw_default = TRUE;
+            if (desktop_id == logon_id) saw_logon = TRUE;
+        }
+        else if (received.data[0] == 0x40000011)
+        {
+            ok( received.header.DataLength == 124, "got window create length %#x\n", received.header.DataLength );
+            ok( !saw_window_link, "window create followed a window link during replay\n" );
+            saw_window_create = TRUE;
+        }
+        else if (received.data[0] == 0x40000012)
+        {
+            ok( received.header.DataLength == 32, "got window link length %#x\n", received.header.DataLength );
+            saw_window_link = TRUE;
+        }
+        else ok( 0, "got unexpected startup command %#lx\n", received.data[0] );
     }
     ok( saw_input, "DWM startup did not replay input desktop %#I64x\n", input_id );
     ok( saw_default, "DWM startup did not replay default desktop %#I64x\n", default_id );
     ok( saw_logon, "DWM startup did not replay logon desktop %#I64x\n", logon_id );
+    ok( saw_window_create, "DWM startup did not replay a window context\n" );
+    ok( saw_window_link, "DWM startup did not replay a window tree link\n" );
     ok( saw_startup_begin, "DWM startup did not release the initializing record after desktop replay\n" );
 
     lifecycle_desktop = CreateDesktopW( L"LinuxNTDwmLifecycle", NULL, NULL, 0,
@@ -2447,6 +2465,81 @@ static void test_dwm_session_message_delivery(void)
     ok( !!target_window, "target window creation failed, error %lu\n", GetLastError() );
     if (target_window)
     {
+        HWND message_window = NULL, message_parent = NULL;
+        HWND expected_link_anchor = GetWindow( target_window, GW_HWNDNEXT );
+        UINT64 message_desktop = 0, message_sequence = 0;
+        DWORD message_style = 0, message_ex_style = 0, message_pid = 0;
+
+        memset( &received, 0, sizeof(received) );
+        size = sizeof(received);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                            &size, NULL, &timeout );
+        ok( !status, "window create receive returned %#lx\n", status );
+        ok( !status && received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+            "got window create type %#x\n", received.header.Type );
+        ok( !status && received.header.DataLength == 124,
+            "got window create length %#x\n", received.header.DataLength );
+        ok( !status && received.data[0] == 0x40000011,
+            "got window create command %#lx\n", received.data[0] );
+        if (!status)
+        {
+            memcpy( &message_window, received.data + 1, sizeof(message_window) );
+            memcpy( &message_parent, received.data + 3, sizeof(message_parent) );
+            message_style = received.data[5];
+            message_ex_style = received.data[6];
+            memcpy( &message_desktop, received.data + 26, sizeof(message_desktop) );
+            message_pid = received.data[28];
+            memcpy( &message_sequence, received.data + 29, sizeof(message_sequence) );
+        }
+        ok( message_window == target_window, "got window create HWND %p, expected %p\n",
+            message_window, target_window );
+        ok( !!message_parent, "window create parent is null\n" );
+        ok( message_style & WS_POPUP, "window create style %#lx lacks WS_POPUP\n", message_style );
+        ok( !message_ex_style, "got window create extended style %#lx\n", message_ex_style );
+        ok( message_desktop == default_id, "got window desktop %#I64x, expected %#I64x\n",
+            message_desktop, default_id );
+        ok( message_pid == GetCurrentProcessId(), "got window PID %lu, expected %lu\n",
+            message_pid, GetCurrentProcessId() );
+        ok( !!message_sequence, "window process sequence is zero\n" );
+
+        for (i = 0; i < 16; ++i)
+        {
+            memset( &received, 0, sizeof(received) );
+            size = sizeof(received);
+            status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                &size, NULL, &timeout );
+            if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+            ok( !status, "window lifecycle receive returned %#lx\n", status );
+            if (status) break;
+            ok( received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+                "got window lifecycle type %#x\n", received.header.Type );
+            memcpy( &message_window, received.data + 1, sizeof(message_window) );
+            if (received.data[0] == 0x40000011)
+            {
+                ok( received.header.DataLength == 124, "got intervening create length %#x\n",
+                    received.header.DataLength );
+                continue;
+            }
+            ok( received.data[0] == 0x40000012, "got window link command %#lx\n",
+                received.data[0] );
+            ok( received.header.DataLength == 32, "got window link length %#x\n",
+                received.header.DataLength );
+            if (received.data[0] != 0x40000012) continue;
+            if (message_window == target_window)
+            {
+                HWND link_parent, link_anchor;
+
+                memcpy( &link_parent, received.data + 3, sizeof(link_parent) );
+                memcpy( &link_anchor, received.data + 5, sizeof(link_anchor) );
+                ok( link_parent == message_parent, "got link parent %p, expected %p\n",
+                    link_parent, message_parent );
+                ok( link_anchor == (expected_link_anchor ? expected_link_anchor : (HWND)1),
+                    "got link anchor %p, expected %p\n", link_anchor,
+                    expected_link_anchor ? expected_link_anchor : (HWND)1 );
+                ok( received.data[7] == 1, "got window band %lu\n", received.data[7] );
+            }
+        }
+
         registered = NtUserCreateDCompositionHwndTarget( target_window, 0, &target );
         ok( registered, "target creation failed, status %#lx\n", RtlGetLastNtStatus() );
     }
@@ -2518,6 +2611,37 @@ static void test_dwm_session_message_delivery(void)
         ok( message_window == target_window, "got target destroy window %p, expected %p\n",
             message_window, target_window );
         ok( message_type == 0, "got target destroy type %u\n", message_type );
+    }
+
+    if (target_window)
+    {
+        HWND message_window = NULL;
+        BOOL saw_destroy = FALSE;
+
+        ok( DestroyWindow( target_window ), "target window destruction failed, error %lu\n", GetLastError() );
+        for (i = 0; i < 16; ++i)
+        {
+            memset( &received, 0, sizeof(received) );
+            size = sizeof(received);
+            status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                &size, NULL, &timeout );
+            ok( !status, "window lifecycle teardown receive returned %#lx\n", status );
+            if (status) break;
+            memcpy( &message_window, received.data + 1, sizeof(message_window) );
+            if (message_window != target_window) continue;
+            if (received.data[0] == 0x40000013)
+                ok( received.header.DataLength == 20, "got window unlink length %#x\n",
+                    received.header.DataLength );
+            else if (received.data[0] == 0x40000014)
+            {
+                ok( received.header.DataLength == 12, "got window destroy length %#x\n",
+                    received.header.DataLength );
+                saw_destroy = TRUE;
+                break;
+            }
+        }
+        ok( saw_destroy, "target window destroy was not delivered\n" );
+        target_window = NULL;
     }
 
 done:

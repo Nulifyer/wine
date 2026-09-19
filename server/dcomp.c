@@ -385,8 +385,9 @@ void replay_dcomp_window_targets( unsigned int session_id )
 
     LIST_FOR_EACH_ENTRY( target, &dcomp_window_targets, struct dcomp_window_target, entry )
         if (target->attached && target->owner->session_id == session_id)
-            notify_dwm_window_target_created( session_id, target->window, target->type,
-                                              &target->obj );
+            if (ensure_dwm_window_context( target->window ))
+                notify_dwm_window_target_created( session_id, target->window, target->type,
+                                                  &target->obj );
 }
 
 static void dcomp_channel_destroy( struct object *obj )
@@ -1500,6 +1501,7 @@ DECL_HANDLER(create_dcomp_window_target)
         set_error( STATUS_DCOMPOSITION_TARGET_ALREADY_EXISTS );
         return;
     }
+    ensure_dwm_window_context( req->window );
     if (!(target = alloc_object( &dcomp_window_target_ops ))) return;
     target->owner = (struct process *)grab_object( current->process );
     target->window = req->window;

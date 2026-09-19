@@ -3315,12 +3315,18 @@ BOOL WINAPI NtUserRegisterTouchPadCapable( BOOL capable )
  */
 INT WINAPI NtUserScheduleDispatchNotification( HWND hwnd )
 {
-    FIXME("hwnd %p stub!\n", hwnd);
+    DWORD process;
 
-    if (is_window(hwnd))
-        return 2;
+    TRACE( "hwnd %p\n", hwnd );
 
-    return 0;
+    if (!get_window_thread( hwnd, &process )) return 0;
+    if (process != GetCurrentProcessId())
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return 0;
+    }
+
+    return queue_notify_message( hwnd, WM_COREMESSAGING_NOTIFICATION, 0, 0 ) ? 2 : 0;
 }
 
 void destroy_thread_pointers(void)

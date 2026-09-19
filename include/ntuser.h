@@ -1170,6 +1170,17 @@ W32KAPI ULONG_PTR WINAPI NtUserSetClassLongPtr( HWND hwnd, INT offset, LONG_PTR 
 W32KAPI WORD    WINAPI NtUserSetClassWord( HWND hwnd, INT offset, WORD newval );
 W32KAPI NTSTATUS WINAPI NtUserSetClipboardData( UINT format, HANDLE handle, struct set_clipboard_params *params );
 W32KAPI HWND    WINAPI NtUserSetClipboardViewer( HWND hwnd );
+W32KAPI BOOL    WINAPI NtUserSetCoreWindow( HWND hwnd, BOOL enabled );
+struct window_composition_attribute_data
+{
+    int attribute;
+    void *data;
+    SIZE_T size;
+};
+W32KAPI BOOL    WINAPI NtUserGetWindowCompositionAttribute( HWND hwnd,
+                                                            struct window_composition_attribute_data *data );
+W32KAPI BOOL    WINAPI NtUserSetWindowCompositionAttribute( HWND hwnd,
+                                                            const struct window_composition_attribute_data *data );
 W32KAPI HCURSOR WINAPI NtUserSetCursor( HCURSOR cursor );
 W32KAPI BOOL    WINAPI NtUserSetCursorIconData( HCURSOR cursor, UNICODE_STRING *module, UNICODE_STRING *res_name,
                                                 struct cursoricon_desc *desc );
@@ -1495,6 +1506,7 @@ enum
     NtUserCallHwnd_GetWindowTextLength,
     NtUserCallHwnd_IsWindow,
     NtUserCallHwnd_IsWindowEnabled,
+    NtUserCallHwnd_IsCoreWindow,
     NtUserCallHwnd_IsWindowUnicode,
     NtUserCallHwnd_IsWindowVisible,
     NtUserCallHwnd_SetForegroundWindowInternal,
@@ -1567,6 +1579,11 @@ static inline BOOL NtUserIsWindow( HWND hwnd )
 static inline BOOL NtUserIsWindowEnabled( HWND hwnd )
 {
     return NtUserCallHwnd( hwnd, NtUserCallHwnd_IsWindowEnabled );
+}
+
+static inline BOOL NtUserIsCoreWindow( HWND hwnd )
+{
+    return NtUserCallHwnd( hwnd, NtUserCallHwnd_IsCoreWindow );
 }
 
 static inline BOOL NtUserIsWindowUnicode( HWND hwnd )

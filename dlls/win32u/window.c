@@ -1242,6 +1242,19 @@ UINT get_window_dpi_awareness_context( HWND hwnd )
     return ctx;
 }
 
+static BOOL is_core_window( HWND hwnd )
+{
+    struct object_lock lock = OBJECT_LOCK_INIT;
+    const window_shm_t *window_shm = NULL;
+    BOOL core_window = FALSE;
+    NTSTATUS status;
+
+    while ((status = get_shared_window( hwnd, &lock, &window_shm )) == STATUS_PENDING)
+        core_window = window_shm->core_window;
+    if (status) RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+    return !status && core_window;
+}
+
 /* see GetDpiForWindow */
 struct ratio get_dpi_for_window( HWND hwnd )
 {
@@ -1715,6 +1728,109 @@ BOOL WINAPI NtUserSetWindowFNID( HWND hwnd, WORD fnid )
     {
         req->handle = wine_server_user_handle( hwnd );
         req->atom = get_builtin_class_atom( fnid & 0x7fff );
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/**********************************************************************
+ *           NtUserGetWindowCompositionAttribute (win32u.@)
+ */
+BOOL WINAPI NtUserGetWindowCompositionAttribute( HWND hwnd,
+                                                  struct window_composition_attribute_data *data )
+{
+    static const unsigned char sizes[] =
+    {
+        0, 4, 4, 4, 4, 16, 4, 4, 16, 4, 4, 4, 20, 4, 4, 4, 4, 4, 4,
+        16, 4, 4, 8, 4, 4, 4, 4, 4, 8, 4, 4, 16, 0, 4, 4, 4, 4, 8
+    };
+    unsigned int values[5];
+    unsigned int size;
+    BOOL ret;
+
+    if (!data || !data->data || data->attribute <= 0 || data->attribute >= ARRAY_SIZE(sizes))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    size = sizes[data->attribute];
+    if (data->size < size)
+    {
+        RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
+        return FALSE;
+    }
+
+    SERVER_START_REQ( get_window_composition_attribute )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        req->attribute = data->attribute;
+        ret = !wine_server_call_err( req );
+        values[0] = reply->value0;
+        values[1] = reply->value1;
+        values[2] = reply->value2;
+        values[3] = reply->value3;
+        values[4] = reply->value4;
+    }
+    SERVER_END_REQ;
+    if (ret) memcpy( data->data, values, size );
+    return ret;
+}
+
+/**********************************************************************
+ *           NtUserSetWindowCompositionAttribute (win32u.@)
+ */
+BOOL WINAPI NtUserSetWindowCompositionAttribute( HWND hwnd,
+                                                  const struct window_composition_attribute_data *data )
+{
+    static const unsigned char sizes[] =
+    {
+        0, 4, 4, 4, 4, 16, 4, 4, 16, 4, 4, 4, 20, 4, 4, 4, 4, 4, 4,
+        16, 4, 4, 8, 4, 4, 4, 4, 4, 8, 4, 4, 16, 0, 4, 4, 4, 4, 8
+    };
+    unsigned int values[5] = {0};
+    unsigned int size;
+    BOOL ret;
+
+    if (!data || data->attribute <= 0 || data->attribute >= ARRAY_SIZE(sizes))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    size = sizes[data->attribute];
+    if ((!data->data && size) || data->size < size)
+    {
+        RtlSetLastWin32Error( data->size < size ? ERROR_INSUFFICIENT_BUFFER : ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    if (size) memcpy( values, data->data, size );
+
+    SERVER_START_REQ( set_window_composition_attribute )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        req->attribute = data->attribute;
+        req->value0 = values[0];
+        req->value1 = values[1];
+        req->value2 = values[2];
+        req->value3 = values[3];
+        req->value4 = values[4];
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/**********************************************************************
+ *           NtUserSetCoreWindow (win32u.@)
+ */
+BOOL WINAPI NtUserSetCoreWindow( HWND hwnd, BOOL enabled )
+{
+    BOOL ret;
+
+    SERVER_START_REQ( set_core_window )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        req->enabled = enabled;
         ret = !wine_server_call_err( req );
     }
     SERVER_END_REQ;
@@ -6364,6 +6480,9 @@ ULONG_PTR WINAPI NtUserCallHwnd( HWND hwnd, DWORD code )
 
     case NtUserCallHwnd_IsWindowEnabled:
         return is_window_enabled( hwnd );
+
+    case NtUserCallHwnd_IsCoreWindow:
+        return is_core_window( hwnd );
 
     case NtUserCallHwnd_IsWindowUnicode:
         return is_window_unicode( hwnd );

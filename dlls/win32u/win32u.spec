@@ -1114,7 +1114,7 @@
 @ stub -syscall NtUserGetWOWClass
 @ stub -syscall NtUserGetWinStationInfo
 @ stub -syscall NtUserGetWindowBand
-@ stub -syscall NtUserGetWindowCompositionAttribute
+@ stdcall -syscall NtUserGetWindowCompositionAttribute(long ptr)
 @ stub -syscall NtUserGetWindowCompositionInfo
 @ stdcall -syscall NtUserGetWindowContextHelpId(long)
 @ stdcall -syscall NtUserGetWindowDC(long)
@@ -1346,7 +1346,7 @@
 @ stdcall -syscall NtUserSetClassWord(long long long)
 @ stdcall -syscall NtUserSetClipboardData(long ptr ptr)
 @ stdcall -syscall NtUserSetClipboardViewer(long)
-@ stub -syscall NtUserSetCoreWindow
+@ stdcall -syscall NtUserSetCoreWindow(long long)
 @ stub -syscall NtUserSetCoreWindowPartner
 @ stub -syscall NtUserSetCoveredWindowStates
 @ stdcall -syscall NtUserSetCursor(long)
@@ -1435,7 +1435,7 @@
 @ stdcall -syscall NtUserSetWinEventHook(long long long ptr ptr long long long)
 @ stub -syscall NtUserSetWindowArrangement
 @ stub -syscall NtUserSetWindowBand
-@ stub -syscall NtUserSetWindowCompositionAttribute
+@ stdcall -syscall NtUserSetWindowCompositionAttribute(long ptr)
 @ stub -syscall NtUserSetWindowCompositionTransition
 @ stdcall -syscall NtUserSetWindowContextHelpId(long long)
 @ stub -syscall NtUserSetWindowDisplayAffinity

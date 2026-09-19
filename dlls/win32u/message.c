@@ -4631,6 +4631,29 @@ LRESULT send_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
     return send_message_timeout( hwnd, msg, wparam, lparam, SMTO_NORMAL, 0, FALSE );
 }
 
+/* Queue an asynchronous sent message even when the destination belongs to the
+ * current thread.  Kernel USER events use this path so that the window proc is
+ * called only when the destination thread next processes its sent-message
+ * queue. */
+BOOL queue_notify_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct send_message_info info;
+    size_t reply_size;
+
+    info.type     = MSG_NOTIFY;
+    info.hwnd     = hwnd;
+    info.msg      = msg;
+    info.wparam   = wparam;
+    info.lparam   = lparam;
+    info.flags    = 0;
+    info.wm_char  = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+    info.params   = NULL;
+
+    if (!(info.dest_tid = get_window_thread( hwnd, NULL ))) return FALSE;
+    if (is_exiting_thread( info.dest_tid )) return FALSE;
+    return put_message_in_queue( &info, &reply_size );
+}
+
 /* see SendNotifyMessageW */
 BOOL send_notify_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, BOOL ansi )
 {

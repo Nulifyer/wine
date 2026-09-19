@@ -1116,7 +1116,7 @@
     SYSCALL_ENTRY( 0x1458, NtUserGetWOWClass, 0 ) \
     SYSCALL_ENTRY( 0x1459, NtUserGetWinStationInfo, 0 ) \
     SYSCALL_ENTRY( 0x145a, NtUserGetWindowBand, 0 ) \
-    SYSCALL_ENTRY( 0x145b, NtUserGetWindowCompositionAttribute, 0 ) \
+    SYSCALL_ENTRY( 0x145b, NtUserGetWindowCompositionAttribute, 8 ) \
     SYSCALL_ENTRY( 0x145c, NtUserGetWindowCompositionInfo, 0 ) \
     SYSCALL_ENTRY( 0x145d, NtUserGetWindowContextHelpId, 4 ) \
     SYSCALL_ENTRY( 0x145e, NtUserGetWindowDC, 4 ) \
@@ -1348,7 +1348,7 @@
     SYSCALL_ENTRY( 0x1540, NtUserSetClassWord, 12 ) \
     SYSCALL_ENTRY( 0x1541, NtUserSetClipboardData, 12 ) \
     SYSCALL_ENTRY( 0x1542, NtUserSetClipboardViewer, 4 ) \
-    SYSCALL_ENTRY( 0x1543, NtUserSetCoreWindow, 0 ) \
+    SYSCALL_ENTRY( 0x1543, NtUserSetCoreWindow, 8 ) \
     SYSCALL_ENTRY( 0x1544, NtUserSetCoreWindowPartner, 0 ) \
     SYSCALL_ENTRY( 0x1545, NtUserSetCoveredWindowStates, 0 ) \
     SYSCALL_ENTRY( 0x1546, NtUserSetCursor, 4 ) \
@@ -1437,7 +1437,7 @@
     SYSCALL_ENTRY( 0x1599, NtUserSetWinEventHook, 32 ) \
     SYSCALL_ENTRY( 0x159a, NtUserSetWindowArrangement, 0 ) \
     SYSCALL_ENTRY( 0x159b, NtUserSetWindowBand, 0 ) \
-    SYSCALL_ENTRY( 0x159c, NtUserSetWindowCompositionAttribute, 0 ) \
+    SYSCALL_ENTRY( 0x159c, NtUserSetWindowCompositionAttribute, 8 ) \
     SYSCALL_ENTRY( 0x159d, NtUserSetWindowCompositionTransition, 0 ) \
     SYSCALL_ENTRY( 0x159e, NtUserSetWindowContextHelpId, 8 ) \
     SYSCALL_ENTRY( 0x159f, NtUserSetWindowDisplayAffinity, 0 ) \
@@ -2658,7 +2658,7 @@
     SYSCALL_ENTRY( 0x1458, NtUserGetWOWClass, 0 ) \
     SYSCALL_ENTRY( 0x1459, NtUserGetWinStationInfo, 0 ) \
     SYSCALL_ENTRY( 0x145a, NtUserGetWindowBand, 0 ) \
-    SYSCALL_ENTRY( 0x145b, NtUserGetWindowCompositionAttribute, 0 ) \
+    SYSCALL_ENTRY( 0x145b, NtUserGetWindowCompositionAttribute, 16 ) \
     SYSCALL_ENTRY( 0x145c, NtUserGetWindowCompositionInfo, 0 ) \
     SYSCALL_ENTRY( 0x145d, NtUserGetWindowContextHelpId, 8 ) \
     SYSCALL_ENTRY( 0x145e, NtUserGetWindowDC, 8 ) \
@@ -2890,7 +2890,7 @@
     SYSCALL_ENTRY( 0x1540, NtUserSetClassWord, 24 ) \
     SYSCALL_ENTRY( 0x1541, NtUserSetClipboardData, 24 ) \
     SYSCALL_ENTRY( 0x1542, NtUserSetClipboardViewer, 8 ) \
-    SYSCALL_ENTRY( 0x1543, NtUserSetCoreWindow, 0 ) \
+    SYSCALL_ENTRY( 0x1543, NtUserSetCoreWindow, 16 ) \
     SYSCALL_ENTRY( 0x1544, NtUserSetCoreWindowPartner, 0 ) \
     SYSCALL_ENTRY( 0x1545, NtUserSetCoveredWindowStates, 0 ) \
     SYSCALL_ENTRY( 0x1546, NtUserSetCursor, 8 ) \
@@ -2979,7 +2979,7 @@
     SYSCALL_ENTRY( 0x1599, NtUserSetWinEventHook, 64 ) \
     SYSCALL_ENTRY( 0x159a, NtUserSetWindowArrangement, 0 ) \
     SYSCALL_ENTRY( 0x159b, NtUserSetWindowBand, 0 ) \
-    SYSCALL_ENTRY( 0x159c, NtUserSetWindowCompositionAttribute, 0 ) \
+    SYSCALL_ENTRY( 0x159c, NtUserSetWindowCompositionAttribute, 16 ) \
     SYSCALL_ENTRY( 0x159d, NtUserSetWindowCompositionTransition, 0 ) \
     SYSCALL_ENTRY( 0x159e, NtUserSetWindowContextHelpId, 16 ) \
     SYSCALL_ENTRY( 0x159f, NtUserSetWindowDisplayAffinity, 0 ) \
@@ -3792,7 +3792,6 @@
     SYSCALL_STUB( NtUserGetWOWClass ) \
     SYSCALL_STUB( NtUserGetWinStationInfo ) \
     SYSCALL_STUB( NtUserGetWindowBand ) \
-    SYSCALL_STUB( NtUserGetWindowCompositionAttribute ) \
     SYSCALL_STUB( NtUserGetWindowCompositionInfo ) \
     SYSCALL_STUB( NtUserGetWindowFeedbackSetting ) \
     SYSCALL_STUB( NtUserGetWindowGroupId ) \
@@ -3940,7 +3939,6 @@
     SYSCALL_STUB( NtUserSetCalibrationData ) \
     SYSCALL_STUB( NtUserSetCancelRotationDelayHintWindow ) \
     SYSCALL_STUB( NtUserSetChildWindowNoActivate ) \
-    SYSCALL_STUB( NtUserSetCoreWindow ) \
     SYSCALL_STUB( NtUserSetCoreWindowPartner ) \
     SYSCALL_STUB( NtUserSetCoveredWindowStates ) \
     SYSCALL_STUB( NtUserSetCursorContents ) \
@@ -4001,7 +3999,6 @@
     SYSCALL_STUB( NtUserSetWatermarkStrings ) \
     SYSCALL_STUB( NtUserSetWindowArrangement ) \
     SYSCALL_STUB( NtUserSetWindowBand ) \
-    SYSCALL_STUB( NtUserSetWindowCompositionAttribute ) \
     SYSCALL_STUB( NtUserSetWindowCompositionTransition ) \
     SYSCALL_STUB( NtUserSetWindowDisplayAffinity ) \
     SYSCALL_STUB( NtUserSetWindowFeedbackSetting ) \

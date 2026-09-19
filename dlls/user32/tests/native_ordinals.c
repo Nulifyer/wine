@@ -33,6 +33,17 @@ typedef DWORD (WINAPI *get_queue_status_readonly_fn)(UINT);
 typedef BOOL (WINAPI *register_user_api_hook_fn)(const struct user_api_hook_descriptor *);
 typedef BOOL (WINAPI *register_dmanip_hook_fn)(void);
 typedef BOOL (WINAPI *init_dmanip_hook_ex_fn)(BOOL);
+typedef BOOL (WINAPI *set_core_window_fn)(HWND, BOOL);
+typedef BOOL (WINAPI *is_core_window_fn)(HWND);
+struct composition_attribute_data
+{
+    int attribute;
+    void *data;
+    SIZE_T size;
+};
+typedef BOOL (WINAPI *get_window_composition_attribute_fn)(HWND, struct composition_attribute_data *);
+typedef BOOL (WINAPI *set_window_composition_attribute_fn)(HWND, struct composition_attribute_data *);
+typedef INT (WINAPI *schedule_dispatch_notification_fn)(HWND);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 
@@ -55,6 +66,70 @@ static BOOL enum_saw_target, enum_saw_child, enum_saw_grandchild;
 static unsigned int theme_change_count;
 static WPARAM theme_change_wparam;
 static LPARAM theme_change_lparam;
+static unsigned int dispatch_notification_count;
+static WPARAM dispatch_notification_wparam;
+static LPARAM dispatch_notification_lparam;
+
+static LRESULT WINAPI dispatch_notification_proc(HWND hwnd, UINT message, WPARAM wparam,
+                                                 LPARAM lparam)
+{
+    if (message == 0x60)
+    {
+        dispatch_notification_count++;
+        dispatch_notification_wparam = wparam;
+        dispatch_notification_lparam = lparam;
+        return 0;
+    }
+    return DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
+static void test_schedule_dispatch_notification(HMODULE module)
+{
+    static const WCHAR class_name[] = L"WineScheduleDispatchNotification";
+    schedule_dispatch_notification_fn function;
+    WNDCLASSW class = {0};
+    MSG message;
+    HWND window;
+    INT ret;
+
+    function = (void *)GetProcAddress(module, (const char *)2582);
+    ok(!!function, "Ordinal 2582 is unavailable.\n");
+    if (!function) return;
+
+    class.lpfnWndProc = dispatch_notification_proc;
+    class.hInstance = GetModuleHandleW(NULL);
+    class.lpszClassName = class_name;
+    ok(RegisterClassW(&class), "RegisterClassW failed, error %lu.\n", GetLastError());
+
+    window = CreateWindowExW(0, class_name, NULL, WS_POPUP, 0, 0, 32, 32,
+                             NULL, NULL, class.hInstance, NULL);
+    ok(!!window, "failed to create dispatch window, error %lu.\n", GetLastError());
+    if (!window) return;
+
+    SetLastError(0x13579bdf);
+    ret = function(NULL);
+    ok(!ret && GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
+       "null HWND returned %d, error %lu.\n", ret, GetLastError());
+
+    dispatch_notification_count = 0;
+    dispatch_notification_wparam = 1;
+    dispatch_notification_lparam = 1;
+    SetLastError(0x13579bdf);
+    ret = function(window);
+    ok(ret == 2, "dispatch schedule returned %d, error %lu.\n", ret, GetLastError());
+    ok(!dispatch_notification_count, "notification was delivered synchronously.\n");
+
+    PeekMessageW(&message, NULL, 0, 0, PM_NOREMOVE);
+    ok(dispatch_notification_count == 1, "received %u dispatch notifications.\n",
+       dispatch_notification_count);
+    ok(!dispatch_notification_wparam, "received wparam %#Ix.\n",
+       dispatch_notification_wparam);
+    ok(!dispatch_notification_lparam, "received lparam %#Ix.\n",
+       dispatch_notification_lparam);
+
+    DestroyWindow(window);
+    UnregisterClassW(class_name, class.hInstance);
+}
 
 static void test_queue_status_readonly(HMODULE module)
 {
@@ -722,6 +797,178 @@ static void test_dmanip_hook_registration(HMODULE module)
     ok(ret, "Direct Manipulation teardown returned %d.\n", ret);
 }
 
+static void test_core_window(HMODULE module)
+{
+    set_core_window_fn set_core_window;
+    is_core_window_fn is_core_window;
+    HWND parent, child, grandchild;
+    BOOL ret;
+
+    set_core_window = (void *)GetProcAddress(module, "SetCoreWindow");
+    is_core_window = (void *)GetProcAddress(module, (const char *)2572);
+    ok(!!set_core_window, "SetCoreWindow is unavailable.\n");
+    ok(!!is_core_window, "Ordinal 2572 is unavailable.\n");
+    if (!set_core_window || !is_core_window) return;
+
+    parent = CreateWindowExW(0, L"Static", NULL, WS_POPUP, 0, 0, 100, 100,
+                             NULL, NULL, GetModuleHandleW(NULL), NULL);
+    child = parent ? CreateWindowExW(0, L"Static", NULL, WS_CHILD, 0, 0, 50, 50,
+                                     parent, NULL, GetModuleHandleW(NULL), NULL) : NULL;
+    grandchild = child ? CreateWindowExW(0, L"Static", NULL, WS_CHILD, 0, 0, 25, 25,
+                                         child, NULL, GetModuleHandleW(NULL), NULL) : NULL;
+    ok(!!parent && !!child && !!grandchild,
+       "failed to create core-window hierarchy, error %lu.\n", GetLastError());
+    if (!parent || !child || !grandchild) goto done;
+
+    ok(!is_core_window(parent), "parent unexpectedly starts as a core window.\n");
+    ok(!is_core_window(child), "child unexpectedly starts as a core window.\n");
+    ok(!is_core_window(grandchild), "grandchild unexpectedly starts as a core window.\n");
+
+    ret = set_core_window(parent, TRUE);
+    ok(ret, "SetCoreWindow(TRUE) failed, error %lu.\n", GetLastError());
+    ok(is_core_window(parent), "parent did not become a core window.\n");
+    ok(is_core_window(child), "core-window state did not reach child.\n");
+    ok(is_core_window(grandchild), "core-window state did not reach grandchild.\n");
+
+    ret = set_core_window(parent, FALSE);
+    ok(ret, "SetCoreWindow(FALSE) failed, error %lu.\n", GetLastError());
+    ok(!is_core_window(parent), "parent retained core-window state.\n");
+    ok(!is_core_window(child), "child retained core-window state.\n");
+    ok(!is_core_window(grandchild), "grandchild retained core-window state.\n");
+
+    SetLastError(0xdeadbeef);
+    ret = set_core_window((HWND)(UINT_PTR)0xdeadbeef, TRUE);
+    ok(!ret, "SetCoreWindow accepted an invalid HWND.\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+       "invalid HWND set error %#lx.\n", GetLastError());
+
+done:
+    if (grandchild) DestroyWindow(grandchild);
+    if (child) DestroyWindow(child);
+    if (parent) DestroyWindow(parent);
+}
+
+static void test_window_composition_attributes(HMODULE module)
+{
+    get_window_composition_attribute_fn get_attribute;
+    set_window_composition_attribute_fn set_attribute;
+    struct composition_attribute_data data;
+    DWORD accent[4], value;
+    HWND window, child;
+    BOOL ret;
+
+    get_attribute = (void *)GetProcAddress(module, "GetWindowCompositionAttribute");
+    set_attribute = (void *)GetProcAddress(module, "SetWindowCompositionAttribute");
+    ok(!!get_attribute, "GetWindowCompositionAttribute is unavailable.\n");
+    ok(!!set_attribute, "SetWindowCompositionAttribute is unavailable.\n");
+    if (!get_attribute || !set_attribute) return;
+
+    window = CreateWindowExW(0, L"Static", NULL, WS_OVERLAPPEDWINDOW, 0, 0, 100, 100,
+                             NULL, NULL, GetModuleHandleW(NULL), NULL);
+    child = window ? CreateWindowExW(0, L"Static", NULL, WS_CHILD, 0, 0, 50, 50,
+                                     window, NULL, GetModuleHandleW(NULL), NULL) : NULL;
+    ok(!!window && !!child, "failed to create composition windows, error %lu.\n", GetLastError());
+    if (!window || !child) goto done;
+
+    value = 0xdeadbeef;
+    data.attribute = 1;
+    data.data = &value;
+    data.size = sizeof(value);
+    ret = get_attribute(window, &data);
+    ok(ret, "non-client rendering query failed, error %lu.\n", GetLastError());
+    ok(value == TRUE, "default non-client rendering state is %#lx.\n", value);
+
+    value = 1; /* DWMNCRP_DISABLED */
+    data.attribute = 2;
+    ret = set_attribute(window, &data);
+    ok(ret, "disabling non-client rendering failed, error %lu.\n", GetLastError());
+    value = 0xdeadbeef;
+    ret = get_attribute(window, &data);
+    ok(ret && value == 1, "policy query returned %d, value %#lx, error %lu.\n",
+       ret, value, GetLastError());
+    data.attribute = 1;
+    ret = get_attribute(window, &data);
+    ok(ret && value == FALSE, "disabled non-client rendering returned %d, value %#lx.\n",
+       ret, value);
+
+    value = 2; /* DWMNCRP_ENABLED */
+    data.attribute = 2;
+    ret = set_attribute(window, &data);
+    ok(ret, "enabling non-client rendering failed, error %lu.\n", GetLastError());
+    value = 0;
+    data.attribute = 1;
+    ret = get_attribute(window, &data);
+    ok(ret && value == TRUE, "enabled non-client rendering returned %d, value %#lx.\n",
+       ret, value);
+
+    accent[0] = 5;
+    accent[1] = 2;
+    accent[2] = 0xff123456;
+    accent[3] = 7;
+    data.attribute = 19;
+    data.data = accent;
+    data.size = sizeof(accent);
+    ret = set_attribute(window, &data);
+    ok(ret, "setting accent policy failed, error %lu.\n", GetLastError());
+    memset(accent, 0, sizeof(accent));
+    ret = get_attribute(window, &data);
+    ok(ret, "getting accent policy failed, error %lu.\n", GetLastError());
+    ok(accent[0] == 5 && accent[1] == 2 && accent[2] == 0xff123456 && accent[3] == 7,
+       "accent policy returned {%#lx, %#lx, %#lx, %#lx}.\n",
+       accent[0], accent[1], accent[2], accent[3]);
+
+    value = 0;
+    data.attribute = 34;
+    data.data = &value;
+    data.size = sizeof(value);
+    ret = get_attribute(window, &data);
+    ok(ret && value == TRUE, "accent-presence query returned %d, value %#lx.\n", ret, value);
+
+    memset(accent, 0, sizeof(accent));
+    data.attribute = 19;
+    data.data = accent;
+    data.size = sizeof(accent);
+    ret = set_attribute(window, &data);
+    ok(ret, "clearing accent policy failed, error %lu.\n", GetLastError());
+    value = 0xdeadbeef;
+    data.attribute = 34;
+    data.data = &value;
+    data.size = sizeof(value);
+    ret = get_attribute(window, &data);
+    ok(ret && value == FALSE, "cleared accent-presence query returned %d, value %#lx.\n",
+       ret, value);
+
+    SetLastError(0xdeadbeef);
+    data.attribute = 19;
+    data.data = accent;
+    data.size = sizeof(accent) - sizeof(accent[0]);
+    ret = set_attribute(window, &data);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "short accent policy returned %d, error %lu.\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    data.attribute = 1;
+    data.data = &value;
+    data.size = sizeof(value);
+    ret = set_attribute(window, &data);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "read-only attribute returned %d, error %lu.\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = get_attribute(child, &data);
+    ok(!ret && GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
+       "child attribute query returned %d, error %lu.\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = get_attribute((HWND)(UINT_PTR)0xdeadbeef, &data);
+    ok(!ret && GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
+       "invalid-window query returned %d, error %lu.\n", ret, GetLastError());
+
+done:
+    if (child) DestroyWindow(child);
+    if (window) DestroyWindow(window);
+}
+
 START_TEST(native_ordinals)
 {
     char **argv;
@@ -740,6 +987,7 @@ START_TEST(native_ordinals)
     }
 
     module = GetModuleHandleW(L"user32.dll");
+    test_schedule_dispatch_notification(module);
     test_queue_status_readonly(module);
     test_broadcast_theme_change_event(module);
     test_internal_window_enumeration(module);
@@ -749,6 +997,8 @@ START_TEST(native_ordinals)
     test_current_dpi_info_for_window(module);
     test_register_user_api_hook(module);
     test_dmanip_hook_registration(module);
+    test_core_window(module);
+    test_window_composition_attributes(module);
 
     pGetProcessUIContextInformation = (void *)GetProcAddress(module,
                                                              "GetProcessUIContextInformation");

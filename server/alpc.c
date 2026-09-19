@@ -1075,6 +1075,108 @@ void notify_dwm_desktop_destroyed( struct desktop *desktop )
         queue_dwm_desktop_message( port, 0x40000010, desktop );
 }
 
+static int queue_dwm_window_message( struct alpc_port *port, const void *data,
+                                     data_size_t size, const char *name,
+                                     unsigned int window )
+{
+    struct alpc_message *message;
+
+    if (!(message = new_message( data, size, ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000,
+                                 0, port->thread ))) return 0;
+    message->info.pid = 0;
+    message->info.tid = 0;
+    message->info.id = 0;
+    message->info.callback_id = 0;
+    set_message_destination( message, port, port->initial_message_context );
+    list_add_tail( &port->messages, &message->entry );
+    notify_port( port );
+    dispatch_receives( port );
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server dwm-window-%s window=%08x phase=%u\n",
+                 name, window, port->kernel_session_phase );
+    return 1;
+}
+
+unsigned int notify_dwm_window_created( struct desktop *desktop, unsigned int generation,
+                                        unsigned int window, unsigned int parent,
+                                        unsigned int style, unsigned int ex_style,
+                                        const struct rectangle *rect, unsigned int process_id,
+                                        unsigned __int64 process_sequence )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 value;
+    unsigned char data[124] = {0};
+
+    if (!port) return 0;
+    if (generation == port->composition_id) return generation;
+    put_u32( data, 0x40000011 );
+    value = window;
+    memcpy( data + 4, &value, sizeof(value) );
+    value = parent;
+    memcpy( data + 12, &value, sizeof(value) );
+    put_u32( data + 20, style );
+    put_u32( data + 24, ex_style );
+    memcpy( data + 28, rect, sizeof(*rect) );
+    /* data + 44 is the initial private composition state and data + 48 is
+     * WINDOWCOMPOSITIONINFO. Wine has no corresponding server state yet;
+     * their all-zero values are the native default-window representation. */
+    value = get_shared_object_locator( desktop->shared ).id;
+    memcpy( data + 104, &value, sizeof(value) );
+    put_u32( data + 112, process_id );
+    memcpy( data + 116, &process_sequence, sizeof(process_sequence) );
+    if (!queue_dwm_window_message( port, data, sizeof(data), "create", window )) return 0;
+    return port->composition_id;
+}
+
+int notify_dwm_window_linked( struct desktop *desktop, unsigned int generation,
+                              unsigned int window, unsigned int parent,
+                              unsigned int previous, unsigned int band )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 value;
+    unsigned char data[32] = {0};
+
+    if (!port || generation != port->composition_id) return 0;
+    put_u32( data, 0x40000012 );
+    value = window;
+    memcpy( data + 4, &value, sizeof(value) );
+    value = parent;
+    memcpy( data + 12, &value, sizeof(value) );
+    value = previous;
+    memcpy( data + 20, &value, sizeof(value) );
+    put_u32( data + 28, band );
+    return queue_dwm_window_message( port, data, sizeof(data), "link", window );
+}
+
+void notify_dwm_window_unlinked( struct desktop *desktop, unsigned int generation,
+                                 unsigned int window, unsigned int parent )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 value;
+    unsigned char data[20] = {0};
+
+    if (!port || generation != port->composition_id) return;
+    put_u32( data, 0x40000013 );
+    value = window;
+    memcpy( data + 4, &value, sizeof(value) );
+    value = parent;
+    memcpy( data + 12, &value, sizeof(value) );
+    queue_dwm_window_message( port, data, sizeof(data), "unlink", window );
+}
+
+void notify_dwm_window_destroyed( struct desktop *desktop, unsigned int generation,
+                                  unsigned int window )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 value = window;
+    unsigned char data[12] = {0};
+
+    if (!port || generation != port->composition_id) return;
+    put_u32( data, 0x40000014 );
+    memcpy( data + 4, &value, sizeof(value) );
+    queue_dwm_window_message( port, data, sizeof(data), "destroy", window );
+}
+
 static int queue_dwm_window_target_message( struct alpc_port *port, unsigned int command,
                                             unsigned int window, unsigned int type,
                                             obj_handle_t handle )
@@ -2553,6 +2655,7 @@ DECL_HANDLER(start_dwm_kernel)
     {
         LIST_FOR_EACH_ENTRY( desktop, &port->composited_winstation->desktops, struct desktop, entry )
             queue_dwm_desktop_message( port, 0x4000000e, desktop );
+        replay_dwm_window_contexts( port->composited_winstation );
         set_winstation_composited( port->composited_winstation, 1 );
     }
     if (initializing)

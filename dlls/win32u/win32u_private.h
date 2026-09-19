@@ -138,6 +138,7 @@ extern NTSTATUS server_send_hardware_message( HWND hwnd, UINT flags, const INPUT
 extern LRESULT send_internal_message_timeout( DWORD dest_pid, DWORD dest_tid, UINT msg, WPARAM wparam,
                                               LPARAM lparam, UINT flags, UINT timeout,
                                               PDWORD_PTR res_ptr );
+extern BOOL queue_notify_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam );
 extern LRESULT send_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam );
 extern BOOL send_notify_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, BOOL ansi );
 extern LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,

@@ -1819,6 +1819,38 @@ static void dump_set_window_fnid_request( const struct set_window_fnid_request *
     fprintf( stderr, ", atom=%04x", req->atom );
 }
 
+static void dump_set_core_window_request( const struct set_core_window_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", enabled=%d", req->enabled );
+}
+
+static void dump_get_window_composition_attribute_request( const struct get_window_composition_attribute_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", attribute=%08x", req->attribute );
+}
+
+static void dump_get_window_composition_attribute_reply( const struct get_window_composition_attribute_reply *req )
+{
+    fprintf( stderr, " value0=%08x", req->value0 );
+    fprintf( stderr, ", value1=%08x", req->value1 );
+    fprintf( stderr, ", value2=%08x", req->value2 );
+    fprintf( stderr, ", value3=%08x", req->value3 );
+    fprintf( stderr, ", value4=%08x", req->value4 );
+}
+
+static void dump_set_window_composition_attribute_request( const struct set_window_composition_attribute_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", attribute=%08x", req->attribute );
+    fprintf( stderr, ", value0=%08x", req->value0 );
+    fprintf( stderr, ", value1=%08x", req->value1 );
+    fprintf( stderr, ", value2=%08x", req->value2 );
+    fprintf( stderr, ", value3=%08x", req->value3 );
+    fprintf( stderr, ", value4=%08x", req->value4 );
+}
+
 static void dump_set_parent_request( const struct set_parent_request *req )
 {
     fprintf( stderr, " handle=%08x", req->handle );
@@ -4627,6 +4659,9 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_init_window_info_request,
     (dump_func)dump_set_window_info_request,
     (dump_func)dump_set_window_fnid_request,
+    (dump_func)dump_set_core_window_request,
+    (dump_func)dump_get_window_composition_attribute_request,
+    (dump_func)dump_set_window_composition_attribute_request,
     (dump_func)dump_set_parent_request,
     (dump_func)dump_get_window_parents_request,
     (dump_func)dump_get_window_list_request,
@@ -5032,6 +5067,9 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_window_info_reply,
     NULL,
     (dump_func)dump_set_window_info_reply,
+    NULL,
+    NULL,
+    (dump_func)dump_get_window_composition_attribute_reply,
     NULL,
     (dump_func)dump_set_parent_reply,
     (dump_func)dump_get_window_parents_reply,
@@ -5439,6 +5477,9 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "init_window_info",
     "set_window_info",
     "set_window_fnid",
+    "set_core_window",
+    "get_window_composition_attribute",
+    "set_window_composition_attribute",
     "set_parent",
     "get_window_parents",
     "get_window_list",
@@ -5735,6 +5776,7 @@ static const struct
     { "ERROR_INVALID_CURSOR_HANDLE", 0xc0010000 | ERROR_INVALID_CURSOR_HANDLE },
     { "ERROR_INVALID_HANDLE",        0xc0010000 | ERROR_INVALID_HANDLE },
     { "ERROR_INVALID_INDEX",         0xc0010000 | ERROR_INVALID_INDEX },
+    { "ERROR_INVALID_PARAMETER",     0xc0010000 | ERROR_INVALID_PARAMETER },
     { "ERROR_INVALID_WINDOW_HANDLE", 0xc0010000 | ERROR_INVALID_WINDOW_HANDLE },
     { "ERROR_NO_MORE_USER_HANDLES",  0xc0010000 | ERROR_NO_MORE_USER_HANDLES },
     { "ERROR_WINDOW_OF_OTHER_THREAD", 0xc0010000 | ERROR_WINDOW_OF_OTHER_THREAD },

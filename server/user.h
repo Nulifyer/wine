@@ -199,6 +199,8 @@ extern int is_window_visible( user_handle_t window );
 extern int is_window_transparent( user_handle_t window );
 extern int make_window_active( user_handle_t window );
 extern struct thread *get_window_thread( user_handle_t handle );
+extern int ensure_dwm_window_context( user_handle_t window );
+extern void replay_dwm_window_contexts( struct winstation *winstation );
 extern void cleanup_dcomp_window_targets( user_handle_t window );
 extern void replay_dcomp_window_targets( unsigned int session_id );
 extern user_handle_t shallow_window_from_point( struct desktop *desktop, int x, int y );
