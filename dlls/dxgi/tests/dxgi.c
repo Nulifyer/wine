@@ -35,6 +35,266 @@ enum frame_latency
     MAX_FRAME_LATENCY     = 16,
 };
 
+DEFINE_GUID(IID_IDXGIAdapterDWM, 0x712bd56d, 0x86ff, 0x4b71, 0x91, 0xe1, 0xc1, 0x3b, 0x27, 0x4f, 0xf2, 0xa2);
+DEFINE_GUID(IID_IDXGIAdapterInternal2, 0x2411e7e1, 0x12ac, 0x4ccf, 0xbd, 0x14, 0x97, 0x98, 0xe8, 0x53, 0x4d, 0xc0);
+DEFINE_GUID(IID_IDXGIFactoryDWM, 0x713f394e, 0x92ca, 0x47e7, 0xab, 0x81, 0x11, 0x59, 0xc2, 0x79, 0x1e, 0x54);
+DEFINE_GUID(IID_IDXGIFactoryDWM2, 0x1ddd77aa, 0x9a4a, 0x4cc8, 0x9e, 0x55, 0x98, 0xc1, 0x96, 0xba, 0xfc, 0x8f);
+DEFINE_GUID(IID_IDXGIFactoryPartner, 0xb14887d9, 0xf537, 0x4af5, 0xb3, 0x79, 0x7d, 0x33, 0x03, 0x1b, 0xe7, 0x73);
+DEFINE_GUID(IID_IDXGIOutputDWM, 0x6f66a9a0, 0xbece, 0x4ee8, 0xb1, 0x1b, 0x99, 0x0e, 0xb3, 0x8e, 0xd9, 0x76);
+DEFINE_GUID(IID_IDXGISwapChainDWM1, 0xfc4f7700, 0x8c88, 0x43fb, 0xaa, 0x4f, 0x44, 0xc4, 0xa5, 0x84, 0xdc, 0x19);
+
+enum test_dxgi_output_dwm_display_flags
+{
+    TEST_DXGI_OUTPUT_DWM_DISPLAY_FLAG_PRIMARY = 0x4,
+    TEST_DXGI_OUTPUT_DWM_DISPLAY_FLAG_ATTACHED_TO_DESKTOP = 0x8,
+};
+
+struct test_dxgi_adapter_dwm;
+struct test_dxgi_factory_dwm;
+struct test_dxgi_factory_dwm2;
+struct test_dxgi_output_dwm;
+struct test_dxgi_swapchain_dwm1;
+
+#pragma pack(push, 4)
+struct test_dxgi_output_dwm_desc
+{
+    LUID adapter_luid;
+    UINT vidpn_source_id;
+    UINT vidpn_target_id;
+    UINT display_id;
+    LUID output_luid;
+    UINT monitor_resolution_width;
+    UINT monitor_resolution_height;
+    DXGI_FORMAT pixel_format;
+    DXGI_RATIONAL refresh_rate;
+    DXGI_RATIONAL minimum_refresh_rate;
+    DXGI_RATIONAL maximum_refresh_rate;
+    UINT boost_refresh_rate_multiplier;
+    DXGI_MODE_ROTATION rotation;
+    DXGI_MODE_SCANLINE_ORDER scanline_ordering;
+    RECT clip_box;
+    RECT content_resolution;
+    UINT flags;
+    WCHAR display_name[CCHDEVICENAME];
+    float sdr_white_level;
+    UINT sync_lock_group_id;
+    UINT sync_lock_style;
+    DXGI_FORMAT hdr_pixel_format;
+    UINT64 umd_driver_version;
+};
+#pragma pack(pop)
+
+struct test_dxgi_frame_statistics_dwm
+{
+    UINT present_count;
+    UINT present_refresh_count;
+    LARGE_INTEGER present_qpc_time;
+    UINT sync_refresh_count;
+    LARGE_INTEGER sync_qpc_time;
+    UINT custom_present_duration;
+    UINT virtual_sync_refresh_count;
+    LARGE_INTEGER virtual_sync_qpc_time;
+    UINT virtual_present_refresh_count;
+    LARGE_INTEGER virtual_present_qpc_time;
+    LARGE_INTEGER vsync_duration_qpc_time;
+    UINT vsync_multiplier;
+};
+
+struct test_dxgi_multiplane_overlay_group_caps
+{
+    UINT max_rgb_planes;
+    UINT max_yuv_planes;
+    UINT overlay_caps;
+    float max_stretch_factor;
+    float max_shrink_factor;
+};
+
+struct test_dxgi_multiplane_overlay_caps
+{
+    UINT max_planes;
+    struct test_dxgi_multiplane_overlay_group_caps overlay;
+    struct test_dxgi_multiplane_overlay_group_caps panel_fitter;
+};
+
+struct test_dxgi_adapter_dwm_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(struct test_dxgi_adapter_dwm *iface,
+            REFIID iid, void **object);
+    ULONG (STDMETHODCALLTYPE *AddRef)(struct test_dxgi_adapter_dwm *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(struct test_dxgi_adapter_dwm *iface);
+    HRESULT (STDMETHODCALLTYPE *OpenKernelHandle)(struct test_dxgi_adapter_dwm *iface, HANDLE *handle);
+    HRESULT (STDMETHODCALLTYPE *CloseKernelHandle)(struct test_dxgi_adapter_dwm *iface, HANDLE handle);
+    HRESULT (STDMETHODCALLTYPE *EnumOutputs)(struct test_dxgi_adapter_dwm *iface,
+            UINT output_idx, UINT output_class, IDXGIOutput **output);
+};
+
+struct test_dxgi_adapter_dwm
+{
+    const struct test_dxgi_adapter_dwm_vtbl *lpVtbl;
+};
+
+struct test_dxgi_factory_dwm_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(struct test_dxgi_factory_dwm *iface,
+            REFIID iid, void **object);
+    ULONG (STDMETHODCALLTYPE *AddRef)(struct test_dxgi_factory_dwm *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(struct test_dxgi_factory_dwm *iface);
+    HRESULT (STDMETHODCALLTYPE *CreateSwapChain)(struct test_dxgi_factory_dwm *iface,
+            IUnknown *device, DXGI_SWAP_CHAIN_DESC *desc, IDXGIOutput *output,
+            struct test_dxgi_swapchain_dwm1 **swapchain);
+};
+
+struct test_dxgi_factory_dwm
+{
+    const struct test_dxgi_factory_dwm_vtbl *lpVtbl;
+};
+
+struct test_dxgi_factory_dwm2_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(struct test_dxgi_factory_dwm2 *iface,
+            REFIID iid, void **object);
+    ULONG (STDMETHODCALLTYPE *AddRef)(struct test_dxgi_factory_dwm2 *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(struct test_dxgi_factory_dwm2 *iface);
+    HRESULT (STDMETHODCALLTYPE *CreateSwapChainDWM)(struct test_dxgi_factory_dwm2 *iface,
+            IUnknown *device, DXGI_SWAP_CHAIN_DESC1 *desc,
+            DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc, IDXGIOutput *output,
+            IUnknown **swapchain);
+    HRESULT (STDMETHODCALLTYPE *CreateSwapChainDDA)(struct test_dxgi_factory_dwm2 *iface,
+            IUnknown *device, DXGI_SWAP_CHAIN_DESC1 *desc, IDXGIOutput *output,
+            IUnknown **swapchain);
+    HRESULT (STDMETHODCALLTYPE *CreateSwapChainDWMFromHandle)(struct test_dxgi_factory_dwm2 *iface,
+            IUnknown *device, DXGI_SWAP_CHAIN_DESC1 *desc,
+            DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc, HANDLE handle,
+            IUnknown **swapchain);
+    HRESULT (STDMETHODCALLTYPE *CreateSwapChainDDAFromHandle)(struct test_dxgi_factory_dwm2 *iface,
+            IUnknown *device, DXGI_SWAP_CHAIN_DESC1 *desc, HANDLE handle, IUnknown **swapchain);
+    HRESULT (STDMETHODCALLTYPE *EnumOutputByLuid)(struct test_dxgi_factory_dwm2 *iface,
+            LUID output_luid, REFIID iid, void **output);
+    HRESULT (STDMETHODCALLTYPE *CreateExclusiveWindowlessSwapChain)(
+            struct test_dxgi_factory_dwm2 *iface, IUnknown *device, DXGI_SWAP_CHAIN_DESC1 *desc,
+            DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc, IDXGIOutput *output,
+            IUnknown **swapchain);
+};
+
+struct test_dxgi_factory_dwm2
+{
+    const struct test_dxgi_factory_dwm2_vtbl *lpVtbl;
+};
+
+struct test_dxgi_output_dwm_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(struct test_dxgi_output_dwm *iface,
+            REFIID iid, void **object);
+    ULONG (STDMETHODCALLTYPE *AddRef)(struct test_dxgi_output_dwm *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(struct test_dxgi_output_dwm *iface);
+    BOOL (STDMETHODCALLTYPE *HasDDAClient)(struct test_dxgi_output_dwm *iface);
+    HRESULT (STDMETHODCALLTYPE *GetDesc)(struct test_dxgi_output_dwm *iface,
+            struct test_dxgi_output_dwm_desc *desc);
+    HRESULT (STDMETHODCALLTYPE *FindClosestMatchingModeFromDesktop)(struct test_dxgi_output_dwm *iface,
+            const DXGI_MODE_DESC1 *mode, DXGI_MODE_DESC1 *closest_match, IUnknown *device);
+    HRESULT (STDMETHODCALLTYPE *WaitForVBlankOrObjects)(struct test_dxgi_output_dwm *iface,
+            UINT object_count, const HANDLE *objects);
+    HRESULT (STDMETHODCALLTYPE *SetSyncRefreshCountWaitTarget)(struct test_dxgi_output_dwm *iface,
+            UINT target);
+    HRESULT (STDMETHODCALLTYPE *GetFrameStatisticsDWM)(struct test_dxgi_output_dwm *iface,
+            struct test_dxgi_frame_statistics_dwm *statistics);
+    HRESULT (STDMETHODCALLTYPE *GetVBlankEvent)(struct test_dxgi_output_dwm *iface, HANDLE *event);
+    BOOL (STDMETHODCALLTYPE *IsIndependentFlipSupported)(struct test_dxgi_output_dwm *iface);
+    HRESULT (STDMETHODCALLTYPE *GetMultiplaneOverlayCaps)(struct test_dxgi_output_dwm *iface,
+            IUnknown *device, struct test_dxgi_multiplane_overlay_caps *caps);
+    HRESULT (STDMETHODCALLTYPE *GetStereoCaps)(struct test_dxgi_output_dwm *iface, DWORD *caps);
+};
+
+struct test_dxgi_output_dwm
+{
+    const struct test_dxgi_output_dwm_vtbl *lpVtbl;
+};
+
+struct test_dxgi_swapchain_dwm1_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(struct test_dxgi_swapchain_dwm1 *iface,
+            REFIID iid, void **object);
+    ULONG (STDMETHODCALLTYPE *AddRef)(struct test_dxgi_swapchain_dwm1 *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(struct test_dxgi_swapchain_dwm1 *iface);
+    HRESULT (STDMETHODCALLTYPE *SetPrivateData)(struct test_dxgi_swapchain_dwm1 *iface,
+            REFGUID guid, UINT data_size, const void *data);
+    HRESULT (STDMETHODCALLTYPE *SetPrivateDataInterface)(struct test_dxgi_swapchain_dwm1 *iface,
+            REFGUID guid, const IUnknown *object);
+    HRESULT (STDMETHODCALLTYPE *GetPrivateData)(struct test_dxgi_swapchain_dwm1 *iface,
+            REFGUID guid, UINT *data_size, void *data);
+    HRESULT (STDMETHODCALLTYPE *GetParent)(struct test_dxgi_swapchain_dwm1 *iface,
+            REFIID iid, void **parent);
+    HRESULT (STDMETHODCALLTYPE *GetDevice)(struct test_dxgi_swapchain_dwm1 *iface,
+            REFIID iid, void **device);
+    HRESULT (STDMETHODCALLTYPE *Present)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT sync_interval, UINT flags);
+    HRESULT (STDMETHODCALLTYPE *GetBuffer)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT buffer_idx, REFIID iid, void **surface);
+    HRESULT (STDMETHODCALLTYPE *GetDesc)(struct test_dxgi_swapchain_dwm1 *iface,
+            DXGI_SWAP_CHAIN_DESC *desc);
+    HRESULT (STDMETHODCALLTYPE *ResizeBuffers)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT buffer_count, UINT width, UINT height, DXGI_FORMAT format, UINT flags);
+    HRESULT (STDMETHODCALLTYPE *ResizeTarget)(struct test_dxgi_swapchain_dwm1 *iface,
+            const DXGI_MODE_DESC *target_mode_desc);
+    HRESULT (STDMETHODCALLTYPE *GetContainingOutput)(struct test_dxgi_swapchain_dwm1 *iface,
+            IDXGIOutput **output);
+    HRESULT (STDMETHODCALLTYPE *GetFrameStatistics)(struct test_dxgi_swapchain_dwm1 *iface,
+            DXGI_FRAME_STATISTICS *statistics);
+    HRESULT (STDMETHODCALLTYPE *GetLastPresentCount)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT *last_present_count);
+    HRESULT (STDMETHODCALLTYPE *PresentDWM)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT sync_interval, UINT flags, UINT dirty_rect_count, const RECT *dirty_rects,
+            UINT scroll_rect_count, const void *scroll_rects, IDXGIResource *resource,
+            UINT private_flags);
+    HRESULT (STDMETHODCALLTYPE *GetLogicalSurfaceHandle)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT64 *handle);
+    HRESULT (STDMETHODCALLTYPE *CheckDirectFlipSupport)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT flags, IDXGIResource *resource, BOOL *supported);
+    HRESULT (STDMETHODCALLTYPE *GetCompositionSurface)(struct test_dxgi_swapchain_dwm1 *iface,
+            void **surface);
+    HRESULT (STDMETHODCALLTYPE *GetFrameStatisticsDWM)(struct test_dxgi_swapchain_dwm1 *iface,
+            struct test_dxgi_frame_statistics_dwm *statistics);
+    HRESULT (STDMETHODCALLTYPE *GetMultiplaneOverlayCaps)(struct test_dxgi_swapchain_dwm1 *iface,
+            struct test_dxgi_multiplane_overlay_caps *caps);
+    HRESULT (STDMETHODCALLTYPE *CheckMultiplaneOverlaySupport)(
+            struct test_dxgi_swapchain_dwm1 *iface, UINT plane_count, const void *plane_info,
+            BOOL *supported, UINT *flags);
+    HRESULT (STDMETHODCALLTYPE *PresentMultiplaneOverlay)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT sync_interval, UINT present_flags, DXGI_HDR_METADATA_TYPE metadata_type,
+            const void *metadata, UINT plane_count, const void *planes);
+    HRESULT (STDMETHODCALLTYPE *CheckPresentDurationSupport)(
+            struct test_dxgi_swapchain_dwm1 *iface, UINT desired_duration,
+            UINT *closest_smaller, UINT *closest_larger);
+    HRESULT (STDMETHODCALLTYPE *SetPrivateFrameDuration)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT numerator, UINT denominator);
+    HRESULT (STDMETHODCALLTYPE *SetHardwareProtection)(struct test_dxgi_swapchain_dwm1 *iface,
+            BOOL enabled);
+    HRESULT (STDMETHODCALLTYPE *GetHardwareProtection)(struct test_dxgi_swapchain_dwm1 *iface,
+            BOOL *enabled);
+    HRESULT (STDMETHODCALLTYPE *SetLatencyHint)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT hint);
+    HRESULT (STDMETHODCALLTYPE *SwapBuffers)(struct test_dxgi_swapchain_dwm1 *iface,
+            UINT first_buffer, UINT second_buffer);
+    HRESULT (STDMETHODCALLTYPE *CheckDwmVidPnOwnership)(struct test_dxgi_swapchain_dwm1 *iface,
+            BOOL *owned);
+    UINT (STDMETHODCALLTYPE *GetCurrentBackBufferIndex)(struct test_dxgi_swapchain_dwm1 *iface);
+    UINT (STDMETHODCALLTYPE *GetBackBufferImplicitRotationCount)(
+            struct test_dxgi_swapchain_dwm1 *iface);
+    UINT (STDMETHODCALLTYPE *GetFrontBufferRenderingCapability)(
+            struct test_dxgi_swapchain_dwm1 *iface);
+    HRESULT (STDMETHODCALLTYPE *SetFrontBufferRenderingMode)(
+            struct test_dxgi_swapchain_dwm1 *iface, BOOL enabled);
+};
+
+struct test_dxgi_swapchain_dwm1
+{
+    const struct test_dxgi_swapchain_dwm1_vtbl *lpVtbl;
+};
+
+C_ASSERT(sizeof(struct test_dxgi_output_dwm_desc) == 0xc8);
+C_ASSERT(sizeof(struct test_dxgi_frame_statistics_dwm) == 0x50);
+C_ASSERT(sizeof(struct test_dxgi_multiplane_overlay_caps) == 0x2c);
+
 static DEVMODEW registry_mode;
 
 static HRESULT (WINAPI *pCreateDXGIFactory1)(REFIID iid, void **factory);
@@ -1036,6 +1296,425 @@ static void test_adapter_desc(void)
 
 done:
     IDXGIAdapter_Release(adapter);
+    refcount = IDXGIDevice_Release(device);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+}
+
+static void test_dwm_output_interfaces(void)
+{
+    struct test_dxgi_frame_statistics_dwm statistics;
+    struct test_dxgi_multiplane_overlay_caps mpo_caps;
+    struct test_dxgi_output_dwm_desc dwm_desc;
+    struct test_dxgi_adapter_dwm *adapter_dwm;
+    struct test_dxgi_factory_dwm2 *factory_dwm2;
+    struct test_dxgi_output_dwm *output_dwm;
+    DXGI_ADAPTER_DESC adapter_desc;
+    DXGI_OUTPUT_DESC output_desc;
+    IDXGIAdapter *adapter;
+    IDXGIDisplayControl *display_control;
+    IDXGIFactory *factory;
+    IDXGIOutput *output;
+    IUnknown *adapter_internal, *factory_dwm, *factory_partner, *identity;
+    HANDLE kernel_handle, object, vblank_event;
+    DWORD wait_result;
+    DWORD stereo_caps;
+    UINT sync_target;
+    HRESULT hr;
+
+    hr = CreateDXGIFactory(&IID_IDXGIFactory, (void **)&factory);
+    ok(hr == S_OK, "Failed to create factory, hr %#lx.\n", hr);
+    if (FAILED(hr))
+        return;
+
+    factory_dwm = NULL;
+    hr = IDXGIFactory_QueryInterface(factory, &IID_IDXGIFactoryDWM, (void **)&factory_dwm);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected IDXGIFactoryDWM hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        identity = NULL;
+        hr = IUnknown_QueryInterface(factory_dwm, &IID_IUnknown, (void **)&identity);
+        ok(hr == S_OK, "Failed to query factory identity, hr %#lx.\n", hr);
+        ok(identity == (IUnknown *)factory, "Got unexpected factory identity %p, expected %p.\n",
+                identity, factory);
+        if (identity)
+            IUnknown_Release(identity);
+        IUnknown_Release(factory_dwm);
+    }
+
+    factory_dwm2 = NULL;
+    hr = IDXGIFactory_QueryInterface(factory, &IID_IDXGIFactoryDWM2, (void **)&factory_dwm2);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected IDXGIFactoryDWM2 hr %#lx.\n", hr);
+
+    factory_partner = NULL;
+    hr = IDXGIFactory_QueryInterface(factory, &IID_IDXGIFactoryPartner, (void **)&factory_partner);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected IDXGIFactoryPartner hr %#lx.\n", hr);
+    if (factory_partner)
+        IUnknown_Release(factory_partner);
+
+    display_control = NULL;
+    hr = IDXGIFactory_QueryInterface(factory, &IID_IDXGIDisplayControl, (void **)&display_control);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected IDXGIDisplayControl hr %#lx.\n", hr);
+    if (display_control)
+    {
+        ok(!IDXGIDisplayControl_IsStereoEnabled(display_control),
+                "Expected windowed stereo to be disabled.\n");
+        IDXGIDisplayControl_Release(display_control);
+    }
+
+    hr = IDXGIFactory_EnumAdapters(factory, 0, &adapter);
+    ok(hr == S_OK, "Failed to enumerate adapter, hr %#lx.\n", hr);
+    if (FAILED(hr))
+    {
+        if (factory_dwm2)
+            factory_dwm2->lpVtbl->Release(factory_dwm2);
+        IDXGIFactory_Release(factory);
+        return;
+    }
+
+    adapter_internal = NULL;
+    hr = IDXGIAdapter_QueryInterface(adapter, &IID_IDXGIAdapterInternal2, (void **)&adapter_internal);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected adapter-internal hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ok(adapter_internal == (IUnknown *)adapter, "Got unexpected adapter-internal pointer %p, expected %p.\n",
+                adapter_internal, adapter);
+        IUnknown_Release(adapter_internal);
+    }
+
+    hr = IDXGIAdapter_QueryInterface(adapter, &IID_IDXGIAdapterDWM, (void **)&adapter_dwm);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected hr %#lx.\n", hr);
+    if (FAILED(hr))
+    {
+        win_skip("IDXGIAdapterDWM is unavailable.\n");
+        IDXGIAdapter_Release(adapter);
+        if (factory_dwm2)
+            factory_dwm2->lpVtbl->Release(factory_dwm2);
+        IDXGIFactory_Release(factory);
+        return;
+    }
+
+    kernel_handle = NULL;
+    hr = adapter_dwm->lpVtbl->OpenKernelHandle(adapter_dwm, &kernel_handle);
+    ok(hr == S_OK, "Failed to open adapter kernel handle, hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ok(!!kernel_handle, "Expected a kernel handle.\n");
+        hr = adapter_dwm->lpVtbl->CloseKernelHandle(adapter_dwm, kernel_handle);
+        ok(hr == S_OK, "Failed to close adapter kernel handle, hr %#lx.\n", hr);
+    }
+
+    output = (IDXGIOutput *)0xdeadbeef;
+    hr = adapter_dwm->lpVtbl->EnumOutputs(adapter_dwm, 0, ~0u, &output);
+    ok(hr == S_OK, "Failed to enumerate DWM output, hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        hr = IDXGIOutput_QueryInterface(output, &IID_IDXGIOutputDWM, (void **)&output_dwm);
+        ok(hr == S_OK, "Failed to query IDXGIOutputDWM, hr %#lx.\n", hr);
+        if (SUCCEEDED(hr))
+        {
+            memset(&dwm_desc, 0xcc, sizeof(dwm_desc));
+            hr = output_dwm->lpVtbl->GetDesc(output_dwm, &dwm_desc);
+            ok(hr == S_OK, "Failed to get DWM output description, hr %#lx.\n", hr);
+            if (SUCCEEDED(hr))
+            {
+                hr = IDXGIAdapter_GetDesc(adapter, &adapter_desc);
+                ok(hr == S_OK, "Failed to get adapter description, hr %#lx.\n", hr);
+                hr = IDXGIOutput_GetDesc(output, &output_desc);
+                ok(hr == S_OK, "Failed to get output description, hr %#lx.\n", hr);
+
+                ok(equal_luid(dwm_desc.adapter_luid, adapter_desc.AdapterLuid),
+                        "Got unexpected adapter LUID %08lx:%08lx.\n",
+                        dwm_desc.adapter_luid.HighPart, dwm_desc.adapter_luid.LowPart);
+                ok(dwm_desc.monitor_resolution_width != 0 && dwm_desc.monitor_resolution_height != 0,
+                        "Got unexpected mode dimensions %ux%u.\n", dwm_desc.monitor_resolution_width,
+                        dwm_desc.monitor_resolution_height);
+                ok(dwm_desc.refresh_rate.Denominator != 0,
+                        "Got invalid refresh rate %u/%u.\n", dwm_desc.refresh_rate.Numerator,
+                        dwm_desc.refresh_rate.Denominator);
+                ok(EqualRect(&dwm_desc.content_resolution, &output_desc.DesktopCoordinates),
+                        "Got unexpected desktop rectangle %s, expected %s.\n",
+                        wine_dbgstr_rect(&dwm_desc.content_resolution), wine_dbgstr_rect(&output_desc.DesktopCoordinates));
+                ok(!lstrcmpW(dwm_desc.display_name, output_desc.DeviceName),
+                        "Got unexpected device name %s, expected %s.\n",
+                        wine_dbgstr_w(dwm_desc.display_name), wine_dbgstr_w(output_desc.DeviceName));
+                ok(!(dwm_desc.flags & 0x2), "Unexpected remote-display flag %#x.\n", dwm_desc.flags);
+                ok(!!(dwm_desc.flags & TEST_DXGI_OUTPUT_DWM_DISPLAY_FLAG_ATTACHED_TO_DESKTOP)
+                        == !!output_desc.AttachedToDesktop,
+                        "Got attached-to-desktop flag %#x for state %#x.\n",
+                        dwm_desc.flags, output_desc.AttachedToDesktop);
+                if (output_desc.AttachedToDesktop && output_desc.DesktopCoordinates.left <= 0
+                        && output_desc.DesktopCoordinates.top <= 0
+                        && output_desc.DesktopCoordinates.right > 0
+                        && output_desc.DesktopCoordinates.bottom > 0)
+                    ok(dwm_desc.flags & TEST_DXGI_OUTPUT_DWM_DISPLAY_FLAG_PRIMARY,
+                            "Primary output lacks primary flag, flags %#x.\n", dwm_desc.flags);
+
+                if (factory_dwm2)
+                {
+                    IDXGIOutput *luid_output = NULL;
+
+                    hr = factory_dwm2->lpVtbl->EnumOutputByLuid(factory_dwm2,
+                            dwm_desc.output_luid, &IID_IDXGIOutput, (void **)&luid_output);
+                    ok(hr == S_OK, "Failed to enumerate output by LUID, hr %#lx.\n", hr);
+                    if (luid_output)
+                        IDXGIOutput_Release(luid_output);
+                }
+            }
+
+
+            memset(&statistics, 0xcc, sizeof(statistics));
+            hr = output_dwm->lpVtbl->GetFrameStatisticsDWM(output_dwm, &statistics);
+            ok(hr == S_OK, "Failed to get DWM frame statistics, hr %#lx.\n", hr);
+            sync_target = 1;
+            if (SUCCEEDED(hr))
+            {
+                sync_target = statistics.sync_refresh_count + 1;
+                ok(statistics.sync_qpc_time.QuadPart != 0, "Expected a sync QPC time.\n");
+                ok(statistics.vsync_duration_qpc_time.QuadPart > 0,
+                        "Expected a positive vblank duration.\n");
+                ok(statistics.vsync_multiplier == 1, "Got vblank multiplier %u.\n",
+                        statistics.vsync_multiplier);
+            }
+
+            vblank_event = NULL;
+            hr = output_dwm->lpVtbl->GetVBlankEvent(output_dwm, &vblank_event);
+            ok(hr == S_OK, "Failed to get vblank event, hr %#lx.\n", hr);
+            if (SUCCEEDED(hr))
+            {
+                hr = output_dwm->lpVtbl->SetSyncRefreshCountWaitTarget(output_dwm, sync_target);
+                ok(hr == S_OK, "Failed to set sync refresh target, hr %#lx.\n", hr);
+                wait_result = WaitForSingleObject(vblank_event, 1000);
+                ok(wait_result == WAIT_OBJECT_0, "Vblank event wait returned %#lx.\n", wait_result);
+                CloseHandle(vblank_event);
+            }
+
+            object = CreateEventW(NULL, FALSE, TRUE, NULL);
+            ok(!!object, "Failed to create wait object.\n");
+            if (object)
+            {
+                hr = output_dwm->lpVtbl->WaitForVBlankOrObjects(output_dwm, 1, &object);
+                ok(hr == S_OK, "Failed to wait for vblank or object, hr %#lx.\n", hr);
+                CloseHandle(object);
+            }
+
+            memset(&mpo_caps, 0xcc, sizeof(mpo_caps));
+            hr = output_dwm->lpVtbl->GetMultiplaneOverlayCaps(output_dwm, NULL, &mpo_caps);
+            ok(hr == E_INVALIDARG, "Got unexpected MPO caps hr %#lx.\n", hr);
+
+            stereo_caps = 0xdeadbeef;
+            hr = output_dwm->lpVtbl->GetStereoCaps(output_dwm, &stereo_caps);
+            ok(hr == S_OK, "Failed to get stereo caps, hr %#lx.\n", hr);
+            ok(!stereo_caps, "Got unexpected stereo caps %#lx.\n", stereo_caps);
+            output_dwm->lpVtbl->Release(output_dwm);
+        }
+        IDXGIOutput_Release(output);
+    }
+
+    adapter_dwm->lpVtbl->Release(adapter_dwm);
+    IDXGIAdapter_Release(adapter);
+    if (factory_dwm2)
+        factory_dwm2->lpVtbl->Release(factory_dwm2);
+    IDXGIFactory_Release(factory);
+}
+
+static void test_dwm_swapchain(void)
+{
+    struct test_dxgi_multiplane_overlay_caps mpo_caps;
+    struct test_dxgi_frame_statistics_dwm statistics;
+    struct test_dxgi_swapchain_dwm1 *queried_dwm;
+    struct test_dxgi_swapchain_dwm1 *swapchain_dwm;
+    struct test_dxgi_factory_dwm *factory_dwm;
+    DXGI_SWAP_CHAIN_DESC host_desc, returned_desc;
+    ID3D11Texture2D *texture;
+    IDXGISwapChain *swapchain;
+    IDXGIDevice *device;
+    IDXGIAdapter *adapter;
+    IDXGIFactory *factory;
+    IDXGIOutput *output;
+    IUnknown *identity;
+    UINT smaller, larger;
+    UINT present_count;
+    BOOL value;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(device = create_d3d11_device()))
+    {
+        skip("Failed to create a D3D11 device.\n");
+        return;
+    }
+
+    hr = IDXGIDevice_GetAdapter(device, &adapter);
+    ok(hr == S_OK, "Failed to get adapter, hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto done_device;
+
+    hr = IDXGIAdapter_GetParent(adapter, &IID_IDXGIFactory, (void **)&factory);
+    ok(hr == S_OK, "Failed to get factory, hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto done_adapter;
+
+    factory_dwm = NULL;
+    hr = IDXGIFactory_QueryInterface(factory, &IID_IDXGIFactoryDWM, (void **)&factory_dwm);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE),
+            "Got unexpected IDXGIFactoryDWM hr %#lx.\n", hr);
+    if (FAILED(hr))
+    {
+        win_skip("IDXGIFactoryDWM is unavailable.\n");
+        goto done_factory;
+    }
+
+    hr = IDXGIAdapter_EnumOutputs(adapter, 0, &output);
+    ok(hr == S_OK, "Failed to enumerate output, hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto done_factory_dwm;
+
+    memset(&returned_desc, 0, sizeof(returned_desc));
+    returned_desc.BufferDesc.Width = 64;
+    returned_desc.BufferDesc.Height = 64;
+    returned_desc.BufferDesc.RefreshRate.Numerator = 60;
+    returned_desc.BufferDesc.RefreshRate.Denominator = 1;
+    returned_desc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    returned_desc.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
+    returned_desc.BufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
+    returned_desc.SampleDesc.Count = 1;
+    returned_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    returned_desc.BufferCount = 2;
+    returned_desc.OutputWindow = NULL;
+    returned_desc.Windowed = FALSE;
+    returned_desc.SwapEffect = DXGI_SWAP_EFFECT_SEQUENTIAL;
+
+    hr = factory_dwm->lpVtbl->CreateSwapChain(factory_dwm, (IUnknown *)device,
+            &returned_desc, output, NULL);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected null-output hr %#lx.\n", hr);
+
+    swapchain_dwm = NULL;
+    hr = factory_dwm->lpVtbl->CreateSwapChain(factory_dwm, (IUnknown *)device,
+            &returned_desc, output, &swapchain_dwm);
+    ok(hr == S_OK, "Failed to create DWM swap chain, hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto done_output;
+
+    identity = NULL;
+    hr = swapchain_dwm->lpVtbl->QueryInterface(swapchain_dwm, &IID_IUnknown,
+            (void **)&identity);
+    ok(hr == S_OK, "Failed to query swap-chain identity, hr %#lx.\n", hr);
+
+    swapchain = NULL;
+    hr = swapchain_dwm->lpVtbl->QueryInterface(swapchain_dwm, &IID_IDXGISwapChain,
+            (void **)&swapchain);
+    ok(hr == S_OK, "Failed to query public swap chain, hr %#lx.\n", hr);
+    ok(identity == (IUnknown *)swapchain, "Got identity %p, expected %p.\n", identity, swapchain);
+
+    queried_dwm = NULL;
+    hr = IDXGISwapChain_QueryInterface(swapchain, &IID_IDXGISwapChainDWM1,
+            (void **)&queried_dwm);
+    ok(hr == S_OK, "Failed to query DWM swap chain, hr %#lx.\n", hr);
+    ok(queried_dwm == swapchain_dwm, "Got private interface %p, expected %p.\n",
+            queried_dwm, swapchain_dwm);
+    if (queried_dwm)
+        queried_dwm->lpVtbl->Release(queried_dwm);
+
+    memset(&host_desc, 0xcc, sizeof(host_desc));
+    hr = IDXGISwapChain_GetDesc(swapchain, &host_desc);
+    ok(hr == S_OK, "Failed to get host swap-chain description, hr %#lx.\n", hr);
+    ok(host_desc.OutputWindow == GetDesktopWindow(), "Got host window %p, expected %p.\n",
+            host_desc.OutputWindow, GetDesktopWindow());
+    ok(host_desc.Windowed, "Expected a windowed host swap chain.\n");
+
+    memset(&host_desc, 0xcc, sizeof(host_desc));
+    hr = swapchain_dwm->lpVtbl->GetDesc(swapchain_dwm, &host_desc);
+    ok(hr == S_OK, "Failed to get private swap-chain description, hr %#lx.\n", hr);
+    ok(host_desc.BufferDesc.Width == returned_desc.BufferDesc.Width
+            && host_desc.BufferDesc.Height == returned_desc.BufferDesc.Height,
+            "Got private dimensions %ux%u.\n", host_desc.BufferDesc.Width,
+            host_desc.BufferDesc.Height);
+    ok(host_desc.OutputWindow == NULL, "Got unexpected private window %p.\n",
+            host_desc.OutputWindow);
+    ok(!host_desc.Windowed, "Expected a windowless private swap chain.\n");
+    ok(host_desc.BufferCount == 2, "Got private buffer count %u.\n", host_desc.BufferCount);
+
+    texture = NULL;
+    hr = swapchain_dwm->lpVtbl->GetBuffer(swapchain_dwm, 0,
+            &IID_ID3D11Texture2D, (void **)&texture);
+    ok(hr == S_OK, "Failed to get D3D11 back buffer, hr %#lx.\n", hr);
+    if (texture)
+        ID3D11Texture2D_Release(texture);
+
+    value = TRUE;
+    hr = swapchain_dwm->lpVtbl->CheckDirectFlipSupport(swapchain_dwm, 0, NULL, &value);
+    ok(hr == S_OK, "Failed to query direct-flip support, hr %#lx.\n", hr);
+    ok(!value, "Unexpected direct-flip support.\n");
+
+    memset(&mpo_caps, 0xcc, sizeof(mpo_caps));
+    hr = swapchain_dwm->lpVtbl->GetMultiplaneOverlayCaps(swapchain_dwm, &mpo_caps);
+    ok(hr == S_OK, "Failed to get MPO capabilities, hr %#lx.\n", hr);
+    ok(mpo_caps.max_planes == 1, "Got max plane count %u.\n", mpo_caps.max_planes);
+
+    smaller = larger = 0xdeadbeef;
+    hr = swapchain_dwm->lpVtbl->CheckPresentDurationSupport(swapchain_dwm,
+            166667, &smaller, &larger);
+    ok(hr == S_OK, "Failed to query present duration, hr %#lx.\n", hr);
+    ok(smaller == 166667 && larger == 166667,
+            "Got present-duration bounds %u, %u.\n", smaller, larger);
+
+    hr = swapchain_dwm->lpVtbl->SetHardwareProtection(swapchain_dwm, TRUE);
+    ok(hr == DXGI_ERROR_UNSUPPORTED, "Got hardware-protection hr %#lx.\n", hr);
+    hr = swapchain_dwm->lpVtbl->SetHardwareProtection(swapchain_dwm, FALSE);
+    ok(hr == S_OK, "Failed to disable hardware protection, hr %#lx.\n", hr);
+    value = TRUE;
+    hr = swapchain_dwm->lpVtbl->GetHardwareProtection(swapchain_dwm, &value);
+    ok(hr == S_OK && !value, "Got hardware protection %#x, hr %#lx.\n", value, hr);
+
+    value = FALSE;
+    hr = swapchain_dwm->lpVtbl->CheckDwmVidPnOwnership(swapchain_dwm, &value);
+    ok(hr == S_OK && value, "Got VidPn ownership %#x, hr %#lx.\n", value, hr);
+    ok(swapchain_dwm->lpVtbl->GetFrontBufferRenderingCapability(swapchain_dwm) == 2,
+            "Got unexpected front-buffer rendering capability.\n");
+    hr = swapchain_dwm->lpVtbl->SetFrontBufferRenderingMode(swapchain_dwm, TRUE);
+    ok(hr == S_OK, "Failed to set front-buffer rendering mode, hr %#lx.\n", hr);
+
+    present_count = 0xdeadbeef;
+    hr = swapchain_dwm->lpVtbl->GetLastPresentCount(swapchain_dwm, &present_count);
+    ok(hr == S_OK && !present_count, "Got initial present count %u, hr %#lx.\n",
+            present_count, hr);
+    hr = swapchain_dwm->lpVtbl->PresentDWM(swapchain_dwm, 0, 0, 1, NULL,
+            0, NULL, NULL, 0);
+    ok(hr == E_INVALIDARG, "Got invalid dirty-rectangle hr %#lx.\n", hr);
+    hr = swapchain_dwm->lpVtbl->PresentDWM(swapchain_dwm, 0, 0, 0, NULL,
+            0, NULL, NULL, 0);
+    ok(hr == S_OK, "Failed to present DWM swap chain, hr %#lx.\n", hr);
+    present_count = 0xdeadbeef;
+    hr = swapchain_dwm->lpVtbl->GetLastPresentCount(swapchain_dwm, &present_count);
+    ok(hr == S_OK && present_count == 1, "Got present count %u, hr %#lx.\n",
+            present_count, hr);
+    ok(swapchain_dwm->lpVtbl->GetCurrentBackBufferIndex(swapchain_dwm) == 1,
+            "Got unexpected current back-buffer index.\n");
+    ok(swapchain_dwm->lpVtbl->GetBackBufferImplicitRotationCount(swapchain_dwm) == 1,
+            "Got unexpected implicit rotation count.\n");
+
+    memset(&statistics, 0xcc, sizeof(statistics));
+    hr = swapchain_dwm->lpVtbl->GetFrameStatisticsDWM(swapchain_dwm, &statistics);
+    ok(hr == S_OK, "Failed to get swap-chain statistics, hr %#lx.\n", hr);
+    ok(statistics.present_count == 1, "Got statistics present count %u.\n",
+            statistics.present_count);
+    ok(statistics.present_qpc_time.QuadPart != 0, "Expected a present QPC time.\n");
+
+    if (identity)
+        IUnknown_Release(identity);
+    if (swapchain)
+        IDXGISwapChain_Release(swapchain);
+    swapchain_dwm->lpVtbl->Release(swapchain_dwm);
+
+done_output:
+    IDXGIOutput_Release(output);
+done_factory_dwm:
+    factory_dwm->lpVtbl->Release(factory_dwm);
+done_factory:
+    IDXGIFactory_Release(factory);
+done_adapter:
+    IDXGIAdapter_Release(adapter);
+done_device:
     refcount = IDXGIDevice_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
 }
@@ -9135,6 +9814,8 @@ START_TEST(dxgi)
     }
 
     queue_test(test_adapter_desc);
+    queue_test(test_dwm_output_interfaces);
+    queue_test(test_dwm_swapchain);
     queue_test(test_adapter_luid);
     queue_test(test_enum_warp_adapter);
     queue_test(test_query_video_memory_info);

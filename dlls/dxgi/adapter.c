@@ -21,6 +21,11 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
+static const GUID IID_IDXGIAdapterDWM =
+        {0x712bd56d, 0x86ff, 0x4b71, {0x91, 0xe1, 0xc1, 0x3b, 0x27, 0x4f, 0xf2, 0xa2}};
+static const GUID IID_IDXGIAdapterInternal2 =
+        {0x2411e7e1, 0x12ac, 0x4ccf, {0xbd, 0x14, 0x97, 0x98, 0xe8, 0x53, 0x4d, 0xc0}};
+
 static void dxgi_video_memory_info_from_wined3d(DXGI_QUERY_VIDEO_MEMORY_INFO *info,
         const struct wined3d_video_memory_info *wined3d_info)
 {
@@ -35,6 +40,11 @@ static inline struct dxgi_adapter *impl_from_IWineDXGIAdapter(IWineDXGIAdapter *
     return CONTAINING_RECORD(iface, struct dxgi_adapter, IWineDXGIAdapter_iface);
 }
 
+static inline struct dxgi_adapter *impl_from_IDXGIAdapterDWM(IDXGIAdapterDWM *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_adapter, IDXGIAdapterDWM_iface);
+}
+
 static HRESULT STDMETHODCALLTYPE dxgi_adapter_QueryInterface(IWineDXGIAdapter *iface, REFIID iid, void **out)
 {
     TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
@@ -45,6 +55,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_adapter_QueryInterface(IWineDXGIAdapter *i
             || IsEqualGUID(iid, &IID_IDXGIAdapter2)
             || IsEqualGUID(iid, &IID_IDXGIAdapter1)
             || IsEqualGUID(iid, &IID_IDXGIAdapter)
+            || IsEqualGUID(iid, &IID_IDXGIAdapterInternal2)
             || IsEqualGUID(iid, &IID_IDXGIObject)
             || IsEqualGUID(iid, &IID_IUnknown))
     {
@@ -53,11 +64,104 @@ static HRESULT STDMETHODCALLTYPE dxgi_adapter_QueryInterface(IWineDXGIAdapter *i
         return S_OK;
     }
 
+    if (IsEqualGUID(iid, &IID_IDXGIAdapterDWM))
+    {
+        struct dxgi_adapter *adapter = impl_from_IWineDXGIAdapter(iface);
+
+        IWineDXGIAdapter_AddRef(iface);
+        *out = &adapter->IDXGIAdapterDWM_iface;
+        return S_OK;
+    }
+
     WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
 
     *out = NULL;
     return E_NOINTERFACE;
 }
+
+static HRESULT STDMETHODCALLTYPE dxgi_adapter_dwm_QueryInterface(IDXGIAdapterDWM *iface,
+        REFIID iid, void **object)
+{
+    struct dxgi_adapter *adapter = impl_from_IDXGIAdapterDWM(iface);
+
+    return IWineDXGIAdapter_QueryInterface(&adapter->IWineDXGIAdapter_iface, iid, object);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_adapter_dwm_AddRef(IDXGIAdapterDWM *iface)
+{
+    struct dxgi_adapter *adapter = impl_from_IDXGIAdapterDWM(iface);
+
+    return IWineDXGIAdapter_AddRef(&adapter->IWineDXGIAdapter_iface);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_adapter_dwm_Release(IDXGIAdapterDWM *iface)
+{
+    struct dxgi_adapter *adapter = impl_from_IDXGIAdapterDWM(iface);
+
+    return IWineDXGIAdapter_Release(&adapter->IWineDXGIAdapter_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_adapter_dwm_OpenKernelHandle(IDXGIAdapterDWM *iface, HANDLE *handle)
+{
+    struct dxgi_adapter *adapter = impl_from_IDXGIAdapterDWM(iface);
+    D3DKMT_OPENADAPTERFROMLUID open_desc = {0};
+    DXGI_ADAPTER_DESC desc;
+    NTSTATUS status;
+    HRESULT hr;
+
+    TRACE("iface %p, handle %p.\n", iface, handle);
+
+    if (!handle)
+        return E_INVALIDARG;
+    *handle = NULL;
+
+    if (FAILED(hr = IWineDXGIAdapter_GetDesc(&adapter->IWineDXGIAdapter_iface, &desc)))
+        return hr;
+
+    open_desc.AdapterLuid = desc.AdapterLuid;
+    if ((status = D3DKMTOpenAdapterFromLuid(&open_desc)))
+        return HRESULT_FROM_NT(status);
+
+    *handle = ULongToHandle(open_desc.hAdapter);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_adapter_dwm_CloseKernelHandle(IDXGIAdapterDWM *iface, HANDLE handle)
+{
+    D3DKMT_CLOSEADAPTER close_desc;
+    NTSTATUS status;
+
+    TRACE("iface %p, handle %p.\n", iface, handle);
+
+    close_desc.hAdapter = HandleToULong(handle);
+    if ((status = D3DKMTCloseAdapter(&close_desc)))
+        return HRESULT_FROM_NT(status);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_adapter_dwm_EnumOutputs(IDXGIAdapterDWM *iface,
+        UINT output_idx, UINT output_class, IDXGIOutput **output)
+{
+    struct dxgi_adapter *adapter = impl_from_IDXGIAdapterDWM(iface);
+
+    TRACE("iface %p, output_idx %u, output_class %#x, output %p.\n",
+            iface, output_idx, output_class, output);
+
+    if (output_class != 0 && output_class != 1 && output_class != ~0u)
+        return E_INVALIDARG;
+
+    return IWineDXGIAdapter_EnumOutputs(&adapter->IWineDXGIAdapter_iface, output_idx, output);
+}
+
+static const struct IDXGIAdapterDWMVtbl dxgi_adapter_dwm_vtbl =
+{
+    dxgi_adapter_dwm_QueryInterface,
+    dxgi_adapter_dwm_AddRef,
+    dxgi_adapter_dwm_Release,
+    dxgi_adapter_dwm_OpenKernelHandle,
+    dxgi_adapter_dwm_CloseKernelHandle,
+    dxgi_adapter_dwm_EnumOutputs,
+};
 
 static ULONG STDMETHODCALLTYPE dxgi_adapter_AddRef(IWineDXGIAdapter *iface)
 {
@@ -437,6 +541,7 @@ struct dxgi_adapter *unsafe_impl_from_IDXGIAdapter(IDXGIAdapter *iface)
 static void dxgi_adapter_init(struct dxgi_adapter *adapter, struct dxgi_factory *factory, UINT ordinal)
 {
     adapter->IWineDXGIAdapter_iface.lpVtbl = &dxgi_adapter_vtbl;
+    adapter->IDXGIAdapterDWM_iface.lpVtbl = &dxgi_adapter_dwm_vtbl;
     adapter->refcount = 1;
     adapter->wined3d_adapter = wined3d_get_adapter(factory->wined3d, ordinal);
     wined3d_private_store_init(&adapter->private_store);

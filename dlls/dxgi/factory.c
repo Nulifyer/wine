@@ -21,6 +21,17 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
+static const GUID IID_IDXGIFactoryDWM =
+        {0x713f394e, 0x92ca, 0x47e7, {0xab, 0x81, 0x11, 0x59, 0xc2, 0x79, 0x1e, 0x54}};
+static const GUID IID_IDXGIFactoryDWM2 =
+        {0x1ddd77aa, 0x9a4a, 0x4cc8, {0x9e, 0x55, 0x98, 0xc1, 0x96, 0xba, 0xfc, 0x8f}};
+static const GUID IID_IDXGIFactoryPartner =
+        {0xb14887d9, 0xf537, 0x4af5, {0xb3, 0x79, 0x7d, 0x33, 0x03, 0x1b, 0xe7, 0x73}};
+static const GUID IID_IDXGIOutputDWM =
+        {0x6f66a9a0, 0xbece, 0x4ee8, {0xb1, 0x1b, 0x99, 0x0e, 0xb3, 0x8e, 0xd9, 0x76}};
+static const GUID IID_IDXGISwapChainDWM1 =
+        {0xfc4f7700, 0x8c88, 0x43fb, {0xaa, 0x4f, 0x44, 0xc4, 0xa5, 0x84, 0xdc, 0x19}};
+
 struct dxgi_adapter_change_notification
 {
     struct list entry;
@@ -32,6 +43,26 @@ struct dxgi_adapter_change_notification
 static inline struct dxgi_factory *impl_from_IWineDXGIFactory(IWineDXGIFactory *iface)
 {
     return CONTAINING_RECORD(iface, struct dxgi_factory, IWineDXGIFactory_iface);
+}
+
+static inline struct dxgi_factory *impl_from_IDXGIFactoryDWM(IDXGIFactoryDWM *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_factory, IDXGIFactoryDWM_iface);
+}
+
+static inline struct dxgi_factory *impl_from_IDXGIFactoryDWM2(IDXGIFactoryDWM2 *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_factory, IDXGIFactoryDWM2_iface);
+}
+
+static inline struct dxgi_factory *impl_from_IDXGIFactoryPartner(IDXGIFactoryPartner *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_factory, IDXGIFactoryPartner_iface);
+}
+
+static inline struct dxgi_factory *impl_from_IDXGIDisplayControl(IDXGIDisplayControl *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_factory, IDXGIDisplayControl_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_factory_QueryInterface(IWineDXGIFactory *iface, REFIID iid, void **out)
@@ -57,11 +88,396 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_QueryInterface(IWineDXGIFactory *i
         return S_OK;
     }
 
+    if (IsEqualGUID(iid, &IID_IDXGIFactoryDWM))
+    {
+        IWineDXGIFactory_AddRef(iface);
+        *out = &factory->IDXGIFactoryDWM_iface;
+        return S_OK;
+    }
+    if (IsEqualGUID(iid, &IID_IDXGIFactoryDWM2))
+    {
+        IWineDXGIFactory_AddRef(iface);
+        *out = &factory->IDXGIFactoryDWM2_iface;
+        return S_OK;
+    }
+    if (IsEqualGUID(iid, &IID_IDXGIFactoryPartner))
+    {
+        IWineDXGIFactory_AddRef(iface);
+        *out = &factory->IDXGIFactoryPartner_iface;
+        return S_OK;
+    }
+    if (IsEqualGUID(iid, &IID_IDXGIDisplayControl))
+    {
+        IWineDXGIFactory_AddRef(iface);
+        *out = &factory->IDXGIDisplayControl_iface;
+        return S_OK;
+    }
+
     WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
 
     *out = NULL;
     return E_NOINTERFACE;
 }
+
+static HRESULT dxgi_factory_private_QueryInterface(struct dxgi_factory *factory,
+        REFIID iid, void **object)
+{
+    return IWineDXGIFactory_QueryInterface(&factory->IWineDXGIFactory_iface, iid, object);
+}
+
+static ULONG dxgi_factory_private_AddRef(struct dxgi_factory *factory)
+{
+    return IWineDXGIFactory_AddRef(&factory->IWineDXGIFactory_iface);
+}
+
+static ULONG dxgi_factory_private_Release(struct dxgi_factory *factory)
+{
+    return IWineDXGIFactory_Release(&factory->IWineDXGIFactory_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm_QueryInterface(IDXGIFactoryDWM *iface,
+        REFIID iid, void **object)
+{
+    return dxgi_factory_private_QueryInterface(impl_from_IDXGIFactoryDWM(iface), iid, object);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_factory_dwm_AddRef(IDXGIFactoryDWM *iface)
+{
+    return dxgi_factory_private_AddRef(impl_from_IDXGIFactoryDWM(iface));
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_factory_dwm_Release(IDXGIFactoryDWM *iface)
+{
+    return dxgi_factory_private_Release(impl_from_IDXGIFactoryDWM(iface));
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm_CreateSwapChain(IDXGIFactoryDWM *iface,
+        IUnknown *device, DXGI_SWAP_CHAIN_DESC *desc, IDXGIOutput *output,
+        IDXGISwapChainDWM1 **swapchain)
+{
+    struct dxgi_factory *factory = impl_from_IDXGIFactoryDWM(iface);
+    DXGI_SWAP_CHAIN_FULLSCREEN_DESC fullscreen_desc = {0};
+    DXGI_SWAP_CHAIN_DESC1 desc1;
+    IWineDXGISwapChainFactory *swapchain_factory;
+    IDXGISwapChain1 *public_swapchain;
+    HRESULT hr;
+
+    TRACE("iface %p, device %p, desc %p, output %p, swapchain %p.\n",
+            iface, device, desc, output, swapchain);
+
+    if (!device || !desc || !swapchain)
+        return DXGI_ERROR_INVALID_CALL;
+    *swapchain = NULL;
+
+    memset(&desc1, 0, sizeof(desc1));
+    desc1.Width = desc->BufferDesc.Width;
+    desc1.Height = desc->BufferDesc.Height;
+    desc1.Format = desc->BufferDesc.Format;
+    desc1.Stereo = FALSE;
+    desc1.SampleDesc = desc->SampleDesc;
+    desc1.BufferUsage = desc->BufferUsage;
+    desc1.BufferCount = desc->BufferCount;
+    desc1.Scaling = desc->BufferDesc.Scaling == DXGI_MODE_SCALING_CENTERED
+            ? DXGI_SCALING_NONE : DXGI_SCALING_STRETCH;
+    desc1.SwapEffect = desc->SwapEffect;
+    desc1.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    desc1.Flags = desc->Flags;
+
+    if (!dxgi_validate_swapchain_desc(&desc1))
+        return DXGI_ERROR_INVALID_CALL;
+
+    fullscreen_desc.RefreshRate = desc->BufferDesc.RefreshRate;
+    fullscreen_desc.ScanlineOrdering = desc->BufferDesc.ScanlineOrdering;
+    fullscreen_desc.Scaling = desc->BufferDesc.Scaling;
+    /* Native DWM swap chains are windowless. WineD3D needs a host window, so
+     * bind the compositor output to Wine's desktop window without exposing it
+     * through the private descriptor returned to DWM. */
+    fullscreen_desc.Windowed = TRUE;
+
+    if (FAILED(hr = IUnknown_QueryInterface(device, &IID_IWineDXGISwapChainFactory,
+            (void **)&swapchain_factory)))
+        return DXGI_ERROR_UNSUPPORTED;
+
+    hr = IWineDXGISwapChainFactory_create_swapchain(swapchain_factory,
+            (IDXGIFactory *)&factory->IWineDXGIFactory_iface, GetDesktopWindow(), &desc1,
+            &fullscreen_desc, output, &public_swapchain);
+    IWineDXGISwapChainFactory_Release(swapchain_factory);
+    if (FAILED(hr))
+        return hr;
+
+    d3d11_swapchain_set_dwm_mode(public_swapchain, desc);
+    hr = IDXGISwapChain1_QueryInterface(public_swapchain, &IID_IDXGISwapChainDWM1,
+            (void **)swapchain);
+    IDXGISwapChain1_Release(public_swapchain);
+    return hr;
+}
+
+static const struct IDXGIFactoryDWMVtbl dxgi_factory_dwm_vtbl =
+{
+    dxgi_factory_dwm_QueryInterface,
+    dxgi_factory_dwm_AddRef,
+    dxgi_factory_dwm_Release,
+    dxgi_factory_dwm_CreateSwapChain,
+};
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm2_QueryInterface(IDXGIFactoryDWM2 *iface,
+        REFIID iid, void **object)
+{
+    return dxgi_factory_private_QueryInterface(impl_from_IDXGIFactoryDWM2(iface), iid, object);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_factory_dwm2_AddRef(IDXGIFactoryDWM2 *iface)
+{
+    return dxgi_factory_private_AddRef(impl_from_IDXGIFactoryDWM2(iface));
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_factory_dwm2_Release(IDXGIFactoryDWM2 *iface)
+{
+    return dxgi_factory_private_Release(impl_from_IDXGIFactoryDWM2(iface));
+}
+
+static HRESULT dxgi_factory_dwm2_swapchain_unavailable(IDXGIFactoryDWM2 *iface,
+        IUnknown **swapchain)
+{
+    FIXME("iface %p, swapchain %p: private DWM swap chains are not implemented.\n", iface, swapchain);
+
+    if (!swapchain)
+        return DXGI_ERROR_INVALID_CALL;
+    *swapchain = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm2_CreateSwapChainDWM(IDXGIFactoryDWM2 *iface,
+        IUnknown *device, DXGI_SWAP_CHAIN_DESC1 *desc,
+        DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc, IDXGIOutput *output, IUnknown **swapchain)
+{
+    return dxgi_factory_dwm2_swapchain_unavailable(iface, swapchain);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm2_CreateSwapChainDDA(IDXGIFactoryDWM2 *iface,
+        IUnknown *device, DXGI_SWAP_CHAIN_DESC1 *desc, IDXGIOutput *output, IUnknown **swapchain)
+{
+    return dxgi_factory_dwm2_swapchain_unavailable(iface, swapchain);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm2_CreateSwapChainDWMFromHandle(
+        IDXGIFactoryDWM2 *iface, IUnknown *device, DXGI_SWAP_CHAIN_DESC1 *desc,
+        DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc, HANDLE handle, IUnknown **swapchain)
+{
+    return dxgi_factory_dwm2_swapchain_unavailable(iface, swapchain);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm2_CreateSwapChainDDAFromHandle(
+        IDXGIFactoryDWM2 *iface, IUnknown *device, DXGI_SWAP_CHAIN_DESC1 *desc,
+        HANDLE handle, IUnknown **swapchain)
+{
+    return dxgi_factory_dwm2_swapchain_unavailable(iface, swapchain);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm2_EnumOutputByLuid(IDXGIFactoryDWM2 *iface,
+        LUID output_luid, REFIID iid, void **object)
+{
+    struct dxgi_factory *factory = impl_from_IDXGIFactoryDWM2(iface);
+    struct dxgi_output_dwm_desc desc;
+    IDXGIOutputDWM *output_dwm;
+    IDXGIAdapter *adapter;
+    IDXGIOutput *output;
+    unsigned int adapter_idx, output_idx;
+    HRESULT hr;
+
+    TRACE("iface %p, output_luid %08lx:%08lx, iid %s, object %p.\n", iface,
+            output_luid.HighPart, output_luid.LowPart, debugstr_guid(iid), object);
+
+    if (!object)
+        return DXGI_ERROR_INVALID_CALL;
+    *object = NULL;
+
+    for (adapter_idx = 0; ; ++adapter_idx)
+    {
+        if (FAILED(hr = IWineDXGIFactory_EnumAdapters(&factory->IWineDXGIFactory_iface,
+                adapter_idx, &adapter)))
+            return hr == DXGI_ERROR_NOT_FOUND ? DXGI_ERROR_NOT_FOUND : hr;
+
+        for (output_idx = 0; ; ++output_idx)
+        {
+            if (FAILED(hr = IDXGIAdapter_EnumOutputs(adapter, output_idx, &output)))
+                break;
+            if (SUCCEEDED(hr = IDXGIOutput_QueryInterface(output, &IID_IDXGIOutputDWM,
+                    (void **)&output_dwm)))
+            {
+                if (SUCCEEDED(hr = output_dwm->lpVtbl->GetDesc(output_dwm, &desc))
+                        && desc.output_luid.LowPart == output_luid.LowPart
+                        && desc.output_luid.HighPart == output_luid.HighPart)
+                {
+                    hr = IDXGIOutput_QueryInterface(output, iid, object);
+                    output_dwm->lpVtbl->Release(output_dwm);
+                    IDXGIOutput_Release(output);
+                    IDXGIAdapter_Release(adapter);
+                    return hr;
+                }
+                output_dwm->lpVtbl->Release(output_dwm);
+            }
+            IDXGIOutput_Release(output);
+        }
+        IDXGIAdapter_Release(adapter);
+        if (hr != DXGI_ERROR_NOT_FOUND)
+            return hr;
+    }
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm2_CreateExclusiveWindowlessSwapChain(
+        IDXGIFactoryDWM2 *iface, IUnknown *device, DXGI_SWAP_CHAIN_DESC1 *desc,
+        DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc, IDXGIOutput *output,
+        IUnknown **swapchain)
+{
+    return dxgi_factory_dwm2_swapchain_unavailable(iface, swapchain);
+}
+
+static const struct IDXGIFactoryDWM2Vtbl dxgi_factory_dwm2_vtbl =
+{
+    dxgi_factory_dwm2_QueryInterface,
+    dxgi_factory_dwm2_AddRef,
+    dxgi_factory_dwm2_Release,
+    dxgi_factory_dwm2_CreateSwapChainDWM,
+    dxgi_factory_dwm2_CreateSwapChainDDA,
+    dxgi_factory_dwm2_CreateSwapChainDWMFromHandle,
+    dxgi_factory_dwm2_CreateSwapChainDDAFromHandle,
+    dxgi_factory_dwm2_EnumOutputByLuid,
+    dxgi_factory_dwm2_CreateExclusiveWindowlessSwapChain,
+};
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_partner_QueryInterface(IDXGIFactoryPartner *iface,
+        REFIID iid, void **object)
+{
+    return dxgi_factory_private_QueryInterface(impl_from_IDXGIFactoryPartner(iface), iid, object);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_factory_partner_AddRef(IDXGIFactoryPartner *iface)
+{
+    return dxgi_factory_private_AddRef(impl_from_IDXGIFactoryPartner(iface));
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_factory_partner_Release(IDXGIFactoryPartner *iface)
+{
+    return dxgi_factory_private_Release(impl_from_IDXGIFactoryPartner(iface));
+}
+
+static HRESULT dxgi_factory_partner_unavailable(IDXGIFactoryPartner *iface, IUnknown **swapchain)
+{
+    FIXME("iface %p, swapchain %p: indirect swap chains are not implemented.\n", iface, swapchain);
+
+    if (!swapchain)
+        return DXGI_ERROR_INVALID_CALL;
+    *swapchain = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_partner_CreateIndirectSwapChain(
+        IDXGIFactoryPartner *iface, IDXGIDevice *device, UINT resource_count,
+        IDXGIResource **resources, HANDLE handle, UINT flags, const SECURITY_ATTRIBUTES *attributes,
+        DWORD access, const WCHAR *name, HANDLE *shared_handle, IUnknown **swapchain)
+{
+    return dxgi_factory_partner_unavailable(iface, swapchain);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_partner_OpenIndirectSwapChainFromHandle(
+        IDXGIFactoryPartner *iface, IDXGIDevice *device, HANDLE handle, HANDLE metadata_handle,
+        UINT flags, UINT resource_count, IUnknown **swapchain)
+{
+    return dxgi_factory_partner_unavailable(iface, swapchain);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_partner_OpenIndirectSwapChainFromName(
+        IDXGIFactoryPartner *iface, IDXGIDevice *device, DWORD access, BOOL inherit,
+        const WCHAR *name, HANDLE metadata_handle, UINT flags, UINT resource_count,
+        IUnknown **swapchain)
+{
+    return dxgi_factory_partner_unavailable(iface, swapchain);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_partner_ApplicationPresentationMode(
+        IDXGIFactoryPartner *iface, HWND window, HANDLE handle, UINT *mode, REFIID iid, void **object)
+{
+    FIXME("iface %p, window %p, handle %p, mode %p, iid %s, object %p stub.\n",
+            iface, window, handle, mode, debugstr_guid(iid), object);
+    if (object)
+        *object = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_partner_CreateIndirectSwapChain12(
+        IDXGIFactoryPartner *iface, ID3D12Device *device, UINT resource_count,
+        ID3D12Resource **resources, HANDLE handle, UINT flags, const SECURITY_ATTRIBUTES *attributes,
+        DWORD access, const WCHAR *name, HANDLE *shared_handle, IUnknown **swapchain)
+{
+    return dxgi_factory_partner_unavailable(iface, swapchain);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_partner_OpenIndirectSwapChainFromHandle12(
+        IDXGIFactoryPartner *iface, ID3D12Device *device, HANDLE handle, HANDLE metadata_handle,
+        UINT flags, UINT resource_count, IUnknown **swapchain)
+{
+    return dxgi_factory_partner_unavailable(iface, swapchain);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_partner_OpenIndirectSwapChainFromName12(
+        IDXGIFactoryPartner *iface, ID3D12Device *device, DWORD access, BOOL inherit,
+        const WCHAR *name, HANDLE metadata_handle, UINT flags, UINT resource_count,
+        IUnknown **swapchain)
+{
+    return dxgi_factory_partner_unavailable(iface, swapchain);
+}
+
+static const struct IDXGIFactoryPartnerVtbl dxgi_factory_partner_vtbl =
+{
+    dxgi_factory_partner_QueryInterface,
+    dxgi_factory_partner_AddRef,
+    dxgi_factory_partner_Release,
+    dxgi_factory_partner_CreateIndirectSwapChain,
+    dxgi_factory_partner_OpenIndirectSwapChainFromHandle,
+    dxgi_factory_partner_OpenIndirectSwapChainFromName,
+    dxgi_factory_partner_ApplicationPresentationMode,
+    dxgi_factory_partner_CreateIndirectSwapChain12,
+    dxgi_factory_partner_OpenIndirectSwapChainFromHandle12,
+    dxgi_factory_partner_OpenIndirectSwapChainFromName12,
+};
+
+static HRESULT STDMETHODCALLTYPE dxgi_display_control_QueryInterface(IDXGIDisplayControl *iface,
+        REFIID iid, void **object)
+{
+    return dxgi_factory_private_QueryInterface(impl_from_IDXGIDisplayControl(iface), iid, object);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_display_control_AddRef(IDXGIDisplayControl *iface)
+{
+    return dxgi_factory_private_AddRef(impl_from_IDXGIDisplayControl(iface));
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_display_control_Release(IDXGIDisplayControl *iface)
+{
+    return dxgi_factory_private_Release(impl_from_IDXGIDisplayControl(iface));
+}
+
+static BOOL STDMETHODCALLTYPE dxgi_display_control_IsStereoEnabled(IDXGIDisplayControl *iface)
+{
+    TRACE("iface %p.\n", iface);
+    return FALSE;
+}
+
+static void STDMETHODCALLTYPE dxgi_display_control_SetStereoEnabled(IDXGIDisplayControl *iface,
+        BOOL enabled)
+{
+    FIXME("iface %p, enabled %#x: stereo display mode is not implemented.\n", iface, enabled);
+}
+
+static const IDXGIDisplayControlVtbl dxgi_display_control_vtbl =
+{
+    dxgi_display_control_QueryInterface,
+    dxgi_display_control_AddRef,
+    dxgi_display_control_Release,
+    dxgi_display_control_IsStereoEnabled,
+    dxgi_display_control_SetStereoEnabled,
+};
 
 static ULONG STDMETHODCALLTYPE dxgi_factory_AddRef(IWineDXGIFactory *iface)
 {
@@ -671,6 +1087,10 @@ struct dxgi_factory *unsafe_impl_from_IDXGIFactory(IDXGIFactory *iface)
 static HRESULT dxgi_factory_init(struct dxgi_factory *factory, BOOL extended)
 {
     factory->IWineDXGIFactory_iface.lpVtbl = &dxgi_factory_vtbl;
+    factory->IDXGIFactoryDWM_iface.lpVtbl = &dxgi_factory_dwm_vtbl;
+    factory->IDXGIFactoryDWM2_iface.lpVtbl = &dxgi_factory_dwm2_vtbl;
+    factory->IDXGIFactoryPartner_iface.lpVtbl = &dxgi_factory_partner_vtbl;
+    factory->IDXGIDisplayControl_iface.lpVtbl = &dxgi_display_control_vtbl;
     factory->refcount = 1;
     wined3d_private_store_init(&factory->private_store);
     InitializeCriticalSection(&factory->adapter_change_cs);

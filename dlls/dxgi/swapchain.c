@@ -27,6 +27,11 @@
 WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
+static const GUID IID_IDXGIOutputDWM =
+        {0x6f66a9a0, 0xbece, 0x4ee8, {0xb1, 0x1b, 0x99, 0x0e, 0xb3, 0x8e, 0xd9, 0x76}};
+static const GUID IID_IDXGISwapChainDWM1 =
+        {0xfc4f7700, 0x8c88, 0x43fb, {0xaa, 0x4f, 0x44, 0xc4, 0xa5, 0x84, 0xdc, 0x19}};
+
 static DXGI_SWAP_EFFECT dxgi_swap_effect_from_wined3d(enum wined3d_swap_effect swap_effect)
 {
     switch (swap_effect)
@@ -207,10 +212,18 @@ static inline struct d3d11_swapchain *d3d11_swapchain_from_IDXGISwapChain4(IDXGI
     return CONTAINING_RECORD(iface, struct d3d11_swapchain, IDXGISwapChain4_iface);
 }
 
+static inline struct d3d11_swapchain *d3d11_swapchain_from_IDXGISwapChainDWM1(
+        IDXGISwapChainDWM1 *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d11_swapchain, IDXGISwapChainDWM1_iface);
+}
+
 /* IUnknown methods */
 
 static HRESULT STDMETHODCALLTYPE d3d11_swapchain_QueryInterface(IDXGISwapChain4 *iface, REFIID riid, void **object)
 {
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChain4(iface);
+
     TRACE("iface %p, riid %s, object %p\n", iface, debugstr_guid(riid), object);
 
     if (IsEqualGUID(riid, &IID_IUnknown)
@@ -224,6 +237,13 @@ static HRESULT STDMETHODCALLTYPE d3d11_swapchain_QueryInterface(IDXGISwapChain4 
     {
         IUnknown_AddRef(iface);
         *object = iface;
+        return S_OK;
+    }
+
+    if (swapchain->is_dwm && IsEqualGUID(riid, &IID_IDXGISwapChainDWM1))
+    {
+        IUnknown_AddRef(iface);
+        *object = &swapchain->IDXGISwapChainDWM1_iface;
         return S_OK;
     }
 
@@ -346,7 +366,10 @@ static HRESULT d3d11_swapchain_present(struct d3d11_swapchain *swapchain,
     }
 
     if (SUCCEEDED(hr = wined3d_swapchain_present(swapchain->wined3d_swapchain, NULL, NULL, NULL, sync_interval, 0)))
+    {
         InterlockedIncrement(&swapchain->present_count);
+        QueryPerformanceCounter(&swapchain->last_present_qpc);
+    }
     return hr;
 }
 
@@ -971,6 +994,484 @@ static const struct IDXGISwapChain4Vtbl d3d11_swapchain_vtbl =
     d3d11_swapchain_SetHDRMetaData,
 };
 
+struct dxgi_scroll_rect
+{
+    RECT source;
+    POINT offset;
+};
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_QueryInterface(
+        IDXGISwapChainDWM1 *iface, REFIID iid, void **object)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_QueryInterface(&swapchain->IDXGISwapChain4_iface, iid, object);
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_swapchain_dwm_AddRef(IDXGISwapChainDWM1 *iface)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_AddRef(&swapchain->IDXGISwapChain4_iface);
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_swapchain_dwm_Release(IDXGISwapChainDWM1 *iface)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_Release(&swapchain->IDXGISwapChain4_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_SetPrivateData(IDXGISwapChainDWM1 *iface,
+        REFGUID guid, UINT data_size, const void *data)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_SetPrivateData(&swapchain->IDXGISwapChain4_iface,
+            guid, data_size, data);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_SetPrivateDataInterface(
+        IDXGISwapChainDWM1 *iface, REFGUID guid, const IUnknown *object)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_SetPrivateDataInterface(&swapchain->IDXGISwapChain4_iface,
+            guid, object);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetPrivateData(IDXGISwapChainDWM1 *iface,
+        REFGUID guid, UINT *data_size, void *data)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_GetPrivateData(&swapchain->IDXGISwapChain4_iface,
+            guid, data_size, data);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetParent(IDXGISwapChainDWM1 *iface,
+        REFIID iid, void **parent)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_GetParent(&swapchain->IDXGISwapChain4_iface, iid, parent);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetDevice(IDXGISwapChainDWM1 *iface,
+        REFIID iid, void **device)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_GetDevice(&swapchain->IDXGISwapChain4_iface, iid, device);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_Present(IDXGISwapChainDWM1 *iface,
+        UINT sync_interval, UINT flags)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_present(swapchain, sync_interval, flags);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetBuffer(IDXGISwapChainDWM1 *iface,
+        UINT buffer_idx, REFIID iid, void **surface)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_GetBuffer(&swapchain->IDXGISwapChain4_iface,
+            buffer_idx, iid, surface);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetDesc(IDXGISwapChainDWM1 *iface,
+        DXGI_SWAP_CHAIN_DESC *desc)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    TRACE("iface %p, desc %p.\n", iface, desc);
+
+    if (!desc)
+        return E_INVALIDARG;
+    *desc = swapchain->dwm_desc;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_ResizeBuffers(IDXGISwapChainDWM1 *iface,
+        UINT buffer_count, UINT width, UINT height, DXGI_FORMAT format, UINT flags)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = d3d11_swapchain_ResizeBuffers(&swapchain->IDXGISwapChain4_iface,
+            buffer_count, width, height, format, flags)))
+    {
+        if (buffer_count)
+            swapchain->dwm_desc.BufferCount = buffer_count;
+        if (width)
+            swapchain->dwm_desc.BufferDesc.Width = width;
+        if (height)
+            swapchain->dwm_desc.BufferDesc.Height = height;
+        if (format != DXGI_FORMAT_UNKNOWN)
+            swapchain->dwm_desc.BufferDesc.Format = format;
+        swapchain->dwm_desc.Flags = flags;
+    }
+    return hr;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_ResizeTarget(IDXGISwapChainDWM1 *iface,
+        const DXGI_MODE_DESC *target_mode_desc)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_ResizeTarget(&swapchain->IDXGISwapChain4_iface,
+            target_mode_desc);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetContainingOutput(
+        IDXGISwapChainDWM1 *iface, IDXGIOutput **output)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_GetContainingOutput(&swapchain->IDXGISwapChain4_iface, output);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetFrameStatistics(
+        IDXGISwapChainDWM1 *iface, DXGI_FRAME_STATISTICS *statistics)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return d3d11_swapchain_GetFrameStatistics(&swapchain->IDXGISwapChain4_iface, statistics);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetLastPresentCount(
+        IDXGISwapChainDWM1 *iface, UINT *last_present_count)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    if (!last_present_count)
+        return E_INVALIDARG;
+    return d3d11_swapchain_GetLastPresentCount(&swapchain->IDXGISwapChain4_iface,
+            last_present_count);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_PresentDWM(IDXGISwapChainDWM1 *iface,
+        UINT sync_interval, UINT flags, UINT dirty_rect_count, const RECT *dirty_rects,
+        UINT scroll_rect_count, const void *scroll_rects, IDXGIResource *resource,
+        UINT private_flags)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+    const struct dxgi_scroll_rect *scroll = scroll_rects;
+    DXGI_PRESENT_PARAMETERS parameters = {0};
+
+    TRACE("iface %p, sync_interval %u, flags %#x, dirty_rect_count %u, "
+            "dirty_rects %p, scroll_rect_count %u, scroll_rects %p, resource %p, "
+            "private_flags %#x.\n", iface, sync_interval, flags, dirty_rect_count,
+            dirty_rects, scroll_rect_count, scroll_rects, resource, private_flags);
+
+    if ((dirty_rect_count && !dirty_rects) || (scroll_rect_count && !scroll_rects))
+        return E_INVALIDARG;
+
+    parameters.DirtyRectsCount = dirty_rect_count;
+    parameters.pDirtyRects = (RECT *)dirty_rects;
+    if (scroll_rect_count)
+    {
+        parameters.pScrollRect = (RECT *)&scroll->source;
+        parameters.pScrollOffset = (POINT *)&scroll->offset;
+    }
+
+    return d3d11_swapchain_Present1(&swapchain->IDXGISwapChain4_iface,
+            sync_interval, flags, &parameters);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetLogicalSurfaceHandle(
+        IDXGISwapChainDWM1 *iface, UINT64 *handle)
+{
+    TRACE("iface %p, handle %p.\n", iface, handle);
+
+    if (!handle)
+        return E_INVALIDARG;
+    *handle = 0;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_CheckDirectFlipSupport(
+        IDXGISwapChainDWM1 *iface, UINT flags, IDXGIResource *resource, BOOL *supported)
+{
+    TRACE("iface %p, flags %#x, resource %p, supported %p.\n",
+            iface, flags, resource, supported);
+
+    if (!supported)
+        return E_INVALIDARG;
+    *supported = FALSE;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetCompositionSurface(
+        IDXGISwapChainDWM1 *iface, void **surface)
+{
+    TRACE("iface %p, surface %p.\n", iface, surface);
+
+    if (!surface)
+        return E_INVALIDARG;
+    *surface = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetFrameStatisticsDWM(
+        IDXGISwapChainDWM1 *iface, struct dxgi_frame_statistics_dwm *statistics)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+    IDXGIOutputDWM *output_dwm = NULL;
+    IDXGIOutput *output = NULL;
+    LARGE_INTEGER counter, frequency;
+    HRESULT hr;
+
+    TRACE("iface %p, statistics %p.\n", iface, statistics);
+
+    if (!statistics)
+        return E_INVALIDARG;
+
+    hr = d3d11_swapchain_GetContainingOutput(&swapchain->IDXGISwapChain4_iface, &output);
+    if (SUCCEEDED(hr))
+        hr = IDXGIOutput_QueryInterface(output, &IID_IDXGIOutputDWM, (void **)&output_dwm);
+    if (SUCCEEDED(hr))
+        hr = output_dwm->lpVtbl->GetFrameStatisticsDWM(output_dwm, statistics);
+    if (output_dwm)
+        output_dwm->lpVtbl->Release(output_dwm);
+    if (output)
+        IDXGIOutput_Release(output);
+
+    if (FAILED(hr))
+    {
+        QueryPerformanceCounter(&counter);
+        QueryPerformanceFrequency(&frequency);
+        memset(statistics, 0, sizeof(*statistics));
+        statistics->sync_qpc_time = counter;
+        statistics->virtual_sync_qpc_time = counter;
+        statistics->vsync_duration_qpc_time.QuadPart = frequency.QuadPart / 60;
+        statistics->vsync_multiplier = 1;
+        hr = S_OK;
+    }
+
+    statistics->present_count = swapchain->present_count;
+    statistics->present_refresh_count = swapchain->present_count;
+    if (swapchain->last_present_qpc.QuadPart)
+        statistics->present_qpc_time = swapchain->last_present_qpc;
+    return hr;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetMultiplaneOverlayCaps(
+        IDXGISwapChainDWM1 *iface, struct dxgi_multiplane_overlay_caps *caps)
+{
+    TRACE("iface %p, caps %p.\n", iface, caps);
+
+    if (!caps)
+        return E_INVALIDARG;
+    memset(caps, 0, sizeof(*caps));
+    caps->max_planes = 1;
+    caps->overlay.max_stretch_factor = 1.0f;
+    caps->overlay.max_shrink_factor = 1.0f;
+    caps->panel_fitter.max_stretch_factor = 1.0f;
+    caps->panel_fitter.max_shrink_factor = 1.0f;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_CheckMultiplaneOverlaySupport(
+        IDXGISwapChainDWM1 *iface, UINT plane_count, const void *plane_info,
+        BOOL *supported, UINT *flags)
+{
+    TRACE("iface %p, plane_count %u, plane_info %p, supported %p, flags %p.\n",
+            iface, plane_count, plane_info, supported, flags);
+
+    if (!supported || !flags || (plane_count && !plane_info))
+        return E_INVALIDARG;
+    *supported = FALSE;
+    *flags = 0;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_PresentMultiplaneOverlay(
+        IDXGISwapChainDWM1 *iface, UINT sync_interval, UINT present_flags,
+        DXGI_HDR_METADATA_TYPE metadata_type, const void *metadata,
+        UINT plane_count, const void *planes)
+{
+    TRACE("iface %p, sync_interval %u, present_flags %#x, metadata_type %#x, "
+            "metadata %p, plane_count %u, planes %p.\n", iface, sync_interval,
+            present_flags, metadata_type, metadata, plane_count, planes);
+    return DXGI_ERROR_UNSUPPORTED;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_CheckPresentDurationSupport(
+        IDXGISwapChainDWM1 *iface, UINT desired_duration,
+        UINT *closest_smaller, UINT *closest_larger)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+    DXGI_RATIONAL refresh_rate = swapchain->dwm_desc.BufferDesc.RefreshRate;
+    UINT frame_duration;
+
+    TRACE("iface %p, desired_duration %u, closest_smaller %p, closest_larger %p.\n",
+            iface, desired_duration, closest_smaller, closest_larger);
+
+    if (!closest_smaller || !closest_larger)
+        return E_INVALIDARG;
+    if (!refresh_rate.Numerator || !refresh_rate.Denominator)
+    {
+        refresh_rate.Numerator = 60;
+        refresh_rate.Denominator = 1;
+    }
+    frame_duration = ((UINT64)10000000 * refresh_rate.Denominator
+            + refresh_rate.Numerator / 2) / refresh_rate.Numerator;
+    *closest_smaller = desired_duration >= frame_duration ? frame_duration : 0;
+    *closest_larger = desired_duration <= frame_duration ? frame_duration : 0;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_SetPrivateFrameDuration(
+        IDXGISwapChainDWM1 *iface, UINT numerator, UINT denominator)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    TRACE("iface %p, numerator %u, denominator %u.\n", iface, numerator, denominator);
+    swapchain->private_frame_duration_numerator = numerator;
+    swapchain->private_frame_duration_denominator = denominator;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_SetHardwareProtection(
+        IDXGISwapChainDWM1 *iface, BOOL enabled)
+{
+    TRACE("iface %p, enabled %#x.\n", iface, enabled);
+    return enabled ? DXGI_ERROR_UNSUPPORTED : S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetHardwareProtection(
+        IDXGISwapChainDWM1 *iface, BOOL *enabled)
+{
+    TRACE("iface %p, enabled %p.\n", iface, enabled);
+
+    if (!enabled)
+        return E_INVALIDARG;
+    *enabled = FALSE;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_SetLatencyHint(
+        IDXGISwapChainDWM1 *iface, UINT hint)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    TRACE("iface %p, hint %#x.\n", iface, hint);
+    swapchain->latency_hint = hint;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_SwapBuffers(
+        IDXGISwapChainDWM1 *iface, UINT first_buffer, UINT second_buffer)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    TRACE("iface %p, first_buffer %u, second_buffer %u.\n",
+            iface, first_buffer, second_buffer);
+    if (first_buffer >= swapchain->dwm_desc.BufferCount
+            || second_buffer >= swapchain->dwm_desc.BufferCount)
+        return E_FAIL;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_CheckDwmVidPnOwnership(
+        IDXGISwapChainDWM1 *iface, BOOL *owned)
+{
+    TRACE("iface %p, owned %p.\n", iface, owned);
+
+    if (!owned)
+        return E_INVALIDARG;
+    *owned = TRUE;
+    return S_OK;
+}
+
+static UINT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetCurrentBackBufferIndex(
+        IDXGISwapChainDWM1 *iface)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    if (!swapchain->dwm_desc.BufferCount)
+        return 0;
+    return swapchain->present_count % swapchain->dwm_desc.BufferCount;
+}
+
+static UINT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetBackBufferImplicitRotationCount(
+        IDXGISwapChainDWM1 *iface)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    return swapchain->present_count;
+}
+
+static UINT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetFrontBufferRenderingCapability(
+        IDXGISwapChainDWM1 *iface)
+{
+    TRACE("iface %p.\n", iface);
+    return 2;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_swapchain_dwm_SetFrontBufferRenderingMode(
+        IDXGISwapChainDWM1 *iface, BOOL enabled)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
+
+    TRACE("iface %p, enabled %#x.\n", iface, enabled);
+    swapchain->front_buffer_rendering = !!enabled;
+    return S_OK;
+}
+
+static const struct IDXGISwapChainDWM1Vtbl d3d11_swapchain_dwm_vtbl =
+{
+    d3d11_swapchain_dwm_QueryInterface,
+    d3d11_swapchain_dwm_AddRef,
+    d3d11_swapchain_dwm_Release,
+    d3d11_swapchain_dwm_SetPrivateData,
+    d3d11_swapchain_dwm_SetPrivateDataInterface,
+    d3d11_swapchain_dwm_GetPrivateData,
+    d3d11_swapchain_dwm_GetParent,
+    d3d11_swapchain_dwm_GetDevice,
+    d3d11_swapchain_dwm_Present,
+    d3d11_swapchain_dwm_GetBuffer,
+    d3d11_swapchain_dwm_GetDesc,
+    d3d11_swapchain_dwm_ResizeBuffers,
+    d3d11_swapchain_dwm_ResizeTarget,
+    d3d11_swapchain_dwm_GetContainingOutput,
+    d3d11_swapchain_dwm_GetFrameStatistics,
+    d3d11_swapchain_dwm_GetLastPresentCount,
+    d3d11_swapchain_dwm_PresentDWM,
+    d3d11_swapchain_dwm_GetLogicalSurfaceHandle,
+    d3d11_swapchain_dwm_CheckDirectFlipSupport,
+    d3d11_swapchain_dwm_GetCompositionSurface,
+    d3d11_swapchain_dwm_GetFrameStatisticsDWM,
+    d3d11_swapchain_dwm_GetMultiplaneOverlayCaps,
+    d3d11_swapchain_dwm_CheckMultiplaneOverlaySupport,
+    d3d11_swapchain_dwm_PresentMultiplaneOverlay,
+    d3d11_swapchain_dwm_CheckPresentDurationSupport,
+    d3d11_swapchain_dwm_SetPrivateFrameDuration,
+    d3d11_swapchain_dwm_SetHardwareProtection,
+    d3d11_swapchain_dwm_GetHardwareProtection,
+    d3d11_swapchain_dwm_SetLatencyHint,
+    d3d11_swapchain_dwm_SwapBuffers,
+    d3d11_swapchain_dwm_CheckDwmVidPnOwnership,
+    d3d11_swapchain_dwm_GetCurrentBackBufferIndex,
+    d3d11_swapchain_dwm_GetBackBufferImplicitRotationCount,
+    d3d11_swapchain_dwm_GetFrontBufferRenderingCapability,
+    d3d11_swapchain_dwm_SetFrontBufferRenderingMode,
+};
+
+void d3d11_swapchain_set_dwm_mode(IDXGISwapChain1 *iface,
+        const DXGI_SWAP_CHAIN_DESC *desc)
+{
+    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChain4(
+            (IDXGISwapChain4 *)iface);
+
+    swapchain->dwm_desc = *desc;
+    swapchain->is_dwm = TRUE;
+}
+
 static void STDMETHODCALLTYPE d3d11_swapchain_wined3d_object_released(void *parent)
 {
     struct d3d11_swapchain *swapchain = parent;
@@ -1062,6 +1563,7 @@ HRESULT d3d11_swapchain_init(struct d3d11_swapchain *swapchain, struct dxgi_devi
     IWineDXGIDevice_AddRef(swapchain->device = &device->IWineDXGIDevice_iface);
 
     swapchain->IDXGISwapChain4_iface.lpVtbl = &d3d11_swapchain_vtbl;
+    swapchain->IDXGISwapChainDWM1_iface.lpVtbl = &d3d11_swapchain_dwm_vtbl;
     swapchain->state_parent.ops = &d3d11_swapchain_state_parent_ops;
     swapchain->fullscreen_desc = *fullscreen_desc;
     swapchain->refcount = 1;

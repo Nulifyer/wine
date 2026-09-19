@@ -20,6 +20,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
+static const GUID IID_IDXGIOutputDWM =
+        {0x6f66a9a0, 0xbece, 0x4ee8, {0xb1, 0x1b, 0x99, 0x0e, 0xb3, 0x8e, 0xd9, 0x76}};
+
 static inline DXGI_MODE_SCANLINE_ORDER dxgi_mode_scanline_order_from_wined3d(enum wined3d_scanline_ordering ordering)
 {
     return (DXGI_MODE_SCANLINE_ORDER)ordering;
@@ -188,6 +191,11 @@ static inline struct dxgi_output *impl_from_IDXGIOutput6(IDXGIOutput6 *iface)
     return CONTAINING_RECORD(iface, struct dxgi_output, IDXGIOutput6_iface);
 }
 
+static inline struct dxgi_output *impl_from_IDXGIOutputDWM(IDXGIOutputDWM *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_output, IDXGIOutputDWM_iface);
+}
+
 /* IUnknown methods */
 
 static HRESULT STDMETHODCALLTYPE dxgi_output_QueryInterface(IDXGIOutput6 *iface, REFIID iid, void **object)
@@ -209,11 +217,336 @@ static HRESULT STDMETHODCALLTYPE dxgi_output_QueryInterface(IDXGIOutput6 *iface,
         return S_OK;
     }
 
+    if (IsEqualGUID(iid, &IID_IDXGIOutputDWM))
+    {
+        struct dxgi_output *output = impl_from_IDXGIOutput6(iface);
+
+        IDXGIOutput6_AddRef(iface);
+        *object = &output->IDXGIOutputDWM_iface;
+        return S_OK;
+    }
+
     WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
 
     *object = NULL;
     return E_NOINTERFACE;
 }
+
+static HRESULT STDMETHODCALLTYPE dxgi_output_dwm_QueryInterface(IDXGIOutputDWM *iface,
+        REFIID iid, void **object)
+{
+    struct dxgi_output *output = impl_from_IDXGIOutputDWM(iface);
+
+    return IDXGIOutput6_QueryInterface(&output->IDXGIOutput6_iface, iid, object);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_output_dwm_AddRef(IDXGIOutputDWM *iface)
+{
+    struct dxgi_output *output = impl_from_IDXGIOutputDWM(iface);
+
+    return IDXGIOutput6_AddRef(&output->IDXGIOutput6_iface);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_output_dwm_Release(IDXGIOutputDWM *iface)
+{
+    struct dxgi_output *output = impl_from_IDXGIOutputDWM(iface);
+
+    return IDXGIOutput6_Release(&output->IDXGIOutput6_iface);
+}
+
+static BOOL STDMETHODCALLTYPE dxgi_output_dwm_HasDDAClient(IDXGIOutputDWM *iface)
+{
+    TRACE("iface %p.\n", iface);
+    return FALSE;
+}
+
+static HRESULT dxgi_output_get_vblank_timing(struct dxgi_output *output, LARGE_INTEGER *counter,
+        LARGE_INTEGER *frequency, UINT64 *ticks_per_frame)
+{
+    struct wined3d_display_mode mode;
+    HRESULT hr;
+
+    wined3d_mutex_lock();
+    hr = wined3d_output_get_display_mode(output->wined3d_output, &mode, NULL);
+    wined3d_mutex_unlock();
+    if (FAILED(hr))
+        return hr;
+
+    if (!QueryPerformanceCounter(counter) || !QueryPerformanceFrequency(frequency))
+        return DXGI_ERROR_INVALID_CALL;
+    if (!mode.refresh_rate)
+        mode.refresh_rate = 60;
+    if (!(*ticks_per_frame = frequency->QuadPart / mode.refresh_rate))
+        return DXGI_ERROR_INVALID_CALL;
+
+    return S_OK;
+}
+
+static HRESULT dxgi_output_set_vblank_timer(HANDLE timer, UINT64 ticks_until_vblank,
+        const LARGE_INTEGER *frequency)
+{
+    LARGE_INTEGER due_time;
+
+    due_time.QuadPart = -((ticks_until_vblank * 10000000 + frequency->QuadPart - 1)
+            / frequency->QuadPart);
+    if (!SetWaitableTimer(timer, &due_time, 0, NULL, NULL, FALSE))
+        return HRESULT_FROM_WIN32(GetLastError());
+
+    return S_OK;
+}
+
+static HANDLE dxgi_output_get_vblank_timer(struct dxgi_output *output)
+{
+    HANDLE previous, timer;
+
+    if ((timer = output->vblank_timer))
+        return timer;
+    if (!(timer = CreateWaitableTimerW(NULL, FALSE, NULL)))
+        return NULL;
+    if ((previous = InterlockedCompareExchangePointer((void **)&output->vblank_timer, timer, NULL)))
+    {
+        CloseHandle(timer);
+        timer = previous;
+    }
+
+    return timer;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_output_dwm_GetDesc(IDXGIOutputDWM *iface,
+        struct dxgi_output_dwm_desc *desc)
+{
+    struct dxgi_output *output = impl_from_IDXGIOutputDWM(iface);
+    struct wined3d_adapter_identifier adapter_id;
+    struct wined3d_output_desc output_desc;
+    enum wined3d_display_rotation rotation;
+    struct wined3d_display_mode mode;
+    char adapter_name[128];
+    HRESULT hr;
+
+    TRACE("iface %p, desc %p.\n", iface, desc);
+
+    if (!desc)
+        return E_INVALIDARG;
+
+    adapter_id.driver_size = 0;
+    adapter_id.description = adapter_name;
+    adapter_id.description_size = sizeof(adapter_name);
+
+    wined3d_mutex_lock();
+    hr = wined3d_adapter_get_identifier(output->adapter->wined3d_adapter, 0, &adapter_id);
+    if (SUCCEEDED(hr))
+        hr = wined3d_output_get_desc(output->wined3d_output, &output_desc);
+    if (SUCCEEDED(hr))
+        hr = wined3d_output_get_display_mode(output->wined3d_output, &mode, &rotation);
+    wined3d_mutex_unlock();
+    if (FAILED(hr))
+        return hr;
+
+    memset(desc, 0, sizeof(*desc));
+    desc->adapter_luid = adapter_id.adapter_luid;
+    desc->vidpn_source_id = output_desc.ordinal;
+    desc->vidpn_target_id = output_desc.ordinal;
+    desc->display_id = output_desc.ordinal;
+    desc->output_luid.LowPart = adapter_id.adapter_luid.LowPart ^ (output_desc.ordinal + 1);
+    desc->output_luid.HighPart = adapter_id.adapter_luid.HighPart ^ 0x4c4e5455;
+    desc->monitor_resolution_width = mode.width;
+    desc->monitor_resolution_height = mode.height;
+    desc->pixel_format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc->refresh_rate.Numerator = mode.refresh_rate ? mode.refresh_rate : 60;
+    desc->refresh_rate.Denominator = 1;
+    desc->minimum_refresh_rate = desc->refresh_rate;
+    desc->maximum_refresh_rate = desc->refresh_rate;
+    desc->boost_refresh_rate_multiplier = 1;
+    desc->rotation = dxgi_mode_rotation_from_wined3d(rotation);
+    desc->scanline_ordering = dxgi_mode_scanline_order_from_wined3d(mode.scanline_ordering);
+    SetRect(&desc->clip_box, 0, 0, mode.width, mode.height);
+    desc->content_resolution = output_desc.desktop_rect;
+    if (output_desc.attached_to_desktop)
+        desc->flags |= DXGI_OUTPUT_DWM_DISPLAY_FLAG_ATTACHED_TO_DESKTOP;
+    if (output_desc.attached_to_desktop && output_desc.desktop_rect.left <= 0
+            && output_desc.desktop_rect.top <= 0 && output_desc.desktop_rect.right > 0
+            && output_desc.desktop_rect.bottom > 0)
+        desc->flags |= DXGI_OUTPUT_DWM_DISPLAY_FLAG_PRIMARY;
+    memcpy(desc->display_name, output_desc.device_name, sizeof(desc->display_name));
+    desc->sdr_white_level = 1.0f;
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_output_dwm_FindClosestMatchingModeFromDesktop(
+        IDXGIOutputDWM *iface, const DXGI_MODE_DESC1 *mode, DXGI_MODE_DESC1 *closest_match,
+        IUnknown *device)
+{
+    struct dxgi_output *output = impl_from_IDXGIOutputDWM(iface);
+
+    return IDXGIOutput6_FindClosestMatchingMode1(&output->IDXGIOutput6_iface,
+            mode, closest_match, device);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_output_dwm_WaitForVBlankOrObjects(IDXGIOutputDWM *iface,
+        UINT object_count, const HANDLE *objects)
+{
+    struct dxgi_output *output = impl_from_IDXGIOutputDWM(iface);
+    LARGE_INTEGER counter, frequency;
+    UINT64 ticks_per_frame;
+    HANDLE wait_handles[9];
+    HANDLE timer;
+    DWORD wait_result;
+    HRESULT hr;
+
+    TRACE("iface %p, object_count %u, objects %p.\n", iface, object_count, objects);
+
+    if (object_count > 8 || (object_count && !objects))
+        return DXGI_ERROR_INVALID_CALL;
+
+    if (!object_count)
+        return IDXGIOutput6_WaitForVBlank(&output->IDXGIOutput6_iface);
+
+    if (FAILED(hr = dxgi_output_get_vblank_timing(output, &counter, &frequency, &ticks_per_frame)))
+        return hr;
+    if (!(timer = CreateWaitableTimerW(NULL, FALSE, NULL)))
+        return HRESULT_FROM_WIN32(GetLastError());
+    if (FAILED(hr = dxgi_output_set_vblank_timer(timer,
+            ticks_per_frame - counter.QuadPart % ticks_per_frame, &frequency)))
+    {
+        CloseHandle(timer);
+        return hr;
+    }
+
+    memcpy(wait_handles, objects, object_count * sizeof(*objects));
+    wait_handles[object_count] = timer;
+    wait_result = WaitForMultipleObjects(object_count + 1, wait_handles, FALSE, INFINITE);
+    CloseHandle(timer);
+    if (wait_result >= WAIT_OBJECT_0 && wait_result < WAIT_OBJECT_0 + object_count + 1)
+        return S_OK;
+    if (wait_result == WAIT_FAILED)
+        return HRESULT_FROM_WIN32(GetLastError());
+    return DXGI_ERROR_INVALID_CALL;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_output_dwm_SetSyncRefreshCountWaitTarget(
+        IDXGIOutputDWM *iface, UINT target)
+{
+    struct dxgi_output *output = impl_from_IDXGIOutputDWM(iface);
+    LARGE_INTEGER counter, frequency;
+    UINT64 ticks_per_frame, ticks_until_target;
+    INT refresh_delta;
+    HANDLE timer;
+    HRESULT hr;
+
+    TRACE("iface %p, target %u.\n", iface, target);
+
+    if (FAILED(hr = dxgi_output_get_vblank_timing(output, &counter, &frequency, &ticks_per_frame)))
+        return hr;
+    if (!(timer = dxgi_output_get_vblank_timer(output)))
+        return HRESULT_FROM_WIN32(GetLastError());
+
+    refresh_delta = target - (UINT)(counter.QuadPart / ticks_per_frame);
+    if (refresh_delta <= 0)
+        refresh_delta = 1;
+    ticks_until_target = (UINT64)refresh_delta * ticks_per_frame
+            - counter.QuadPart % ticks_per_frame;
+    return dxgi_output_set_vblank_timer(timer, ticks_until_target, &frequency);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_output_dwm_GetFrameStatisticsDWM(
+        IDXGIOutputDWM *iface, struct dxgi_frame_statistics_dwm *statistics)
+{
+    struct dxgi_output *output = impl_from_IDXGIOutputDWM(iface);
+    LARGE_INTEGER counter, frequency;
+    UINT64 ticks_per_frame;
+    UINT refresh_count;
+    HRESULT hr;
+
+    TRACE("iface %p, statistics %p.\n", iface, statistics);
+
+    if (!statistics)
+        return E_INVALIDARG;
+    if (FAILED(hr = dxgi_output_get_vblank_timing(output, &counter, &frequency, &ticks_per_frame)))
+        return hr;
+
+    refresh_count = counter.QuadPart / ticks_per_frame;
+    memset(statistics, 0, sizeof(*statistics));
+    statistics->present_count = refresh_count;
+    statistics->present_refresh_count = refresh_count;
+    statistics->present_qpc_time.QuadPart = counter.QuadPart - counter.QuadPart % ticks_per_frame;
+    statistics->sync_refresh_count = refresh_count;
+    statistics->sync_qpc_time = statistics->present_qpc_time;
+    statistics->virtual_sync_refresh_count = refresh_count;
+    statistics->virtual_sync_qpc_time = statistics->present_qpc_time;
+    statistics->virtual_present_refresh_count = refresh_count;
+    statistics->virtual_present_qpc_time = statistics->present_qpc_time;
+    statistics->vsync_duration_qpc_time.QuadPart = ticks_per_frame;
+    statistics->vsync_multiplier = 1;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_output_dwm_GetVBlankEvent(IDXGIOutputDWM *iface, HANDLE *event)
+{
+    struct dxgi_output *output = impl_from_IDXGIOutputDWM(iface);
+    HANDLE timer;
+
+    TRACE("iface %p, event %p.\n", iface, event);
+
+    if (!event)
+        return E_INVALIDARG;
+    *event = NULL;
+    if (!(timer = dxgi_output_get_vblank_timer(output)))
+        return HRESULT_FROM_WIN32(GetLastError());
+    if (!DuplicateHandle(GetCurrentProcess(), timer, GetCurrentProcess(), event,
+            0, FALSE, DUPLICATE_SAME_ACCESS))
+        return HRESULT_FROM_WIN32(GetLastError());
+    return S_OK;
+}
+
+static BOOL STDMETHODCALLTYPE dxgi_output_dwm_IsIndependentFlipSupported(IDXGIOutputDWM *iface)
+{
+    TRACE("iface %p.\n", iface);
+    return FALSE;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_output_dwm_GetMultiplaneOverlayCaps(
+        IDXGIOutputDWM *iface, IUnknown *device, struct dxgi_multiplane_overlay_caps *caps)
+{
+    TRACE("iface %p, device %p, caps %p.\n", iface, device, caps);
+
+    if (!device || !caps)
+        return E_INVALIDARG;
+    memset(caps, 0, sizeof(*caps));
+    caps->max_planes = 1;
+    caps->overlay.max_stretch_factor = 1.0f;
+    caps->overlay.max_shrink_factor = 1.0f;
+    caps->panel_fitter.max_stretch_factor = 1.0f;
+    caps->panel_fitter.max_shrink_factor = 1.0f;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_output_dwm_GetStereoCaps(IDXGIOutputDWM *iface, DWORD *caps)
+{
+    TRACE("iface %p, caps %p.\n", iface, caps);
+
+    if (!caps)
+        return E_INVALIDARG;
+    *caps = 0;
+    return S_OK;
+}
+
+static const struct IDXGIOutputDWMVtbl dxgi_output_dwm_vtbl =
+{
+    dxgi_output_dwm_QueryInterface,
+    dxgi_output_dwm_AddRef,
+    dxgi_output_dwm_Release,
+    dxgi_output_dwm_HasDDAClient,
+    dxgi_output_dwm_GetDesc,
+    dxgi_output_dwm_FindClosestMatchingModeFromDesktop,
+    dxgi_output_dwm_WaitForVBlankOrObjects,
+    dxgi_output_dwm_SetSyncRefreshCountWaitTarget,
+    dxgi_output_dwm_GetFrameStatisticsDWM,
+    dxgi_output_dwm_GetVBlankEvent,
+    dxgi_output_dwm_IsIndependentFlipSupported,
+    dxgi_output_dwm_GetMultiplaneOverlayCaps,
+    dxgi_output_dwm_GetStereoCaps,
+};
 
 static ULONG STDMETHODCALLTYPE dxgi_output_AddRef(IDXGIOutput6 *iface)
 {
@@ -234,6 +567,8 @@ static ULONG STDMETHODCALLTYPE dxgi_output_Release(IDXGIOutput6 *iface)
 
     if (!refcount)
     {
+        if (output->vblank_timer)
+            CloseHandle(output->vblank_timer);
         wined3d_private_store_cleanup(&output->private_store);
         IWineDXGIAdapter_Release(&output->adapter->IWineDXGIAdapter_iface);
         free(output);
@@ -712,7 +1047,9 @@ static void dxgi_output_init(struct dxgi_output *output, unsigned int output_idx
         struct dxgi_adapter *adapter)
 {
     output->IDXGIOutput6_iface.lpVtbl = &dxgi_output_vtbl;
+    output->IDXGIOutputDWM_iface.lpVtbl = &dxgi_output_dwm_vtbl;
     output->refcount = 1;
+    output->vblank_timer = NULL;
     output->wined3d_output = wined3d_adapter_get_output(adapter->wined3d_adapter, output_idx);
     wined3d_private_store_init(&output->private_store);
     output->adapter = adapter;
