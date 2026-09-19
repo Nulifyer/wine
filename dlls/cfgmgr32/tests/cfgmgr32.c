@@ -2741,6 +2741,7 @@ static void test_CM_Get_Class_Property(void)
 
 static void test_CM_Get_Device_Interface_List_Size(void)
 {
+    static const GUID no_interfaces = {0xdeac60ab, 0x42a4, 0x66e2, {0xad,0x9b,0x55,0x7e,0xe3,0x3a,0xe2,0xd5}};
     GUID guid = GUID_DEVINTERFACE_HID;
     ULONG size_all, size_present, size;
     CONFIGRET ret;
@@ -2758,10 +2759,10 @@ static void test_CM_Get_Device_Interface_List_Size(void)
     }
     size = 0xdeadbeef;
     ret = CM_Get_Device_Interface_List_SizeW( &size, &guid, (WCHAR *)L"INVALID", CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES );
-    todo_wine ok_x4( ret, ==, CR_INVALID_DEVNODE );
-    todo_wine ok_u4( size, ==, 0 );
+    ok_x4( ret, ==, CR_INVALID_DEVNODE );
+    ok_u4( size, ==, 0 );
     ret = CM_Get_Device_Interface_List_SizeW( &size, &guid, (WCHAR *)L"\\\\?\\", CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES );
-    todo_wine ok_x4( ret, ==, CR_INVALID_DEVNODE );
+    ok_x4( ret, ==, CR_INVALID_DEVNODE );
 
     size_present = 0;
     ret = CM_Get_Device_Interface_List_SizeW( &size_present, &guid, NULL, CM_GET_DEVICE_INTERFACE_LIST_PRESENT );
@@ -2786,11 +2787,26 @@ static void test_CM_Get_Device_Interface_List_Size(void)
     ret = CM_Get_Device_Interface_List_SizeA( &size, &guid, NULL, CM_GET_DEVICE_INTERFACE_LIST_PRESENT );
     ok_x4( ret, ==, CR_SUCCESS );
     ok_u4( size, ==, size_present );
+
+    size = 0xdeadbeef;
+    ret = CM_Get_Device_Interface_List_SizeW( &size, (GUID *)&no_interfaces, NULL,
+                                              CM_GET_DEVICE_INTERFACE_LIST_PRESENT );
+    ok_x4( ret, ==, CR_SUCCESS );
+    ok_u4( size, ==, 1 );
+
+    size = 0xdeadbeef;
+    ret = CM_Get_Device_Interface_List_SizeA( &size, (GUID *)&no_interfaces, NULL,
+                                              CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES );
+    ok_x4( ret, ==, CR_SUCCESS );
+    ok_u4( size, ==, 1 );
 }
 
 static void test_CM_Get_Device_Interface_List(void)
 {
+    static const GUID no_interfaces = {0xdeac60ab, 0x42a4, 0x66e2, {0xad,0x9b,0x55,0x7e,0xe3,0x3a,0xe2,0xd5}};
     GUID guid = GUID_DEVINTERFACE_HID;
+    WCHAR empty_bufferW[4];
+    char empty_bufferA[4];
     WCHAR *tmp, *tmp2, *buffer, *bufferW, instance[MAX_PATH];
     CONFIGRET ret;
     char *bufferA;
@@ -2816,10 +2832,12 @@ static void test_CM_Get_Device_Interface_List(void)
         ok_x4( ret, ==, CR_INVALID_FLAG );
         winetest_pop_context();
     }
+    memset( buffer, 0xcc, size * sizeof(*buffer) );
     ret = CM_Get_Device_Interface_ListW( &guid, (WCHAR *)L"INVALID", buffer, size, CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES );
-    todo_wine ok_x4( ret, ==, CR_INVALID_DEVNODE );
+    ok_x4( ret, ==, CR_INVALID_DEVNODE );
+    ok_u4( buffer[0], ==, 0 );
     ret = CM_Get_Device_Interface_ListW( &guid, (WCHAR *)L"\\\\?\\", buffer, size, CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES );
-    todo_wine ok_x4( ret, ==, CR_INVALID_DEVNODE );
+    ok_x4( ret, ==, CR_INVALID_DEVNODE );
 
 
     ret = CM_Get_Device_Interface_ListW( &guid, NULL, buffer, size, CM_GET_DEVICE_INTERFACE_LIST_PRESENT );
@@ -2923,6 +2941,20 @@ skip_tests:
     ok( tmp > buffer, "got %s\n", debugstr_wn( buffer, size ) );
 
     free( buffer );
+
+    memset( empty_bufferW, 0xcc, sizeof(empty_bufferW) );
+    ret = CM_Get_Device_Interface_ListW( (GUID *)&no_interfaces, NULL, empty_bufferW, 1,
+                                         CM_GET_DEVICE_INTERFACE_LIST_PRESENT );
+    ok_x4( ret, ==, CR_SUCCESS );
+    ok_u4( empty_bufferW[0], ==, 0 );
+    ok_u4( empty_bufferW[1], ==, 0xcccc );
+
+    memset( empty_bufferA, 0xcc, sizeof(empty_bufferA) );
+    ret = CM_Get_Device_Interface_ListA( (GUID *)&no_interfaces, NULL, empty_bufferA, 1,
+                                         CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES );
+    ok_x4( ret, ==, CR_SUCCESS );
+    ok_u4( empty_bufferA[0], ==, 0 );
+    ok_u4( (unsigned char)empty_bufferA[1], ==, 0xcc );
 }
 
 static void test_CM_Open_Device_Interface_Key(void)

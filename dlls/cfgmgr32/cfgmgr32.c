@@ -62,6 +62,27 @@ static const WCHAR control_classW[]  = L"System\\CurrentControlSet\\Control\\Cla
 static const WCHAR device_classesW[] = L"System\\CurrentControlSet\\Control\\DeviceClasses\\";
 static const WCHAR enum_rootW[]      = L"System\\CurrentControlSet\\Enum\\";
 
+static BOOL is_legal_device_id( const WCHAR *id )
+{
+    UINT component_len = 0, component_count = 1, len = 0;
+
+    if (!id || !*id) return TRUE;
+
+    for (; *id; id++)
+    {
+        if (++len > MAX_DEVICE_ID_LEN || *id < 0x21 || *id > 0x7f || *id == ',') return FALSE;
+        if (*id == '\\')
+        {
+            if (!component_len) return FALSE;
+            component_len = 0;
+            component_count++;
+        }
+        else component_len++;
+    }
+
+    return component_len && component_count == 3;
+}
+
 static struct key_cache
 {
     HKEY root;
@@ -457,11 +478,18 @@ static LSTATUS enum_device_interface_list( GUID *class, DEVINSTID_W instance_id,
     if (instance_id && !*instance_id) instance_id = NULL;
 
     guid_string( class, iface.class, ARRAY_SIZE(iface.class) );
-    if ((err = open_device_classes_key( HKEY_LOCAL_MACHINE, iface.class, KEY_ENUMERATE_SUB_KEYS, TRUE, &class_key ))) return err;
-    err = enum_class_device_interfaces( class_key, &iface, instance_id, all, callback, context );
-    RegCloseKey( class_key );
+    if (!(err = open_device_classes_key( HKEY_LOCAL_MACHINE, iface.class, KEY_ENUMERATE_SUB_KEYS, TRUE, &class_key )))
+    {
+        err = enum_class_device_interfaces( class_key, &iface, instance_id, all, callback, context );
+        RegCloseKey( class_key );
+    }
+    else if (err == ERROR_FILE_NOT_FOUND)
+    {
+        /* An unregistered class has no matching interfaces. */
+        err = ERROR_SUCCESS;
+    }
 
-    if (!err) callback( NULL, NULL, L"", 1, context );
+    if (!err) err = callback( NULL, NULL, L"", 1, context );
     return err;
 }
 
@@ -1358,6 +1386,7 @@ CONFIGRET WINAPI CM_Get_Device_Interface_List_Size_ExW( ULONG *len, GUID *class,
     if (flags & ~CM_GET_DEVICE_INTERFACE_LIST_BITS) return CR_INVALID_FLAG;
 
     *len = 0;
+    if (!is_legal_device_id( instance_id )) return CR_INVALID_DEVNODE;
     return map_error( enum_device_interface_list( class, instance_id, all, enum_objects_size, len ) );
 }
 
@@ -1404,7 +1433,8 @@ CONFIGRET WINAPI CM_Get_Device_Interface_List_ExW( GUID *class, DEVINSTID_W inst
     if (!len) return CR_BUFFER_SMALL;
     if (flags & ~CM_GET_DEVICE_INTERFACE_LIST_BITS) return CR_INVALID_FLAG;
 
-    memset( buffer, 0, len * sizeof(WCHAR) );
+    *buffer = 0;
+    if (!is_legal_device_id( instance_id )) return CR_INVALID_DEVNODE;
     return map_error( enum_device_interface_list( class, instance_id, all, enum_objects_append, &params ) );
 }
 
