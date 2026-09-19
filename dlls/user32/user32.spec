@@ -49,7 +49,7 @@
 2535 stub @
 2536 stdcall -noname SetWindowServicesDestroyCallback(ptr ptr)
 2537 stub -noname SendEventMessage  # NtUserSendEventMessage
-2538 stub -noname LayoutCompleted  # NtUserLayoutCompleted
+2538 stdcall -noname LayoutCompleted(long) NtUserLayoutCompleted
 2539 stub -noname HidePointerContactVisualization  # NtUserHidePointerContactVisualization
 2540 stub -noname SetCancelRotationDelayHintWindow  # NtUserSetCancelRotationDelayHintWindow
 2541 stdcall -noname GetQueueStatusReadonly(long) NtUserGetQueueStatusReadonly

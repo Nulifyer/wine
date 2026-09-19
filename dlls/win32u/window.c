@@ -4986,6 +4986,21 @@ void update_window_state( HWND hwnd )
 }
 
 /***********************************************************************
+ *           NtUserLayoutCompleted (win32u.@)
+ *
+ * Windows uses this notification to retire compositor-side resize state
+ * after a XAML layout pass. Wine applies host window geometry and surfaces
+ * synchronously in apply_window_pos(), so there is no deferred resize state
+ * to retire here. Keep the Windows-visible live-window validation instead of
+ * turning the entry point into an unconditional success stub.
+ */
+BOOL WINAPI NtUserLayoutCompleted( HWND hwnd )
+{
+    TRACE( "hwnd %p\n", hwnd );
+    return is_window( hwnd );
+}
+
+/***********************************************************************
  *              show_window
  *
  * Implementation of ShowWindow and ShowWindowAsync.

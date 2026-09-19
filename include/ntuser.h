@@ -1095,6 +1095,7 @@ W32KAPI BOOL    WINAPI NtUserInvalidateRect( HWND hwnd, const RECT *rect, BOOL e
 W32KAPI BOOL    WINAPI NtUserInvalidateRgn( HWND hwnd, HRGN hrgn, BOOL erase );
 W32KAPI BOOL    WINAPI NtUserKillSystemTimer( HWND hwnd, UINT_PTR id );
 W32KAPI BOOL    WINAPI NtUserKillTimer( HWND hwnd, UINT_PTR id );
+W32KAPI BOOL    WINAPI NtUserLayoutCompleted( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserLockWindowUpdate( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserLogicalToPerMonitorDPIPhysicalPoint( HWND hwnd, POINT *pt );
 W32KAPI UINT    WINAPI NtUserMapVirtualKeyEx( UINT code, UINT type, HKL layout );

@@ -160,6 +160,88 @@ static void test_NtUserCloseWindowStation(void)
         "NtUserCloseWindowStation returned %x %lu\n", ret, GetLastError() );
 }
 
+typedef BOOL (WINAPI *layout_completed_proc)( HWND hwnd );
+
+static void test_NtUserLayoutCompleted_child( const char *arg )
+{
+    HWND hwnd = UlongToHandle( strtoul( arg, NULL, 16 ) );
+    layout_completed_proc layout_completed;
+    BOOL ret;
+
+    layout_completed = (layout_completed_proc)GetProcAddress( GetModuleHandleA( "user32.dll" ),
+                                                               (const char *)2538 );
+    ok( !!layout_completed, "LayoutCompleted ordinal is missing\n" );
+
+    SetLastError( 0xdeadbeef );
+    ret = NtUserLayoutCompleted( hwnd );
+    ok( ret, "NtUserLayoutCompleted failed for cross-process window, error %lu\n", GetLastError() );
+    ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+
+    if (layout_completed)
+    {
+        SetLastError( 0xdeadbeef );
+        ret = layout_completed( hwnd );
+        ok( ret, "LayoutCompleted failed for cross-process window, error %lu\n", GetLastError() );
+        ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+    }
+}
+
+static void test_NtUserLayoutCompleted( char **argv )
+{
+    layout_completed_proc layout_completed;
+    HWND hwnd, child;
+    char args[64];
+    BOOL ret;
+
+    layout_completed = (layout_completed_proc)GetProcAddress( GetModuleHandleA( "user32.dll" ),
+                                                               (const char *)2538 );
+    ok( !!layout_completed, "LayoutCompleted ordinal is missing\n" );
+
+    SetLastError( 0xdeadbeef );
+    ret = NtUserLayoutCompleted( NULL );
+    ok( !ret, "NtUserLayoutCompleted succeeded for a null window\n" );
+
+    SetLastError( 0xdeadbeef );
+    ret = NtUserLayoutCompleted( (HWND)(ULONG_PTR)0xdeadbeef );
+    ok( !ret, "NtUserLayoutCompleted succeeded for an invalid window\n" );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "last error is %lu\n", GetLastError() );
+
+    hwnd = CreateWindowA( "static", "layout-completed", WS_OVERLAPPEDWINDOW,
+                          0, 0, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "failed to create top-level window, error %lu\n", GetLastError() );
+    child = CreateWindowA( "static", "child", WS_CHILD, 0, 0, 10, 10,
+                           hwnd, NULL, NULL, NULL );
+    ok( !!child, "failed to create child window, error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = NtUserLayoutCompleted( hwnd );
+    ok( ret, "NtUserLayoutCompleted failed for top-level window, error %lu\n", GetLastError() );
+    ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = NtUserLayoutCompleted( child );
+    ok( ret, "NtUserLayoutCompleted failed for child window, error %lu\n", GetLastError() );
+    ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+
+    if (layout_completed)
+    {
+        SetLastError( 0xdeadbeef );
+        ret = layout_completed( hwnd );
+        ok( ret, "LayoutCompleted failed for top-level window, error %lu\n", GetLastError() );
+        ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+    }
+
+    sprintf( args, "NtUserLayoutCompleted %lx", HandleToUlong( hwnd ) );
+    run_in_process( argv, args );
+
+    DestroyWindow( child );
+    DestroyWindow( hwnd );
+    SetLastError( 0xdeadbeef );
+    ret = NtUserLayoutCompleted( hwnd );
+    ok( !ret, "NtUserLayoutCompleted succeeded for a destroyed window\n" );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "last error is %lu\n", GetLastError() );
+}
+
 static void test_rootless_user_object_names(void)
 {
     OBJECT_ATTRIBUTES attr;
@@ -3209,6 +3291,12 @@ START_TEST(win32u)
         return;
     }
 
+    if (argc > 3 && !strcmp( argv[2], "NtUserLayoutCompleted" ))
+    {
+        test_NtUserLayoutCompleted_child( argv[3] );
+        return;
+    }
+
     test_NtUserEnumDisplayDevices();
     test_window_props();
     test_class();
@@ -3227,6 +3315,7 @@ START_TEST(win32u)
     test_wndproc_hook();
 
     test_NtUserCloseWindowStation();
+    test_NtUserLayoutCompleted( argv );
     test_NtUserRemoteConnect();
     test_rootless_user_object_names();
     test_NtUserDisplayConfigGetDeviceInfo();

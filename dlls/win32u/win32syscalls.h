@@ -1182,7 +1182,7 @@
     SYSCALL_ENTRY( 0x149a, NtUserKillSystemTimer, 8 ) \
     SYSCALL_ENTRY( 0x149b, NtUserKillTimer, 8 ) \
     SYSCALL_ENTRY( 0x149c, NtUserLW_LoadFonts, 0 ) \
-    SYSCALL_ENTRY( 0x149d, NtUserLayoutCompleted, 0 ) \
+    SYSCALL_ENTRY( 0x149d, NtUserLayoutCompleted, 4 ) \
     SYSCALL_ENTRY( 0x149e, NtUserLinkDpiCursor, 0 ) \
     SYSCALL_ENTRY( 0x149f, NtUserLoadCursorsAndIcons, 0 ) \
     SYSCALL_ENTRY( 0x14a0, NtUserLoadKeyboardLayoutEx, 0 ) \
@@ -2724,7 +2724,7 @@
     SYSCALL_ENTRY( 0x149a, NtUserKillSystemTimer, 16 ) \
     SYSCALL_ENTRY( 0x149b, NtUserKillTimer, 16 ) \
     SYSCALL_ENTRY( 0x149c, NtUserLW_LoadFonts, 0 ) \
-    SYSCALL_ENTRY( 0x149d, NtUserLayoutCompleted, 0 ) \
+    SYSCALL_ENTRY( 0x149d, NtUserLayoutCompleted, 8 ) \
     SYSCALL_ENTRY( 0x149e, NtUserLinkDpiCursor, 0 ) \
     SYSCALL_ENTRY( 0x149f, NtUserLoadCursorsAndIcons, 0 ) \
     SYSCALL_ENTRY( 0x14a0, NtUserLoadKeyboardLayoutEx, 0 ) \
@@ -3842,7 +3842,6 @@
     SYSCALL_STUB( NtUserIsWindowDisplayChangeSuppressed ) \
     SYSCALL_STUB( NtUserIsWindowGDIScaledDpiMessageEnabled ) \
     SYSCALL_STUB( NtUserLW_LoadFonts ) \
-    SYSCALL_STUB( NtUserLayoutCompleted ) \
     SYSCALL_STUB( NtUserLinkDpiCursor ) \
     SYSCALL_STUB( NtUserLoadCursorsAndIcons ) \
     SYSCALL_STUB( NtUserLoadKeyboardLayoutEx ) \

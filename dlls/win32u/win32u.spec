@@ -1180,7 +1180,7 @@
 @ stdcall -syscall NtUserKillSystemTimer(long long)
 @ stdcall -syscall NtUserKillTimer(long long)
 @ stub -syscall NtUserLW_LoadFonts
-@ stub -syscall NtUserLayoutCompleted
+@ stdcall -syscall NtUserLayoutCompleted(long)
 @ stub -syscall NtUserLinkDpiCursor
 @ stub -syscall NtUserLoadCursorsAndIcons
 @ stub -syscall NtUserLoadKeyboardLayoutEx
