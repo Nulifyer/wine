@@ -25,6 +25,13 @@
 #define WNF_SPI_LOGICALDPIOVERRIDE 0x418f1e3ea3bc0835ULL
 #define WNF_DX_MODE_CHANGE_NOTIFICATION 0x41c61629a3bc1035ULL
 #define WNF_DX_MONITOR_CHANGE_NOTIFICATION 0x41c61629a3bc2835ULL
+#define WNF_DX_CONSOLE_ADAPTER_START 0x41c61629a3bc8075ULL
+#define WNF_DX_CONSOLE_ADAPTER_STOP 0x41c61629a3bc8875ULL
+#define WNF_DX_REMOTE_ADAPTER_START 0x41c61629a3bcb835ULL
+#define WNF_DX_REMOTE_ADAPTER_STOP 0x41c61629a3bcc035ULL
+#define WNF_DX_RENDER_ADAPTER_PAIRING_CHANGED 0x41c61629a3bcf035ULL
+#define WNF_DXGK_PATH_FAILED_OR_INVALIDATED 0x0a811629a3bc1075ULL
+#define WNF_DXGK_PATH_FAILED_OR_INVALIDATED_V2 0x0a811629a3bc2835ULL
 #define WNF_PNPA_DEVNODES_CHANGED 0x0096003da3bc0875ULL
 #define WNF_PNPA_DEVNODES_CHANGED_SESSION 0x0096003da3bc1035ULL
 #define WNF_PNPA_VOLUMES_CHANGED 0x0096003da3bc1875ULL
@@ -377,6 +384,13 @@ START_TEST(wnf)
             WNF_SPI_LOGICALDPIOVERRIDE,
             WNF_DX_MODE_CHANGE_NOTIFICATION,
             WNF_DX_MONITOR_CHANGE_NOTIFICATION,
+            WNF_DX_CONSOLE_ADAPTER_START,
+            WNF_DX_CONSOLE_ADAPTER_STOP,
+            WNF_DX_REMOTE_ADAPTER_START,
+            WNF_DX_REMOTE_ADAPTER_STOP,
+            WNF_DX_RENDER_ADAPTER_PAIRING_CHANGED,
+            WNF_DXGK_PATH_FAILED_OR_INVALIDATED,
+            WNF_DXGK_PATH_FAILED_OR_INVALIDATED_V2,
             WNF_PNPA_DEVNODES_CHANGED,
             WNF_PNPA_DEVNODES_CHANGED_SESSION,
             WNF_PNPA_VOLUMES_CHANGED,
@@ -415,17 +429,24 @@ START_TEST(wnf)
             ULONGLONG name;
             ULONG stamp, size;
         }
-        display_scaling_states[] =
+        display_states[] =
         {
             { WNF_SPI_LOGICALDPIOVERRIDE, 0, 0 },
             { WNF_DX_MODE_CHANGE_NOTIFICATION, 0, 0 },
             { WNF_DX_MONITOR_CHANGE_NOTIFICATION, 1, 16 },
+            { WNF_DX_CONSOLE_ADAPTER_START, 0, 0 },
+            { WNF_DX_CONSOLE_ADAPTER_STOP, 0, 0 },
+            { WNF_DX_REMOTE_ADAPTER_START, 0, 0 },
+            { WNF_DX_REMOTE_ADAPTER_STOP, 0, 0 },
+            { WNF_DX_RENDER_ADAPTER_PAIRING_CHANGED, 0, 0 },
+            { WNF_DXGK_PATH_FAILED_OR_INVALIDATED, 0, 0 },
+            { WNF_DXGK_PATH_FAILED_OR_INVALIDATED_V2, 0, 0 },
         };
         unsigned int i;
 
-        for (i = 0; i < ARRAY_SIZE(display_scaling_states); i++)
+        for (i = 0; i < ARRAY_SIZE(display_states); i++)
         {
-            struct display_scaling_query query = { .name = display_scaling_states[i].name };
+            struct display_scaling_query query = { .name = display_states[i].name };
             BYTE data[16];
 
             memset( data, 0xcc, sizeof(data) );
@@ -434,10 +455,10 @@ START_TEST(wnf)
             status = pNtQueryWnfStateData( &query.name, NULL, NULL, &stamp, data, &size );
             ok( status == STATUS_SUCCESS, "%#I64x: expected STATUS_SUCCESS, got %#lx\n",
                 query.name, status );
-            ok( stamp == display_scaling_states[i].stamp, "%#I64x: expected stamp %lu, got %lu\n",
-                query.name, display_scaling_states[i].stamp, stamp );
-            ok( size == display_scaling_states[i].size, "%#I64x: expected size %lu, got %lu\n",
-                query.name, display_scaling_states[i].size, size );
+            ok( stamp == display_states[i].stamp, "%#I64x: expected stamp %lu, got %lu\n",
+                query.name, display_states[i].stamp, stamp );
+            ok( size == display_states[i].size, "%#I64x: expected size %lu, got %lu\n",
+                query.name, display_states[i].size, size );
             if (size) ok( !memcmp( data, (BYTE[16]){0}, size ), "%#I64x: expected zero data\n", query.name );
 
             stamp = 0xdeadbeef;
@@ -445,15 +466,15 @@ START_TEST(wnf)
                                             &query, NULL );
             ok( status == STATUS_SUCCESS, "%#I64x: expected STATUS_SUCCESS, got %#lx\n",
                 query.name, status );
-            ok( stamp == display_scaling_states[i].stamp, "%#I64x: expected stamp %lu, got %lu\n",
-                query.name, display_scaling_states[i].stamp, stamp );
+            ok( stamp == display_states[i].stamp, "%#I64x: expected stamp %lu, got %lu\n",
+                query.name, display_states[i].stamp, stamp );
             ok( query.calls == 1, "%#I64x: expected one callback, got %lu\n", query.name, query.calls );
-            ok( query.stamp == display_scaling_states[i].stamp,
+            ok( query.stamp == display_states[i].stamp,
                 "%#I64x: expected callback stamp %lu, got %lu\n",
-                query.name, display_scaling_states[i].stamp, query.stamp );
-            ok( query.size == display_scaling_states[i].size,
+                query.name, display_states[i].stamp, query.stamp );
+            ok( query.size == display_states[i].size,
                 "%#I64x: expected callback size %lu, got %lu\n",
-                query.name, display_scaling_states[i].size, query.size );
+                query.name, display_states[i].size, query.size );
             if (query.size)
                 ok( !memcmp( query.data, (BYTE[16]){0}, query.size ),
                     "%#I64x: expected zero callback data\n", query.name );
