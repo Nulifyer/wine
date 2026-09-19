@@ -2730,9 +2730,23 @@ INT WINAPI NamedEscape( HDC hdc, const WCHAR *driver, INT escape, INT input_size
  */
 ULONG WINAPI DdQueryDisplaySettingsUniqueness(void)
 {
-    static int warn_once;
-    if (!warn_once++) FIXME( "stub\n" );
-    return 0;
+    return NtUserCallNoParam( NtUserCallNoParam_GetDisplaySettingsUniqueness );
+}
+
+/*******************************************************************
+ *           DrvQueryAdapterPopulationUniqueness    (GDI32.1004)
+ */
+ULONG WINAPI DrvQueryAdapterPopulationUniqueness(void)
+{
+    return NtUserCallNoParam( NtUserCallNoParam_GetAdapterPopulationUniqueness );
+}
+
+/*******************************************************************
+ *           DrvQueryMonitorUniqueness    (GDI32.1016)
+ */
+ULONG WINAPI DrvQueryMonitorUniqueness(void)
+{
+    return NtUserCallNoParam( NtUserCallNoParam_GetMonitorUniqueness );
 }
 
 /*******************************************************************

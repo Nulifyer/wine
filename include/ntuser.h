@@ -1233,6 +1233,9 @@ enum
     NtUserCallNoParam_GetTaskmanWindow,
     NtUserCallNoParam_DisplayModeChanged,
     NtUserCallNoParam_GetDwmCompositionId,
+    NtUserCallNoParam_GetDisplaySettingsUniqueness,
+    NtUserCallNoParam_GetAdapterPopulationUniqueness,
+    NtUserCallNoParam_GetMonitorUniqueness,
     /* temporary exports */
     NtUserExitingThread,
     NtUserThreadDetach,

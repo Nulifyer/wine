@@ -2104,6 +2104,8 @@ static void dump_close_winstation_request( const struct close_winstation_request
 static void dump_set_winstation_monitors_request( const struct set_winstation_monitors_request *req )
 {
     fprintf( stderr, " increment=%d", req->increment );
+    dump_uint64( ", adapter_fingerprint=", &req->adapter_fingerprint );
+    dump_uint64( ", monitor_fingerprint=", &req->monitor_fingerprint );
     dump_varargs_monitor_infos( ", infos=", cur_size );
 }
 

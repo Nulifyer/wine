@@ -1018,6 +1018,9 @@ typedef volatile struct
     struct shared_cursor cursor;
     unsigned char        keystate[256];
     unsigned __int64     monitor_serial;
+    unsigned int         display_settings_uniqueness;
+    unsigned int         adapter_population_uniqueness;
+    unsigned int         monitor_uniqueness;
     unsigned __int64     keystate_serial;
 } desktop_shm_t;
 
@@ -4146,6 +4149,8 @@ struct set_winstation_monitors_request
 {
     struct request_header __header;
     int              increment;
+    unsigned __int64 adapter_fingerprint;
+    unsigned __int64 monitor_fingerprint;
     /* VARARG(infos,monitor_infos); */
 };
 struct set_winstation_monitors_reply
@@ -8609,6 +8614,6 @@ union generic_reply
     struct query_dwm_composition_id_reply query_dwm_composition_id_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1026
+#define SERVER_PROTOCOL_VERSION 1028
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

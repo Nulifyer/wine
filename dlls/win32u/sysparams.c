@@ -2496,6 +2496,41 @@ static void monitor_get_info( struct monitor *monitor, MONITORINFO *info, struct
     }
 }
 
+static UINT64 hash_fingerprint_bytes( UINT64 hash, const void *data, SIZE_T size )
+{
+    const UINT64 fnv_prime = 1099511628211ULL;
+    const unsigned char *ptr = data;
+    SIZE_T i;
+
+    for (i = 0; i < size; ++i) hash = (hash ^ ptr[i]) * fnv_prime;
+    return hash;
+}
+
+/* display_lock must be held */
+static UINT64 get_adapter_fingerprint(void)
+{
+    UINT64 hash = 14695981039346656037ULL;
+    struct gpu *gpu;
+
+    LIST_FOR_EACH_ENTRY( gpu, &gpus, struct gpu, entry )
+    {
+        hash = hash_fingerprint_bytes( hash, gpu->path, strlen(gpu->path) + 1 );
+        hash = hash_fingerprint_bytes( hash, &gpu->luid, sizeof(gpu->luid) );
+    }
+    return hash;
+}
+
+/* display_lock must be held */
+static UINT64 get_monitor_fingerprint(void)
+{
+    UINT64 hash = 14695981039346656037ULL;
+    struct monitor *monitor;
+
+    LIST_FOR_EACH_ENTRY( monitor, &monitors, struct monitor, entry )
+        hash = hash_fingerprint_bytes( hash, monitor->path, strlen(monitor->path) + 1 );
+    return hash;
+}
+
 /* display_lock must be held */
 static void set_winstation_monitors( BOOL increment )
 {
@@ -2525,6 +2560,8 @@ static void set_winstation_monitors( BOOL increment )
     SERVER_START_REQ( set_winstation_monitors )
     {
         req->increment = increment;
+        req->adapter_fingerprint = get_adapter_fingerprint();
+        req->monitor_fingerprint = get_monitor_fingerprint();
         wine_server_add_data( req, infos, count * sizeof(*infos) );
         if (!wine_server_call( req )) monitor_update_serial = reply->serial;
     }
@@ -7804,6 +7841,27 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
         }
         SERVER_END_REQ;
         return id;
+    }
+
+    case NtUserCallNoParam_GetDisplaySettingsUniqueness:
+    case NtUserCallNoParam_GetAdapterPopulationUniqueness:
+    case NtUserCallNoParam_GetMonitorUniqueness:
+    {
+        struct object_lock lock = OBJECT_LOCK_INIT;
+        const desktop_shm_t *desktop_shm;
+        ULONG_PTR ret = 0;
+        NTSTATUS status;
+
+        while ((status = get_shared_desktop( &lock, &desktop_shm )) == STATUS_PENDING)
+        {
+            if (code == NtUserCallNoParam_GetDisplaySettingsUniqueness)
+                ret = desktop_shm->display_settings_uniqueness;
+            else if (code == NtUserCallNoParam_GetAdapterPopulationUniqueness)
+                ret = desktop_shm->adapter_population_uniqueness;
+            else
+                ret = desktop_shm->monitor_uniqueness;
+        }
+        return status ? 0 : ret;
     }
 
     /* temporary exports */

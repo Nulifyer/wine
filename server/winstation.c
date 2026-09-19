@@ -158,6 +158,11 @@ static bool winstation_init( struct object *obj, const void *init_data )
     winstation->monitors = NULL;
     winstation->monitor_count = 0;
     winstation->monitor_serial = 1;
+    winstation->display_settings_uniqueness = 1;
+    winstation->adapter_population_uniqueness = 1;
+    winstation->monitor_uniqueness = 1;
+    winstation->adapter_fingerprint = 0;
+    winstation->monitor_fingerprint = 0;
     winstation->composited = 0;
     list_init( &winstation->desktops );
     list_add_tail( &winstation_list, &winstation->entry );
@@ -431,6 +436,9 @@ static bool desktop_init( struct object *obj, const void *init_data )
         memset( (void *)shared->keystate, 0, sizeof(shared->keystate) );
         shared->keystate_serial = 1;
         shared->monitor_serial = winstation->monitor_serial;
+        shared->display_settings_uniqueness = winstation->display_settings_uniqueness;
+        shared->adapter_population_uniqueness = winstation->adapter_population_uniqueness;
+        shared->monitor_uniqueness = winstation->monitor_uniqueness;
     }
     SHARED_WRITE_END;
 
@@ -748,14 +756,35 @@ DECL_HANDLER(set_winstation_monitors)
     struct winstation *winstation;
     struct desktop *desktop;
     unsigned int size = get_req_data_size();
+    int display_changed, adapter_changed, monitor_changed;
 
     if (!(winstation = (struct winstation *)get_handle_obj( current->process, current->process->winstation,
                                                            0, &winstation_ops )))
         return;
 
-    if (req->increment || winstation->monitor_count != size / sizeof(*winstation->monitors) ||
-        !winstation->monitors || memcmp( winstation->monitors, get_req_data(), size ))
+    display_changed = req->increment || winstation->monitor_count != size / sizeof(*winstation->monitors) ||
+                      !winstation->monitors || memcmp( winstation->monitors, get_req_data(), size );
+    adapter_changed = winstation->adapter_fingerprint != req->adapter_fingerprint;
+    monitor_changed = winstation->monitor_fingerprint != req->monitor_fingerprint;
+
+    if (display_changed || adapter_changed || monitor_changed)
+    {
         winstation->monitor_serial++;
+    }
+    if (adapter_changed)
+    {
+        winstation->adapter_fingerprint = req->adapter_fingerprint;
+        if (!++winstation->adapter_population_uniqueness) ++winstation->adapter_population_uniqueness;
+    }
+    if (monitor_changed)
+    {
+        winstation->monitor_fingerprint = req->monitor_fingerprint;
+        if (!++winstation->monitor_uniqueness) ++winstation->monitor_uniqueness;
+    }
+    if (display_changed)
+    {
+        if (!++winstation->display_settings_uniqueness) ++winstation->display_settings_uniqueness;
+    }
 
     free( winstation->monitors );
     winstation->monitors = NULL;
@@ -766,6 +795,9 @@ DECL_HANDLER(set_winstation_monitors)
         SHARED_WRITE_BEGIN( desktop->shared, desktop_shm_t )
         {
             shared->monitor_serial = winstation->monitor_serial;
+            shared->display_settings_uniqueness = winstation->display_settings_uniqueness;
+            shared->adapter_population_uniqueness = winstation->adapter_population_uniqueness;
+            shared->monitor_uniqueness = winstation->monitor_uniqueness;
         }
         SHARED_WRITE_END;
     }

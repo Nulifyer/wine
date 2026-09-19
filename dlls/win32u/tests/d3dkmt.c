@@ -44,6 +44,7 @@
 #include "wine/vulkan.h"
 #include "wine/wgl.h"
 #include "wine/test.h"
+#include "ntuser.h"
 
 #define D3DUSAGE_SURFACE    0x8000000
 #define D3DUSAGE_LOCKABLE   0x4000000
@@ -912,6 +913,9 @@ static void test_D3DKMTEnumAdapters2(void)
 
 static void test_D3DKMTDisplayManager(void)
 {
+    ULONG (WINAPI *pDrvQueryAdapterPopulationUniqueness)(void);
+    ULONG (WINAPI *pDrvQueryMonitorUniqueness)(void);
+    ULONG (WINAPI *pDdQueryDisplaySettingsUniqueness)(void);
     NTSTATUS (WINAPI *pD3DKMTDDisplayEnum)( struct d3dkmt_ddisplay_enum *desc );
     NTSTATUS (WINAPI *pD3DKMTDispMgrCreate)( struct d3dkmt_disp_mgr_create *desc );
     NTSTATUS (WINAPI *pD3DKMTDispMgrOperation)( struct d3dkmt_disp_mgr_operation *desc );
@@ -923,20 +927,55 @@ static void test_D3DKMTDisplayManager(void)
     ALPC_PORT_ATTRIBUTES port_attributes;
     OBJECT_ATTRIBUTES object_attributes;
     HANDLE gdi32, listener = NULL, event;
+    ULONG display_generation, adapter_generation, monitor_generation;
     NTSTATUS status;
     UINT i;
 
     gdi32 = GetModuleHandleA( "gdi32.dll" );
+    pDrvQueryAdapterPopulationUniqueness = (void *)GetProcAddress( gdi32, (const char *)1004 );
+    pDrvQueryMonitorUniqueness = (void *)GetProcAddress( gdi32, (const char *)1016 );
+    pDdQueryDisplaySettingsUniqueness = (void *)GetProcAddress( gdi32, "GdiEntry13" );
     pD3DKMTDDisplayEnum = (void *)GetProcAddress( gdi32, "D3DKMTDDisplayEnum" );
     pD3DKMTDispMgrCreate = (void *)GetProcAddress( gdi32, "D3DKMTDispMgrCreate" );
     pD3DKMTDispMgrOperation = (void *)GetProcAddress( gdi32, "D3DKMTDispMgrOperation" );
     pD3DKMTDispMgrSourceOperation = (void *)GetProcAddress( gdi32, "D3DKMTDispMgrSourceOperation" );
     pD3DKMTDispMgrTargetOperation = (void *)GetProcAddress( gdi32, "D3DKMTDispMgrTargetOperation" );
+    ok( !!pDrvQueryAdapterPopulationUniqueness, "DrvQueryAdapterPopulationUniqueness is missing\n" );
+    ok( !!pDrvQueryMonitorUniqueness, "DrvQueryMonitorUniqueness is missing\n" );
+    ok( !!pDdQueryDisplaySettingsUniqueness, "DdQueryDisplaySettingsUniqueness is missing\n" );
     ok( !!pD3DKMTDDisplayEnum, "D3DKMTDDisplayEnum is missing\n" );
     ok( !!pD3DKMTDispMgrCreate, "D3DKMTDispMgrCreate is missing\n" );
     ok( !!pD3DKMTDispMgrOperation, "D3DKMTDispMgrOperation is missing\n" );
     ok( !!pD3DKMTDispMgrSourceOperation, "D3DKMTDispMgrSourceOperation is missing\n" );
     ok( !!pD3DKMTDispMgrTargetOperation, "D3DKMTDispMgrTargetOperation is missing\n" );
+    if (pDrvQueryAdapterPopulationUniqueness && pDrvQueryMonitorUniqueness &&
+        pDdQueryDisplaySettingsUniqueness)
+    {
+        display_generation = pDdQueryDisplaySettingsUniqueness();
+        adapter_generation = pDrvQueryAdapterPopulationUniqueness();
+        monitor_generation = pDrvQueryMonitorUniqueness();
+        ok( !!display_generation, "got zero display settings generation\n" );
+        ok( !!adapter_generation, "got zero adapter population generation\n" );
+        ok( !!monitor_generation, "got zero monitor generation\n" );
+        ok( pDdQueryDisplaySettingsUniqueness() == display_generation,
+            "display settings generation changed without an update\n" );
+        ok( pDrvQueryAdapterPopulationUniqueness() == adapter_generation,
+            "adapter population generation changed without an update\n" );
+        ok( pDrvQueryMonitorUniqueness() == monitor_generation,
+            "monitor generation changed without an update\n" );
+
+        if (!strcmp( winetest_platform, "wine" ))
+        {
+            ok( NtUserCallNoParam( NtUserCallNoParam_DisplayModeChanged ),
+                "display mode refresh failed\n" );
+            ok( pDdQueryDisplaySettingsUniqueness() != display_generation,
+                "display settings generation did not advance\n" );
+            ok( pDrvQueryAdapterPopulationUniqueness() == adapter_generation,
+                "display mode refresh changed adapter population generation\n" );
+            ok( pDrvQueryMonitorUniqueness() == monitor_generation,
+                "display mode refresh changed monitor generation\n" );
+        }
+    }
     if (!pD3DKMTDDisplayEnum || !pD3DKMTDispMgrCreate || !pD3DKMTDispMgrOperation ||
         !pD3DKMTDispMgrSourceOperation || !pD3DKMTDispMgrTargetOperation) return;
 

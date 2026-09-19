@@ -2,7 +2,7 @@
 1001 stub @
 1002 stub @
 1003 stub @
-1004 stub @
+1004 stdcall -noname DrvQueryAdapterPopulationUniqueness()
 1005 stdcall DwmQueryCompositionId()
 1006 stub @
 1007 stub @
@@ -13,7 +13,7 @@
 1013 stub @
 1014 stub DwmCreatedBitmapRemotingOutput
 1015 stub @
-1016 stub @
+1016 stdcall -noname DrvQueryMonitorUniqueness()
 
 @ stdcall AbortDoc(long)
 @ stdcall AbortPath(long)

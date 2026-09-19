@@ -60,6 +60,11 @@ struct winstation
     unsigned int       monitor_count;      /* number of monitors */
     struct monitor_info *monitors;         /* window station monitors */
     unsigned __int64   monitor_serial;     /* winstation monitor update counter */
+    unsigned int       display_settings_uniqueness; /* display settings generation */
+    unsigned int       adapter_population_uniqueness; /* display adapter population generation */
+    unsigned int       monitor_uniqueness; /* display monitor generation */
+    unsigned __int64   adapter_fingerprint; /* stable fingerprint of the adapter population */
+    unsigned __int64   monitor_fingerprint; /* stable fingerprint of the monitor population */
     int                composited;         /* desktops are owned by the session compositor */
 };
 

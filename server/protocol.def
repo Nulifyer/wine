@@ -1034,6 +1034,9 @@ typedef volatile struct
     struct shared_cursor cursor;           /* global cursor information */
     unsigned char        keystate[256];    /* asynchronous key state */
     unsigned __int64     monitor_serial;   /* winstation monitor update counter */
+    unsigned int         display_settings_uniqueness; /* display settings generation */
+    unsigned int         adapter_population_uniqueness; /* display adapter population generation */
+    unsigned int         monitor_uniqueness; /* display monitor generation */
     unsigned __int64     keystate_serial;  /* keystate update counter */
 } desktop_shm_t;
 
@@ -3062,7 +3065,9 @@ enum coords_relative
 
 /* Update the process current window station monitors */
 @REQ(set_winstation_monitors)
-    int              increment;   /* force increment the monitor update counter */
+    int              increment;   /* force a display-settings generation update */
+    unsigned __int64 adapter_fingerprint; /* stable fingerprint of the adapter population */
+    unsigned __int64 monitor_fingerprint; /* stable fingerprint of the monitor population */
     VARARG(infos,monitor_infos);  /* window station monitors */
 @REPLY
     unsigned __int64 serial;      /* winstation monitor update counter */
