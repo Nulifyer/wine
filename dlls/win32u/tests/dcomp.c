@@ -1832,6 +1832,93 @@ static void test_hwnd_target_lifecycle(void)
     DestroyWindow( hwnd );
 }
 
+static void test_shared_resource_handle_lifecycle(void)
+{
+    static const UINT valid_types[] = {0x13, 0x82, 0xb8};
+    static const UINT invalid_types[] = {0, 0x12, 0x14, 0x81, 0x83, 0xb7, 0xb9};
+    BYTE *buffer = (BYTE *)0xdeadbeef;
+    HANDLE handles[ARRAY_SIZE(valid_types)] = {0}, event = NULL;
+    UINT command[6], channel = 0xcccccccc, size = 0x1000, i;
+    ULONG processed;
+    BYTE released;
+    NTSTATUS status;
+
+    for (i = 0; i < ARRAY_SIZE(invalid_types); ++i)
+    {
+        HANDLE handle = (HANDLE)0xdeadbeef;
+
+        status = NtDCompositionCreateSharedResourceHandle( invalid_types[i], &handle );
+        ok( status == STATUS_INVALID_PARAMETER, "type %#x returned %#lx\n",
+            invalid_types[i], status );
+        ok( handle == (HANDLE)0xdeadbeef, "type %#x changed output to %p\n",
+            invalid_types[i], handle );
+    }
+    status = NtDCompositionCreateSharedResourceHandle( 0xb8, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "null output returned %#lx\n", status );
+
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got channel status %#lx\n", status );
+    if (status) return;
+
+    for (i = 0; i < ARRAY_SIZE(valid_types); ++i)
+    {
+        status = NtDCompositionCreateSharedResourceHandle( valid_types[i], &handles[i] );
+        ok( status == STATUS_SUCCESS, "type %#x returned %#lx\n", valid_types[i], status );
+        ok( !!handles[i] && handles[i] != INVALID_HANDLE_VALUE,
+            "type %#x returned handle %p\n", valid_types[i], handles[i] );
+        if (status) continue;
+
+        command[0] = 3;
+        command[1] = i + 1;
+        memcpy( command + 2, &handles[i], sizeof(handles[i]) );
+        command[4] = valid_types[i];
+        command[5] = 0;
+        memcpy( buffer, command, sizeof(command) );
+        status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(command),
+                                                           &processed, &released );
+        ok( status == STATUS_SUCCESS, "type %#x open returned %#lx\n",
+            valid_types[i], status );
+        ok( processed == 1, "type %#x processed %lu commands\n",
+            valid_types[i], processed );
+    }
+
+    command[0] = 3;
+    command[1] = 4;
+    memcpy( command + 2, &handles[2], sizeof(handles[2]) );
+    command[4] = 0x82;
+    command[5] = 0;
+    memcpy( buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(command),
+                                                       &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "mismatched type returned %#lx\n", status );
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create event, error %lu\n", GetLastError() );
+    command[1] = 4;
+    memcpy( command + 2, &event, sizeof(event) );
+    command[4] = 0xb8;
+    memcpy( buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(command),
+                                                       &processed, &released );
+    ok( status == STATUS_OBJECT_TYPE_MISMATCH, "event handle returned %#lx\n", status );
+
+    for (i = 0; i < ARRAY_SIZE(valid_types); ++i)
+    {
+        if (!handles[i]) continue;
+        command[0] = 4;
+        command[1] = i + 1;
+        memcpy( buffer, command, 8 );
+        status = NtDCompositionProcessChannelBatchBuffer( channel, 8, &processed, &released );
+        ok( status == STATUS_SUCCESS, "type %#x release returned %#lx\n",
+            valid_types[i], status );
+    }
+
+    if (event) CloseHandle( event );
+    for (i = 0; i < ARRAY_SIZE(handles); ++i) if (handles[i]) CloseHandle( handles[i] );
+    status = NtDCompositionDestroyChannel( channel );
+    ok( status == STATUS_SUCCESS, "got channel destroy status %#lx\n", status );
+}
+
 static void test_frame_lifecycle(void)
 {
     struct dcomposition_frame_info frame_info = {0};
@@ -2317,6 +2404,7 @@ START_TEST(dcomp)
     test_kst();
     test_frame_statistics();
     test_channel_lifetime();
+    test_shared_resource_handle_lifecycle();
     test_hwnd_target_lifecycle();
     test_connection_queue();
     test_visual_target_root_lifecycle();

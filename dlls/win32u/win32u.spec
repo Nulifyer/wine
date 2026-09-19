@@ -22,7 +22,7 @@
 @ stdcall -syscall NtDCompositionCreateChannel(ptr ptr ptr long)
 @ stdcall -syscall NtDCompositionCreateConnection(long long ptr)
 @ stub -syscall NtDCompositionCreateDwmChannel
-@ stub -syscall NtDCompositionCreateSharedResourceHandle
+@ stdcall -syscall NtDCompositionCreateSharedResourceHandle(long ptr)
 @ stub -syscall NtDCompositionCreateSynchronizationObject
 @ stdcall -syscall NtDCompositionDestroyChannel(long)
 @ stdcall -syscall NtDCompositionDestroyConnection(long)

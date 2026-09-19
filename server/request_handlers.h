@@ -386,7 +386,8 @@ DECL_HANDLER(create_dcomp_shared_section);
 DECL_HANDLER(get_dcomp_shared_section_update);
 DECL_HANDLER(release_dcomp_shared_section);
 DECL_HANDLER(publish_dcomp_resource);
-DECL_HANDLER(begin_dcomp_resource_duplicate);
+DECL_HANDLER(create_dcomp_shared_resource);
+DECL_HANDLER(open_dcomp_shared_resource);
 DECL_HANDLER(get_dcomp_connection_batch);
 DECL_HANDLER(release_all_dcomp_resources);
 DECL_HANDLER(get_deleted_dcomp_resources);
@@ -406,7 +407,6 @@ DECL_HANDLER(create_dcomp_token);
 DECL_HANDLER(present_dcomp_token);
 DECL_HANDLER(create_dcomp_window_target);
 DECL_HANDLER(destroy_dcomp_window_target);
-DECL_HANDLER(validate_dcomp_window_target);
 DECL_HANDLER(set_dcomp_channel_completion_event);
 DECL_HANDLER(get_dwm_desktop_id);
 
@@ -792,7 +792,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_dcomp_shared_section_update,
     (req_handler)req_release_dcomp_shared_section,
     (req_handler)req_publish_dcomp_resource,
-    (req_handler)req_begin_dcomp_resource_duplicate,
+    (req_handler)req_create_dcomp_shared_resource,
+    (req_handler)req_open_dcomp_shared_resource,
     (req_handler)req_get_dcomp_connection_batch,
     (req_handler)req_release_all_dcomp_resources,
     (req_handler)req_get_deleted_dcomp_resources,
@@ -812,7 +813,6 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_present_dcomp_token,
     (req_handler)req_create_dcomp_window_target,
     (req_handler)req_destroy_dcomp_window_target,
-    (req_handler)req_validate_dcomp_window_target,
     (req_handler)req_set_dcomp_channel_completion_event,
     (req_handler)req_get_dwm_desktop_id,
 };
@@ -2962,10 +2962,14 @@ C_ASSERT( offsetof(struct publish_dcomp_resource_request, type) == 20 );
 C_ASSERT( sizeof(struct publish_dcomp_resource_request) == 24 );
 C_ASSERT( offsetof(struct publish_dcomp_resource_reply, handle) == 8 );
 C_ASSERT( sizeof(struct publish_dcomp_resource_reply) == 16 );
-C_ASSERT( offsetof(struct begin_dcomp_resource_duplicate_request, handle) == 12 );
-C_ASSERT( offsetof(struct begin_dcomp_resource_duplicate_request, channel) == 16 );
-C_ASSERT( offsetof(struct begin_dcomp_resource_duplicate_request, type) == 20 );
-C_ASSERT( sizeof(struct begin_dcomp_resource_duplicate_request) == 24 );
+C_ASSERT( offsetof(struct create_dcomp_shared_resource_request, type) == 12 );
+C_ASSERT( sizeof(struct create_dcomp_shared_resource_request) == 16 );
+C_ASSERT( offsetof(struct create_dcomp_shared_resource_reply, handle) == 8 );
+C_ASSERT( sizeof(struct create_dcomp_shared_resource_reply) == 16 );
+C_ASSERT( offsetof(struct open_dcomp_shared_resource_request, handle) == 12 );
+C_ASSERT( offsetof(struct open_dcomp_shared_resource_request, channel) == 16 );
+C_ASSERT( offsetof(struct open_dcomp_shared_resource_request, type) == 20 );
+C_ASSERT( sizeof(struct open_dcomp_shared_resource_request) == 24 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_request, connection) == 12 );
 C_ASSERT( sizeof(struct get_dcomp_connection_batch_request) == 16 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, type) == 8 );
@@ -3044,9 +3048,6 @@ C_ASSERT( sizeof(struct create_dcomp_window_target_reply) == 16 );
 C_ASSERT( offsetof(struct destroy_dcomp_window_target_request, window) == 12 );
 C_ASSERT( offsetof(struct destroy_dcomp_window_target_request, type) == 16 );
 C_ASSERT( sizeof(struct destroy_dcomp_window_target_request) == 24 );
-C_ASSERT( offsetof(struct validate_dcomp_window_target_request, handle) == 12 );
-C_ASSERT( offsetof(struct validate_dcomp_window_target_request, resource_type) == 16 );
-C_ASSERT( sizeof(struct validate_dcomp_window_target_request) == 24 );
 C_ASSERT( offsetof(struct set_dcomp_channel_completion_event_request, channel) == 12 );
 C_ASSERT( offsetof(struct set_dcomp_channel_completion_event_request, event) == 16 );
 C_ASSERT( offsetof(struct set_dcomp_channel_completion_event_request, internal) == 20 );

@@ -7353,14 +7353,27 @@ struct publish_dcomp_resource_reply
 };
 
 
-struct begin_dcomp_resource_duplicate_request
+struct create_dcomp_shared_resource_request
+{
+    struct request_header __header;
+    unsigned int type;
+};
+struct create_dcomp_shared_resource_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+struct open_dcomp_shared_resource_request
 {
     struct request_header __header;
     obj_handle_t handle;
     unsigned int channel;
     unsigned int type;
 };
-struct begin_dcomp_resource_duplicate_reply
+struct open_dcomp_shared_resource_reply
 {
     struct reply_header __header;
 };
@@ -7626,19 +7639,6 @@ struct destroy_dcomp_window_target_request
     char __pad_20[4];
 };
 struct destroy_dcomp_window_target_reply
-{
-    struct reply_header __header;
-};
-
-
-struct validate_dcomp_window_target_request
-{
-    struct request_header __header;
-    obj_handle_t handle;
-    unsigned int resource_type;
-    char __pad_20[4];
-};
-struct validate_dcomp_window_target_reply
 {
     struct reply_header __header;
 };
@@ -8050,7 +8050,8 @@ enum request
     REQ_get_dcomp_shared_section_update,
     REQ_release_dcomp_shared_section,
     REQ_publish_dcomp_resource,
-    REQ_begin_dcomp_resource_duplicate,
+    REQ_create_dcomp_shared_resource,
+    REQ_open_dcomp_shared_resource,
     REQ_get_dcomp_connection_batch,
     REQ_release_all_dcomp_resources,
     REQ_get_deleted_dcomp_resources,
@@ -8070,7 +8071,6 @@ enum request
     REQ_present_dcomp_token,
     REQ_create_dcomp_window_target,
     REQ_destroy_dcomp_window_target,
-    REQ_validate_dcomp_window_target,
     REQ_set_dcomp_channel_completion_event,
     REQ_get_dwm_desktop_id,
     REQ_NB_REQUESTS
@@ -8459,7 +8459,8 @@ union generic_request
     struct get_dcomp_shared_section_update_request get_dcomp_shared_section_update_request;
     struct release_dcomp_shared_section_request release_dcomp_shared_section_request;
     struct publish_dcomp_resource_request publish_dcomp_resource_request;
-    struct begin_dcomp_resource_duplicate_request begin_dcomp_resource_duplicate_request;
+    struct create_dcomp_shared_resource_request create_dcomp_shared_resource_request;
+    struct open_dcomp_shared_resource_request open_dcomp_shared_resource_request;
     struct get_dcomp_connection_batch_request get_dcomp_connection_batch_request;
     struct release_all_dcomp_resources_request release_all_dcomp_resources_request;
     struct get_deleted_dcomp_resources_request get_deleted_dcomp_resources_request;
@@ -8479,7 +8480,6 @@ union generic_request
     struct present_dcomp_token_request present_dcomp_token_request;
     struct create_dcomp_window_target_request create_dcomp_window_target_request;
     struct destroy_dcomp_window_target_request destroy_dcomp_window_target_request;
-    struct validate_dcomp_window_target_request validate_dcomp_window_target_request;
     struct set_dcomp_channel_completion_event_request set_dcomp_channel_completion_event_request;
     struct get_dwm_desktop_id_request get_dwm_desktop_id_request;
 };
@@ -8866,7 +8866,8 @@ union generic_reply
     struct get_dcomp_shared_section_update_reply get_dcomp_shared_section_update_reply;
     struct release_dcomp_shared_section_reply release_dcomp_shared_section_reply;
     struct publish_dcomp_resource_reply publish_dcomp_resource_reply;
-    struct begin_dcomp_resource_duplicate_reply begin_dcomp_resource_duplicate_reply;
+    struct create_dcomp_shared_resource_reply create_dcomp_shared_resource_reply;
+    struct open_dcomp_shared_resource_reply open_dcomp_shared_resource_reply;
     struct get_dcomp_connection_batch_reply get_dcomp_connection_batch_reply;
     struct release_all_dcomp_resources_reply release_all_dcomp_resources_reply;
     struct get_deleted_dcomp_resources_reply get_deleted_dcomp_resources_reply;
@@ -8886,11 +8887,10 @@ union generic_reply
     struct present_dcomp_token_reply present_dcomp_token_reply;
     struct create_dcomp_window_target_reply create_dcomp_window_target_reply;
     struct destroy_dcomp_window_target_reply destroy_dcomp_window_target_reply;
-    struct validate_dcomp_window_target_reply validate_dcomp_window_target_reply;
     struct set_dcomp_channel_completion_event_reply set_dcomp_channel_completion_event_reply;
     struct get_dwm_desktop_id_reply get_dwm_desktop_id_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1039
+#define SERVER_PROTOCOL_VERSION 1040
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

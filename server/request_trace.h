@@ -4263,7 +4263,17 @@ static void dump_publish_dcomp_resource_reply( const struct publish_dcomp_resour
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
-static void dump_begin_dcomp_resource_duplicate_request( const struct begin_dcomp_resource_duplicate_request *req )
+static void dump_create_dcomp_shared_resource_request( const struct create_dcomp_shared_resource_request *req )
+{
+    fprintf( stderr, " type=%08x", req->type );
+}
+
+static void dump_create_dcomp_shared_resource_reply( const struct create_dcomp_shared_resource_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_open_dcomp_shared_resource_request( const struct open_dcomp_shared_resource_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", channel=%08x", req->channel );
@@ -4441,12 +4451,6 @@ static void dump_destroy_dcomp_window_target_request( const struct destroy_dcomp
 {
     fprintf( stderr, " window=%08x", req->window );
     fprintf( stderr, ", type=%08x", req->type );
-}
-
-static void dump_validate_dcomp_window_target_request( const struct validate_dcomp_window_target_request *req )
-{
-    fprintf( stderr, " handle=%04x", req->handle );
-    fprintf( stderr, ", resource_type=%08x", req->resource_type );
 }
 
 static void dump_set_dcomp_channel_completion_event_request( const struct set_dcomp_channel_completion_event_request *req )
@@ -4849,7 +4853,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_dcomp_shared_section_update_request,
     (dump_func)dump_release_dcomp_shared_section_request,
     (dump_func)dump_publish_dcomp_resource_request,
-    (dump_func)dump_begin_dcomp_resource_duplicate_request,
+    (dump_func)dump_create_dcomp_shared_resource_request,
+    (dump_func)dump_open_dcomp_shared_resource_request,
     (dump_func)dump_get_dcomp_connection_batch_request,
     (dump_func)dump_release_all_dcomp_resources_request,
     (dump_func)dump_get_deleted_dcomp_resources_request,
@@ -4869,7 +4874,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_present_dcomp_token_request,
     (dump_func)dump_create_dcomp_window_target_request,
     (dump_func)dump_destroy_dcomp_window_target_request,
-    (dump_func)dump_validate_dcomp_window_target_request,
     (dump_func)dump_set_dcomp_channel_completion_event_request,
     (dump_func)dump_get_dwm_desktop_id_request,
 };
@@ -5255,6 +5259,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_dcomp_shared_section_update_reply,
     NULL,
     (dump_func)dump_publish_dcomp_resource_reply,
+    (dump_func)dump_create_dcomp_shared_resource_reply,
     NULL,
     (dump_func)dump_get_dcomp_connection_batch_reply,
     (dump_func)dump_release_all_dcomp_resources_reply,
@@ -5274,7 +5279,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_token_reply,
     NULL,
     (dump_func)dump_create_dcomp_window_target_reply,
-    NULL,
     NULL,
     NULL,
     (dump_func)dump_get_dwm_desktop_id_reply,
@@ -5661,7 +5665,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "get_dcomp_shared_section_update",
     "release_dcomp_shared_section",
     "publish_dcomp_resource",
-    "begin_dcomp_resource_duplicate",
+    "create_dcomp_shared_resource",
+    "open_dcomp_shared_resource",
     "get_dcomp_connection_batch",
     "release_all_dcomp_resources",
     "get_deleted_dcomp_resources",
@@ -5681,7 +5686,6 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "present_dcomp_token",
     "create_dcomp_window_target",
     "destroy_dcomp_window_target",
-    "validate_dcomp_window_target",
     "set_dcomp_channel_completion_event",
     "get_dwm_desktop_id",
 };

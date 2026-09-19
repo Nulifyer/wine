@@ -125,6 +125,7 @@ struct dcomp_shared_resource
 {
     struct object obj;
     struct dcomp_channel *channel;
+    unsigned int session_id;
     unsigned int resource;
     unsigned int type;
 };
@@ -285,8 +286,9 @@ static void dcomp_shared_resource_dump( struct object *obj, int verbose )
     struct dcomp_shared_resource *resource = (struct dcomp_shared_resource *)obj;
 
     assert( obj->ops == &dcomp_shared_resource_ops );
-    fprintf( stderr, "DirectComposition shared resource channel=%#x resource=%#x type=%#x\n",
-             resource->channel->id, resource->resource, resource->type );
+    fprintf( stderr, "DirectComposition shared resource session=%u channel=%#x resource=%#x type=%#x\n",
+             resource->session_id, resource->channel ? resource->channel->id : 0,
+             resource->resource, resource->type );
 }
 
 static void dcomp_shared_resource_destroy( struct object *obj )
@@ -294,7 +296,7 @@ static void dcomp_shared_resource_destroy( struct object *obj )
     struct dcomp_shared_resource *resource = (struct dcomp_shared_resource *)obj;
 
     assert( obj->ops == &dcomp_shared_resource_ops );
-    release_object( resource->channel );
+    if (resource->channel) release_object( resource->channel );
 }
 
 static void dcomp_surface_destroy( struct object *obj )
@@ -1103,6 +1105,7 @@ DECL_HANDLER(publish_dcomp_resource)
     if (!attach_internal_dcomp_channel( channel )) goto done;
     if (!(resource = alloc_object( &dcomp_shared_resource_ops ))) goto done;
     resource->channel = (struct dcomp_channel *)grab_object( channel );
+    resource->session_id = channel->owner->session_id;
     resource->resource = req->resource;
     resource->type = req->type;
     reply->handle = alloc_handle_no_access_check( current->process, resource, 0, 0 );
@@ -1112,34 +1115,22 @@ done:
     release_object( channel );
 }
 
-DECL_HANDLER(begin_dcomp_resource_duplicate)
+DECL_HANDLER(create_dcomp_shared_resource)
 {
     struct dcomp_shared_resource *resource;
-    struct dcomp_channel *target;
-    unsigned int command[4];
 
-    if (!(resource = (struct dcomp_shared_resource *)get_handle_obj( current->process,
-            req->handle, 0, &dcomp_shared_resource_ops ))) return;
-    if (!(target = get_dcomp_channel( req->channel ))) goto done;
-    if (resource->type != req->type ||
-        resource->channel->owner->session_id != target->owner->session_id)
+    reply->handle = 0;
+    if (req->type != 0x13 && req->type != 0x82 && req->type != 0xb8)
     {
         set_error( STATUS_INVALID_PARAMETER );
-        goto done_target;
+        return;
     }
-    if (!resource->channel->connection && !attach_internal_dcomp_channel( resource->channel ))
-        goto done_target;
-    command[0] = sizeof(command);
-    command[1] = 0x26; /* MILCMD_CHANNEL_BEGINDUPLICATERESOURCE */
-    command[2] = resource->resource;
-    command[3] = target->id;
-    if (!queue_dcomp_record( resource->channel->connection, DCOMP_RECORD_BATCH,
-                             resource->channel->id, sizeof(command), 0, 0,
-                             command, sizeof(command) )) goto done_target;
-
-done_target:
-    release_object( target );
-done:
+    if (!(resource = alloc_object( &dcomp_shared_resource_ops ))) return;
+    resource->channel = NULL;
+    resource->session_id = current->process->session_id;
+    resource->resource = 0;
+    resource->type = req->type;
+    reply->handle = alloc_handle_no_access_check( current->process, resource, 0, 0 );
     release_object( resource );
 }
 
@@ -1538,18 +1529,48 @@ DECL_HANDLER(destroy_dcomp_window_target)
     detach_dcomp_window_target( target );
 }
 
-DECL_HANDLER(validate_dcomp_window_target)
+DECL_HANDLER(open_dcomp_shared_resource)
 {
-    struct dcomp_window_target *target;
+    struct dcomp_shared_resource *resource;
+    struct dcomp_window_target *window_target;
+    struct dcomp_channel *channel;
+    struct object *obj;
+    unsigned int command[4];
 
-    if (req->resource_type != 0xb8)
+    if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL ))) return;
+    if (!(channel = get_dcomp_channel( req->channel ))) goto done;
+
+    if (obj->ops == &dcomp_window_target_ops)
     {
-        set_error( STATUS_INVALID_PARAMETER );
-        return;
+        window_target = (struct dcomp_window_target *)obj;
+        if (req->type != 0xb8)
+            set_error( STATUS_INVALID_PARAMETER );
+        else if (!window_target->attached || window_target->owner != current->process)
+            set_error( STATUS_ACCESS_DENIED );
     }
-    if (!(target = (struct dcomp_window_target *)get_handle_obj( current->process, req->handle,
-                                                                 0, &dcomp_window_target_ops ))) return;
-    if (!target->attached || target->owner != current->process)
-        set_error( STATUS_ACCESS_DENIED );
-    release_object( target );
+    else if (obj->ops == &dcomp_shared_resource_ops)
+    {
+        resource = (struct dcomp_shared_resource *)obj;
+        if (resource->type != req->type ||
+            resource->session_id != channel->owner->session_id)
+            set_error( STATUS_INVALID_PARAMETER );
+        else if (resource->channel)
+        {
+            if (!resource->channel->connection && !attach_internal_dcomp_channel( resource->channel ))
+                goto done_channel;
+            command[0] = sizeof(command);
+            command[1] = 0x26; /* MILCMD_CHANNEL_BEGINDUPLICATERESOURCE */
+            command[2] = resource->resource;
+            command[3] = channel->id;
+            queue_dcomp_record( resource->channel->connection, DCOMP_RECORD_BATCH,
+                                resource->channel->id, sizeof(command), 0, 0,
+                                command, sizeof(command) );
+        }
+    }
+    else set_error( STATUS_OBJECT_TYPE_MISMATCH );
+
+done_channel:
+    release_object( channel );
+done:
+    release_object( obj );
 }

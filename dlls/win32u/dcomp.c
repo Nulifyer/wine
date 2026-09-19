@@ -1004,11 +1004,25 @@ static NTSTATUS publish_dcomp_resource( UINT channel, UINT resource, UINT type, 
     return status;
 }
 
-static NTSTATUS begin_dcomp_resource_duplicate( HANDLE handle, UINT channel, UINT type )
+static NTSTATUS create_dcomp_shared_resource( UINT type, HANDLE *handle )
 {
     NTSTATUS status;
 
-    SERVER_START_REQ( begin_dcomp_resource_duplicate )
+    SERVER_START_REQ( create_dcomp_shared_resource )
+    {
+        req->type = type;
+        status = wine_server_call( req );
+        if (!status) *handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS open_dcomp_shared_resource( HANDLE handle, UINT channel, UINT type )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( open_dcomp_shared_resource )
     {
         req->handle = wine_server_obj_handle( handle );
         req->channel = channel;
@@ -1086,20 +1100,6 @@ static BOOL dcomp_command_size( const BYTE *buffer, UINT remaining, UINT *size )
     return TRUE;
 }
 
-static NTSTATUS validate_dcomp_window_target( HANDLE handle, UINT resource_type )
-{
-    NTSTATUS status;
-
-    SERVER_START_REQ( validate_dcomp_window_target )
-    {
-        req->handle = wine_server_obj_handle( handle );
-        req->resource_type = resource_type;
-        status = wine_server_call( req );
-    }
-    SERVER_END_REQ;
-    return status;
-}
-
 static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *buffer,
                                         UINT length, BOOL allow_indirect, ULONG *processed )
 {
@@ -1148,14 +1148,9 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             memcpy( &mode, buffer + 20, sizeof(mode) );
             if (!id || !handle || !resource_type) return STATUS_INVALID_PARAMETER;
             if (find_any_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
-            if (resource_type == 0xb8 &&
-                (status = validate_dcomp_window_target( handle, resource_type ))) return status;
-            if (resource_type != 0xb8)
-            {
-                if (mode) return STATUS_NOT_SUPPORTED;
-                if ((status = begin_dcomp_resource_duplicate( handle, view->channel,
-                                                               resource_type ))) return status;
-            }
+            if (resource_type != 0xb8 && mode) return STATUS_NOT_SUPPORTED;
+            if ((status = open_dcomp_shared_resource( handle, view->channel,
+                                                       resource_type ))) return status;
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
             initialize_dcomp_resource_view( resource, id, resource_type );
             resource->visual_target = resource_type == 0xb8;
@@ -2164,6 +2159,15 @@ NTSTATUS WINAPI NtDCompositionCreateConnection( BOOL is_dwm, HANDLE event, HANDL
     }
     SERVER_END_REQ;
     return status;
+}
+
+NTSTATUS WINAPI NtDCompositionCreateSharedResourceHandle( UINT type, HANDLE *handle )
+{
+    TRACE( "type %#x, handle %p\n", type, handle );
+
+    if (type != 0x13 && type != 0x82 && type != 0xb8) return STATUS_INVALID_PARAMETER;
+    if (!handle) return STATUS_INVALID_PARAMETER;
+    return create_dcomp_shared_resource( type, handle );
 }
 
 NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection )

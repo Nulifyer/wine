@@ -4989,9 +4989,16 @@ struct alpc_message_info
     obj_handle_t handle;       /* shared-resource handle */
 @END
 
-/* Begin duplicating a published resource into another channel. */
-@REQ(begin_dcomp_resource_duplicate)
-    obj_handle_t handle;       /* published shared-resource handle */
+/* Create a typed session-scoped DirectComposition shared resource. */
+@REQ(create_dcomp_shared_resource)
+    unsigned int type;         /* supported MIL resource type */
+@REPLY
+    obj_handle_t handle;       /* shared-resource handle */
+@END
+
+/* Validate and open a shared resource into another channel. */
+@REQ(open_dcomp_shared_resource)
+    obj_handle_t handle;       /* shared-resource or HWND-target handle */
     unsigned int channel;      /* target channel ID */
     unsigned int type;         /* expected MIL resource type */
 @END
@@ -5136,12 +5143,6 @@ struct alpc_message_info
 @REQ(destroy_dcomp_window_target)
     user_handle_t window;         /* same-process target window */
     unsigned int type;            /* _HwndTargetType, zero through two */
-@END
-
-/* Validate an HWND target handle imported through a channel open command. */
-@REQ(validate_dcomp_window_target)
-    obj_handle_t handle;          /* shared system-visual handle */
-    unsigned int resource_type;   /* expected MIL resource type */
 @END
 
 /* Retain the event signaled when one channel batch is consumed. */
