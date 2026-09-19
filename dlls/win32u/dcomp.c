@@ -1030,6 +1030,7 @@ static NTSTATUS open_dcomp_shared_resource( HANDLE handle, UINT channel, UINT ty
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
+    TRACE( "handle %p, channel %#x, type %#x, status %#x\n", handle, channel, type, status );
     return status;
 }
 
@@ -1342,6 +1343,17 @@ static struct dcomp_connection_batch_view *find_dcomp_connection_batch_view( HAN
     LIST_FOR_EACH_ENTRY( view, &dcomp_connection_batch_views, struct dcomp_connection_batch_view, entry )
         if (view->connection == connection) return view;
     return NULL;
+}
+
+static void free_dcomp_connection_batches( struct dcomposition_connection_batch *batch )
+{
+    while (batch)
+    {
+        struct dcomposition_connection_batch *next = batch->next;
+
+        free( batch );
+        batch = next;
+    }
 }
 
 static NTSTATUS copy_dcomp_protocol_blocks( const void *list, BYTE **data,
@@ -2190,7 +2202,7 @@ NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection )
         pthread_mutex_unlock( &dcomp_channel_lock );
         if (view)
         {
-            free( view->batch );
+            free_dcomp_connection_batches( view->batch );
             free( view );
         }
     }
@@ -2886,9 +2898,10 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
                                                     struct dcomposition_connection_batch **batch )
 {
     struct dcomp_connection_batch_view *view;
-    struct dcomposition_connection_batch *record = NULL;
+    struct dcomposition_connection_batch *record, *records = NULL, **next = &records;
     BYTE *data;
     data_size_t size = 0;
+    UINT count = 0;
     NTSTATUS status;
     const data_size_t capacity = 0x10000;
 
@@ -2902,57 +2915,72 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
     view = find_dcomp_connection_batch_view( connection );
     if (view)
     {
-        free( view->batch );
+        free_dcomp_connection_batches( view->batch );
         view->batch = NULL;
     }
-    SERVER_START_REQ( get_dcomp_connection_batch )
+    do
     {
-        req->connection = wine_server_obj_handle( connection );
-        wine_server_set_reply( req, data, capacity );
-        status = wine_server_call( req );
-        if (!status && reply->type)
+        record = NULL;
+        SERVER_START_REQ( get_dcomp_connection_batch )
         {
-            size = wine_server_reply_size( reply );
-            if (reply->type == 7 && size != reply->value) status = STATUS_INVALID_PARAMETER;
-            else if ((record = calloc( 1, sizeof(*record) + size )))
+            req->connection = wine_server_obj_handle( connection );
+            wine_server_set_reply( req, data, capacity );
+            status = wine_server_call( req );
+            if (!status && reply->type)
             {
-                record->type = reply->type;
-                if (reply->type == 5)
+                size = wine_server_reply_size( reply );
+                if (reply->type == 7 && size != reply->value) status = STATUS_INVALID_PARAMETER;
+                else if ((record = calloc( 1, sizeof(*record) + size )))
                 {
-                    record->u.create.channel = reply->channel;
-                    record->u.create.flags = reply->value;
-                    record->u.create.connection = reply->connection;
-                    record->u.create.object = wine_server_get_ptr( reply->object );
+                    record->type = reply->type;
+                    if (reply->type == 5)
+                    {
+                        record->u.create.channel = reply->channel;
+                        record->u.create.flags = reply->value;
+                        record->u.create.connection = reply->connection;
+                        record->u.create.object = wine_server_get_ptr( reply->object );
+                    }
+                    else if (reply->type == 6) record->u.close.channel = reply->channel;
+                    else if (reply->type == 7)
+                    {
+                        record->u.batch.channel = reply->channel;
+                        record->u.batch.size = reply->value;
+                        record->u.batch.data = (BYTE *)(record + 1);
+                        memcpy( record->u.batch.data, data, size );
+                    }
+                    else
+                    {
+                        free( record );
+                        record = NULL;
+                        status = STATUS_INVALID_PARAMETER;
+                    }
                 }
-                else if (reply->type == 6) record->u.close.channel = reply->channel;
-                else if (reply->type == 7)
-                {
-                    record->u.batch.channel = reply->channel;
-                    record->u.batch.size = reply->value;
-                    record->u.batch.data = (BYTE *)(record + 1);
-                    memcpy( record->u.batch.data, data, size );
-                }
-                else
-                {
-                    free( record );
-                    record = NULL;
-                    status = STATUS_INVALID_PARAMETER;
-                }
+                else status = STATUS_NO_MEMORY;
             }
-            else status = STATUS_NO_MEMORY;
         }
-    }
-    SERVER_END_REQ;
+        SERVER_END_REQ;
+        if (record)
+        {
+            *next = record;
+            next = &record->next;
+            count++;
+        }
+    } while (!status && record && count < DCOMP_PROTOCOL_MAX_BLOCKS);
     free( data );
 
-    if (!status && record)
+    if (status)
+    {
+        free_dcomp_connection_batches( records );
+        records = NULL;
+    }
+    else if (records)
     {
         if (!view)
         {
             if (!(view = calloc( 1, sizeof(*view) )))
             {
-                free( record );
-                record = NULL;
+                free_dcomp_connection_batches( records );
+                records = NULL;
                 status = STATUS_NO_MEMORY;
             }
             else
@@ -2961,10 +2989,11 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
                 list_add_tail( &dcomp_connection_batch_views, &view->entry );
             }
         }
-        if (view) view->batch = record;
+        if (view) view->batch = records;
     }
     pthread_mutex_unlock( &dcomp_channel_lock );
-    if (!status) *batch = record;
+    TRACE( "returning status %#x with %u records\n", status, count );
+    if (!status) *batch = records;
     return status;
 }
 

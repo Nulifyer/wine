@@ -359,9 +359,12 @@ static struct dcomp_window_target *find_dcomp_window_target( struct process *own
     return NULL;
 }
 
-static void detach_dcomp_window_target( struct dcomp_window_target *target )
+static void detach_dcomp_window_target( struct dcomp_window_target *target, int notify )
 {
     assert( target->attached );
+    if (notify)
+        notify_dwm_window_target_destroyed( target->owner->session_id,
+                                            target->window, target->type );
     target->attached = 0;
     list_remove( &target->entry );
     release_object( target );
@@ -373,7 +376,17 @@ void cleanup_dcomp_window_targets( user_handle_t window )
 
     LIST_FOR_EACH_ENTRY_SAFE( target, next, &dcomp_window_targets,
                               struct dcomp_window_target, entry )
-        if (target->window == window) detach_dcomp_window_target( target );
+        if (target->window == window) detach_dcomp_window_target( target, 1 );
+}
+
+void replay_dcomp_window_targets( unsigned int session_id )
+{
+    struct dcomp_window_target *target;
+
+    LIST_FOR_EACH_ENTRY( target, &dcomp_window_targets, struct dcomp_window_target, entry )
+        if (target->attached && target->owner->session_id == session_id)
+            notify_dwm_window_target_created( session_id, target->window, target->type,
+                                              &target->obj );
 }
 
 static void dcomp_channel_destroy( struct object *obj )
@@ -1494,7 +1507,17 @@ DECL_HANDLER(create_dcomp_window_target)
     target->attached = 1;
     list_add_tail( &dcomp_window_targets, &target->entry );
     reply->handle = alloc_handle_no_access_check( current->process, target, 0, 0 );
-    if (!reply->handle) detach_dcomp_window_target( target );
+    if (!reply->handle ||
+        !notify_dwm_window_target_created( current->process->session_id, target->window,
+                                           target->type, &target->obj ))
+    {
+        if (reply->handle)
+        {
+            close_handle( current->process, reply->handle );
+            reply->handle = 0;
+        }
+        detach_dcomp_window_target( target, 0 );
+    }
     /* The allocation reference owns the HWND attachment. The handle owns its
      * own reference and can close before the target is detached. */
 }
@@ -1526,7 +1549,7 @@ DECL_HANDLER(destroy_dcomp_window_target)
         set_error( STATUS_NOT_FOUND );
         return;
     }
-    detach_dcomp_window_target( target );
+    detach_dcomp_window_target( target, 1 );
 }
 
 DECL_HANDLER(open_dcomp_shared_resource)
@@ -1545,7 +1568,10 @@ DECL_HANDLER(open_dcomp_shared_resource)
         window_target = (struct dcomp_window_target *)obj;
         if (req->type != 0xb8)
             set_error( STATUS_INVALID_PARAMETER );
-        else if (!window_target->attached || window_target->owner != current->process)
+        else if (!window_target->attached ||
+                 (window_target->owner != current->process &&
+                  (!current->process->native_dwm_owner ||
+                   window_target->owner->session_id != current->process->session_id)))
             set_error( STATUS_ACCESS_DENIED );
     }
     else if (obj->ops == &dcomp_shared_resource_ops)

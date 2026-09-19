@@ -925,7 +925,10 @@ static int handle_dwm_session_message( struct alpc_port *port, const struct alpc
         else if (send_message( port, req->flags, req->message_id, req->wow64,
                                req->send_attributes, req->message_context,
                                message, size, NULL ))
+        {
             port->kernel_session_phase = next_phase;
+            replay_dcomp_window_targets( port->kernel_session_id );
+        }
         return 1;
     }
 
@@ -1070,6 +1073,68 @@ void notify_dwm_desktop_destroyed( struct desktop *desktop )
 
     if ((port = find_dwm_session_port_for_winstation( desktop->winstation )))
         queue_dwm_desktop_message( port, 0x40000010, desktop );
+}
+
+static int queue_dwm_window_target_message( struct alpc_port *port, unsigned int command,
+                                            unsigned int window, unsigned int type,
+                                            obj_handle_t handle )
+{
+    struct alpc_message *message;
+    unsigned char data[24] = {0};
+    unsigned __int64 value;
+    data_size_t size;
+
+    memcpy( data, &command, sizeof(command) );
+    value = window;
+    memcpy( data + 4, &value, sizeof(value) );
+    memcpy( data + 12, &type, sizeof(type) );
+    if (command == 0x40000045)
+    {
+        value = handle;
+        memcpy( data + 16, &value, sizeof(value) );
+        size = sizeof(data);
+    }
+    else size = 16;
+
+    if (!(message = new_message( data, size, ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000,
+                                 0, port->thread ))) return 0;
+    message->info.pid = 0;
+    message->info.tid = 0;
+    message->info.id = 0;
+    message->info.callback_id = 0;
+    set_message_destination( message, port, port->initial_message_context );
+    list_add_tail( &port->messages, &message->entry );
+    notify_port( port );
+    dispatch_receives( port );
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server dwm-window-target command=%08x window=%08x "
+                 "type=%u handle=%04x\n", command, window, type, handle );
+    return 1;
+}
+
+int notify_dwm_window_target_created( unsigned int session_id, unsigned int window,
+                                      unsigned int type, struct object *target )
+{
+    struct alpc_port *port = find_dwm_session_port( session_id );
+    obj_handle_t handle;
+
+    if (!port || port->kernel_session_phase != DWM_SESSION_PORT_READY) return 1;
+    if (!(handle = alloc_handle_no_access_check( port->thread->process, target, 0, 0 ))) return 0;
+    if (!queue_dwm_window_target_message( port, 0x40000045, window, type, handle ))
+    {
+        close_handle( port->thread->process, handle );
+        return 0;
+    }
+    return 1;
+}
+
+void notify_dwm_window_target_destroyed( unsigned int session_id, unsigned int window,
+                                         unsigned int type )
+{
+    struct alpc_port *port = find_dwm_session_port( session_id );
+
+    if (port && port->kernel_session_phase == DWM_SESSION_PORT_READY)
+        queue_dwm_window_target_message( port, 0x40000046, window, type, 0 );
 }
 
 static void unlink_pending( struct alpc_port *client )

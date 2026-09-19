@@ -61,7 +61,7 @@ struct coremsg_message
 struct dwm_session_message
 {
     ALPC_PORT_MESSAGE header;
-    DWORD data[4];
+    DWORD data[6];
 };
 
 struct coremsg_registrar_context
@@ -1352,6 +1352,7 @@ static void test_shared_manipulation_transform(void)
         status, record, record ? record->type : 0 );
     if (record) ok( record->u.create.channel == owner_channel,
                     "got owner create channel %#x\n", record->u.create.channel );
+    if (record) record = record->next;
 
     expected[0] = 16; expected[1] = 0x28; expected[2] = 1; expected[3] = 0x6a;
     memcpy( expected_owner, expected, 16 );
@@ -1360,8 +1361,6 @@ static void test_shared_manipulation_transform(void)
     memcpy( expected_owner + 16, expected, 60 );
     expected[0] = 16; expected[1] = 0xf5; expected[2] = 1; expected[3] = 0x12345678;
     memcpy( expected_owner + 76, expected, 16 );
-    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
-    ok( status == STATUS_SUCCESS, "got owner payload status %#lx\n", status );
     check_dcomp_batch_payload( record, owner_channel, (const UINT *)expected_owner,
                                sizeof(expected_owner), "shared-transform owner" );
 
@@ -2273,6 +2272,8 @@ static void test_dwm_session_message_delivery(void)
     BOOL saw_input = FALSE, saw_default = FALSE, saw_logon = FALSE, saw_startup_begin = FALSE;
     HDESK lifecycle_desktop = NULL;
     HDESK logon_desktop = NULL;
+    HWND target_window = NULL;
+    HANDLE target = NULL, dwm_target = NULL;
     HANDLE port = NULL;
     BOOL registered;
     NTSTATUS status;
@@ -2441,6 +2442,15 @@ static void test_dwm_session_message_delivery(void)
             desktop_id, lifecycle_id );
     }
 
+    target_window = CreateWindowExA( 0, "static", "DWM target replay", WS_POPUP,
+                                     0, 0, 32, 32, NULL, NULL, NULL, NULL );
+    ok( !!target_window, "target window creation failed, error %lu\n", GetLastError() );
+    if (target_window)
+    {
+        registered = NtUserCreateDCompositionHwndTarget( target_window, 0, &target );
+        ok( registered, "target creation failed, status %#lx\n", RtlGetLastNtStatus() );
+    }
+
     memset( &message, 0, sizeof(message) );
     message.header.DataLength = 8;
     message.header.TotalLength = sizeof(message.header) + message.header.DataLength;
@@ -2457,7 +2467,63 @@ static void test_dwm_session_message_delivery(void)
     ok( !status && received.data[0] == 0x40000026 && !received.data[1],
         "got ready payload %#lx, %#lx\n", received.data[0], received.data[1] );
 
+    if (target)
+    {
+        HWND message_window = NULL;
+        UINT message_type = 0xcccccccc;
+
+        memset( &received, 0, sizeof(received) );
+        size = sizeof(received);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                            &size, NULL, &timeout );
+        ok( !status, "target replay receive returned %#lx\n", status );
+        ok( !status && received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+            "got target replay type %#x\n", received.header.Type );
+        ok( !status && received.header.DataLength == 24,
+            "got target replay length %#x\n", received.header.DataLength );
+        ok( !status && received.data[0] == 0x40000045,
+            "got target replay command %#lx\n", received.data[0] );
+        if (!status)
+        {
+            memcpy( &message_window, received.data + 1, sizeof(message_window) );
+            memcpy( &message_type, received.data + 3, sizeof(message_type) );
+            memcpy( &dwm_target, received.data + 4, sizeof(dwm_target) );
+        }
+        ok( message_window == target_window, "got target replay window %p, expected %p\n",
+            message_window, target_window );
+        ok( message_type == 0, "got target replay type %u\n", message_type );
+        ok( dwm_target && dwm_target != target, "got DWM target handle %p, client handle %p\n",
+            dwm_target, target );
+        if (dwm_target) CloseHandle( dwm_target );
+        dwm_target = NULL;
+
+        registered = NtUserDestroyDCompositionHwndTarget( target_window, 0 );
+        ok( registered, "target destruction failed, status %#lx\n", RtlGetLastNtStatus() );
+        memset( &received, 0, sizeof(received) );
+        size = sizeof(received);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                            &size, NULL, &timeout );
+        ok( !status, "target destroy receive returned %#lx\n", status );
+        ok( !status && received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+            "got target destroy type %#x\n", received.header.Type );
+        ok( !status && received.header.DataLength == 16,
+            "got target destroy length %#x\n", received.header.DataLength );
+        ok( !status && received.data[0] == 0x40000046,
+            "got target destroy command %#lx\n", received.data[0] );
+        if (!status)
+        {
+            memcpy( &message_window, received.data + 1, sizeof(message_window) );
+            memcpy( &message_type, received.data + 3, sizeof(message_type) );
+        }
+        ok( message_window == target_window, "got target destroy window %p, expected %p\n",
+            message_window, target_window );
+        ok( message_type == 0, "got target destroy type %u\n", message_type );
+    }
+
 done:
+    if (dwm_target) CloseHandle( dwm_target );
+    if (target) CloseHandle( target );
+    if (target_window) DestroyWindow( target_window );
     if (lifecycle_desktop) CloseDesktop( lifecycle_desktop );
     if (logon_desktop) CloseDesktop( logon_desktop );
     if (port)
