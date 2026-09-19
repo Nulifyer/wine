@@ -108,7 +108,7 @@
 2594 stub -noname SetInteractiveCtrlRotationAngle  # NtUserSetInteractiveCtrlRotationAngle
 2595 stub -noname SetProcessInteractionFlags  # NtUserSetProcessInteractionFlags
 
-2597 stub -noname CitSetInfo  # NtUserCitSetInfo
+2597 stdcall -noname CitSetInfo(long ptr) NtUserCitSetInfo
 2598 stub @
 2599 stub @
 2600 stub -noname ForceEnableNumpadTranslation  # NtUserForceEnableNumpadTranslation

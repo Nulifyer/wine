@@ -845,7 +845,7 @@
     SYSCALL_ENTRY( 0x1349, NtUserCheckProcessSession, 0 ) \
     SYSCALL_ENTRY( 0x134a, NtUserCheckWindowThreadDesktop, 0 ) \
     SYSCALL_ENTRY( 0x134b, NtUserChildWindowFromPointEx, 16 ) \
-    SYSCALL_ENTRY( 0x134c, NtUserCitSetInfo, 0 ) \
+    SYSCALL_ENTRY( 0x134c, NtUserCitSetInfo, 8 ) \
     SYSCALL_ENTRY( 0x134d, NtUserClearForeground, 0 ) \
     SYSCALL_ENTRY( 0x134e, NtUserClearWakeMask, 0 ) \
     SYSCALL_ENTRY( 0x134f, NtUserClearWindowState, 0 ) \
@@ -2387,7 +2387,7 @@
     SYSCALL_ENTRY( 0x1349, NtUserCheckProcessSession, 0 ) \
     SYSCALL_ENTRY( 0x134a, NtUserCheckWindowThreadDesktop, 0 ) \
     SYSCALL_ENTRY( 0x134b, NtUserChildWindowFromPointEx, 32 ) \
-    SYSCALL_ENTRY( 0x134c, NtUserCitSetInfo, 0 ) \
+    SYSCALL_ENTRY( 0x134c, NtUserCitSetInfo, 16 ) \
     SYSCALL_ENTRY( 0x134d, NtUserClearForeground, 0 ) \
     SYSCALL_ENTRY( 0x134e, NtUserClearWakeMask, 0 ) \
     SYSCALL_ENTRY( 0x134f, NtUserClearWindowState, 0 ) \
@@ -3651,7 +3651,6 @@
     SYSCALL_STUB( NtUserCheckProcessForClipboardAccess ) \
     SYSCALL_STUB( NtUserCheckProcessSession ) \
     SYSCALL_STUB( NtUserCheckWindowThreadDesktop ) \
-    SYSCALL_STUB( NtUserCitSetInfo ) \
     SYSCALL_STUB( NtUserClearForeground ) \
     SYSCALL_STUB( NtUserClearWakeMask ) \
     SYSCALL_STUB( NtUserClearWindowState ) \

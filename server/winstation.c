@@ -38,6 +38,7 @@
 #include "user.h"
 #include "file.h"
 #include "security.h"
+#include "alpc.h"
 
 #define DESKTOP_ALL_ACCESS 0x01ff
 
@@ -458,6 +459,8 @@ static bool desktop_init( struct object *obj, const void *init_data )
     }
     SHARED_WRITE_END;
 
+    if (winstation->composited) notify_dwm_desktop_created( desktop );
+
     return true;
 }
 
@@ -510,6 +513,7 @@ static void desktop_destroy( struct object *obj )
     struct desktop *desktop = (struct desktop *)obj;
     struct winstation *winstation = desktop->winstation;
 
+    if (winstation->composited) notify_dwm_desktop_destroyed( desktop );
     list_remove( &desktop->entry );
 
     if (desktop == winstation->input_desktop)

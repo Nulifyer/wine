@@ -111,6 +111,28 @@ static void test_NtUserRemoteConnect(void)
     ok( status == STATUS_SUCCESS, "NtUserRemoteConnect returned %#lx\n", status );
 }
 
+static void test_NtUserCitSetInfo(void)
+{
+    NTSTATUS status;
+    UINT info_class;
+
+    if (!winetest_platform_is_wine)
+    {
+        win_skip( "CIT telemetry sink behavior is Wine-specific\n" );
+        return;
+    }
+
+    for (info_class = 1; info_class <= 5; ++info_class)
+    {
+        status = NtUserCitSetInfo( info_class, NULL );
+        ok( status == STATUS_SUCCESS, "class %u returned %#lx\n", info_class, status );
+    }
+    status = NtUserCitSetInfo( 0, NULL );
+    ok( status == STATUS_INVALID_INFO_CLASS, "class 0 returned %#lx\n", status );
+    status = NtUserCitSetInfo( 6, NULL );
+    ok( status == STATUS_INVALID_INFO_CLASS, "class 6 returned %#lx\n", status );
+}
+
 static void test_NtUserEnumDisplayDevices(void)
 {
     NTSTATUS ret;
@@ -3263,6 +3285,12 @@ START_TEST(win32u)
         return;
     }
 
+    if (argc > 2 && !strcmp( argv[2], "NtUserCitSetInfo" ))
+    {
+        test_NtUserCitSetInfo();
+        return;
+    }
+
     if (argc > 3 && !strcmp( argv[2], "ipcmsg" ))
     {
         test_inter_process_child( LongToHandle( strtol( argv[3], NULL, 16 )));
@@ -3317,6 +3345,7 @@ START_TEST(win32u)
     test_NtUserCloseWindowStation();
     test_NtUserLayoutCompleted( argv );
     test_NtUserRemoteConnect();
+    test_NtUserCitSetInfo();
     test_rootless_user_object_names();
     test_NtUserDisplayConfigGetDeviceInfo();
     test_NtUserQueryWindow();

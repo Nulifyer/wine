@@ -915,8 +915,16 @@ static int handle_dwm_session_message( struct alpc_port *port, const struct alpc
             set_error( STATUS_INVALID_DEVICE_STATE );
             return 1;
         }
-        if (send_message( port, req->flags, req->message_id, req->wow64, req->send_attributes,
-                          req->message_context, message, size, NULL ))
+        /* StartupBegin enables monitor targets and expects the desktop root
+         * visuals published by win32k startup to exist already.  Hold the
+         * initializing record until start_dwm_kernel has queued the initial
+         * kernel-only desktop-create set; the ready record can follow the
+         * ordinary port path. */
+        if (message[0] == 0x40000025)
+            port->kernel_session_phase = next_phase;
+        else if (send_message( port, req->flags, req->message_id, req->wow64,
+                               req->send_attributes, req->message_context,
+                               message, size, NULL ))
             port->kernel_session_phase = next_phase;
         return 1;
     }
@@ -1000,6 +1008,68 @@ static void set_message_destination( struct alpc_message *message, struct alpc_p
     message->info.sequence = ++port->receive_sequence;
     message->info.attributes_valid |= ALPC_MESSAGE_CONTEXT_ATTRIBUTE;
     port->initial_message_context = 0;
+}
+
+/* Win32k publishes desktop composition lifecycle changes as kernel-only
+ * datagrams on the registered DwmApiPort.  The genuine redirection layer
+ * forwards these records to uDWM, which keys its root visuals by the same
+ * stable desktop identity exposed through GetDesktopID(). */
+static void queue_dwm_desktop_message( struct alpc_port *port, unsigned int command,
+                                       struct desktop *desktop )
+{
+    struct alpc_message *message;
+    unsigned __int64 id;
+    unsigned int data[3];
+
+    if (!desktop->shared) return;
+    id = get_shared_object_locator( desktop->shared ).id;
+    data[0] = command;
+    memcpy( data + 1, &id, sizeof(id) );
+    /* LpcRequestPort supplies the asynchronous datagram type while win32k's
+     * packet sets the private kernel-only bit.  DwmRedir requires both: its
+     * router dispatches low-byte type 3 before ProcessCommand examines bit
+     * 0x8000 to select the kernel-only handler. */
+    if (!(message = new_message( data, sizeof(data),
+                                 ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000, 0, port->thread ))) return;
+
+    /* Native kernel messages have no client identity or request/reply ID. */
+    message->info.pid = 0;
+    message->info.tid = 0;
+    message->info.id = 0;
+    message->info.callback_id = 0;
+    set_message_destination( message, port, port->initial_message_context );
+    list_add_tail( &port->messages, &message->entry );
+    notify_port( port );
+    dispatch_receives( port );
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server dwm-desktop-message command=%08x id=%016llx phase=%u\n",
+                 command, (unsigned long long)id, port->kernel_session_phase );
+}
+
+static struct alpc_port *find_dwm_session_port_for_winstation( struct winstation *winstation )
+{
+    struct alpc_port *port;
+
+    LIST_FOR_EACH_ENTRY( port, &dwm_session_ports, struct alpc_port, kernel_session_entry )
+        if (port->composited_winstation == winstation &&
+            port->kernel_session_phase >= DWM_SESSION_PORT_STARTED) return port;
+    return NULL;
+}
+
+void notify_dwm_desktop_created( struct desktop *desktop )
+{
+    struct alpc_port *port;
+
+    if ((port = find_dwm_session_port_for_winstation( desktop->winstation )))
+        queue_dwm_desktop_message( port, 0x4000000e, desktop );
+}
+
+void notify_dwm_desktop_destroyed( struct desktop *desktop )
+{
+    struct alpc_port *port;
+
+    if ((port = find_dwm_session_port_for_winstation( desktop->winstation )))
+        queue_dwm_desktop_message( port, 0x40000010, desktop );
 }
 
 static void unlink_pending( struct alpc_port *client )
@@ -2382,7 +2452,15 @@ DECL_HANDLER(query_dwm_composition_id)
 DECL_HANDLER(start_dwm_kernel)
 {
     struct alpc_port *port = find_dwm_session_port( current->process->session_id );
+    struct desktop *desktop;
     struct winstation *winstation;
+    unsigned int startup_begin[2] = {0x40000025, 0};
+    int initializing;
+
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server dwm-kernel-start winpid=%04x session=%u phase=%u\n",
+                 current->process->id, current->process->session_id,
+                 port ? port->kernel_session_phase : ~0u );
 
     if (!port || port->thread->process != current->process)
     {
@@ -2394,6 +2472,7 @@ DECL_HANDLER(start_dwm_kernel)
         set_error( STATUS_INVALID_DEVICE_STATE );
         return;
     }
+    initializing = port->kernel_session_phase == DWM_SESSION_PORT_INITIALIZING;
     if (!(winstation = get_process_winstation( current->process, 0 ))) return;
     if (port->composited_winstation && port->composited_winstation != winstation)
     {
@@ -2403,14 +2482,23 @@ DECL_HANDLER(start_dwm_kernel)
     }
     if (!port->composited_winstation) port->composited_winstation = winstation;
     else release_object( winstation );
-    set_winstation_composited( port->composited_winstation, 1 );
-    if (port->kernel_session_phase == DWM_SESSION_PORT_INITIALIZING)
+    if (initializing)
         port->kernel_session_phase = DWM_SESSION_PORT_STARTED;
+    if (!port->composited_winstation->composited)
+    {
+        LIST_FOR_EACH_ENTRY( desktop, &port->composited_winstation->desktops, struct desktop, entry )
+            queue_dwm_desktop_message( port, 0x4000000e, desktop );
+        set_winstation_composited( port->composited_winstation, 1 );
+    }
+    if (initializing)
+        send_message( port, 0x10000, 0, 0, 0, 0,
+                      startup_begin, sizeof(startup_begin), NULL );
 }
 
 DECL_HANDLER(stop_dwm_kernel)
 {
     struct alpc_port *port = find_dwm_session_port( current->process->session_id );
+    struct desktop *desktop;
 
     if (!port || port->thread->process != current->process)
     {
@@ -2418,7 +2506,11 @@ DECL_HANDLER(stop_dwm_kernel)
         return;
     }
     if (port->composited_winstation)
+    {
+        LIST_FOR_EACH_ENTRY( desktop, &port->composited_winstation->desktops, struct desktop, entry )
+            queue_dwm_desktop_message( port, 0x40000010, desktop );
         set_winstation_composited( port->composited_winstation, 0 );
+    }
 }
 
 DECL_HANDLER(open_coremsg_kernel_connection)

@@ -852,8 +852,21 @@ static void test_connection_queue(void)
     state = 0xcc;
     status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL,
                                            &protocol_list.head, NULL, 0 );
-    ok( status == STATUS_NOT_SUPPORTED, "got unsupported protocol status %#lx\n", status );
-    ok( state == 0xcc, "unsupported protocol changed state to %#x\n", state );
+    ok( status == STATUS_SUCCESS, "got alternate-type protocol status %#lx\n", status );
+    ok( !state, "got alternate-type protocol state %#x\n", state );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got alternate-type batch record status %#lx\n", status );
+    ok( !!record, "alternate-type batch record is null\n" );
+    if (record)
+    {
+        ok( record->type == 7, "got alternate-type record type %u\n", record->type );
+        ok( record->u.batch.size == sizeof(protocol_list.block.data),
+            "got alternate-type batch size %u\n", record->u.batch.size );
+        ok( record->u.batch.size != sizeof(protocol_list.block.data) ||
+            !memcmp( record->u.batch.data, protocol_list.block.data,
+                     sizeof(protocol_list.block.data) ),
+            "alternate block type changed the protocol payload\n" );
+    }
     protocol_list.block.type = 0x200;
 
     ((UINT *)buffer)[0] = 4;
@@ -2256,7 +2269,9 @@ static void test_dwm_session_message_delivery(void)
     LARGE_INTEGER timeout = {0};
     BOOLEAN previous, ignored;
     DWORD session_id;
-    UINT64 input_id, repeated_id, default_id, logon_id;
+    UINT64 input_id, repeated_id, default_id, logon_id = 0, desktop_id, lifecycle_id = 0;
+    BOOL saw_input = FALSE, saw_default = FALSE, saw_logon = FALSE, saw_startup_begin = FALSE;
+    HDESK lifecycle_desktop = NULL;
     HDESK logon_desktop = NULL;
     HANDLE port = NULL;
     BOOL registered;
@@ -2348,17 +2363,83 @@ static void test_dwm_session_message_delivery(void)
     status = NtAlpcSendWaitReceivePort( port, 0x10000, &message.header,
                                         NULL, NULL, NULL, NULL, NULL );
     ok( !status, "initializing send returned %#lx\n", status );
+    memset( &received, 0, sizeof(received) );
     size = sizeof(received);
     status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
                                         &size, NULL, &timeout );
-    ok( !status, "initializing receive returned %#lx\n", status );
-    ok( !status && received.header.DataLength == 8, "got data length %#x\n", received.header.DataLength );
-    ok( !status && received.data[0] == 0x40000025 && !received.data[1],
-        "got initializing payload %#lx, %#lx\n", received.data[0], received.data[1] );
+    ok( status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL,
+        "initializing record was delivered before desktop replay, status %#lx\n", status );
 
     SetLastError( 0xdeadbeef );
     ok( NtUserDwmKernelStartup(), "NtUserDwmKernelStartup failed, error %lu\n", GetLastError() );
     ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+
+    for (;;)
+    {
+        memset( &received, 0, sizeof(received) );
+        size = sizeof(received);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                            &size, NULL, &timeout );
+        /* Wine's zero-time receive currently reports STATUS_UNSUCCESSFUL for
+         * an empty registered kernel port; either result ends the drain. */
+        if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+        ok( !status, "desktop replay receive returned %#lx\n", status );
+        if (status) break;
+        if (received.header.Type != (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000))
+        {
+            ok( received.header.Type == ALPC_MESSAGE_TYPE_DATAGRAM,
+                "got initializing message type %#x\n", received.header.Type );
+            ok( received.header.DataLength == 8,
+                "got initializing data length %#x\n", received.header.DataLength );
+            ok( received.data[0] == 0x40000025 && !received.data[1],
+                "got initializing payload %#lx, %#lx\n", received.data[0], received.data[1] );
+            saw_startup_begin = received.data[0] == 0x40000025 && !received.data[1];
+            break;
+        }
+        ok( received.header.DataLength == 12, "got desktop data length %#x\n", received.header.DataLength );
+        ok( received.data[0] == 0x4000000e, "got desktop command %#lx\n", received.data[0] );
+        memcpy( &desktop_id, received.data + 1, sizeof(desktop_id) );
+        if (desktop_id == input_id) saw_input = TRUE;
+        if (desktop_id == default_id) saw_default = TRUE;
+        if (desktop_id == logon_id) saw_logon = TRUE;
+    }
+    ok( saw_input, "DWM startup did not replay input desktop %#I64x\n", input_id );
+    ok( saw_default, "DWM startup did not replay default desktop %#I64x\n", default_id );
+    ok( saw_logon, "DWM startup did not replay logon desktop %#I64x\n", logon_id );
+    ok( saw_startup_begin, "DWM startup did not release the initializing record after desktop replay\n" );
+
+    lifecycle_desktop = CreateDesktopW( L"LinuxNTDwmLifecycle", NULL, NULL, 0,
+                                        DESKTOP_ALL_ACCESS, NULL );
+    ok( !!lifecycle_desktop, "lifecycle CreateDesktopW failed, error %lu\n", GetLastError() );
+    if (lifecycle_desktop)
+    {
+        memset( &received, 0, sizeof(received) );
+        size = sizeof(received);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                            &size, NULL, &timeout );
+        ok( !status, "desktop create receive returned %#lx\n", status );
+        ok( !status && received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+            "got desktop create type %#x\n", received.header.Type );
+        ok( !status && received.header.DataLength == 12, "got desktop create length %#x\n", received.header.DataLength );
+        ok( !status && received.data[0] == 0x4000000e, "got desktop create command %#lx\n", received.data[0] );
+        if (!status) memcpy( &lifecycle_id, received.data + 1, sizeof(lifecycle_id) );
+        ok( lifecycle_id != 0, "desktop create ID is zero\n" );
+
+        CloseDesktop( lifecycle_desktop );
+        lifecycle_desktop = NULL;
+        memset( &received, 0, sizeof(received) );
+        size = sizeof(received);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                            &size, NULL, &timeout );
+        ok( !status, "desktop free receive returned %#lx\n", status );
+        ok( !status && received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+            "got desktop free type %#x\n", received.header.Type );
+        ok( !status && received.header.DataLength == 12, "got desktop free length %#x\n", received.header.DataLength );
+        ok( !status && received.data[0] == 0x40000010, "got desktop free command %#lx\n", received.data[0] );
+        if (!status) memcpy( &desktop_id, received.data + 1, sizeof(desktop_id) );
+        ok( !status && desktop_id == lifecycle_id, "desktop free ID %#I64x, expected %#I64x\n",
+            desktop_id, lifecycle_id );
+    }
 
     memset( &message, 0, sizeof(message) );
     message.header.DataLength = 8;
@@ -2377,6 +2458,7 @@ static void test_dwm_session_message_delivery(void)
         "got ready payload %#lx, %#lx\n", received.data[0], received.data[1] );
 
 done:
+    if (lifecycle_desktop) CloseDesktop( lifecycle_desktop );
     if (logon_desktop) CloseDesktop( logon_desktop );
     if (port)
     {

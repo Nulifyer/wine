@@ -13,8 +13,11 @@
 #define __WINE_SERVER_ALPC_H
 
 struct process;
+struct desktop;
 
 extern int set_coremsg_input_port_ready( struct process *process, int enabled );
 extern void cleanup_process_coremsg_connections( struct process *process );
+extern void notify_dwm_desktop_created( struct desktop *desktop );
+extern void notify_dwm_desktop_destroyed( struct desktop *desktop );
 
 #endif /* __WINE_SERVER_ALPC_H */

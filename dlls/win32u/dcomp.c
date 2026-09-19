@@ -1385,11 +1385,10 @@ static NTSTATUS copy_dcomp_protocol_blocks( const void *list, BYTE **data,
         }
         __ENDTRY
         if (status) break;
-        if (header.type != 0x200)
-        {
-            status = STATUS_NOT_SUPPORTED;
-            break;
-        }
+        /* Native win32k validates and copies every block payload but clears
+         * the caller's block type before passing the private list to the
+         * channel parser.  The type is producer metadata, not a protocol
+         * discriminator at this boundary. */
         if (header.size < 8 || (header.size & 3) ||
             header.size > DCOMP_PROTOCOL_MAX_SIZE - size)
         {

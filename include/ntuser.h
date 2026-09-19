@@ -968,6 +968,7 @@ W32KAPI DWORD   WINAPI NtUserDrawMenuBarTemp( HWND hwnd, HDC hdc, RECT *rect, HM
 W32KAPI NTSTATUS WINAPI NtUserDwmLockScreenUpdates( BOOL lock );
 W32KAPI BOOL     WINAPI NtUserDwmKernelStartup(void);
 W32KAPI BOOL     WINAPI NtUserDwmKernelShutdown(void);
+W32KAPI NTSTATUS WINAPI NtUserCitSetInfo( UINT flags, const void *info );
 W32KAPI BOOL    WINAPI NtUserEmptyClipboard(void);
 W32KAPI BOOL    WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointer( BOOL );

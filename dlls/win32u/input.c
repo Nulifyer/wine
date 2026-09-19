@@ -38,6 +38,24 @@
 #include "kbd.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
+
+/***********************************************************************
+ *           NtUserCitSetInfo (win32u.@)
+ *
+ * Windows CIT consumes interaction, composition, audio, and engagement
+ * reports for energy attribution.  There is no corresponding Windows
+ * telemetry consumer in Wine; accept the complete known report-class
+ * family as a sink without inventing user-input or scheduler state.
+ */
+NTSTATUS WINAPI NtUserCitSetInfo( UINT flags, const void *info )
+{
+    UINT info_class = flags & 0xffff;
+
+    TRACE( "flags %#x, info %p\n", flags, info );
+
+    if (info_class < 1 || info_class > 5) return STATUS_INVALID_INFO_CLASS;
+    return STATUS_SUCCESS;
+}
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
 
 #define HIMETRIC_PER_INCH 2540

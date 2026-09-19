@@ -843,7 +843,7 @@
 @ stub -syscall NtUserCheckProcessSession
 @ stub -syscall NtUserCheckWindowThreadDesktop
 @ stdcall -syscall NtUserChildWindowFromPointEx(long long long long)
-@ stub -syscall NtUserCitSetInfo
+@ stdcall -syscall NtUserCitSetInfo(long ptr)
 @ stub -syscall NtUserClearForeground
 @ stub -syscall NtUserClearWakeMask
 @ stub -syscall NtUserClearWindowState
