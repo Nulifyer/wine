@@ -3,7 +3,7 @@
 1002 stub @
 1003 stub @
 1004 stub @
-1005 stub @
+1005 stdcall DwmQueryCompositionId()
 1006 stub @
 1007 stub @
 1008 stub @

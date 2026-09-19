@@ -8,6 +8,7 @@ VER_FILEDESCRIPTION_STR = "Wine graphics library"
 
 SOURCES = \
 	dc.c \
+	dwm.c \
 	emfdc.c \
 	enhmetafile.c \
 	gdi32.rc \

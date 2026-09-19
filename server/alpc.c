@@ -125,6 +125,8 @@ struct alpc_port
     unsigned int            kernel_session_id;
     enum dwm_session_port_phase kernel_session_phase;
     struct winstation       *composited_winstation; /* strong while this DWM owns composition */
+    struct event            *composed_event;        /* session DwmComposedEvent generation */
+    unsigned int            composition_id;
     struct coremsg_client_port *coremsg_client;      /* owned virtual-kernel client record */
     struct token            *client_token;          /* captured connecting security */
     int                      impersonation_level, tracking_mode;
@@ -300,6 +302,8 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     port->kernel_session_id = 0;
     port->kernel_session_phase = DWM_SESSION_PORT_REGISTERED;
     port->composited_winstation = NULL;
+    port->composed_event = NULL;
+    port->composition_id = 0;
     port->coremsg_client = NULL;
     port->thread      = (struct thread *)grab_object( current );
     list_init( &port->messages );
@@ -372,6 +376,7 @@ static void alpc_port_destroy( struct object *obj )
         set_winstation_composited( port->composited_winstation, 0 );
         release_object( port->composited_winstation );
     }
+    if (port->composed_event) release_object( port->composed_event );
     assert( !port->completion_lease );
     if (port->completion) release_object( port->completion );
 
@@ -630,6 +635,30 @@ static struct alpc_port *find_dwm_session_port( unsigned int session_id )
     LIST_FOR_EACH_ENTRY( port, &dwm_session_ports, struct alpc_port, kernel_session_entry )
         if (port->kernel_session_id == session_id) return port;
     return NULL;
+}
+
+static int create_dwm_composed_event( struct alpc_port *port )
+{
+    static unsigned int next_composition_id = 1;
+    struct object *root;
+    struct unicode_str name;
+    WCHAR *nameW;
+    char nameA[40];
+
+    if (!(root = get_session_base_named_objects( port->kernel_session_id ))) return 0;
+    for (;;)
+    {
+        port->composition_id = next_composition_id++;
+        if (!next_composition_id) next_composition_id = 1;
+        snprintf( nameA, sizeof(nameA), "DwmComposedEvent_%x", port->composition_id );
+        nameW = ascii_to_unicode_str( nameA, &name );
+        port->composed_event = create_event( root, name, OBJ_CASE_INSENSITIVE, 1, 0, NULL );
+        free( nameW );
+        if (port->composed_event || get_error() != STATUS_OBJECT_NAME_COLLISION) break;
+    }
+    release_object( root );
+    if (!port->composed_event) port->composition_id = 0;
+    return !!port->composed_event;
 }
 
 static int is_coremsg_registrar_connection( struct alpc_port *port )
@@ -2209,6 +2238,13 @@ DECL_HANDLER(register_dwm_session_port)
             port->kernel_port = ALPC_KERNEL_DWM_SESSION_PORT;
             port->kernel_session_id = session_id;
             port->kernel_session_phase = DWM_SESSION_PORT_REGISTERED;
+            if (!create_dwm_composed_event( port ))
+            {
+                port->kernel_port = ALPC_KERNEL_PORT_NONE;
+                port->kernel_session_id = 0;
+                release_object( port );
+                return;
+            }
             list_add_tail( &dwm_session_ports, &port->kernel_session_entry );
         }
         current->process->native_dwm_owner = 1;
@@ -2217,6 +2253,13 @@ DECL_HANDLER(register_dwm_session_port)
                      current->process->id, session_id );
     }
     release_object( port );
+}
+
+DECL_HANDLER(query_dwm_composition_id)
+{
+    struct alpc_port *port = find_dwm_session_port( current->process->session_id );
+
+    reply->id = port ? port->composition_id : 0;
 }
 
 DECL_HANDLER(start_dwm_kernel)

@@ -5020,3 +5020,9 @@ struct alpc_message_info
 /* Register the current thread as the DWM manipulation input consumer. */
 @REQ(register_manipulation_thread)
 @END
+
+/* Query the generation of the active per-session DWM composed event. */
+@REQ(query_dwm_composition_id)
+@REPLY
+    unsigned int id;
+@END

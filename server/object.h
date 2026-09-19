@@ -254,6 +254,7 @@ extern void reset_sync( struct object *sync );
 extern struct event *create_event( struct object *root, struct unicode_str name,
                                    unsigned int attr, int manual_reset, int initial_state,
                                    const struct security_descriptor *sd );
+extern struct object *get_session_base_named_objects( unsigned int session_id );
 extern struct event *get_session_desktop_switch_event( unsigned int session_id );
 extern struct keyed_event *create_keyed_event( struct object *root, struct unicode_str name,
                                                unsigned int attr, const struct security_descriptor *sd );

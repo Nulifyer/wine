@@ -268,8 +268,8 @@ struct object *get_root_directory(void)
     return grab_object( root_directory );
 }
 
-/* return the desktop-switch notification event for a session */
-struct event *get_session_desktop_switch_event( unsigned int session_id )
+/* return the BaseNamedObjects directory for a session */
+struct object *get_session_base_named_objects( unsigned int session_id )
 {
     static const WCHAR dir_bnoW[] = {'B','a','s','e','N','a','m','e','d','O','b','j','e','c','t','s'};
     static const struct unicode_str dir_bno_str = {dir_bnoW, sizeof(dir_bnoW)};
@@ -305,6 +305,16 @@ struct event *get_session_desktop_switch_event( unsigned int session_id )
         bno_dir = (struct directory *)obj;
     }
 
+    return &bno_dir->obj;
+}
+
+/* return the desktop-switch notification event for a session */
+struct event *get_session_desktop_switch_event( unsigned int session_id )
+{
+    struct directory *bno_dir;
+    struct object *obj;
+
+    if (!(bno_dir = (struct directory *)get_session_base_named_objects( session_id ))) return NULL;
     obj = find_object( bno_dir->entries, desktop_switch_event_str, 0 );
     release_object( bno_dir );
     if (!obj) return NULL;

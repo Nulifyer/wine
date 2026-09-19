@@ -7794,6 +7794,18 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
         display_mode_changed( FALSE );
         return TRUE;
 
+    case NtUserCallNoParam_GetDwmCompositionId:
+    {
+        unsigned int id = 0;
+
+        SERVER_START_REQ( query_dwm_composition_id )
+        {
+            if (!wine_server_call_err( req )) id = reply->id;
+        }
+        SERVER_END_REQ;
+        return id;
+    }
+
     /* temporary exports */
     case NtUserExitingThread:
         exiting_thread_id = GetCurrentThreadId();

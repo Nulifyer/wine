@@ -1232,6 +1232,7 @@ enum
     NtUserCallNoParam_GetShellWindow,
     NtUserCallNoParam_GetTaskmanWindow,
     NtUserCallNoParam_DisplayModeChanged,
+    NtUserCallNoParam_GetDwmCompositionId,
     /* temporary exports */
     NtUserExitingThread,
     NtUserThreadDetach,

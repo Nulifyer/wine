@@ -751,6 +751,19 @@ static NTSTATUS get_apiset_target( const API_SET_NAMESPACE *map, const API_SET_N
     return STATUS_SUCCESS;
 }
 
+static BOOL get_linuxnt_apiset_target( const WCHAR *name, UNICODE_STRING *ret )
+{
+    static const WCHAR contract[] = L"ext-ms-win-gdi-private-l1-1-0";
+    static const WCHAR target[] = L"gdi32.dll";
+    ULONG len;
+
+    for (len = 0; name[len] && name[len] != '.'; ++len) {}
+    if (len != ARRAY_SIZE(contract) - 1 || wcsnicmp( name, contract, len )) return FALSE;
+    ret->Buffer = (WCHAR *)target;
+    ret->Length = (ARRAY_SIZE(target) - 1) * sizeof(WCHAR);
+    return TRUE;
+}
+
 
 /**********************************************************************
  *	    build_import_name
@@ -767,6 +780,13 @@ static NTSTATUS build_import_name( WINE_MODREF *importer, WCHAR buffer[256], con
     ascii_to_unicode( buffer, import, len );
     buffer[len] = 0;
     if (!wcschr( buffer, '.' )) wcscpy( buffer + len, L".dll" );
+
+    if (get_linuxnt_apiset_target( buffer, &str ))
+    {
+        memcpy( buffer, str.Buffer, str.Length );
+        buffer[str.Length / sizeof(WCHAR)] = 0;
+        return STATUS_SUCCESS;
+    }
 
     if (get_apiset_entry( map, buffer, wcslen(buffer), &entry )) return STATUS_SUCCESS;
 
@@ -3106,8 +3126,11 @@ static NTSTATUS find_apiset_dll( const WCHAR *name, WCHAR **fullname )
     UNICODE_STRING str;
     ULONG len;
 
-    if (get_apiset_entry( map, name, wcslen(name), &entry )) return STATUS_APISET_NOT_PRESENT;
-    if (get_apiset_target( map, entry, NULL, &str )) return STATUS_DLL_NOT_FOUND;
+    if (!get_linuxnt_apiset_target( name, &str ))
+    {
+        if (get_apiset_entry( map, name, wcslen(name), &entry )) return STATUS_APISET_NOT_PRESENT;
+        if (get_apiset_target( map, entry, NULL, &str )) return STATUS_DLL_NOT_FOUND;
+    }
 
     len = wcslen( system_dir ) + str.Length / sizeof(WCHAR);
     if (!(*fullname = RtlAllocateHeap( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) )))

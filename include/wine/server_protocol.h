@@ -7422,6 +7422,19 @@ struct register_manipulation_thread_reply
 };
 
 
+struct query_dwm_composition_id_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct query_dwm_composition_id_reply
+{
+    struct reply_header __header;
+    unsigned int id;
+    char __pad_12[4];
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -7809,6 +7822,7 @@ enum request
     REQ_set_mit_input_callbacks,
     REQ_open_coremsg_kernel_connection,
     REQ_register_manipulation_thread,
+    REQ_query_dwm_composition_id,
     REQ_NB_REQUESTS
 };
 
@@ -8201,6 +8215,7 @@ union generic_request
     struct set_mit_input_callbacks_request set_mit_input_callbacks_request;
     struct open_coremsg_kernel_connection_request open_coremsg_kernel_connection_request;
     struct register_manipulation_thread_request register_manipulation_thread_request;
+    struct query_dwm_composition_id_request query_dwm_composition_id_request;
 };
 union generic_reply
 {
@@ -8591,8 +8606,9 @@ union generic_reply
     struct set_mit_input_callbacks_reply set_mit_input_callbacks_reply;
     struct open_coremsg_kernel_connection_reply open_coremsg_kernel_connection_reply;
     struct register_manipulation_thread_reply register_manipulation_thread_reply;
+    struct query_dwm_composition_id_reply query_dwm_composition_id_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1025
+#define SERVER_PROTOCOL_VERSION 1026
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

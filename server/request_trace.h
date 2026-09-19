@@ -4307,6 +4307,15 @@ static void dump_register_manipulation_thread_request( const struct register_man
 {
 }
 
+static void dump_query_dwm_composition_id_request( const struct query_dwm_composition_id_request *req )
+{
+}
+
+static void dump_query_dwm_composition_id_reply( const struct query_dwm_composition_id_reply *req )
+{
+    fprintf( stderr, " id=%08x", req->id );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4696,6 +4705,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_mit_input_callbacks_request,
     (dump_func)dump_open_coremsg_kernel_connection_request,
     (dump_func)dump_register_manipulation_thread_request,
+    (dump_func)dump_query_dwm_composition_id_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5085,6 +5095,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     NULL,
+    (dump_func)dump_query_dwm_composition_id_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -5474,6 +5485,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_mit_input_callbacks",
     "open_coremsg_kernel_connection",
     "register_manipulation_thread",
+    "query_dwm_composition_id",
 };
 
 static const struct
