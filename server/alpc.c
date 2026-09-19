@@ -173,6 +173,9 @@ static struct list message_waits = LIST_INIT(message_waits);
 static void cleanup_thread_message_waits( struct thread *thread );
 static void dispatch_receives( struct alpc_port *port );
 static void dispatch_all_receives( void );
+static int send_message( struct alpc_port *port, unsigned int flags, unsigned int id,
+                         int wow64, unsigned int send_attributes, client_ptr_t message_context,
+                         const void *data, data_size_t size, struct alpc_wait *wait );
 
 static struct list message_requests = LIST_INIT(message_requests);
 static struct alpc_port *default_hard_error_port;
@@ -877,53 +880,63 @@ static int handle_coremsg_registrar_message( struct alpc_port *port,
     return 0;
 }
 
-/* USER session-port messages are consumed by win32k on Windows.  Keep the
- * observed startup protocol in the session owner instead of treating every
- * synchronous send on a connection port as a successful ALPC exchange. */
-static void handle_dwm_session_message( struct alpc_port *port, const struct alpc_send_receive_request *req,
-                                        struct alpc_send_receive_reply *reply, data_size_t capacity )
+/* USER observes the startup messages while the DWM port server dispatches the
+ * same messages to uDWM.  Keep the phase transition in the session owner, but
+ * retain normal ALPC delivery for the upper user-mode protocol. */
+static int handle_dwm_session_message( struct alpc_port *port, const struct alpc_send_receive_request *req,
+                                       struct alpc_send_receive_reply *reply, data_size_t capacity )
 {
     const unsigned int *message = get_req_data();
     unsigned int response[4];
     data_size_t size = get_req_data_size();
 
-    if (!req->send || size < sizeof(*message))
+    if (!req->send) return 0;
+    if (size < sizeof(*message))
     {
         set_error( STATUS_INVALID_PARAMETER );
-        return;
+        return 1;
     }
 
     if (req->flags == 0x10000)
     {
+        enum dwm_session_port_phase next_phase;
+
         if (size != 2 * sizeof(*message) || message[1])
         {
             set_error( STATUS_INVALID_PARAMETER );
-            return;
+            return 1;
         }
         if (message[0] == 0x40000025 && port->kernel_session_phase == DWM_SESSION_PORT_REGISTERED)
-            port->kernel_session_phase = DWM_SESSION_PORT_INITIALIZING;
+            next_phase = DWM_SESSION_PORT_INITIALIZING;
         else if (message[0] == 0x40000026 && port->kernel_session_phase == DWM_SESSION_PORT_STARTED)
-            port->kernel_session_phase = DWM_SESSION_PORT_READY;
-        else set_error( STATUS_INVALID_DEVICE_STATE );
-        return;
+            next_phase = DWM_SESSION_PORT_READY;
+        else
+        {
+            set_error( STATUS_INVALID_DEVICE_STATE );
+            return 1;
+        }
+        if (send_message( port, req->flags, req->message_id, req->wow64, req->send_attributes,
+                          req->message_context, message, size, NULL ))
+            port->kernel_session_phase = next_phase;
+        return 1;
     }
 
     if (req->flags != 0x20000 || !req->receive || size != sizeof(response) ||
         message[0] != 0x8000000a)
     {
         set_error( STATUS_NOT_IMPLEMENTED );
-        return;
+        return 1;
     }
     if (port->kernel_session_phase != DWM_SESSION_PORT_READY)
     {
         set_error( STATUS_INVALID_DEVICE_STATE );
-        return;
+        return 1;
     }
     if (capacity < size)
     {
         reply->info.size = size;
         set_error( STATUS_BUFFER_TOO_SMALL );
-        return;
+        return 1;
     }
 
     memcpy( response, message, sizeof(response) );
@@ -931,7 +944,8 @@ static void handle_dwm_session_message( struct alpc_port *port, const struct alp
     memset( &reply->info, 0, sizeof(reply->info) );
     reply->info.type = ALPC_MESSAGE_TYPE_REPLY;
     reply->info.size = sizeof(response);
-    if (!set_reply_data( response, sizeof(response) )) return;
+    set_reply_data( response, sizeof(response) );
+    return 1;
 }
 
 static void finish_connect_operation( struct alpc_port *port )
@@ -1782,8 +1796,7 @@ DECL_HANDLER(alpc_send_receive)
     }
     if (port->kernel_port == ALPC_KERNEL_DWM_SESSION_PORT)
     {
-        handle_dwm_session_message( port, req, reply, capacity );
-        goto done;
+        if (handle_dwm_session_message( port, req, reply, capacity )) goto done;
     }
     if (handle_coremsg_registrar_message( port, req, reply, capacity )) goto done;
     if (req->flags & ~(1 | 0x10000 | 0x20000) ||

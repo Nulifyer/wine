@@ -55,6 +55,12 @@ struct coremsg_message
     unsigned char data[296];
 };
 
+struct dwm_session_message
+{
+    ALPC_PORT_MESSAGE header;
+    DWORD data[4];
+};
+
 struct coremsg_registrar_context
 {
     unsigned char guid[16];
@@ -2149,6 +2155,97 @@ static void test_token_manager_lifetime(void)
     CloseHandle( work_event );
 }
 
+static void test_dwm_session_message_delivery(void)
+{
+    ALPC_PORT_ATTRIBUTES attributes = {0};
+    OBJECT_ATTRIBUTES object_attributes;
+    struct dwm_session_message message = {0}, received = {0};
+    WCHAR name_buffer[64];
+    UNICODE_STRING name;
+    LARGE_INTEGER timeout = {0};
+    BOOLEAN previous, ignored;
+    DWORD session_id;
+    HANDLE port = NULL;
+    BOOL registered;
+    NTSTATUS status;
+    SIZE_T size;
+
+    if (!ProcessIdToSessionId( GetCurrentProcessId(), &session_id ))
+    {
+        win_skip( "could not query the process session, error %lu\n", GetLastError() );
+        return;
+    }
+    status = RtlAdjustPrivilege( SE_TCB_PRIVILEGE, TRUE, FALSE, &previous );
+    if (status == STATUS_PRIVILEGE_NOT_HELD)
+    {
+        win_skip( "SeTcbPrivilege is unavailable\n" );
+        return;
+    }
+    ok( !status, "RtlAdjustPrivilege returned %#lx\n", status );
+    if (status) return;
+
+    wsprintfW( name_buffer, L"\\Sessions\\%lu\\Windows\\DwmApiPort", session_id );
+    RtlInitUnicodeString( &name, name_buffer );
+    InitializeObjectAttributes( &object_attributes, &name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+    attributes.Flags = 0x60000;
+    attributes.SecurityQos.Length = sizeof(attributes.SecurityQos);
+    attributes.SecurityQos.ImpersonationLevel = SecurityIdentification;
+    attributes.SecurityQos.ContextTrackingMode = SECURITY_STATIC_TRACKING;
+    attributes.SecurityQos.EffectiveOnly = TRUE;
+    attributes.MaxMessageLength = 0x200;
+    status = NtAlpcCreatePort( &port, &object_attributes, &attributes );
+    ok( !status, "NtAlpcCreatePort returned %#lx\n", status );
+    if (status) goto done;
+    SetLastError( 0xdeadbeef );
+    registered = NtUserRegisterSessionPort( port );
+    ok( registered, "NtUserRegisterSessionPort failed, error %lu\n", GetLastError() );
+    ok( !registered || GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+    if (!registered) goto done;
+
+    message.header.DataLength = 8;
+    message.header.TotalLength = sizeof(message.header) + message.header.DataLength;
+    message.data[0] = 0x40000025;
+    status = NtAlpcSendWaitReceivePort( port, 0x10000, &message.header,
+                                        NULL, NULL, NULL, NULL, NULL );
+    ok( !status, "initializing send returned %#lx\n", status );
+    size = sizeof(received);
+    status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                        &size, NULL, &timeout );
+    ok( !status, "initializing receive returned %#lx\n", status );
+    ok( !status && received.header.DataLength == 8, "got data length %#x\n", received.header.DataLength );
+    ok( !status && received.data[0] == 0x40000025 && !received.data[1],
+        "got initializing payload %#lx, %#lx\n", received.data[0], received.data[1] );
+
+    SetLastError( 0xdeadbeef );
+    ok( NtUserDwmKernelStartup(), "NtUserDwmKernelStartup failed, error %lu\n", GetLastError() );
+    ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+
+    memset( &message, 0, sizeof(message) );
+    message.header.DataLength = 8;
+    message.header.TotalLength = sizeof(message.header) + message.header.DataLength;
+    message.data[0] = 0x40000026;
+    status = NtAlpcSendWaitReceivePort( port, 0x10000, &message.header,
+                                        NULL, NULL, NULL, NULL, NULL );
+    ok( !status, "ready send returned %#lx\n", status );
+    memset( &received, 0, sizeof(received) );
+    size = sizeof(received);
+    status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                        &size, NULL, &timeout );
+    ok( !status, "ready receive returned %#lx\n", status );
+    ok( !status && received.header.DataLength == 8, "got data length %#x\n", received.header.DataLength );
+    ok( !status && received.data[0] == 0x40000026 && !received.data[1],
+        "got ready payload %#lx, %#lx\n", received.data[0], received.data[1] );
+
+done:
+    if (port)
+    {
+        NtUserDwmKernelShutdown();
+        NtClose( port );
+    }
+    status = RtlAdjustPrivilege( SE_TCB_PRIVILEGE, previous, FALSE, &ignored );
+    ok( !status, "restoring SeTcbPrivilege returned %#lx\n", status );
+}
+
 START_TEST(dcomp)
 {
     unsigned int argc;
@@ -2177,4 +2274,5 @@ START_TEST(dcomp)
     test_composition_surface_lifecycle();
     test_connection_lifetime();
     test_token_manager_lifetime();
+    test_dwm_session_message_delivery();
 }
