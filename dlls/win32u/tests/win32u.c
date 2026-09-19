@@ -27,6 +27,35 @@
 #define MAX_ATOM_LEN  255
 #define DESKTOP_ALL_ACCESS 0x01ff
 
+#define DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO  (-20)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO2 (-39)
+
+struct displayconfig_session_info
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    UINT remote_driver;
+    UINT remote_wddm;
+    UINT remote_xddm;
+    UINT wddm_connected;
+    UINT console_connected;
+    UINT disconnected;
+    USHORT connection;
+    USHORT reserved;
+    LUID terminal_luid;
+};
+
+struct displayconfig_session_info2
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    UINT flags;
+    USHORT connection;
+    USHORT reserved;
+    LUID terminal_luid;
+};
+
+C_ASSERT( sizeof(struct displayconfig_session_info) == 56 );
+C_ASSERT( sizeof(struct displayconfig_session_info2) == 36 );
+
 #define check_member_( file, line, val, exp, fmt, member )                                         \
     ok_(file, line)( (val).member == (exp).member, "got " #member " " fmt "\n", (val).member )
 #define check_member( val, exp, fmt, member )                                                      \
@@ -1728,8 +1757,53 @@ static void test_timer(void)
 
 static void test_NtUserDisplayConfigGetDeviceInfo(void)
 {
+    struct displayconfig_session_info session_info;
+    struct displayconfig_session_info2 session_info2;
     DISPLAYCONFIG_SOURCE_DEVICE_NAME source_name;
     NTSTATUS status;
+
+    memset( &session_info, 0xcc, sizeof(session_info) );
+    session_info.header.type = (DISPLAYCONFIG_DEVICE_INFO_TYPE)DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO;
+    session_info.header.size = sizeof(session_info);
+    session_info.reserved = 0xbeef;
+    SetLastError( 0xdeadbeef );
+    status = NtUserDisplayConfigGetDeviceInfo( &session_info.header );
+    ok( status == STATUS_SUCCESS, "session info returned %#lx\n", status );
+    ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+    ok( !session_info.remote_driver, "remote_driver is %#x\n", session_info.remote_driver );
+    ok( !session_info.remote_wddm, "remote_wddm is %#x\n", session_info.remote_wddm );
+    ok( !session_info.remote_xddm, "remote_xddm is %#x\n", session_info.remote_xddm );
+    ok( session_info.wddm_connected == 1, "wddm_connected is %#x\n", session_info.wddm_connected );
+    ok( session_info.console_connected == 1, "console_connected is %#x\n", session_info.console_connected );
+    ok( !session_info.disconnected, "disconnected is %#x\n", session_info.disconnected );
+    ok( !session_info.connection, "connection is %#x\n", session_info.connection );
+    ok( session_info.reserved == 0xbeef, "reserved is %#x\n", session_info.reserved );
+    ok( !session_info.terminal_luid.LowPart && !session_info.terminal_luid.HighPart,
+        "terminal LUID is %08lx:%08lx\n", session_info.terminal_luid.HighPart,
+        session_info.terminal_luid.LowPart );
+
+    memset( &session_info2, 0xcc, sizeof(session_info2) );
+    session_info2.header.type = (DISPLAYCONFIG_DEVICE_INFO_TYPE)DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO2;
+    session_info2.header.size = sizeof(session_info2);
+    session_info2.flags = 0xdeadbe00;
+    session_info2.reserved = 0xbeef;
+    SetLastError( 0xdeadbeef );
+    status = NtUserDisplayConfigGetDeviceInfo( &session_info2.header );
+    ok( status == STATUS_SUCCESS, "session info2 returned %#lx\n", status );
+    ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+    ok( session_info2.flags == 0xdeadbe58, "flags are %#x\n", session_info2.flags );
+    ok( !session_info2.connection, "connection is %#x\n", session_info2.connection );
+    ok( session_info2.reserved == 0xbeef, "reserved is %#x\n", session_info2.reserved );
+    ok( !session_info2.terminal_luid.LowPart && !session_info2.terminal_luid.HighPart,
+        "terminal LUID is %08lx:%08lx\n", session_info2.terminal_luid.HighPart,
+        session_info2.terminal_luid.LowPart );
+
+    session_info2.header.size = sizeof(session_info2) - 1;
+    status = NtUserDisplayConfigGetDeviceInfo( &session_info2.header );
+    ok( status == STATUS_INVALID_PARAMETER, "short session info2 returned %#lx\n", status );
+    session_info2.header.size = sizeof(session_info2) + 1;
+    status = NtUserDisplayConfigGetDeviceInfo( &session_info2.header );
+    ok( status == STATUS_INVALID_PARAMETER, "long session info2 returned %#lx\n", status );
 
     source_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
     source_name.header.size = sizeof(source_name.header);

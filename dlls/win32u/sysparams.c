@@ -40,6 +40,50 @@ WINE_DEFAULT_DEBUG_CHANNEL(system);
 
 #define WINE_ENUM_PHYSICAL_SETTINGS  ((DWORD) -3)
 
+#define DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO  (-20)
+#define DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO2 (-39)
+
+#define DISPLAYCONFIG_SESSION_REMOTE_DRIVER       0x01
+#define DISPLAYCONFIG_SESSION_REMOTE_WDDM         0x02
+#define DISPLAYCONFIG_SESSION_REMOTE_XDDM         0x04
+#define DISPLAYCONFIG_SESSION_WDDM_CONNECTED      0x08
+#define DISPLAYCONFIG_SESSION_CONSOLE_CONNECTED   0x10
+#define DISPLAYCONFIG_SESSION_DISCONNECTED        0x20
+#define DISPLAYCONFIG_SESSION_GDI_POWERED_ON      0x40
+#define DISPLAYCONFIG_SESSION_SWITCH_IN_PROGRESS  0x80
+
+struct displayconfig_session_info
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    UINT remote_driver;
+    UINT remote_wddm;
+    UINT remote_xddm;
+    UINT wddm_connected;
+    UINT console_connected;
+    UINT disconnected;
+    USHORT connection;
+    USHORT reserved;
+    LUID terminal_luid;
+};
+
+struct displayconfig_session_info2
+{
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    UINT flags;
+    USHORT connection;
+    USHORT reserved;
+    LUID terminal_luid;
+};
+
+C_ASSERT( offsetof(struct displayconfig_session_info, remote_driver) == 20 );
+C_ASSERT( offsetof(struct displayconfig_session_info, connection) == 44 );
+C_ASSERT( offsetof(struct displayconfig_session_info, terminal_luid) == 48 );
+C_ASSERT( sizeof(struct displayconfig_session_info) == 56 );
+C_ASSERT( offsetof(struct displayconfig_session_info2, flags) == 20 );
+C_ASSERT( offsetof(struct displayconfig_session_info2, connection) == 24 );
+C_ASSERT( offsetof(struct displayconfig_session_info2, terminal_luid) == 28 );
+C_ASSERT( sizeof(struct displayconfig_session_info2) == 36 );
+
 static LONG dpi_context; /* process DPI awareness context */
 
 static HKEY video_key, enum_key, control_key, config_key, volatile_base_key;
@@ -7887,8 +7931,50 @@ NTSTATUS WINAPI NtUserDisplayConfigGetDeviceInfo( DISPLAYCONFIG_DEVICE_INFO_HEAD
     if (!packet || packet->size < sizeof(*packet))
         return STATUS_UNSUCCESSFUL;
 
-    switch (packet->type)
+    switch ((INT)packet->type)
     {
+    case DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO:
+    {
+        struct displayconfig_session_info *info = (struct displayconfig_session_info *)packet;
+        BOOL console = NtCurrentTeb()->Peb->SessionId != 0;
+
+        TRACE( "DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO.\n" );
+
+        if (packet->size != sizeof(*info)) return STATUS_INVALID_PARAMETER;
+
+        info->remote_driver = FALSE;
+        info->remote_wddm = FALSE;
+        info->remote_xddm = FALSE;
+        info->wddm_connected = console;
+        info->console_connected = console;
+        info->disconnected = !console;
+        info->connection = console ? 0 : (USHORT)-1;
+        info->terminal_luid.LowPart = 0;
+        info->terminal_luid.HighPart = 0;
+        return STATUS_SUCCESS;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO2:
+    {
+        struct displayconfig_session_info2 *info = (struct displayconfig_session_info2 *)packet;
+        BOOL console = NtCurrentTeb()->Peb->SessionId != 0;
+        UINT flags;
+
+        TRACE( "DISPLAYCONFIG_DEVICE_INFO_GET_SESSION_INFO2.\n" );
+
+        if (packet->size != sizeof(*info)) return STATUS_INVALID_PARAMETER;
+
+        if (console)
+            flags = DISPLAYCONFIG_SESSION_WDDM_CONNECTED | DISPLAYCONFIG_SESSION_CONSOLE_CONNECTED |
+                    DISPLAYCONFIG_SESSION_GDI_POWERED_ON;
+        else
+            flags = DISPLAYCONFIG_SESSION_DISCONNECTED;
+
+        info->flags = (info->flags & ~0xff) | flags;
+        info->connection = console ? 0 : (USHORT)-1;
+        info->terminal_luid.LowPart = 0;
+        info->terminal_luid.HighPart = 0;
+        return STATUS_SUCCESS;
+    }
     case DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME:
     {
         DISPLAYCONFIG_SOURCE_DEVICE_NAME *source_name = (DISPLAYCONFIG_SOURCE_DEVICE_NAME *)packet;
