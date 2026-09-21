@@ -52,6 +52,98 @@ static struct list dce_list = LIST_INIT(dce_list);
 static struct list window_surfaces = LIST_INIT( window_surfaces );
 static pthread_mutex_t surfaces_lock = PTHREAD_MUTEX_INITIALIZER;
 
+static BOOL has_dwm_compositor(void)
+{
+    UINT id = 0;
+
+    SERVER_START_REQ( query_dwm_composition_id )
+    {
+        if (!wine_server_call( req )) id = reply->id;
+    }
+    SERVER_END_REQ;
+    return !!id;
+}
+
+static UINT publish_window_logical_surface( struct window_surface *surface )
+{
+    UINT serial = 0;
+
+    SERVER_START_REQ( set_window_logical_surface )
+    {
+        req->handle = wine_server_user_handle( surface->hwnd );
+        req->section = wine_server_obj_handle( surface->logical_surface_section );
+        req->serial = surface->logical_surface_serial;
+        req->width = surface->rect.right - surface->rect.left;
+        req->height = surface->rect.bottom - surface->rect.top;
+        req->stride = surface->logical_surface_stride;
+        if (!wine_server_call( req )) serial = reply->serial;
+    }
+    SERVER_END_REQ;
+    return serial;
+}
+
+static void dirty_window_logical_surface( struct window_surface *surface )
+{
+    if (!surface->logical_surface_serial) return;
+    SERVER_START_REQ( dirty_window_logical_surface )
+    {
+        req->handle = wine_server_user_handle( surface->hwnd );
+        req->serial = surface->logical_surface_serial;
+        wine_server_call( req );
+    }
+    SERVER_END_REQ;
+}
+
+static void destroy_window_logical_surface( struct window_surface *surface )
+{
+    if (surface->logical_surface_bits)
+        NtUnmapViewOfSection( GetCurrentProcess(), surface->logical_surface_bits );
+    if (surface->logical_surface_section) NtClose( surface->logical_surface_section );
+    surface->logical_surface_section = 0;
+    surface->logical_surface_bits = NULL;
+    surface->logical_surface_size = 0;
+    surface->logical_surface_stride = 0;
+    surface->logical_surface_serial = 0;
+}
+
+static void create_window_logical_surface( struct window_surface *surface,
+                                           const BITMAPINFO *info, const void *color_bits )
+{
+    LARGE_INTEGER section_size;
+    SIZE_T view_size;
+    UINT stride;
+
+    if (surface->logical_surface_section || !has_dwm_compositor() ||
+        info->bmiHeader.biBitCount != 32 || !info->bmiHeader.biSizeImage)
+        return;
+
+    stride = get_dib_stride( info->bmiHeader.biWidth, info->bmiHeader.biBitCount );
+    if (!stride || stride > info->bmiHeader.biSizeImage) return;
+    surface->logical_surface_stride = stride;
+    section_size.QuadPart = info->bmiHeader.biSizeImage;
+    if (NtCreateSection( &surface->logical_surface_section,
+                         SECTION_MAP_READ | SECTION_MAP_WRITE | SECTION_QUERY,
+                         NULL, &section_size, PAGE_READWRITE, SEC_COMMIT, 0 ))
+        return;
+
+    view_size = section_size.QuadPart;
+    if (NtMapViewOfSection( surface->logical_surface_section, GetCurrentProcess(),
+                            &surface->logical_surface_bits, 0, 0, NULL, &view_size,
+                            ViewUnmap, 0, PAGE_READWRITE ))
+    {
+        NtClose( surface->logical_surface_section );
+        surface->logical_surface_section = 0;
+        return;
+    }
+
+    surface->logical_surface_size = view_size;
+    memcpy( surface->logical_surface_bits, color_bits,
+            min( surface->logical_surface_size,
+                 (SIZE_T)info->bmiHeader.biSizeImage ) );
+    surface->logical_surface_serial = publish_window_logical_surface( surface );
+    if (!surface->logical_surface_serial) destroy_window_logical_surface( surface );
+}
+
 /*******************************************************************
  * Dummy window surface for windows that shouldn't get painted.
  */
@@ -553,6 +645,7 @@ struct window_surface *window_surface_create( UINT size, const struct window_sur
                                               const RECT *rect, BITMAPINFO *info, HBITMAP bitmap )
 {
     struct window_surface *surface;
+    void *color_bits;
 
     if (!(surface = calloc( 1, size ))) return NULL;
     surface->funcs = funcs;
@@ -573,7 +666,9 @@ struct window_surface *window_surface_create( UINT size, const struct window_sur
 
     pthread_mutex_init( &surface->mutex, NULL );
 
-    memset( window_surface_get_color( surface, info ), 0xff, info->bmiHeader.biSizeImage );
+    color_bits = window_surface_get_color( surface, info );
+    memset( color_bits, 0xff, info->bmiHeader.biSizeImage );
+    create_window_logical_surface( surface, info, color_bits );
 
     TRACE( "created surface %p for hwnd %p rect %s\n", surface, hwnd, wine_dbgstr_rect( &surface->rect ) );
     return surface;
@@ -589,6 +684,14 @@ void window_surface_release( struct window_surface *surface )
     ULONG ret = InterlockedDecrement( &surface->ref );
     if (!ret)
     {
+        if (surface->logical_surface_serial)
+        {
+            HANDLE section = surface->logical_surface_section;
+            surface->logical_surface_section = 0;
+            publish_window_logical_surface( surface );
+            surface->logical_surface_section = section;
+        }
+        destroy_window_logical_surface( surface );
         if (surface != &dummy_surface) pthread_mutex_destroy( &surface->mutex );
         if (surface->clip_region) NtGdiDeleteObjectApp( surface->clip_region );
         if (surface->color_bitmap) NtGdiDeleteObjectApp( surface->color_bitmap );
@@ -636,6 +739,17 @@ void window_surface_flush( struct window_surface *surface )
 
         TRACE( "Flushing hwnd %p, surface %p %s, bounds %s, dirty %s\n", surface->hwnd, surface,
                wine_dbgstr_rect( &surface->rect ), wine_dbgstr_rect( &surface->bounds ), wine_dbgstr_rect( &dirty ) );
+
+        if (surface->logical_surface_bits)
+        {
+            if (!surface->logical_surface_serial)
+                surface->logical_surface_serial = publish_window_logical_surface( surface );
+            memcpy( surface->logical_surface_bits, color_bits,
+                    min( surface->logical_surface_size,
+                         (SIZE_T)color_info->bmiHeader.biSizeImage ) );
+            dirty_window_logical_surface( surface );
+        }
+        else create_window_logical_surface( surface, color_info, color_bits );
 
         if (surface->funcs->flush( surface, &surface->rect, &dirty, color_info, color_bits,
                                    shape_changed, shape_info, shape_bits ))

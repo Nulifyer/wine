@@ -74,11 +74,314 @@ typedef struct
     ULONG         otmpFullName;
 } OUTLINETEXTMETRIC32;
 
+struct hlsurf_surface_info32
+{
+    UINT type;
+    UINT width;
+    UINT height;
+    UINT stride;
+    UINT flags;
+    UINT64 update_id;
+    LUID adapter_luid;
+    ULONG section;
+    ULONG padding;
+};
+
+struct hlsurf_dirty_info32
+{
+    UINT64 update_id;
+    ULONG dirty_region;
+    ULONG valid_region;
+    ULONG invalid_region;
+    ULONG padding;
+    UINT64 signal_id;
+    UINT64 present_id;
+    UINT present_flags;
+    UINT reserved;
+};
+
+struct hlsurf_signal_info32
+{
+    BOOL enable;
+    UINT reserved;
+    ULONG event;
+    LUID adapter_luid;
+};
+
+struct hlsurf_surface_info64
+{
+    UINT type;
+    UINT width;
+    UINT height;
+    UINT stride;
+    UINT flags;
+    UINT64 update_id;
+    LUID adapter_luid;
+    HANDLE section;
+};
+
+struct hlsurf_dirty_info64
+{
+    UINT64 update_id;
+    HRGN dirty_region;
+    HRGN valid_region;
+    HRGN invalid_region;
+    UINT64 signal_id;
+    UINT64 present_id;
+    UINT present_flags;
+    UINT reserved;
+};
+
+struct hlsurf_signal_info64
+{
+    BOOL enable;
+    UINT reserved;
+    HANDLE event;
+    LUID adapter_luid;
+};
+
+C_ASSERT( sizeof(struct hlsurf_surface_info32) == 48 );
+C_ASSERT( sizeof(struct hlsurf_dirty_info32) == 48 );
+C_ASSERT( sizeof(struct hlsurf_signal_info32) == 20 );
+
+struct d3dkmt_disp_mgr_create32
+{
+    ULONG object_attributes;
+    ACCESS_MASK access;
+    UINT flags;
+    ULONG handle;
+};
+
+struct d3dkmt_disp_mgr_create64
+{
+    OBJECT_ATTRIBUTES *object_attributes;
+    ACCESS_MASK access;
+    UINT flags;
+    HANDLE handle;
+};
+
+struct d3dkmt_disp_mgr_operation32
+{
+    UINT operation;
+    UINT reserved;
+    ULONG manager;
+    ULONG port;
+    UINT connect;
+    UINT reserved2;
+};
+
+struct d3dkmt_disp_mgr_operation64
+{
+    UINT operation;
+    UINT reserved;
+    HANDLE manager;
+    HANDLE port;
+    UINT connect;
+    UINT reserved2;
+};
+
+struct d3dkmt_disp_mgr_target_operation32
+{
+    UINT operation;
+    UINT reserved;
+    ULONG manager;
+    LUID adapter_luid;
+    UINT target_id;
+    UINT reserved2;
+    UINT64 data[3];
+};
+
+struct d3dkmt_disp_mgr_target_operation64
+{
+    UINT operation;
+    UINT reserved;
+    HANDLE manager;
+    LUID adapter_luid;
+    UINT target_id;
+    UINT reserved2;
+    UINT64 data[3];
+};
+
+struct d3dkmt_ddisplay_enum32
+{
+    UINT adapter_count;
+    UINT adapter_capacity;
+    ULONG adapters;
+    UINT target_count;
+    UINT target_capacity;
+    ULONG targets;
+};
+
 
 static DWORD gdi_handle_type( HGDIOBJ obj )
 {
     unsigned int handle = HandleToUlong( obj );
     return handle & NTGDI_HANDLE_TYPE_MASK;
+}
+
+NTSTATUS WINAPI wow64_NtDxgkDispMgrOperation( UINT *args )
+{
+    const struct d3dkmt_disp_mgr_operation32 *desc32 = get_ptr( &args );
+    struct d3dkmt_disp_mgr_operation64 desc;
+
+    if (!desc32) return NtDxgkDispMgrOperation( NULL );
+    desc.operation = desc32->operation;
+    desc.reserved = desc32->reserved;
+    desc.manager = LongToHandle( desc32->manager );
+    desc.port = LongToHandle( desc32->port );
+    desc.connect = desc32->connect;
+    desc.reserved2 = desc32->reserved2;
+    return NtDxgkDispMgrOperation( &desc );
+}
+
+NTSTATUS WINAPI wow64_NtDxgkEnumAdapters3( UINT *args )
+{
+    struct
+    {
+        D3DKMT_ENUMADAPTERS_FILTER Filter;
+        ULONG NumAdapters;
+        ULONG pAdapters;
+    } *desc32 = get_ptr( &args );
+    D3DKMT_ENUMADAPTERS3 desc;
+    NTSTATUS status;
+
+    if (!desc32) return NtDxgkEnumAdapters3( NULL );
+    desc.Filter = desc32->Filter;
+    desc.NumAdapters = desc32->NumAdapters;
+    desc.pAdapters = ULongToPtr( desc32->pAdapters );
+    status = NtDxgkEnumAdapters3( &desc );
+    desc32->NumAdapters = desc.NumAdapters;
+    return status;
+}
+
+NTSTATUS WINAPI wow64_NtDxgkIsFeatureEnabled( UINT *args )
+{
+    return NtDxgkIsFeatureEnabled( get_ptr( &args ) );
+}
+
+NTSTATUS WINAPI wow64_NtGdiDdDDIDispMgrCreate( UINT *args )
+{
+    struct d3dkmt_disp_mgr_create32 *desc32 = get_ptr( &args );
+    struct d3dkmt_disp_mgr_create64 desc;
+    struct object_attr64 attributes;
+    NTSTATUS status;
+
+    if (!desc32) return NtGdiDdDDIDispMgrCreate( NULL );
+    desc.object_attributes = objattr_32to64( &attributes, ULongToPtr( desc32->object_attributes ) );
+    desc.access = desc32->access;
+    desc.flags = desc32->flags;
+    desc.handle = NULL;
+    status = NtGdiDdDDIDispMgrCreate( &desc );
+    if (!status) desc32->handle = HandleToUlong( desc.handle );
+    return status;
+}
+
+NTSTATUS WINAPI wow64_NtGdiDdDDIDispMgrSourceOperation( UINT *args )
+{
+    return NtGdiDdDDIDispMgrSourceOperation( get_ptr( &args ) );
+}
+
+NTSTATUS WINAPI wow64_NtGdiDdDDIDispMgrTargetOperation( UINT *args )
+{
+    const struct d3dkmt_disp_mgr_target_operation32 *desc32 = get_ptr( &args );
+    struct d3dkmt_disp_mgr_target_operation64 desc;
+
+    if (!desc32) return NtGdiDdDDIDispMgrTargetOperation( NULL );
+    desc.operation = desc32->operation;
+    desc.reserved = desc32->reserved;
+    desc.manager = LongToHandle( desc32->manager );
+    desc.adapter_luid = desc32->adapter_luid;
+    desc.target_id = desc32->target_id;
+    desc.reserved2 = desc32->reserved2;
+    memcpy( desc.data, desc32->data, sizeof(desc.data) );
+    return NtGdiDdDDIDispMgrTargetOperation( &desc );
+}
+
+NTSTATUS WINAPI wow64_NtGdiDdDDIDDisplayEnum( UINT *args )
+{
+    struct d3dkmt_ddisplay_enum32 *desc32 = get_ptr( &args );
+    struct
+    {
+        UINT adapter_count;
+        UINT adapter_capacity;
+        void *adapters;
+        UINT target_count;
+        UINT target_capacity;
+        void *targets;
+    } desc;
+    NTSTATUS status;
+
+    if (!desc32) return NtGdiDdDDIDDisplayEnum( NULL );
+    desc.adapter_count = desc32->adapter_count;
+    desc.adapter_capacity = desc32->adapter_capacity;
+    desc.adapters = ULongToPtr( desc32->adapters );
+    desc.target_count = desc32->target_count;
+    desc.target_capacity = desc32->target_capacity;
+    desc.targets = ULongToPtr( desc32->targets );
+    status = NtGdiDdDDIDDisplayEnum( &desc );
+    desc32->adapter_count = desc.adapter_count;
+    desc32->target_count = desc.target_count;
+    return status;
+}
+
+NTSTATUS WINAPI wow64_NtGdiDdDDIGetProcessSchedulingPriorityClass( UINT *args )
+{
+    HANDLE process = get_handle( &args );
+    D3DKMT_SCHEDULINGPRIORITYCLASS *priority = get_ptr( &args );
+
+    return NtGdiDdDDIGetProcessSchedulingPriorityClass( process, priority );
+}
+
+NTSTATUS WINAPI wow64_NtGdiDdDDISetProcessDeviceRemovalSupport( UINT *args )
+{
+    return NtGdiDdDDISetProcessDeviceRemovalSupport( get_ptr( &args ) );
+}
+
+NTSTATUS WINAPI wow64_NtGdiDdDDISetProcessSchedulingPriorityClass( UINT *args )
+{
+    HANDLE process = get_handle( &args );
+    D3DKMT_SCHEDULINGPRIORITYCLASS priority = get_ulong( &args );
+
+    return NtGdiDdDDISetProcessSchedulingPriorityClass( process, priority );
+}
+
+NTSTATUS WINAPI wow64_NtGdiClearBitmapAttributes( UINT *args )
+{
+    HBITMAP bitmap = get_handle( &args );
+    UINT flags = get_ulong( &args );
+
+    return HandleToUlong( NtGdiClearBitmapAttributes( bitmap, flags ) );
+}
+
+NTSTATUS WINAPI wow64_NtGdiSetBitmapAttributes( UINT *args )
+{
+    HBITMAP bitmap = get_handle( &args );
+    UINT flags = get_ulong( &args );
+
+    return HandleToUlong( NtGdiSetBitmapAttributes( bitmap, flags ) );
+}
+
+NTSTATUS WINAPI wow64_NtGdiCreateSessionMappedDIBSection( UINT *args )
+{
+    HDC hdc = get_handle( &args );
+    HANDLE section = get_handle( &args );
+    DWORD offset = get_ulong( &args );
+    const BITMAPINFO *bmi = get_ptr( &args );
+
+    return HandleToUlong( NtGdiCreateSessionMappedDIBSection( hdc, section, offset, bmi ) );
+}
+
+NTSTATUS WINAPI wow64_NtGdiGetCurrentDpiInfo( UINT *args )
+{
+    HMONITOR monitor = get_handle( &args );
+    struct ntgdi_current_dpi_info *info = get_ptr( &args );
+
+    return NtGdiGetCurrentDpiInfo( monitor, info );
+}
+
+NTSTATUS WINAPI wow64_NtGdiWaitForTextReady( UINT *args )
+{
+    return NtGdiWaitForTextReady();
 }
 
 NTSTATUS WINAPI wow64_NtGdiAbortDoc( UINT *args )
@@ -2534,6 +2837,85 @@ NTSTATUS WINAPI wow64_NtGdiHfontCreate( UINT *args )
     void *data = get_ptr( &args );
 
     return HandleToUlong( NtGdiHfontCreate( logfont, unk2, unk3, unk4, data ));
+}
+
+NTSTATUS WINAPI wow64_NtGdiHLSurfGetInformation( UINT *args )
+{
+    HANDLE surface = get_handle( &args );
+    UINT type = get_ulong( &args );
+    void *buffer = get_ptr( &args );
+    UINT *size = get_ptr( &args );
+    struct hlsurf_surface_info64 surface_info = {0};
+    struct hlsurf_dirty_info64 dirty_info = {0};
+    UINT native_size;
+    BOOL ret;
+
+    if (type == 3)
+    {
+        struct hlsurf_surface_info32 *info32 = buffer;
+
+        if (!size || !buffer || *size < sizeof(*info32))
+            return NtGdiHLSurfGetInformation( surface, type, buffer, size );
+        native_size = sizeof(surface_info);
+        ret = NtGdiHLSurfGetInformation( surface, type, &surface_info, &native_size );
+        if (ret)
+        {
+            info32->type = surface_info.type;
+            info32->width = surface_info.width;
+            info32->height = surface_info.height;
+            info32->stride = surface_info.stride;
+            info32->flags = surface_info.flags;
+            info32->update_id = surface_info.update_id;
+            info32->adapter_luid = surface_info.adapter_luid;
+            info32->section = HandleToUlong( surface_info.section );
+            info32->padding = 0;
+        }
+        return ret;
+    }
+    if (type == 4 || type == 9)
+    {
+        struct hlsurf_dirty_info32 *info32 = buffer;
+
+        if (!size || !buffer || *size < sizeof(*info32))
+            return NtGdiHLSurfGetInformation( surface, type, buffer, size );
+        native_size = sizeof(dirty_info);
+        ret = NtGdiHLSurfGetInformation( surface, type, &dirty_info, &native_size );
+        if (ret)
+        {
+            info32->update_id = dirty_info.update_id;
+            info32->dirty_region = HandleToUlong( dirty_info.dirty_region );
+            info32->valid_region = HandleToUlong( dirty_info.valid_region );
+            info32->invalid_region = HandleToUlong( dirty_info.invalid_region );
+            info32->padding = 0;
+            info32->signal_id = dirty_info.signal_id;
+            info32->present_id = dirty_info.present_id;
+            info32->present_flags = dirty_info.present_flags;
+            info32->reserved = dirty_info.reserved;
+        }
+        return ret;
+    }
+    return NtGdiHLSurfGetInformation( surface, type, buffer, size );
+}
+
+NTSTATUS WINAPI wow64_NtGdiHLSurfSetInformation( UINT *args )
+{
+    HANDLE surface = get_handle( &args );
+    UINT type = get_ulong( &args );
+    const void *buffer = get_ptr( &args );
+    UINT size = get_ulong( &args );
+
+    if (type == 5 && buffer && size >= sizeof(struct hlsurf_signal_info32))
+    {
+        const struct hlsurf_signal_info32 *info32 = buffer;
+        struct hlsurf_signal_info64 info;
+
+        info.enable = info32->enable;
+        info.reserved = info32->reserved;
+        info.event = LongToHandle( info32->event );
+        info.adapter_luid = info32->adapter_luid;
+        return NtGdiHLSurfSetInformation( surface, type, &info, sizeof(info) );
+    }
+    return NtGdiHLSurfSetInformation( surface, type, buffer, size );
 }
 
 NTSTATUS WINAPI wow64_NtGdiInitSpool( UINT *args )

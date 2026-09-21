@@ -422,6 +422,12 @@ DECL_HANDLER(open_d3d11_fence);
 DECL_HANDLER(query_d3d11_fence);
 DECL_HANDLER(signal_d3d11_fence);
 DECL_HANDLER(set_d3d11_fence_event);
+DECL_HANDLER(set_window_logical_surface);
+DECL_HANDLER(reference_window_logical_surface);
+DECL_HANDLER(get_window_logical_surface);
+DECL_HANDLER(set_window_logical_surface_metadata);
+DECL_HANDLER(signal_window_logical_surface);
+DECL_HANDLER(dirty_window_logical_surface);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -841,6 +847,12 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_query_d3d11_fence,
     (req_handler)req_signal_d3d11_fence,
     (req_handler)req_set_d3d11_fence_event,
+    (req_handler)req_set_window_logical_surface,
+    (req_handler)req_reference_window_logical_surface,
+    (req_handler)req_get_window_logical_surface,
+    (req_handler)req_set_window_logical_surface_metadata,
+    (req_handler)req_signal_window_logical_surface,
+    (req_handler)req_dirty_window_logical_surface,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -3153,3 +3165,37 @@ C_ASSERT( offsetof(struct set_d3d11_fence_event_request, fence) == 12 );
 C_ASSERT( offsetof(struct set_d3d11_fence_event_request, event) == 16 );
 C_ASSERT( offsetof(struct set_d3d11_fence_event_request, value) == 24 );
 C_ASSERT( sizeof(struct set_d3d11_fence_event_request) == 32 );
+C_ASSERT( offsetof(struct set_window_logical_surface_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_window_logical_surface_request, section) == 16 );
+C_ASSERT( offsetof(struct set_window_logical_surface_request, serial) == 20 );
+C_ASSERT( offsetof(struct set_window_logical_surface_request, width) == 24 );
+C_ASSERT( offsetof(struct set_window_logical_surface_request, height) == 28 );
+C_ASSERT( offsetof(struct set_window_logical_surface_request, stride) == 32 );
+C_ASSERT( sizeof(struct set_window_logical_surface_request) == 40 );
+C_ASSERT( offsetof(struct set_window_logical_surface_reply, serial) == 8 );
+C_ASSERT( sizeof(struct set_window_logical_surface_reply) == 16 );
+C_ASSERT( offsetof(struct reference_window_logical_surface_request, handle) == 12 );
+C_ASSERT( offsetof(struct reference_window_logical_surface_request, delta) == 16 );
+C_ASSERT( sizeof(struct reference_window_logical_surface_request) == 24 );
+C_ASSERT( offsetof(struct get_window_logical_surface_request, handle) == 12 );
+C_ASSERT( offsetof(struct get_window_logical_surface_request, consume_dirty) == 16 );
+C_ASSERT( sizeof(struct get_window_logical_surface_request) == 24 );
+C_ASSERT( offsetof(struct get_window_logical_surface_reply, section) == 8 );
+C_ASSERT( offsetof(struct get_window_logical_surface_reply, width) == 12 );
+C_ASSERT( offsetof(struct get_window_logical_surface_reply, height) == 16 );
+C_ASSERT( offsetof(struct get_window_logical_surface_reply, stride) == 20 );
+C_ASSERT( offsetof(struct get_window_logical_surface_reply, serial) == 24 );
+C_ASSERT( offsetof(struct get_window_logical_surface_reply, dirty) == 28 );
+C_ASSERT( offsetof(struct get_window_logical_surface_reply, update_id) == 32 );
+C_ASSERT( offsetof(struct get_window_logical_surface_reply, present_flags) == 40 );
+C_ASSERT( sizeof(struct get_window_logical_surface_reply) == 48 );
+C_ASSERT( offsetof(struct set_window_logical_surface_metadata_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_window_logical_surface_metadata_request, field) == 16 );
+C_ASSERT( offsetof(struct set_window_logical_surface_metadata_request, value) == 24 );
+C_ASSERT( sizeof(struct set_window_logical_surface_metadata_request) == 32 );
+C_ASSERT( offsetof(struct signal_window_logical_surface_request, handle) == 12 );
+C_ASSERT( offsetof(struct signal_window_logical_surface_request, event) == 16 );
+C_ASSERT( sizeof(struct signal_window_logical_surface_request) == 24 );
+C_ASSERT( offsetof(struct dirty_window_logical_surface_request, handle) == 12 );
+C_ASSERT( offsetof(struct dirty_window_logical_surface_request, serial) == 16 );
+C_ASSERT( sizeof(struct dirty_window_logical_surface_request) == 24 );

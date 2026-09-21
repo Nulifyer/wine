@@ -317,6 +317,11 @@ struct window_surface
     HRGN                               shape_region; /* shape of the window surface, unshaped if 0 */
     HBITMAP                            shape_bitmap; /* bitmap for the surface shape (1bpp) */
     HBITMAP                            color_bitmap; /* bitmap for the surface colors */
+    HANDLE                             logical_surface_section; /* section exported to DWM */
+    void                              *logical_surface_bits; /* mapped shared BGRA pixels */
+    SIZE_T                             logical_surface_size;
+    UINT                               logical_surface_stride;
+    UINT                               logical_surface_serial;
     /* driver-specific fields here */
 };
 

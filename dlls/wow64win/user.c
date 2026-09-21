@@ -88,6 +88,248 @@ typedef struct
     POINT   pt;
 } MSG32;
 
+static MSG *msg_32to64( MSG *msg, const MSG32 *msg32 );
+
+struct window_composition_attribute_data32
+{
+    int attribute;
+    ULONG data;
+    ULONG size;
+};
+
+NTSTATUS WINAPI wow64_NtUserBroadcastThemeChangeEvent( UINT *args )
+{
+    DWORD change = get_ulong( &args );
+    LONG flags = get_ulong( &args );
+
+    return NtUserBroadcastThemeChangeEvent( change, flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserCitSetInfo( UINT *args )
+{
+    UINT flags = get_ulong( &args );
+    const void *info = get_ptr( &args );
+
+    return NtUserCitSetInfo( flags, info );
+}
+
+NTSTATUS WINAPI wow64_NtUserCreateDCompositionHwndTarget( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    UINT type = get_ulong( &args );
+    ULONG *handle32 = get_ptr( &args );
+    HANDLE handle;
+    BOOL ret;
+
+    ret = NtUserCreateDCompositionHwndTarget( hwnd, type, handle32 ? &handle : NULL );
+    if (ret) put_handle( handle32, handle );
+    return ret;
+}
+
+NTSTATUS WINAPI wow64_NtUserDestroyDCompositionHwndTarget( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    UINT type = get_ulong( &args );
+
+    return NtUserDestroyDCompositionHwndTarget( hwnd, type );
+}
+
+NTSTATUS WINAPI wow64_NtUserDelegateInput( UINT *args )
+{
+    DWORD tid = get_ulong( &args );
+    void *callback = get_ptr( &args );
+    void *context = get_ptr( &args );
+    HWND hwnd = get_handle( &args );
+    UINT flags = get_ulong( &args );
+
+    return NtUserDelegateInput( tid, callback, context, hwnd, flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserUndelegateInput( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    UINT option = get_ulong( &args );
+
+    return NtUserUndelegateInput( hwnd, option );
+}
+
+NTSTATUS WINAPI wow64_NtUserHandleDelegatedInput( UINT *args )
+{
+    const MSG32 *msg32 = get_ptr( &args );
+    UINT option = get_ulong( &args );
+    MSG msg;
+
+    return NtUserHandleDelegatedInput( msg_32to64( &msg, msg32 ), option );
+}
+
+NTSTATUS WINAPI wow64_NtUserDwmKernelShutdown( UINT *args )
+{
+    return NtUserDwmKernelShutdown();
+}
+
+NTSTATUS WINAPI wow64_NtUserDwmKernelStartup( UINT *args )
+{
+    return NtUserDwmKernelStartup();
+}
+
+NTSTATUS WINAPI wow64_NtUserDwmLockScreenUpdates( UINT *args )
+{
+    return NtUserDwmLockScreenUpdates( get_ulong( &args ) );
+}
+
+NTSTATUS WINAPI wow64_NtUserEnableMouseInputForCursorSuppression( UINT *args )
+{
+    return NtUserEnableMouseInputForCursorSuppression( get_ulong( &args ) );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetActiveProcessesDpis( UINT *args )
+{
+    return NtUserGetActiveProcessesDpis();
+}
+
+NTSTATUS WINAPI wow64_NtUserGetCurrentDpiInfoForWindow( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    struct ntgdi_current_dpi_info *info = get_ptr( &args );
+
+    return NtUserGetCurrentDpiInfoForWindow( hwnd, info );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetDManipHookInitFunction( UINT *args )
+{
+    WCHAR *module = get_ptr( &args );
+    WCHAR *proc = get_ptr( &args );
+
+    return NtUserGetDManipHookInitFunction( module, proc );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetDesktopID( UINT *args )
+{
+    UINT selector = get_ulong( &args );
+    UINT64 *id = get_ptr( &args );
+
+    return NtUserGetDesktopID( selector, id );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetProcessUIContextInformation( UINT *args )
+{
+    HANDLE process = get_handle( &args );
+    struct ntuser_process_ui_context_information *information = get_ptr( &args );
+
+    return NtUserGetProcessUIContextInformation( process, information );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetUniformSpaceMapping( UINT *args )
+{
+    HMONITOR monitor = get_handle( &args );
+    RECT *mapping = get_ptr( &args );
+
+    return NtUserGetUniformSpaceMapping( monitor, mapping );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetWindowCompositionAttribute( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    const struct window_composition_attribute_data32 *data32 = get_ptr( &args );
+    struct window_composition_attribute_data data;
+
+    if (!data32) return NtUserGetWindowCompositionAttribute( hwnd, NULL );
+    data.attribute = data32->attribute;
+    data.data = ULongToPtr( data32->data );
+    data.size = data32->size;
+    return NtUserGetWindowCompositionAttribute( hwnd, &data );
+}
+
+NTSTATUS WINAPI wow64_NtUserSetWindowCompositionAttribute( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    const struct window_composition_attribute_data32 *data32 = get_ptr( &args );
+    struct window_composition_attribute_data data;
+
+    if (!data32) return NtUserSetWindowCompositionAttribute( hwnd, NULL );
+    data.attribute = data32->attribute;
+    data.data = ULongToPtr( data32->data );
+    data.size = data32->size;
+    return NtUserSetWindowCompositionAttribute( hwnd, &data );
+}
+
+NTSTATUS WINAPI wow64_NtUserLayoutCompleted( UINT *args )
+{
+    return NtUserLayoutCompleted( get_handle( &args ) );
+}
+
+NTSTATUS WINAPI wow64_NtUserLoadUserApiHook( UINT *args )
+{
+    return NtUserLoadUserApiHook();
+}
+
+NTSTATUS WINAPI wow64_NtUserQueryBSDRWindow( UINT *args )
+{
+    return HandleToUlong( NtUserQueryBSDRWindow() );
+}
+
+NTSTATUS WINAPI wow64_NtUserRegisterBSDRWindow( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    DWORD flags = get_ulong( &args );
+
+    return NtUserRegisterBSDRWindow( hwnd, flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserRegisterDManipHook( UINT *args )
+{
+    return NtUserRegisterDManipHook();
+}
+
+NTSTATUS WINAPI wow64_NtUserRegisterLogonProcess( UINT *args )
+{
+    DWORD process_id = get_ulong( &args );
+    BOOL secure = get_ulong( &args );
+
+    return NtUserRegisterLogonProcess( process_id, secure );
+}
+
+NTSTATUS WINAPI wow64_NtUserRegisterSessionPort( UINT *args )
+{
+    return NtUserRegisterSessionPort( get_handle( &args ) );
+}
+
+NTSTATUS WINAPI wow64_NtUserRegisterUserApiHook( UINT *args )
+{
+    UNICODE_STRING32 *module64_32 = get_ptr( &args );
+    UNICODE_STRING32 *proc64_32 = get_ptr( &args );
+    UNICODE_STRING32 *module32_32 = get_ptr( &args );
+    UNICODE_STRING32 *proc32_32 = get_ptr( &args );
+    UNICODE_STRING module64, proc64, module32, proc32;
+
+    return NtUserRegisterUserApiHook( unicode_str_32to64( &module64, module64_32 ),
+                                      unicode_str_32to64( &proc64, proc64_32 ),
+                                      unicode_str_32to64( &module32, module32_32 ),
+                                      unicode_str_32to64( &proc32, proc32_32 ) );
+}
+
+NTSTATUS WINAPI wow64_NtUserUnregisterUserApiHook( UINT *args )
+{
+    return NtUserUnregisterUserApiHook();
+}
+
+NTSTATUS WINAPI wow64_NtUserRemoteConnect( UINT *args )
+{
+    void *connect_info = get_ptr( &args );
+    ULONG operation = get_ulong( &args );
+    void *output = get_ptr( &args );
+
+    return NtUserRemoteConnect( connect_info, operation, output );
+}
+
+NTSTATUS WINAPI wow64_NtUserSetCoreWindow( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    BOOL enabled = get_ulong( &args );
+
+    return NtUserSetCoreWindow( hwnd, enabled );
+}
+
 typedef struct
 {
     DWORD dwType;
@@ -1477,6 +1719,35 @@ static NTSTATUS WINAPI wow64_NtUserUnpackDDEMessage( void *arg, ULONG size )
 static NTSTATUS WINAPI wow64_NtUserCallDispatchCallback( void *arg, ULONG size )
 {
     return dispatch_callback( NtUserCallDispatchCallback, arg, size );
+}
+
+static NTSTATUS WINAPI wow64_NtUserLoadUserApiHookCallback( void *arg, ULONG size )
+{
+    return dispatch_callback( NtUserLoadUserApiHookCallback, arg, size );
+}
+
+static NTSTATUS WINAPI wow64_NtUserCallDelegateThread( void *arg, ULONG size )
+{
+    const struct delegate_input_callback_params *params = arg;
+    struct
+    {
+        ULONG callback;
+        ULONG context;
+        MSG32 msg;
+    } params32;
+    UINT64 result = 0;
+    ULONG *result32;
+    ULONG ret_len;
+    NTSTATUS status;
+
+    if (size != sizeof(*params)) return STATUS_INVALID_PARAMETER;
+    params32.callback = params->callback;
+    params32.context = params->context;
+    msg_64to32( &params->msg, &params32.msg );
+    status = Wow64KiUserCallbackDispatcher( NtUserCallDelegateThread, &params32,
+                                            sizeof(params32), (void **)&result32, &ret_len );
+    if (!status && ret_len == sizeof(*result32)) result = *result32;
+    return NtCallbackReturn( &result, sizeof(result), status );
 }
 
 static NTSTATUS WINAPI wow64_NtUserDragDropEnter( void *arg, ULONG size )

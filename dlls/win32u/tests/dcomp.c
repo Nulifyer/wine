@@ -27,6 +27,7 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "winternl.h"
+#include "ntgdi.h"
 #include "ntuser.h"
 
 #define DESKTOP_ALL_ACCESS 0x01ff
@@ -1812,6 +1813,99 @@ done:
     CloseHandle( event );
 }
 
+static void test_gdi_sprite_bitmap_protocol(void)
+{
+    static const UINT create[] =
+    {
+        2, 1, 0x41, 0,
+        11, 1, 3, 0, 0x87654321, 0x12345678,
+        11, 1, 1, 0, 0x57, 0,
+        11, 1, 2, 0, 1, 0,
+    };
+    static const UINT expected_create[] =
+    {
+        16, 0x28, 1, 0x41,
+        20, 0x20c, 1, 0x87654321, 0x12345678,
+        16, 0x20a, 1, 0x57,
+        16, 0x20b, 1, 1,
+    };
+    static const UINT update[] =
+    {
+        11, 1, 3, 0, 0x87654321, 0x12345678,
+        11, 1, 1, 0, 0x1c, 0,
+        11, 1, 2, 0, 0, 0,
+    };
+    static const UINT expected_update[] =
+    {
+        16, 0x20a, 1, 0x1c,
+        16, 0x20b, 1, 0,
+    };
+    static const UINT bad_property[] = {11, 1, 4, 0, 1, 0};
+    static const UINT bad_format[] = {11, 1, 1, 0, 0, 1};
+    static const UINT release[] = {4, 1};
+    static const UINT expected_release[] = {12, 0x29, 1};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = NULL, state;
+    UINT channel = 0, size = 0x1000, batch;
+    UINT64 cookie = 0;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create GDI-sprite event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got GDI-sprite create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    status = process_dcomp_test_command( channel, buffer, create, sizeof(create) );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite property status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_property, sizeof(bad_property) );
+    ok( status == STATUS_INVALID_PARAMETER, "got bad GDI-sprite property status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_format, sizeof(bad_format) );
+    ok( status == STATUS_INVALID_PARAMETER, "got bad GDI-sprite format status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite create commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite create batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_create,
+                               sizeof(expected_create), "GDI-sprite create" );
+
+    status = process_dcomp_test_command( channel, buffer, update, sizeof(update) );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite update status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite update commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite update batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_update,
+                               sizeof(expected_update), "GDI-sprite update" );
+
+    status = process_dcomp_test_command( channel, buffer, release, sizeof(release) );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite release status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite release commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite release batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_release,
+                               sizeof(expected_release), "GDI-sprite release" );
+
+done:
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_legacy_render_target_protocol(void)
 {
     static const UINT commands[] =
@@ -2740,6 +2834,200 @@ static void test_token_manager_lifetime(void)
     CloseHandle( work_event );
 }
 
+struct hlsurf_test_surface_info
+{
+    UINT type;
+    UINT width;
+    UINT height;
+    UINT stride;
+    UINT flags;
+    UINT64 update_id;
+    LUID adapter_luid;
+    HANDLE section;
+};
+
+struct hlsurf_test_dirty_info
+{
+    UINT64 update_id;
+    HRGN dirty_region;
+    HRGN valid_region;
+    HRGN invalid_region;
+    UINT64 signal_id;
+    UINT64 present_id;
+    UINT present_flags;
+    UINT reserved;
+};
+
+struct hlsurf_test_signal_info
+{
+    BOOL enable;
+    UINT reserved;
+    HANDLE event;
+    LUID adapter_luid;
+};
+
+struct hlsurf_test_redirection_info
+{
+    UINT style;
+    UINT width;
+    UINT height;
+    LUID adapter_luid;
+    UINT reserved;
+    HANDLE section;
+};
+
+static void test_hlsurf_protocol(HWND window, HANDLE surface)
+{
+    BOOL (WINAPI *pDwmHLSurfOpenCompositorRef)(HANDLE);
+    BOOL (WINAPI *pDwmHLSurfCloseCompositorRef)(HANDLE);
+    BOOL (WINAPI *pDwmGetSurfaceData)(HANDLE, void *);
+    BOOL (WINAPI *pDwmGetRedirectionStyle)(HANDLE, void *);
+    BOOL (WINAPI *pDwmHLSurfGetDirtyRgn)(HANDLE, UINT64, HRGN *, HRGN *, HRGN *, UINT64 *, UINT64 *, UINT *, UINT *);
+    BOOL (WINAPI *pDwmHLSurfSetSignalOnDirty)(HANDLE, LUID, HANDLE, BOOL);
+    BOOL (WINAPI *pDwmHLsurfSetPresentFlags)(HANDLE, UINT);
+    BOOL (WINAPI *pDwmHLsurfSetUpdatedId)(HANDLE, const UINT64 *);
+    BOOL (WINAPI *pDwmGetDirtyRgn)(HANDLE, UINT64, HRGN *, HRGN *, HRGN *);
+    struct hlsurf_test_surface_info surface_info = {0};
+    struct hlsurf_test_dirty_info dirty_info = {0};
+    struct hlsurf_test_redirection_info redirection_info = {0};
+    HMODULE gdi32 = GetModuleHandleA( "gdi32.dll" );
+    SIZE_T view_size = 0;
+    UINT64 update_id = 0x123456789abcdef0, signal_id = 0, present_id = 0;
+    UINT present_flags = 0x24, reserved = 0;
+    void *view = NULL;
+    HANDLE event;
+    LUID adapter_luid = {0};
+    HBRUSH brush;
+    RECT rect;
+    HDC hdc;
+    BOOL ret;
+    NTSTATUS status;
+
+    pDwmHLSurfSetSignalOnDirty = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1000 );
+    pDwmHLsurfSetPresentFlags = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1001 );
+    pDwmHLsurfSetUpdatedId = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1002 );
+    pDwmGetSurfaceData = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1003 );
+    pDwmGetRedirectionStyle = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1006 );
+    pDwmHLSurfGetDirtyRgn = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1007 );
+    pDwmGetDirtyRgn = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1008 );
+    pDwmHLSurfOpenCompositorRef = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1009 );
+    pDwmHLSurfCloseCompositorRef = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1010 );
+    ok( pDwmHLSurfSetSignalOnDirty && pDwmHLsurfSetPresentFlags &&
+        pDwmHLsurfSetUpdatedId && pDwmGetSurfaceData && pDwmGetRedirectionStyle &&
+        pDwmHLSurfGetDirtyRgn && pDwmGetDirtyRgn && pDwmHLSurfOpenCompositorRef &&
+        pDwmHLSurfCloseCompositorRef, "missing private GDI32 HLSURF exports\n" );
+    if (!pDwmHLSurfSetSignalOnDirty || !pDwmHLsurfSetPresentFlags ||
+        !pDwmHLsurfSetUpdatedId || !pDwmGetSurfaceData || !pDwmGetRedirectionStyle ||
+        !pDwmHLSurfGetDirtyRgn || !pDwmGetDirtyRgn || !pDwmHLSurfOpenCompositorRef ||
+        !pDwmHLSurfCloseCompositorRef) return;
+
+    SetLastError( 0xdeadbeef );
+    ret = pDwmHLSurfOpenCompositorRef( surface );
+    ok( ret, "logical-surface open failed, error %lu\n", GetLastError() );
+    if (!ret) return;
+
+    ret = pDwmHLsurfSetPresentFlags( surface, present_flags );
+    ok( ret, "present-flags update failed, error %lu\n", GetLastError() );
+    ret = pDwmHLsurfSetUpdatedId( surface, &update_id );
+    ok( ret, "update-ID update failed, error %lu\n", GetLastError() );
+
+    ret = pDwmGetSurfaceData( surface, &surface_info );
+    ok( ret, "surface-data query failed, error %lu\n", GetLastError() );
+    ok( surface_info.type == 1, "got surface type %u\n", surface_info.type );
+    ok( surface_info.width >= 32 && surface_info.height >= 32,
+        "got surface size %ux%u\n", surface_info.width, surface_info.height );
+    ok( surface_info.stride >= surface_info.width * 4,
+        "got surface stride %u for width %u\n", surface_info.stride, surface_info.width );
+    ok( !!surface_info.section, "surface section is null\n" );
+    ok( surface_info.update_id == update_id, "got update ID %#I64x\n", surface_info.update_id );
+    if (surface_info.section)
+    {
+        status = NtMapViewOfSection( surface_info.section, GetCurrentProcess(), &view,
+                                     0, 0, NULL, &view_size, ViewUnmap, 0, PAGE_READONLY );
+        ok( !status, "surface section map returned %#lx\n", status );
+        if (view) NtUnmapViewOfSection( GetCurrentProcess(), view );
+        CloseHandle( surface_info.section );
+    }
+
+    ret = pDwmGetRedirectionStyle( surface, &redirection_info );
+    ok( ret, "redirection-style query failed, error %lu\n", GetLastError() );
+    ok( redirection_info.style == 1, "got redirection style %u\n", redirection_info.style );
+    ok( redirection_info.width == surface_info.width && redirection_info.height == surface_info.height,
+        "got redirection size %ux%u, expected %ux%u\n", redirection_info.width,
+        redirection_info.height, surface_info.width, surface_info.height );
+    ok( !!redirection_info.section, "redirection section is null\n" );
+    if (redirection_info.section) CloseHandle( redirection_info.section );
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "dirty event creation failed, error %lu\n", GetLastError() );
+    if (event)
+    {
+        ret = pDwmHLSurfSetSignalOnDirty( surface, adapter_luid, event, TRUE );
+        ok( ret, "dirty-event registration failed, error %lu\n", GetLastError() );
+
+        GetClientRect( window, &rect );
+        hdc = GetDC( window );
+        brush = CreateSolidBrush( RGB( 0x24, 0x68, 0xac ) );
+        ok( !!hdc && !!brush, "paint setup failed, dc %p brush %p\n", hdc, brush );
+        if (hdc && brush) FillRect( hdc, &rect, brush );
+        if (brush) DeleteObject( brush );
+        if (hdc) ReleaseDC( window, hdc );
+        GdiFlush();
+        ok( MsgWaitForMultipleObjects( 1, &event, FALSE, 2000, QS_ALLINPUT ) == WAIT_OBJECT_0,
+            "logical-surface dirty event was not signaled\n" );
+
+        ret = pDwmHLSurfSetSignalOnDirty( surface, adapter_luid, NULL, FALSE );
+        ok( ret, "dirty-event unregister failed, error %lu\n", GetLastError() );
+        CloseHandle( event );
+    }
+
+    ret = pDwmHLSurfGetDirtyRgn( surface, 0, &dirty_info.dirty_region,
+                                 &dirty_info.valid_region, &dirty_info.invalid_region,
+                                 &signal_id, &present_id, &dirty_info.present_flags, &reserved );
+    ok( ret, "dirty-region query failed, error %lu\n", GetLastError() );
+    ok( !!dirty_info.dirty_region && !!dirty_info.valid_region && !!dirty_info.invalid_region,
+        "got dirty regions %p, %p, %p\n", dirty_info.dirty_region,
+        dirty_info.valid_region, dirty_info.invalid_region );
+    ok( dirty_info.present_flags == present_flags, "got present flags %#x\n",
+        dirty_info.present_flags );
+    if (dirty_info.dirty_region) DeleteObject( dirty_info.dirty_region );
+    if (dirty_info.valid_region) DeleteObject( dirty_info.valid_region );
+    if (dirty_info.invalid_region) DeleteObject( dirty_info.invalid_region );
+
+    SetLastError( 0xdeadbeef );
+    ret = pDwmGetDirtyRgn( surface, 0, NULL, NULL, NULL );
+    ok( !ret && GetLastError() == ERROR_NOT_SUPPORTED,
+        "legacy dirty-region query returned %u, error %lu\n", ret, GetLastError() );
+
+    ret = pDwmHLSurfCloseCompositorRef( surface );
+    ok( ret, "logical-surface close failed, error %lu\n", GetLastError() );
+}
+
+static void test_hlsurf_destroyed_window_lifetime(HANDLE surface)
+{
+    BOOL (WINAPI *open_surface)(HANDLE);
+    BOOL (WINAPI *get_surface)(HANDLE, void *);
+    BOOL (WINAPI *close_surface)(HANDLE);
+    struct hlsurf_test_surface_info info = {0};
+    HMODULE gdi32 = GetModuleHandleA( "gdi32.dll" );
+    BOOL ret;
+
+    open_surface = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1009 );
+    get_surface = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1003 );
+    close_surface = (void *)GetProcAddress( gdi32, (const char *)(UINT_PTR)1010 );
+    if (!open_surface || !get_surface || !close_surface) return;
+
+    ret = open_surface( surface );
+    ok( ret, "queued logical surface did not outlive its HWND, error %lu\n", GetLastError() );
+    if (!ret) return;
+    ret = get_surface( surface, &info );
+    ok( ret && info.section, "destroyed-window surface query returned %u, section %p, error %lu\n",
+        ret, info.section, GetLastError() );
+    if (info.section) CloseHandle( info.section );
+    ret = close_surface( surface );
+    ok( ret, "destroyed-window surface close failed, error %lu\n", GetLastError() );
+}
+
 static void test_dwm_session_message_delivery(void)
 {
     BOOL (WINAPI *pGetDesktopID)(UINT, UINT64 *);
@@ -2760,6 +3048,7 @@ static void test_dwm_session_message_delivery(void)
     HWND target_window = NULL, no_redirection_window = NULL;
     HANDLE target = NULL, dwm_target = NULL;
     HANDLE port = NULL;
+    UINT64 logical_surface_token = 0;
     DPI_AWARENESS_CONTEXT previous_dpi_context;
     BOOL registered, scaled, saw_no_redirection_context = FALSE;
     NTSTATUS status;
@@ -3159,17 +3448,19 @@ static void test_dwm_session_message_delivery(void)
                 memcpy( &logical_surface, received.data + 42, sizeof(logical_surface) );
                 ok( sprite == target_window, "got updated sprite %p, expected %p\n",
                     sprite, target_window );
-                ok( received.data[3] & 0x8, "sprite update flags %#lx lack surface state\n",
+                ok( !(received.data[3] & 0x8),
+                    "unpainted sprite update flags %#lx contain surface state\n",
                     received.data[3] );
                 ok( received.data[4] == 1, "got mini-window-present value %#lx\n",
                     received.data[4] );
                 ok( sprite_desktop == default_id,
                     "got updated sprite desktop %#I64x, expected %#I64x\n",
                     sprite_desktop, default_id );
-                ok( logical_surface == (UINT_PTR)target_window,
-                    "got logical surface %#I64x, expected %p\n", logical_surface, target_window );
-                ok( received.data[45] && received.data[46],
-                    "got sprite surface size %lux%lu\n", received.data[45], received.data[46] );
+                ok( !logical_surface, "unpainted sprite has logical surface %#I64x\n",
+                    logical_surface );
+                ok( !received.data[45] && !received.data[46],
+                    "unpainted sprite has surface size %lux%lu\n",
+                    received.data[45], received.data[46] );
                 saw_sprite_update = TRUE;
                 continue;
             }
@@ -3221,6 +3512,7 @@ static void test_dwm_session_message_delivery(void)
             BOOL show = i != 1;
 
             ShowWindow( target_window, show ? SW_SHOW : SW_HIDE );
+            if (!i) UpdateWindow( target_window );
             for (j = 0; j < 512; ++j)
             {
                 memset( &received, 0, sizeof(received) );
@@ -3253,7 +3545,17 @@ static void test_dwm_session_message_delivery(void)
                         received.data[3], show );
                     saw_visibility = TRUE;
                 }
-                if (saw_style && saw_visibility) break;
+                else if (!i && received.data[0] == 0x40000006 &&
+                         (received.data[3] & 0x8))
+                {
+                    memcpy( &logical_surface_token, received.data + 42,
+                            sizeof(logical_surface_token) );
+                    ok( !!logical_surface_token, "painted sprite has no logical surface\n" );
+                    ok( received.data[45] && received.data[46],
+                        "painted sprite has surface size %lux%lu\n",
+                        received.data[45], received.data[46] );
+                }
+                if (saw_style && saw_visibility && (i || logical_surface_token)) break;
             }
             ok( saw_style, "window style change was not delivered\n" );
             ok( saw_visibility, "window visibility change was not delivered\n" );
@@ -3262,6 +3564,13 @@ static void test_dwm_session_message_delivery(void)
             ok( style_offset == GWL_STYLE, "got style offset %ld\n", style_offset );
             ok( !!(style_value & WS_VISIBLE) == show,
                 "got style %#lx, expected visible %u\n", style_value, show );
+            if (!i)
+            {
+                ok( !!logical_surface_token, "logical surface was not published after paint\n" );
+                if (logical_surface_token)
+                    test_hlsurf_protocol( target_window,
+                                          (HANDLE)(UINT_PTR)logical_surface_token );
+            }
         }
 
         for (i = 0; i < 2; ++i)
@@ -3411,6 +3720,8 @@ static void test_dwm_session_message_delivery(void)
         BOOL saw_sprite_destroy = FALSE, saw_destroy = FALSE;
 
         ok( DestroyWindow( target_window ), "target window destruction failed, error %lu\n", GetLastError() );
+        if (logical_surface_token)
+            test_hlsurf_destroyed_window_lifetime( (HANDLE)(UINT_PTR)logical_surface_token );
         for (i = 0; i < 16; ++i)
         {
             memset( &received, 0, sizeof(received) );
@@ -3484,6 +3795,7 @@ START_TEST(dcomp)
     test_shared_host_visual_lifecycle();
     test_window_target_shared_identity();
     test_window_node_properties();
+    test_gdi_sprite_bitmap_protocol();
     test_legacy_render_target_protocol();
     test_expression_graph();
     test_shared_manipulation_transform();

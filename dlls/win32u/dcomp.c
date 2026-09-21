@@ -129,6 +129,11 @@ struct dcomp_resource_view
     BYTE window_source_modifications[16];
     UINT64 window_sprite_handle;
     UINT64 window_handle;
+    UINT gdi_sprite_properties;
+    UINT gdi_sprite_dirty;
+    UINT gdi_sprite_pixel_format;
+    BOOL gdi_sprite_dirty_from_accumulation;
+    UINT64 gdi_sprite_surface;
     UINT64 render_target_monitor;
     UINT64 render_target_adapter_luid;
     UINT render_target_display_id;
@@ -213,6 +218,272 @@ static void set_last_status( NTSTATUS status )
 {
     NtCurrentTeb()->LastStatusValue = status;
     RtlSetLastWin32Error( RtlNtStatusToDosError( status ) );
+}
+
+struct hlsurf_surface_info
+{
+    UINT type;
+    UINT width;
+    UINT height;
+    UINT stride;
+    UINT flags;
+    UINT64 update_id;
+    LUID adapter_luid;
+    HANDLE section;
+};
+
+struct hlsurf_dirty_info
+{
+    UINT64 update_id;
+    HRGN dirty_region;
+    HRGN valid_region;
+    HRGN invalid_region;
+    UINT64 signal_id;
+    UINT64 present_id;
+    UINT present_flags;
+    UINT reserved;
+};
+
+struct hlsurf_signal_info
+{
+    BOOL enable;
+    UINT reserved;
+    HANDLE event;
+    LUID adapter_luid;
+};
+
+C_ASSERT( sizeof(struct hlsurf_surface_info) == 48 );
+C_ASSERT( sizeof(struct hlsurf_dirty_info) == 56 );
+C_ASSERT( sizeof(struct hlsurf_signal_info) == 24 );
+
+struct hlsurf_redirection_info
+{
+    UINT style;
+    UINT width;
+    UINT height;
+    LUID adapter_luid;
+    UINT reserved;
+    HANDLE section;
+};
+
+C_ASSERT( sizeof(struct hlsurf_redirection_info) == 32 );
+
+static NTSTATUS reference_window_logical_surface( HANDLE surface, int delta )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( reference_window_logical_surface )
+    {
+        req->handle = wine_server_user_handle( surface );
+        req->delta = delta;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS query_window_logical_surface( HANDLE surface, BOOL consume_dirty,
+                                              HANDLE *section, UINT *width, UINT *height,
+                                              UINT *stride, UINT *serial, BOOL *dirty,
+                                              UINT64 *update_id, UINT *present_flags )
+{
+    NTSTATUS status;
+
+    *section = NULL;
+    SERVER_START_REQ( get_window_logical_surface )
+    {
+        req->handle = wine_server_user_handle( surface );
+        req->consume_dirty = consume_dirty;
+        status = wine_server_call( req );
+        if (!status)
+        {
+            *section = wine_server_ptr_handle( reply->section );
+            *width = reply->width;
+            *height = reply->height;
+            *stride = reply->stride;
+            *serial = reply->serial;
+            *dirty = reply->dirty;
+            *update_id = reply->update_id;
+            *present_flags = reply->present_flags;
+        }
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS set_window_logical_surface_metadata( HANDLE surface, UINT field, UINT64 value )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( set_window_logical_surface_metadata )
+    {
+        req->handle = wine_server_user_handle( surface );
+        req->field = field;
+        req->value = value;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS signal_window_logical_surface( HANDLE surface, HANDLE event )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( signal_window_logical_surface )
+    {
+        req->handle = wine_server_user_handle( surface );
+        req->event = wine_server_obj_handle( event );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+BOOL WINAPI NtGdiHLSurfGetInformation( HANDLE surface, UINT type, void *buffer, UINT *size )
+{
+    struct hlsurf_surface_info surface_info = {0};
+    struct hlsurf_dirty_info dirty_info = {0};
+    struct hlsurf_redirection_info redirection_info = {0};
+    HANDLE section;
+    UINT width, height, stride, serial;
+    UINT64 update_id;
+    UINT present_flags;
+    BOOL dirty;
+    NTSTATUS status;
+    UINT required;
+
+    TRACE( "surface %p, type %u, buffer %p, size %p\n", surface, type, buffer, size );
+
+    if (!size || !buffer)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    if (type == 3) required = sizeof(surface_info);
+    else if (type == 4 || type == 9) required = sizeof(dirty_info);
+    else if (type == 6) required = sizeof(redirection_info);
+    else
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    if (*size < required)
+    {
+        RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
+        return FALSE;
+    }
+
+    status = query_window_logical_surface( surface, type == 4 || type == 9,
+                                           &section, &width, &height, &stride,
+                                           &serial, &dirty, &update_id, &present_flags );
+    if (status)
+    {
+        set_last_status( status );
+        return FALSE;
+    }
+
+    if (type == 3)
+    {
+        surface_info.type = 1; /* section-backed GDI bitmap */
+        surface_info.width = width;
+        surface_info.height = height;
+        surface_info.stride = stride;
+        surface_info.update_id = update_id;
+        surface_info.section = section;
+        memcpy( buffer, &surface_info, sizeof(surface_info) );
+    }
+    else if (type == 4 || type == 9)
+    {
+        LONG right = dirty ? width : 0, bottom = dirty ? height : 0;
+
+        NtClose( section );
+        dirty_info.dirty_region = NtGdiCreateRectRgn( 0, 0, right, bottom );
+        dirty_info.valid_region = NtGdiCreateRectRgn( 0, 0, right, bottom );
+        dirty_info.invalid_region = NtGdiCreateRectRgn( 0, 0, right, bottom );
+        dirty_info.update_id = update_id;
+        dirty_info.present_flags = present_flags;
+        if (!dirty_info.dirty_region || !dirty_info.valid_region || !dirty_info.invalid_region)
+        {
+            if (dirty_info.dirty_region) NtGdiDeleteObjectApp( dirty_info.dirty_region );
+            if (dirty_info.valid_region) NtGdiDeleteObjectApp( dirty_info.valid_region );
+            if (dirty_info.invalid_region) NtGdiDeleteObjectApp( dirty_info.invalid_region );
+            RtlSetLastWin32Error( ERROR_NOT_ENOUGH_MEMORY );
+            return FALSE;
+        }
+        memcpy( buffer, &dirty_info, sizeof(dirty_info) );
+    }
+    else
+    {
+        redirection_info.style = 1; /* section-backed GDI bitmap */
+        redirection_info.width = width;
+        redirection_info.height = height;
+        redirection_info.section = section;
+        memcpy( buffer, &redirection_info, sizeof(redirection_info) );
+    }
+    return TRUE;
+}
+
+BOOL WINAPI NtGdiHLSurfSetInformation( HANDLE surface, UINT type, const void *buffer, UINT size )
+{
+    const struct hlsurf_signal_info *signal = buffer;
+    NTSTATUS status;
+
+    TRACE( "surface %p, type %u, buffer %p, size %u\n", surface, type, buffer, size );
+
+    switch (type)
+    {
+    case 1:
+        if (!buffer || size < sizeof(UINT))
+        {
+            RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+        status = set_window_logical_surface_metadata( surface, type, *(const UINT *)buffer );
+        break;
+    case 2:
+        if (!buffer || size < sizeof(UINT64))
+        {
+            RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+        status = set_window_logical_surface_metadata( surface, type, *(const UINT64 *)buffer );
+        break;
+    case 5:
+        if (!buffer || size < sizeof(*signal))
+        {
+            RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+        status = signal_window_logical_surface( surface,
+                                                signal->enable ? signal->event : NULL );
+        break;
+    case 7:
+        if (buffer || size)
+        {
+            RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+        status = reference_window_logical_surface( surface, 1 );
+        break;
+    case 8:
+        if (buffer || size)
+        {
+            RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+        status = reference_window_logical_surface( surface, -1 );
+        break;
+    default:
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    if (status)
+    {
+        set_last_status( status );
+        return FALSE;
+    }
+    return TRUE;
 }
 
 static struct dcomp_channel_view *find_dcomp_channel_view( UINT channel )
@@ -492,6 +763,42 @@ static NTSTATUS set_dcomp_manipulation_integer_property( struct dcomp_resource_v
     if (property != 6) return STATUS_NOT_SUPPORTED;
     resource->manipulation_tracing_cookie = value;
     resource->manipulation_cookie_dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_gdi_sprite_integer_property( struct dcomp_resource_view *resource,
+                                                        UINT property, INT64 value )
+{
+    UINT bit, int_value;
+    UINT64 uint64_value;
+
+    if (property < 1 || property > 3) return STATUS_INVALID_PARAMETER;
+    bit = 1u << (property - 1);
+
+    switch (property)
+    {
+    case 1:
+        if (value != (INT64)(INT)value) return STATUS_INVALID_PARAMETER;
+        int_value = value;
+        if ((resource->gdi_sprite_properties & bit) &&
+            resource->gdi_sprite_pixel_format == int_value) return STATUS_SUCCESS;
+        resource->gdi_sprite_pixel_format = int_value;
+        break;
+    case 2:
+        int_value = !!value;
+        if ((resource->gdi_sprite_properties & bit) &&
+            resource->gdi_sprite_dirty_from_accumulation == int_value) return STATUS_SUCCESS;
+        resource->gdi_sprite_dirty_from_accumulation = int_value;
+        break;
+    case 3:
+        uint64_value = value;
+        if ((resource->gdi_sprite_properties & bit) &&
+            resource->gdi_sprite_surface == uint64_value) return STATUS_SUCCESS;
+        resource->gdi_sprite_surface = uint64_value;
+        break;
+    }
+    resource->gdi_sprite_properties |= bit;
+    resource->gdi_sprite_dirty |= bit;
     return STATUS_SUCCESS;
 }
 
@@ -1571,6 +1878,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                 status = set_dcomp_manipulation_integer_property( resource, property, value );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 0x41)
+            {
+                if ((status = set_dcomp_gdi_sprite_integer_property( resource,
+                                                                      property, value )))
+                    return status;
+            }
             else if (resource->type == 0x60)
             {
                 if ((status = set_dcomp_legacy_target_integer_property( resource,
@@ -1869,6 +2182,52 @@ static BYTE *emit_dcomp_reference_update( BYTE *cursor, UINT opcode, UINT id,
 
     memcpy( cursor, command, sizeof(command) );
     return cursor + sizeof(command);
+}
+
+static data_size_t dcomp_gdi_sprite_update_size( const struct dcomp_resource_view *resource )
+{
+    data_size_t size = 0;
+
+    if (resource->gdi_sprite_dirty & 1) size += 16;
+    if (resource->gdi_sprite_dirty & 2) size += 16;
+    if (resource->gdi_sprite_dirty & 4) size += 20;
+    return size;
+}
+
+static BYTE *emit_dcomp_gdi_sprite_updates( BYTE *cursor,
+                                             const struct dcomp_resource_view *resource )
+{
+    UINT command[5];
+
+    if (resource->gdi_sprite_dirty & 4)
+    {
+        command[0] = 20;
+        command[1] = 0x20c;
+        command[2] = resource->id;
+        memcpy( command + 3, &resource->gdi_sprite_surface,
+                sizeof(resource->gdi_sprite_surface) );
+        memcpy( cursor, command, 20 );
+        cursor += 20;
+    }
+    if (resource->gdi_sprite_dirty & 1)
+    {
+        command[0] = 16;
+        command[1] = 0x20a;
+        command[2] = resource->id;
+        command[3] = resource->gdi_sprite_pixel_format;
+        memcpy( cursor, command, 16 );
+        cursor += 16;
+    }
+    if (resource->gdi_sprite_dirty & 2)
+    {
+        command[0] = 16;
+        command[1] = 0x20b;
+        command[2] = resource->id;
+        command[3] = resource->gdi_sprite_dirty_from_accumulation;
+        memcpy( cursor, command, 16 );
+        cursor += 16;
+    }
+    return cursor;
 }
 
 static data_size_t dcomp_window_node_update_size( const struct dcomp_resource_view *resource )
@@ -2347,6 +2706,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         if (resource->visual_size_dirty) resource_size += 20;
         if (!resource->released && resource->type == 0xc0)
             resource_size += dcomp_window_node_update_size( resource );
+        if (!resource->released && resource->type == 0x41)
+            resource_size += dcomp_gdi_sprite_update_size( resource );
         if (!resource->released && resource->type == 0x36)
             resource_size += dcomp_desktop_tree_update_size( resource );
         if (!resource->released && resource->type == 0x60)
@@ -2394,6 +2755,11 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             memcpy( cursor, command, sizeof(command) );
             cursor += sizeof(command);
         }
+    }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        if (!resource->released && resource->type == 0x41)
+            cursor = emit_dcomp_gdi_sprite_updates( cursor, resource );
     }
     /* Preserve proxy creation order.  Genuine clients create the legacy target
      * before its desktop tree and send the target association before later tree
@@ -2609,6 +2975,7 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
             resource->visual_relative_size_dirty = FALSE;
             resource->visual_size_dirty = FALSE;
             resource->window_node_dirty = 0;
+            resource->gdi_sprite_dirty = 0;
             resource->render_target_create_dirty = FALSE;
             resource->render_target_desktop_tree_dirty = FALSE;
             resource->render_target_transform_dirty = FALSE;

@@ -2966,6 +2966,7 @@ enum message_type
     struct rectangle client;      /* client rectangle */
     struct rectangle visible;     /* visible rectangle */
 @END
+
 enum coords_relative
 {
     COORDS_CLIENT,   /* relative to client area */
@@ -5280,4 +5281,56 @@ struct alpc_message_info
     obj_handle_t fence;           /* private fence handle */
     obj_handle_t event;           /* event with modify-state access */
     unsigned __int64 value;       /* value awaited by this registration */
+@END
+
+/* Publish the section-backed GDI surface associated with a window. */
+@REQ(set_window_logical_surface)
+    user_handle_t  handle;        /* handle to the window */
+    obj_handle_t   section;       /* section containing BGRA pixels, or zero to clear */
+    unsigned int   serial;        /* serial to match when clearing */
+    unsigned int   width;         /* surface width in pixels */
+    unsigned int   height;        /* surface height in pixels */
+    unsigned int   stride;        /* surface stride in bytes */
+@REPLY
+    unsigned int   serial;        /* assigned surface serial */
+@END
+
+/* Open or close a compositor reference on a window logical surface. */
+@REQ(reference_window_logical_surface)
+    user_handle_t  handle;        /* logical-surface window handle */
+    int            delta;         /* +1 to open, -1 to close */
+@END
+
+/* Duplicate a referenced window logical-surface section into DWM. */
+@REQ(get_window_logical_surface)
+    user_handle_t  handle;        /* logical-surface window handle */
+    int            consume_dirty; /* clear dirty state after this query */
+@REPLY
+    obj_handle_t   section;       /* section handle in the calling process */
+    unsigned int   width;         /* surface width in pixels */
+    unsigned int   height;        /* surface height in pixels */
+    unsigned int   stride;        /* surface stride in bytes */
+    unsigned int   serial;        /* current surface serial */
+    int            dirty;         /* surface changed since the last query */
+    unsigned __int64 update_id;   /* update ID assigned by DWM */
+    unsigned int   present_flags; /* DWM presentation flags */
+@END
+
+/* Set DWM-owned metadata on a referenced window logical surface. */
+@REQ(set_window_logical_surface_metadata)
+    user_handle_t  handle;        /* logical-surface window handle */
+    int            field;         /* 1 for present flags, 2 for update ID */
+    unsigned __int64 value;       /* new field value */
+@END
+
+/* Register DWM's dirty notification event for a logical surface. */
+@REQ(signal_window_logical_surface)
+    user_handle_t  handle;        /* logical-surface window handle */
+    obj_handle_t   event;         /* DWM event handle, or zero to unregister */
+@END
+
+/* Mark a window logical surface dirty after its shared pixels change. */
+@REQ(dirty_window_logical_surface)
+    user_handle_t  handle;        /* logical-surface window handle */
+    unsigned int   serial;        /* publishing surface serial */
 @END

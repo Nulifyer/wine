@@ -3995,6 +3995,7 @@ struct get_window_rectangles_reply
     struct rectangle client;
     struct rectangle visible;
 };
+
 enum coords_relative
 {
     COORDS_CLIENT,
@@ -7879,6 +7880,100 @@ struct set_d3d11_fence_event_reply
 };
 
 
+struct set_window_logical_surface_request
+{
+    struct request_header __header;
+    user_handle_t  handle;
+    obj_handle_t   section;
+    unsigned int   serial;
+    unsigned int   width;
+    unsigned int   height;
+    unsigned int   stride;
+    char __pad_36[4];
+};
+struct set_window_logical_surface_reply
+{
+    struct reply_header __header;
+    unsigned int   serial;
+    char __pad_12[4];
+};
+
+
+struct reference_window_logical_surface_request
+{
+    struct request_header __header;
+    user_handle_t  handle;
+    int            delta;
+    char __pad_20[4];
+};
+struct reference_window_logical_surface_reply
+{
+    struct reply_header __header;
+};
+
+
+struct get_window_logical_surface_request
+{
+    struct request_header __header;
+    user_handle_t  handle;
+    int            consume_dirty;
+    char __pad_20[4];
+};
+struct get_window_logical_surface_reply
+{
+    struct reply_header __header;
+    obj_handle_t   section;
+    unsigned int   width;
+    unsigned int   height;
+    unsigned int   stride;
+    unsigned int   serial;
+    int            dirty;
+    unsigned __int64 update_id;
+    unsigned int   present_flags;
+    char __pad_44[4];
+};
+
+
+struct set_window_logical_surface_metadata_request
+{
+    struct request_header __header;
+    user_handle_t  handle;
+    int            field;
+    char __pad_20[4];
+    unsigned __int64 value;
+};
+struct set_window_logical_surface_metadata_reply
+{
+    struct reply_header __header;
+};
+
+
+struct signal_window_logical_surface_request
+{
+    struct request_header __header;
+    user_handle_t  handle;
+    obj_handle_t   event;
+    char __pad_20[4];
+};
+struct signal_window_logical_surface_reply
+{
+    struct reply_header __header;
+};
+
+
+struct dirty_window_logical_surface_request
+{
+    struct request_header __header;
+    user_handle_t  handle;
+    unsigned int   serial;
+    char __pad_20[4];
+};
+struct dirty_window_logical_surface_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -8296,6 +8391,12 @@ enum request
     REQ_query_d3d11_fence,
     REQ_signal_d3d11_fence,
     REQ_set_d3d11_fence_event,
+    REQ_set_window_logical_surface,
+    REQ_reference_window_logical_surface,
+    REQ_get_window_logical_surface,
+    REQ_set_window_logical_surface_metadata,
+    REQ_signal_window_logical_surface,
+    REQ_dirty_window_logical_surface,
     REQ_NB_REQUESTS
 };
 
@@ -8718,6 +8819,12 @@ union generic_request
     struct query_d3d11_fence_request query_d3d11_fence_request;
     struct signal_d3d11_fence_request signal_d3d11_fence_request;
     struct set_d3d11_fence_event_request set_d3d11_fence_event_request;
+    struct set_window_logical_surface_request set_window_logical_surface_request;
+    struct reference_window_logical_surface_request reference_window_logical_surface_request;
+    struct get_window_logical_surface_request get_window_logical_surface_request;
+    struct set_window_logical_surface_metadata_request set_window_logical_surface_metadata_request;
+    struct signal_window_logical_surface_request signal_window_logical_surface_request;
+    struct dirty_window_logical_surface_request dirty_window_logical_surface_request;
 };
 union generic_reply
 {
@@ -9138,8 +9245,14 @@ union generic_reply
     struct query_d3d11_fence_reply query_d3d11_fence_reply;
     struct signal_d3d11_fence_reply signal_d3d11_fence_reply;
     struct set_d3d11_fence_event_reply set_d3d11_fence_event_reply;
+    struct set_window_logical_surface_reply set_window_logical_surface_reply;
+    struct reference_window_logical_surface_reply reference_window_logical_surface_reply;
+    struct get_window_logical_surface_reply get_window_logical_surface_reply;
+    struct set_window_logical_surface_metadata_reply set_window_logical_surface_metadata_reply;
+    struct signal_window_logical_surface_reply signal_window_logical_surface_reply;
+    struct dirty_window_logical_surface_reply dirty_window_logical_surface_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1046
+#define SERVER_PROTOCOL_VERSION 1049
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

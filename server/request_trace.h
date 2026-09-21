@@ -4599,6 +4599,64 @@ static void dump_set_d3d11_fence_event_request( const struct set_d3d11_fence_eve
     dump_uint64( ", value=", &req->value );
 }
 
+static void dump_set_window_logical_surface_request( const struct set_window_logical_surface_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", section=%04x", req->section );
+    fprintf( stderr, ", serial=%08x", req->serial );
+    fprintf( stderr, ", width=%08x", req->width );
+    fprintf( stderr, ", height=%08x", req->height );
+    fprintf( stderr, ", stride=%08x", req->stride );
+}
+
+static void dump_set_window_logical_surface_reply( const struct set_window_logical_surface_reply *req )
+{
+    fprintf( stderr, " serial=%08x", req->serial );
+}
+
+static void dump_reference_window_logical_surface_request( const struct reference_window_logical_surface_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", delta=%d", req->delta );
+}
+
+static void dump_get_window_logical_surface_request( const struct get_window_logical_surface_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", consume_dirty=%d", req->consume_dirty );
+}
+
+static void dump_get_window_logical_surface_reply( const struct get_window_logical_surface_reply *req )
+{
+    fprintf( stderr, " section=%04x", req->section );
+    fprintf( stderr, ", width=%08x", req->width );
+    fprintf( stderr, ", height=%08x", req->height );
+    fprintf( stderr, ", stride=%08x", req->stride );
+    fprintf( stderr, ", serial=%08x", req->serial );
+    fprintf( stderr, ", dirty=%d", req->dirty );
+    dump_uint64( ", update_id=", &req->update_id );
+    fprintf( stderr, ", present_flags=%08x", req->present_flags );
+}
+
+static void dump_set_window_logical_surface_metadata_request( const struct set_window_logical_surface_metadata_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", field=%d", req->field );
+    dump_uint64( ", value=", &req->value );
+}
+
+static void dump_signal_window_logical_surface_request( const struct signal_window_logical_surface_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", event=%04x", req->event );
+}
+
+static void dump_dirty_window_logical_surface_request( const struct dirty_window_logical_surface_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", serial=%08x", req->serial );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -5018,6 +5076,12 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_query_d3d11_fence_request,
     (dump_func)dump_signal_d3d11_fence_request,
     (dump_func)dump_set_d3d11_fence_event_request,
+    (dump_func)dump_set_window_logical_surface_request,
+    (dump_func)dump_reference_window_logical_surface_request,
+    (dump_func)dump_get_window_logical_surface_request,
+    (dump_func)dump_set_window_logical_surface_metadata_request,
+    (dump_func)dump_signal_window_logical_surface_request,
+    (dump_func)dump_dirty_window_logical_surface_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5435,6 +5499,12 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_share_d3d11_fence_reply,
     (dump_func)dump_open_d3d11_fence_reply,
     (dump_func)dump_query_d3d11_fence_reply,
+    NULL,
+    NULL,
+    (dump_func)dump_set_window_logical_surface_reply,
+    NULL,
+    (dump_func)dump_get_window_logical_surface_reply,
+    NULL,
     NULL,
     NULL,
 };
@@ -5856,6 +5926,12 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "query_d3d11_fence",
     "signal_d3d11_fence",
     "set_d3d11_fence_event",
+    "set_window_logical_surface",
+    "reference_window_logical_surface",
+    "get_window_logical_surface",
+    "set_window_logical_surface_metadata",
+    "signal_window_logical_surface",
+    "dirty_window_logical_surface",
 };
 
 static const struct

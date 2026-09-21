@@ -323,7 +323,6 @@ apiset api-ms-win-shell-shellfolders-l1-1-0 = windows.storage.dll
 apiset api-ms-win-shlwapi-ie-l1-1-0 = shlwapi.dll
 apiset api-ms-win-shlwapi-winrt-storage-l1-1-1 = shlwapi.dll
 apiset api-ms-win-stateseparation-helpers-l1-1-0 = kernelbase.dll
-apiset api-ms-win-stateseparation-helpers-l1-1-1 = kernelbase.dll
 apiset api-ms-win-storage-exports-external-l1-1-2 = windows.storage.dll
 apiset api-ms-win-storage-exports-internal-l1-1-0 = windows.storage.dll
 apiset ext-ms-mf-pal-l2-1-1 =

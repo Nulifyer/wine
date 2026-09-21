@@ -465,6 +465,16 @@ NTSTATUS WINAPI wow64_NtAllocateUuids( UINT *args )
 }
 
 /**********************************************************************
+ *           wow64_NtSetUuidSeed
+ */
+NTSTATUS WINAPI wow64_NtSetUuidSeed( UINT *args )
+{
+    UCHAR *seed = get_ptr( &args );
+
+    return NtSetUuidSeed( seed );
+}
+
+/**********************************************************************
  *           wow64_NtAlpcAcceptConnectPort
  */
 NTSTATUS WINAPI wow64_NtAlpcAcceptConnectPort( UINT *args )
@@ -547,6 +557,62 @@ NTSTATUS WINAPI wow64_NtAlpcConnectPort( UINT *args )
     }
     if (status == STATUS_SUCCESS || status == STATUS_BUFFER_TOO_SMALL)
         alpc_port_message_attributes_64to32( recv_msg_attr32, recv_msg_attr, status == STATUS_BUFFER_TOO_SMALL );
+    return status;
+}
+
+/**********************************************************************
+ *           wow64_NtAlpcConnectPortEx
+ */
+NTSTATUS WINAPI wow64_NtAlpcConnectPortEx( UINT *args )
+{
+    ULONG *handle_ptr = get_ptr( &args );
+    OBJECT_ATTRIBUTES32 *connection_attr32 = get_ptr( &args );
+    OBJECT_ATTRIBUTES32 *client_attr32 = get_ptr( &args );
+    ALPC_PORT_ATTRIBUTES32 *port_attr32 = get_ptr( &args );
+    ULONG flags = get_ulong( &args );
+    SECURITY_DESCRIPTOR *security32 = get_ptr( &args );
+    ALPC_PORT_MESSAGE32 *msg32 = get_ptr( &args );
+    ULONG *size32 = get_ptr( &args );
+    ALPC_MESSAGE_ATTRIBUTES32 *out_msg_attr32 = get_ptr( &args );
+    ALPC_MESSAGE_ATTRIBUTES32 *in_msg_attr32 = get_ptr( &args );
+    LARGE_INTEGER *timeout = get_ptr( &args );
+    struct object_attr64 connection_attr, client_attr;
+    ALPC_PORT_ATTRIBUTES port_attr;
+    ALPC_MESSAGE_ATTRIBUTES *out_msg_attr, *in_msg_attr;
+    SECURITY_DESCRIPTOR security;
+    ALPC_PORT_MESSAGE *msg;
+    SIZE_T size = size32 ? (*size32 + sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)) : 65535;
+    HANDLE handle = 0;
+    NTSTATUS status;
+
+    if (!handle_ptr) return STATUS_ACCESS_VIOLATION;
+    if (port_attr32 && (!port_attr32->MaxMessageLength ||
+                        port_attr32->MaxMessageLength > 65535 -
+                        (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32))))
+        return STATUS_INVALID_PARAMETER;
+
+    status = NtAlpcConnectPortEx( &handle,
+                                  objattr_32to64( &connection_attr, connection_attr32 ),
+                                  objattr_32to64( &client_attr, client_attr32 ),
+                                  alpc_port_attributes_32to64( &port_attr, port_attr32 ),
+                                  flags, secdesc_32to64( &security, security32 ),
+                                  alpc_port_message_32to64( &msg, size, msg32, TRUE ), &size,
+                                  alpc_port_message_attributes_32to64( &out_msg_attr, out_msg_attr32, TRUE ),
+                                  alpc_port_message_attributes_32to64( &in_msg_attr, in_msg_attr32, FALSE ),
+                                  timeout );
+    if (status == STATUS_SUCCESS)
+    {
+        put_handle( handle_ptr, handle );
+        if (size32) put_size( size32, size - (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)) );
+        alpc_port_message_64to32( msg32, msg );
+    }
+    else if (status == STATUS_BUFFER_TOO_SMALL && size32)
+    {
+        put_size( size32, size - (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)) );
+    }
+    if (status == STATUS_SUCCESS || status == STATUS_BUFFER_TOO_SMALL)
+        alpc_port_message_attributes_64to32( in_msg_attr32, in_msg_attr,
+                                             status == STATUS_BUFFER_TOO_SMALL );
     return status;
 }
 

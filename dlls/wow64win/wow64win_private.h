@@ -70,6 +70,11 @@ static inline void put_addr( ULONG *addr32, void *addr )
     if (addr32) *addr32 = PtrToUlong( addr );
 }
 
+static inline void put_handle( ULONG *handle32, HANDLE handle )
+{
+    if (handle32) *handle32 = HandleToUlong( handle );
+}
+
 static inline void put_size( ULONG *size32, SIZE_T size )
 {
     if (size32) *size32 = min( size, MAXDWORD );

@@ -560,8 +560,8 @@
     SYSCALL_ENTRY( 0x122c, NtGdiGetUFIPathname, 0 ) \
     SYSCALL_ENTRY( 0x122d, NtGdiGetWidthTable, 0 ) \
     SYSCALL_ENTRY( 0x122e, NtGdiGradientFill, 24 ) \
-    SYSCALL_ENTRY( 0x122f, NtGdiHLSurfGetInformation, 0 ) \
-    SYSCALL_ENTRY( 0x1230, NtGdiHLSurfSetInformation, 0 ) \
+    SYSCALL_ENTRY( 0x122f, NtGdiHLSurfGetInformation, 16 ) \
+    SYSCALL_ENTRY( 0x1230, NtGdiHLSurfSetInformation, 16 ) \
     SYSCALL_ENTRY( 0x1231, NtGdiHT_Get8BPPFormatPalette, 0 ) \
     SYSCALL_ENTRY( 0x1232, NtGdiHT_Get8BPPMaskPalette, 0 ) \
     SYSCALL_ENTRY( 0x1233, NtGdiHfontCreate, 20 ) \
@@ -2102,8 +2102,8 @@
     SYSCALL_ENTRY( 0x122c, NtGdiGetUFIPathname, 0 ) \
     SYSCALL_ENTRY( 0x122d, NtGdiGetWidthTable, 0 ) \
     SYSCALL_ENTRY( 0x122e, NtGdiGradientFill, 48 ) \
-    SYSCALL_ENTRY( 0x122f, NtGdiHLSurfGetInformation, 0 ) \
-    SYSCALL_ENTRY( 0x1230, NtGdiHLSurfSetInformation, 0 ) \
+    SYSCALL_ENTRY( 0x122f, NtGdiHLSurfGetInformation, 32 ) \
+    SYSCALL_ENTRY( 0x1230, NtGdiHLSurfSetInformation, 32 ) \
     SYSCALL_ENTRY( 0x1231, NtGdiHT_Get8BPPFormatPalette, 0 ) \
     SYSCALL_ENTRY( 0x1232, NtGdiHT_Get8BPPMaskPalette, 0 ) \
     SYSCALL_ENTRY( 0x1233, NtGdiHfontCreate, 40 ) \
@@ -3466,8 +3466,6 @@
     SYSCALL_STUB( NtGdiGetUFI ) \
     SYSCALL_STUB( NtGdiGetUFIPathname ) \
     SYSCALL_STUB( NtGdiGetWidthTable ) \
-    SYSCALL_STUB( NtGdiHLSurfGetInformation ) \
-    SYSCALL_STUB( NtGdiHLSurfSetInformation ) \
     SYSCALL_STUB( NtGdiHT_Get8BPPFormatPalette ) \
     SYSCALL_STUB( NtGdiHT_Get8BPPMaskPalette ) \
     SYSCALL_STUB( NtGdiInit ) \

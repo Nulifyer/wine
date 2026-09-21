@@ -1,14 +1,14 @@
-1000 stub @
-1001 stub @
-1002 stub @
-1003 stub @
+1000 stdcall -noname DwmHLSurfSetSignalOnDirty(long int64 long long)
+1001 stdcall -noname DwmHLsurfSetPresentFlags(long long)
+1002 stdcall -noname DwmHLsurfSetUpdatedId(long ptr)
+1003 stdcall -noname DwmGetSurfaceData(long ptr)
 1004 stdcall -noname DrvQueryAdapterPopulationUniqueness()
 1005 stdcall DwmQueryCompositionId()
-1006 stub @
-1007 stub @
-1008 stub @
-1009 stub @
-1010 stub @
+1006 stdcall -noname DwmGetRedirectionStyle(long ptr)
+1007 stdcall -noname DwmHLSurfGetDirtyRgn(long int64 ptr ptr ptr ptr ptr ptr ptr)
+1008 stdcall -noname DwmGetDirtyRgn(long int64 ptr ptr ptr)
+1009 stdcall -noname DwmHLSurfOpenCompositorRef(long)
+1010 stdcall -noname DwmHLSurfCloseCompositorRef(long)
 
 1013 stub @
 1014 stub DwmCreatedBitmapRemotingOutput

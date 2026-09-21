@@ -425,6 +425,8 @@ W32KAPI BOOL     WINAPI NtGdiGetRasterizerCaps( RASTERIZER_STATUS *status, UINT 
 W32KAPI BOOL     WINAPI NtGdiGetRealizationInfo( HDC hdc, struct font_realization_info *info );
 W32KAPI DWORD    WINAPI NtGdiGetRegionData( HRGN hrgn, DWORD count, RGNDATA *data );
 W32KAPI INT      WINAPI NtGdiGetRgnBox( HRGN hrgn, RECT *rect );
+W32KAPI BOOL     WINAPI NtGdiHLSurfGetInformation( HANDLE surface, UINT type, void *buffer, UINT *size );
+W32KAPI BOOL     WINAPI NtGdiHLSurfSetInformation( HANDLE surface, UINT type, const void *buffer, UINT size );
 W32KAPI DWORD    WINAPI NtGdiGetSpoolMessage( void *ptr1, DWORD data2, void *ptr3, DWORD data4 );
 W32KAPI UINT     WINAPI NtGdiGetSystemPaletteUse( HDC hdc );
 W32KAPI UINT     WINAPI NtGdiGetTextCharsetInfo( HDC hdc, FONTSIGNATURE *fs, DWORD flags );

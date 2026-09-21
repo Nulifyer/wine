@@ -32,13 +32,17 @@ extern int notify_dwm_window_sprite_created( struct desktop *desktop, unsigned i
                                               unsigned int ex_style, int active,
                                               const struct rectangle *window_rect,
                                               const struct rectangle *client_rect,
-                                              const struct rectangle *surface_rect );
+                                              unsigned int logical_surface,
+                                              unsigned int surface_width,
+                                              unsigned int surface_height );
 extern void notify_dwm_window_sprite_updated( struct desktop *desktop, unsigned int generation,
                                                unsigned int window, unsigned int style,
                                                unsigned int ex_style, int active,
                                                const struct rectangle *window_rect,
                                                const struct rectangle *client_rect,
-                                               const struct rectangle *surface_rect );
+                                               unsigned int logical_surface,
+                                               unsigned int surface_width,
+                                               unsigned int surface_height );
 extern void notify_dwm_window_sprite_destroyed( struct desktop *desktop,
                                                  unsigned int generation,
                                                  unsigned int window );

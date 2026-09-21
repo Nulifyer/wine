@@ -558,8 +558,8 @@
 @ stub -syscall NtGdiGetUFIPathname
 @ stub -syscall NtGdiGetWidthTable
 @ stdcall -syscall NtGdiGradientFill(long ptr long ptr long long)
-@ stub -syscall NtGdiHLSurfGetInformation
-@ stub -syscall NtGdiHLSurfSetInformation
+@ stdcall -syscall NtGdiHLSurfGetInformation(long long ptr ptr)
+@ stdcall -syscall NtGdiHLSurfSetInformation(long long ptr long)
 @ stub -syscall NtGdiHT_Get8BPPFormatPalette
 @ stub -syscall NtGdiHT_Get8BPPMaskPalette
 @ stdcall -syscall NtGdiHfontCreate(ptr long long long ptr)

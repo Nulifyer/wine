@@ -220,6 +220,16 @@ HRGN SYSCALL_API NtGdiCreateRectRgn( INT left, INT top, INT right, INT bottom )
     SYSCALL_FUNC( NtGdiCreateRectRgn );
 }
 
+BOOL SYSCALL_API NtGdiHLSurfGetInformation( HANDLE surface, UINT type, void *buffer, UINT *size )
+{
+    SYSCALL_FUNC( NtGdiHLSurfGetInformation );
+}
+
+BOOL SYSCALL_API NtGdiHLSurfSetInformation( HANDLE surface, UINT type, const void *buffer, UINT size )
+{
+    SYSCALL_FUNC( NtGdiHLSurfSetInformation );
+}
+
 HRGN SYSCALL_API NtGdiCreateRoundRectRgn( INT left, INT top, INT right, INT bottom,
                                           INT ellipse_width, INT ellipse_height )
 {

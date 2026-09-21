@@ -30,6 +30,7 @@
 
 #include "object.h"
 #include "file.h"
+#include "handle.h"
 #include "request.h"
 #include "thread.h"
 #include "process.h"
@@ -88,6 +89,8 @@ struct window
     unsigned int     dwm_context_id;  /* DWM composition generation containing this HWND */
     unsigned int     dwm_sprite_id;   /* DWM composition generation containing its sprite */
     unsigned int     dwm_link_id;     /* DWM composition generation containing its tree link */
+    struct logical_surface *logical_surface; /* independently-lived redirected GDI surface */
+    unsigned int     logical_surface_serial;
     unsigned __int64 composition_flags; /* boolean private composition attributes */
     unsigned int     composition_policy; /* non-client rendering policy */
     unsigned int     composition_theme; /* theme rendering attributes */
@@ -112,6 +115,63 @@ struct window
     struct property *properties;      /* window properties array */
     window_shm_t    *shared;          /* window in session shared memory */
 };
+
+struct logical_surface
+{
+    struct list      entry;
+    struct window   *producer;
+    struct desktop  *desktop;
+    struct object   *section;
+    struct event    *event;
+    unsigned int     id;
+    unsigned int     generation;
+    unsigned int     serial;
+    unsigned int     width;
+    unsigned int     height;
+    unsigned int     stride;
+    unsigned int     refs;
+    unsigned __int64 update_id;
+    unsigned int     present_flags;
+    unsigned int     dirty : 1;
+};
+
+static struct list logical_surfaces = LIST_INIT(logical_surfaces);
+static unsigned int next_logical_surface_id = 0x70000001;
+
+static struct logical_surface *find_logical_surface( unsigned int id )
+{
+    struct logical_surface *surface;
+
+    LIST_FOR_EACH_ENTRY( surface, &logical_surfaces, struct logical_surface, entry )
+        if (surface->id == id) return surface;
+    return NULL;
+}
+
+static void free_logical_surface( struct logical_surface *surface )
+{
+    if (surface->producer && surface->producer->logical_surface == surface)
+        surface->producer->logical_surface = NULL;
+    if (surface->section) release_object( surface->section );
+    if (surface->event) release_object( surface->event );
+    release_object( surface->desktop );
+    list_remove( &surface->entry );
+    free( surface );
+}
+
+static void detach_logical_surface( struct window *win )
+{
+    if (!win->logical_surface) return;
+    win->logical_surface->producer = NULL;
+    win->logical_surface = NULL;
+}
+
+void cleanup_dwm_logical_surfaces( unsigned int generation )
+{
+    struct logical_surface *surface, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE( surface, next, &logical_surfaces, struct logical_surface, entry )
+        if (surface->generation == generation) free_logical_surface( surface );
+}
 
 C_ASSERT( sizeof(window_shm_t) == offsetof(window_shm_t, extra[0]) );
 
@@ -177,6 +237,7 @@ static void window_destroy( struct object *obj )
     if (win->update_region) free_region( win->update_region );
     if (win->class) release_class( win->class );
     if (win->input_delegate) release_object( win->input_delegate );
+    detach_logical_surface( win );
     free( win->text );
 
     if (win->shared) free_shared_object( win->shared );
@@ -793,6 +854,8 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->dwm_context_id = 0;
     win->dwm_sprite_id  = 0;
     win->dwm_link_id    = 0;
+    win->logical_surface = NULL;
+    win->logical_surface_serial = 0;
     win->composition_flags = 0;
     win->composition_policy = 0; /* DWMNCRP_USEWINDOWSTYLE */
     win->composition_theme = 0;
@@ -1277,7 +1340,10 @@ static unsigned int sync_dwm_window_context( struct window *win )
         if (!notify_dwm_window_sprite_created( win->desktop, win->dwm_context_id,
                                                win->handle, win->style, win->ex_style,
                                                win->set_foreground, &win->window_rect,
-                                               &win->client_rect, &win->surface_rect ))
+                                               &win->client_rect,
+                                               win->logical_surface ? win->logical_surface->id : 0,
+                                               win->logical_surface ? win->logical_surface->width : 0,
+                                               win->logical_surface ? win->logical_surface->height : 0 ))
             return 0;
         win->dwm_sprite_id = win->dwm_context_id;
     }
@@ -2215,7 +2281,10 @@ static void set_window_pos( struct window *win, struct window *previous,
         notify_dwm_window_sprite_updated( win->desktop, win->dwm_sprite_id,
                                           win->handle, win->style, win->ex_style,
                                           win->set_foreground, &win->window_rect,
-                                          &win->client_rect, &win->surface_rect );
+                                          &win->client_rect,
+                                          win->logical_surface ? win->logical_surface->id : 0,
+                                          win->logical_surface ? win->logical_surface->width : 0,
+                                          win->logical_surface ? win->logical_surface->height : 0 );
 
     /* update window monitor dpi for toplevel windows */
     if (is_toplevel( win )) set_window_monitor_dpi( win );
@@ -2466,6 +2535,7 @@ void free_window_handle( struct window *win )
         notify_dwm_window_destroyed( win->desktop, win->dwm_context_id, win->handle );
         win->dwm_context_id = 0;
     }
+    detach_logical_surface( win );
     destroy_properties( win );
     if (is_desktop_window(win))
     {
@@ -3352,6 +3422,188 @@ DECL_HANDLER(get_window_rectangles)
     map_dpi_rect( win, &reply->window, get_window_dpi( win ), req->dpi );
     map_dpi_rect( win, &reply->client, get_window_dpi( win ), req->dpi );
     map_dpi_rect( win, &reply->visible, get_window_dpi( win ), req->dpi );
+}
+
+/* publish or clear the section backing a window's redirected GDI surface */
+DECL_HANDLER(set_window_logical_surface)
+{
+    struct object *section = NULL;
+    struct logical_surface *surface = NULL;
+    struct window *win = get_window( req->handle );
+
+    if (!win) return;
+    if (!win->thread || win->thread->process != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (req->section && !win->dwm_context_id)
+    {
+        set_error( STATUS_NOT_FOUND );
+        return;
+    }
+    if (req->section)
+    {
+        if (!req->width || !req->height || !req->stride ||
+            !(section = get_handle_obj( current->process, req->section,
+                                        SECTION_MAP_READ, NULL )))
+        {
+            if (!get_error()) set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
+        if (!(surface = mem_alloc( sizeof(*surface) )))
+        {
+            release_object( section );
+            return;
+        }
+        if (!(++win->logical_surface_serial)) ++win->logical_surface_serial;
+        do
+        {
+            surface->id = next_logical_surface_id++;
+            if (!next_logical_surface_id) next_logical_surface_id = 0x70000001;
+        } while (find_logical_surface( surface->id ));
+        surface->producer = win;
+        surface->desktop = (struct desktop *)grab_object( win->desktop );
+        surface->section = section;
+        surface->event = NULL;
+        surface->generation = win->dwm_context_id;
+        surface->serial = win->logical_surface_serial;
+        surface->width = req->width;
+        surface->height = req->height;
+        surface->stride = req->stride;
+        surface->refs = 0;
+        surface->update_id = surface->serial;
+        surface->present_flags = 0;
+        surface->dirty = 1;
+        list_add_tail( &logical_surfaces, &surface->entry );
+        detach_logical_surface( win );
+        win->logical_surface = surface;
+    }
+    else if (!req->serial || req->serial == win->logical_surface_serial)
+        detach_logical_surface( win );
+
+    if (win->dwm_sprite_id == win->dwm_context_id)
+        notify_dwm_window_sprite_updated( win->desktop, win->dwm_sprite_id,
+                                          win->handle, win->style, win->ex_style,
+                                          win->set_foreground, &win->window_rect,
+                                          &win->client_rect,
+                                          win->logical_surface ? win->logical_surface->id : 0,
+                                          win->logical_surface ? win->logical_surface->width : 0,
+                                          win->logical_surface ? win->logical_surface->height : 0 );
+    reply->serial = win->logical_surface_serial;
+}
+
+/* retain the logical surface while the genuine compositor references it */
+DECL_HANDLER(reference_window_logical_surface)
+{
+    struct logical_surface *surface = find_logical_surface( req->handle );
+
+    if (!current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!surface || !surface->section)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+    if (req->delta == 1) surface->refs++;
+    else if (req->delta == -1 && surface->refs)
+    {
+        surface->refs--;
+        if (!surface->refs && !surface->producer) free_logical_surface( surface );
+    }
+    else set_error( STATUS_INVALID_PARAMETER );
+}
+
+/* duplicate the shared section and metadata into the genuine compositor */
+DECL_HANDLER(get_window_logical_surface)
+{
+    struct logical_surface *surface = find_logical_surface( req->handle );
+
+    if (!current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!surface || !surface->section || !surface->refs)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+    if (!(reply->section = alloc_handle( current->process, surface->section,
+                                         SECTION_MAP_READ, 0 ))) return;
+    reply->width = surface->width;
+    reply->height = surface->height;
+    reply->stride = surface->stride;
+    reply->serial = surface->serial;
+    reply->dirty = surface->dirty;
+    reply->update_id = surface->update_id;
+    reply->present_flags = surface->present_flags;
+    if (req->consume_dirty) surface->dirty = 0;
+}
+
+/* update metadata controlled by the genuine compositor */
+DECL_HANDLER(set_window_logical_surface_metadata)
+{
+    struct logical_surface *surface = find_logical_surface( req->handle );
+
+    if (!current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!surface || !surface->section || !surface->refs)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+    if (req->field == 1) surface->present_flags = req->value;
+    else if (req->field == 2) surface->update_id = req->value;
+    else set_error( STATUS_INVALID_PARAMETER );
+}
+
+/* retain DWM's dirty event with the logical surface */
+DECL_HANDLER(signal_window_logical_surface)
+{
+    struct event *event = NULL;
+    struct logical_surface *surface = find_logical_surface( req->handle );
+
+    if (!current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!surface || !surface->section || !surface->refs)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+    if (req->event && !(event = get_event_obj( current->process, req->event,
+                                               EVENT_MODIFY_STATE ))) return;
+    if (surface->event) release_object( surface->event );
+    surface->event = event;
+}
+
+/* publish changed pixels and wake DWM if it registered an event */
+DECL_HANDLER(dirty_window_logical_surface)
+{
+    struct window *win = get_window( req->handle );
+
+    if (!win) return;
+    if (!win->thread || win->thread->process != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!win->logical_surface || req->serial != win->logical_surface->serial)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+    win->logical_surface->dirty = 1;
+    if (win->logical_surface->event) set_event( win->logical_surface->event );
 }
 
 
