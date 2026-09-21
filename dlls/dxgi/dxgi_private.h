@@ -504,13 +504,14 @@ struct d3d11_swapchain
     UINT latency_hint;
     BOOL is_dwm;
     BOOL front_buffer_rendering;
+    HWND dwm_host_window;
     LONG in_set_fullscreen_state;
 };
 
 HRESULT d3d11_swapchain_init(struct d3d11_swapchain *swapchain, struct dxgi_device *device,
         struct wined3d_swapchain_desc *desc, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc);
 void d3d11_swapchain_set_dwm_mode(IDXGISwapChain1 *iface,
-        const DXGI_SWAP_CHAIN_DESC *desc);
+        const DXGI_SWAP_CHAIN_DESC *desc, HWND host_window);
 
 HRESULT d3d12_swapchain_create(IWineDXGIFactory *factory, ID3D12CommandQueue *queue, HWND window,
         const DXGI_SWAP_CHAIN_DESC1 *swapchain_desc, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc,

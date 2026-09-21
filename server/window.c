@@ -240,6 +240,7 @@ static bool is_toplevel( const struct window *win )
  * window-composition state. */
 static bool is_composition_window( const struct window *win )
 {
+    if (win->ex_style & WS_EX_NOREDIRECTIONBITMAP) return false;
     return is_toplevel( win ) || (win->ex_style & WS_EX_LAYERED);
 }
 
@@ -1259,6 +1260,7 @@ static unsigned int sync_dwm_window_context( struct window *win )
     unsigned int process_id = process ? process->id : 0;
     unsigned __int64 sequence = process ? process->start_time : 0;
 
+    if (!is_composition_window( win )) return 0;
     if (win->parent && !sync_dwm_window_context( win->parent )) return 0;
     win->dwm_context_id = notify_dwm_window_created( win->desktop, win->dwm_context_id,
                                                      win->handle, parent, win->style,

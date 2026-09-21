@@ -1588,6 +1588,9 @@ static void test_dwm_swapchain(void)
     IDXGIFactory *factory;
     IDXGIOutput *output;
     IUnknown *identity;
+    HWND host_window = NULL;
+    RECT host_rect;
+    LONG host_ex_style;
     UINT smaller, larger;
     UINT present_count;
     BOOL value;
@@ -1674,9 +1677,20 @@ static void test_dwm_swapchain(void)
     memset(&host_desc, 0xcc, sizeof(host_desc));
     hr = IDXGISwapChain_GetDesc(swapchain, &host_desc);
     ok(hr == S_OK, "Failed to get host swap-chain description, hr %#lx.\n", hr);
-    ok(host_desc.OutputWindow == GetDesktopWindow(), "Got host window %p, expected %p.\n",
-            host_desc.OutputWindow, GetDesktopWindow());
+    host_window = host_desc.OutputWindow;
+    ok(!!host_window && host_window != GetDesktopWindow(),
+            "Got invalid host presentation window %p.\n", host_window);
     ok(host_desc.Windowed, "Expected a windowed host swap chain.\n");
+    ok(IsWindowVisible(host_window), "Host presentation window is not visible.\n");
+    host_ex_style = GetWindowLongW(host_window, GWL_EXSTYLE);
+    ok((host_ex_style & (WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP
+            | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_TRANSPARENT))
+            == (WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP
+            | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_TRANSPARENT),
+            "Got host extended style %#lx.\n", host_ex_style);
+    GetClientRect(host_window, &host_rect);
+    ok(host_rect.right == 64 && host_rect.bottom == 64,
+            "Got host client rectangle %s.\n", wine_dbgstr_rect(&host_rect));
 
     memset(&host_desc, 0xcc, sizeof(host_desc));
     hr = swapchain_dwm->lpVtbl->GetDesc(swapchain_dwm, &host_desc);
@@ -1773,6 +1787,8 @@ static void test_dwm_swapchain(void)
     if (swapchain)
         IDXGISwapChain_Release(swapchain);
     swapchain_dwm->lpVtbl->Release(swapchain_dwm);
+    ok(!IsWindow(host_window), "Host presentation window %p survived its swap chain.\n",
+            host_window);
 
 done_output:
     IDXGIOutput_Release(output);

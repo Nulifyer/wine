@@ -276,6 +276,7 @@ static ULONG STDMETHODCALLTYPE d3d11_swapchain_Release(IDXGISwapChain4 *iface)
     if (!refcount)
     {
         IWineDXGIDevice *device = swapchain->device;
+        HWND dwm_host_window = swapchain->dwm_host_window;
         if (swapchain->target)
         {
             WARN("Releasing fullscreen swapchain.\n");
@@ -284,6 +285,15 @@ static ULONG STDMETHODCALLTYPE d3d11_swapchain_Release(IDXGISwapChain4 *iface)
         IWineDXGIFactory_Release(swapchain->factory);
         wined3d_swapchain_decref(swapchain->wined3d_swapchain);
         IWineDXGIDevice_Release(device);
+        if (dwm_host_window)
+        {
+            DWORD thread_id = GetWindowThreadProcessId(dwm_host_window, NULL);
+
+            if (thread_id == GetCurrentThreadId())
+                DestroyWindow(dwm_host_window);
+            else
+                PostMessageW(dwm_host_window, WM_CLOSE, 0, 0);
+        }
     }
 
     return refcount;
@@ -1461,12 +1471,13 @@ static const struct IDXGISwapChainDWM1Vtbl d3d11_swapchain_dwm_vtbl =
 };
 
 void d3d11_swapchain_set_dwm_mode(IDXGISwapChain1 *iface,
-        const DXGI_SWAP_CHAIN_DESC *desc)
+        const DXGI_SWAP_CHAIN_DESC *desc, HWND host_window)
 {
     struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChain4(
             (IDXGISwapChain4 *)iface);
 
     swapchain->dwm_desc = *desc;
+    swapchain->dwm_host_window = host_window;
     swapchain->is_dwm = TRUE;
 }
 

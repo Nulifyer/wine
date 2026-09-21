@@ -2757,11 +2757,11 @@ static void test_dwm_session_message_delivery(void)
     BOOL saw_window_create = FALSE, saw_window_link = FALSE;
     HDESK lifecycle_desktop = NULL;
     HDESK logon_desktop = NULL;
-    HWND target_window = NULL;
+    HWND target_window = NULL, no_redirection_window = NULL;
     HANDLE target = NULL, dwm_target = NULL;
     HANDLE port = NULL;
     DPI_AWARENESS_CONTEXT previous_dpi_context;
-    BOOL registered, scaled;
+    BOOL registered, scaled, saw_no_redirection_context = FALSE;
     NTSTATUS status;
     SIZE_T size;
     unsigned int i, j;
@@ -2932,6 +2932,63 @@ static void test_dwm_session_message_delivery(void)
     ok( saw_window_create, "DWM startup did not replay a window context\n" );
     ok( saw_window_link, "DWM startup did not replay a window tree link\n" );
     ok( saw_startup_begin, "DWM startup did not release the initializing record after desktop replay\n" );
+
+    /* The startup delimiter may be followed by contexts that were already
+     * queued during replay.  Drain those before checking the new window. */
+    for (i = 0; i < 512; ++i)
+    {
+        memset( &received, 0, sizeof(received) );
+        size = sizeof(received);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                            &size, NULL, &timeout );
+        if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+        ok( !status, "post-startup drain returned %#lx\n", status );
+        if (status) break;
+    }
+    ok( i < 512, "post-startup message drain did not quiesce\n" );
+
+    no_redirection_window = CreateWindowExA( WS_EX_NOREDIRECTIONBITMAP, "static",
+                                              "DWM host-only output", WS_POPUP,
+                                              0, 0, 32, 32, NULL, NULL, NULL, NULL );
+    ok( !!no_redirection_window, "no-redirection window creation failed, error %lu\n",
+        GetLastError() );
+    if (no_redirection_window)
+    {
+        for (i = 0; i < 512; ++i)
+        {
+            HWND message_window = NULL;
+
+            memset( &received, 0, sizeof(received) );
+            size = sizeof(received);
+            status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                &size, NULL, &timeout );
+            if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+            ok( !status, "no-redirection receive returned %#lx\n", status );
+            if (status) break;
+            if (received.data[0] != 0x40000011) continue;
+            memcpy( &message_window, received.data + 1, sizeof(message_window) );
+            if (message_window == no_redirection_window)
+                saw_no_redirection_context = TRUE;
+        }
+        ok( i < 512, "no-redirection message drain did not quiesce\n" );
+        ok( !saw_no_redirection_context,
+            "no-redirection window entered DwmRedir context tracking\n" );
+        ok( DestroyWindow( no_redirection_window ),
+            "no-redirection window destruction failed, error %lu\n", GetLastError() );
+        no_redirection_window = NULL;
+
+        for (i = 0; i < 512; ++i)
+        {
+            memset( &received, 0, sizeof(received) );
+            size = sizeof(received);
+            status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                &size, NULL, &timeout );
+            if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+            ok( !status, "post-no-redirection drain returned %#lx\n", status );
+            if (status) break;
+        }
+        ok( i < 512, "post-no-redirection message drain did not quiesce\n" );
+    }
 
     if (pIsWindowGdiScaledX)
     {

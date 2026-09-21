@@ -151,6 +151,44 @@ static ULONG STDMETHODCALLTYPE dxgi_factory_dwm_Release(IDXGIFactoryDWM *iface)
     return dxgi_factory_private_Release(impl_from_IDXGIFactoryDWM(iface));
 }
 
+static HWND dxgi_factory_create_dwm_host_window(const DXGI_SWAP_CHAIN_DESC *desc,
+        IDXGIOutput *output)
+{
+    static const DWORD ex_style = WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP
+            | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_TRANSPARENT;
+    DXGI_OUTPUT_DESC output_desc;
+    unsigned int width, height;
+    int x = 0, y = 0;
+    HWND window;
+
+    width = desc->BufferDesc.Width;
+    height = desc->BufferDesc.Height;
+    if (output && SUCCEEDED(IDXGIOutput_GetDesc(output, &output_desc)))
+    {
+        x = output_desc.DesktopCoordinates.left;
+        y = output_desc.DesktopCoordinates.top;
+        if (!width)
+            width = output_desc.DesktopCoordinates.right - output_desc.DesktopCoordinates.left;
+        if (!height)
+            height = output_desc.DesktopCoordinates.bottom - output_desc.DesktopCoordinates.top;
+    }
+    if (!width || !height)
+        return NULL;
+
+    window = CreateWindowExW(ex_style, L"static", L"DXGI DWM output",
+            WS_POPUP, x, y, width, height, NULL, NULL, NULL, NULL);
+    if (!window)
+        return NULL;
+
+    if (!SetWindowPos(window, HWND_TOPMOST, x, y, width, height,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW))
+    {
+        DestroyWindow(window);
+        return NULL;
+    }
+    return window;
+}
+
 static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm_CreateSwapChain(IDXGIFactoryDWM *iface,
         IUnknown *device, DXGI_SWAP_CHAIN_DESC *desc, IDXGIOutput *output,
         IDXGISwapChainDWM1 **swapchain)
@@ -160,6 +198,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm_CreateSwapChain(IDXGIFactoryDW
     DXGI_SWAP_CHAIN_DESC1 desc1;
     IWineDXGISwapChainFactory *swapchain_factory;
     IDXGISwapChain1 *public_swapchain;
+    HWND host_window;
     HRESULT hr;
 
     TRACE("iface %p, device %p, desc %p, output %p, swapchain %p.\n",
@@ -189,23 +228,34 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_dwm_CreateSwapChain(IDXGIFactoryDW
     fullscreen_desc.RefreshRate = desc->BufferDesc.RefreshRate;
     fullscreen_desc.ScanlineOrdering = desc->BufferDesc.ScanlineOrdering;
     fullscreen_desc.Scaling = desc->BufferDesc.Scaling;
-    /* Native DWM swap chains are windowless. WineD3D needs a host window, so
-     * bind the compositor output to Wine's desktop window without exposing it
-     * through the private descriptor returned to DWM. */
+    /* Native DWM swap chains are windowless. WineD3D needs a real host window;
+     * using the pseudo desktop HWND selects its offscreen backup drawable. */
     fullscreen_desc.Windowed = TRUE;
+
+    if (!(host_window = dxgi_factory_create_dwm_host_window(desc, output)))
+    {
+        WARN("Failed to create DWM presentation window, error %lu.\n", GetLastError());
+        return DXGI_ERROR_NOT_CURRENTLY_AVAILABLE;
+    }
 
     if (FAILED(hr = IUnknown_QueryInterface(device, &IID_IWineDXGISwapChainFactory,
             (void **)&swapchain_factory)))
+    {
+        DestroyWindow(host_window);
         return DXGI_ERROR_UNSUPPORTED;
+    }
 
     hr = IWineDXGISwapChainFactory_create_swapchain(swapchain_factory,
-            (IDXGIFactory *)&factory->IWineDXGIFactory_iface, GetDesktopWindow(), &desc1,
+            (IDXGIFactory *)&factory->IWineDXGIFactory_iface, host_window, &desc1,
             &fullscreen_desc, output, &public_swapchain);
     IWineDXGISwapChainFactory_Release(swapchain_factory);
     if (FAILED(hr))
+    {
+        DestroyWindow(host_window);
         return hr;
+    }
 
-    d3d11_swapchain_set_dwm_mode(public_swapchain, desc);
+    d3d11_swapchain_set_dwm_mode(public_swapchain, desc, host_window);
     hr = IDXGISwapChain1_QueryInterface(public_swapchain, &IID_IDXGISwapChainDWM1,
             (void **)swapchain);
     IDXGISwapChain1_Release(public_swapchain);
