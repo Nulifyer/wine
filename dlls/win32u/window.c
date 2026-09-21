@@ -1255,6 +1255,32 @@ static BOOL is_core_window( HWND hwnd )
     return !status && core_window;
 }
 
+static BOOL is_window_in_destroy( HWND hwnd )
+{
+    struct object_lock lock = OBJECT_LOCK_INIT;
+    const window_shm_t *window_shm = NULL;
+    BOOL destroying = FALSE;
+    NTSTATUS status;
+
+    while ((status = get_shared_window( hwnd, &lock, &window_shm )) == STATUS_PENDING)
+        destroying = window_shm->destroying;
+    return !status && destroying;
+}
+
+static BOOL set_window_destroying( HWND hwnd, BOOL destroying )
+{
+    BOOL ret;
+
+    SERVER_START_REQ( set_window_destroying )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        req->destroying = destroying;
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
 /* see GetDpiForWindow */
 struct ratio get_dpi_for_window( HWND hwnd )
 {
@@ -5721,6 +5747,8 @@ static BOOL user_destroy_window( HWND hwnd, BOOL winevent )
     TRACE( "(%p)\n", hwnd );
 
     if (call_hooks( WH_CBT, HCBT_DESTROYWND, (WPARAM)hwnd, 0, 0 )) return FALSE;
+    if (!is_window( hwnd )) return TRUE;
+    if (!set_window_destroying( hwnd, TRUE )) return FALSE;
 
     if (is_menu_active() == hwnd) NtUserEndMenu();
 
@@ -6480,6 +6508,9 @@ ULONG_PTR WINAPI NtUserCallHwnd( HWND hwnd, DWORD code )
 
     case NtUserCallHwnd_IsWindowEnabled:
         return is_window_enabled( hwnd );
+
+    case NtUserCallHwnd_IsWindowInDestroy:
+        return is_window_in_destroy( hwnd );
 
     case NtUserCallHwnd_IsCoreWindow:
         return is_core_window( hwnd );

@@ -1344,6 +1344,15 @@ BOOL WINAPI IsWindowArranged( HWND hwnd )
 }
 
 
+/***********************************************************************
+ *              IsWindowInDestroy (USER32.@)
+ */
+BOOL WINAPI IsWindowInDestroy( HWND hwnd )
+{
+    return NtUserCallHwnd( hwnd, NtUserCallHwnd_IsWindowInDestroy );
+}
+
+
 /*******************************************************************
  *		GetTopWindow (USER32.@)
  */

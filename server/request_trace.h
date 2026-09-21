@@ -1853,6 +1853,12 @@ static void dump_set_core_window_request( const struct set_core_window_request *
     fprintf( stderr, ", enabled=%d", req->enabled );
 }
 
+static void dump_set_window_destroying_request( const struct set_window_destroying_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", destroying=%d", req->destroying );
+}
+
 static void dump_get_window_composition_attribute_request( const struct get_window_composition_attribute_request *req )
 {
     fprintf( stderr, " handle=%08x", req->handle );
@@ -4691,6 +4697,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_window_info_request,
     (dump_func)dump_set_window_fnid_request,
     (dump_func)dump_set_core_window_request,
+    (dump_func)dump_set_window_destroying_request,
     (dump_func)dump_get_window_composition_attribute_request,
     (dump_func)dump_set_window_composition_attribute_request,
     (dump_func)dump_set_parent_request,
@@ -5101,6 +5108,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_window_info_reply,
     NULL,
     (dump_func)dump_set_window_info_reply,
+    NULL,
     NULL,
     NULL,
     (dump_func)dump_get_window_composition_attribute_reply,
@@ -5515,6 +5523,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_window_info",
     "set_window_fnid",
     "set_core_window",
+    "set_window_destroying",
     "get_window_composition_attribute",
     "set_window_composition_attribute",
     "set_parent",

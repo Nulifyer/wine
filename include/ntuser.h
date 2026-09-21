@@ -1518,6 +1518,7 @@ enum
     NtUserCallHwnd_GetWindowTextLength,
     NtUserCallHwnd_IsWindow,
     NtUserCallHwnd_IsWindowEnabled,
+    NtUserCallHwnd_IsWindowInDestroy,
     NtUserCallHwnd_IsCoreWindow,
     NtUserCallHwnd_IsWindowUnicode,
     NtUserCallHwnd_IsWindowVisible,

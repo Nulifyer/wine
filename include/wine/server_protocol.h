@@ -1096,6 +1096,7 @@ typedef volatile struct
     unsigned int         fnid;
     unsigned int         ansi;
     unsigned int         core_window;
+    unsigned int         destroying;
     struct ratio         dpi;
     struct ratio         raw_dpi;
     data_size_t          private_size;
@@ -3792,6 +3793,20 @@ struct set_core_window_request
     char __pad_20[4];
 };
 struct set_core_window_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct set_window_destroying_request
+{
+    struct request_header __header;
+    user_handle_t  handle;
+    int            destroying;
+    char __pad_20[4];
+};
+struct set_window_destroying_reply
 {
     struct reply_header __header;
 };
@@ -7938,6 +7953,7 @@ enum request
     REQ_set_window_info,
     REQ_set_window_fnid,
     REQ_set_core_window,
+    REQ_set_window_destroying,
     REQ_get_window_composition_attribute,
     REQ_set_window_composition_attribute,
     REQ_set_parent,
@@ -8353,6 +8369,7 @@ union generic_request
     struct set_window_info_request set_window_info_request;
     struct set_window_fnid_request set_window_fnid_request;
     struct set_core_window_request set_core_window_request;
+    struct set_window_destroying_request set_window_destroying_request;
     struct get_window_composition_attribute_request get_window_composition_attribute_request;
     struct set_window_composition_attribute_request set_window_composition_attribute_request;
     struct set_parent_request set_parent_request;
@@ -8766,6 +8783,7 @@ union generic_reply
     struct set_window_info_reply set_window_info_reply;
     struct set_window_fnid_reply set_window_fnid_reply;
     struct set_core_window_reply set_core_window_reply;
+    struct set_window_destroying_reply set_window_destroying_reply;
     struct get_window_composition_attribute_reply get_window_composition_attribute_reply;
     struct set_window_composition_attribute_reply set_window_composition_attribute_reply;
     struct set_parent_reply set_parent_reply;
@@ -9019,6 +9037,6 @@ union generic_reply
     struct get_dwm_desktop_id_reply get_dwm_desktop_id_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1043
+#define SERVER_PROTOCOL_VERSION 1044
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

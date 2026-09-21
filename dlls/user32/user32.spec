@@ -804,7 +804,7 @@
 @ stdcall IsWindow(long)
 @ stdcall IsWindowArranged(long)
 @ stdcall IsWindowEnabled(long)
-# @ stub IsWindowInDestroy
+@ stdcall IsWindowInDestroy(long)
 @ stdcall IsWindowRedirectedForPrint(long)
 @ stdcall IsWindowUnicode(long)
 @ stdcall IsWindowVisible(long)

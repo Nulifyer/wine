@@ -829,6 +829,7 @@ static struct window *create_window( struct window *parent, struct window *owner
         shared->info.wndproc    = get_class_wndproc( win->class, &ansi );
         shared->ansi            = ansi;
         shared->core_window     = parent ? parent->shared->core_window : 0;
+        shared->destroying      = 0;
     }
     SHARED_WRITE_END;
 
@@ -2558,6 +2559,26 @@ DECL_HANDLER(set_core_window)
 
     win->is_core_window = !!req->enabled;
     set_window_subtree_core_status( win, req->enabled );
+}
+
+
+/* set the window-destruction state */
+DECL_HANDLER(set_window_destroying)
+{
+    struct window *win;
+
+    if (!(win = get_window( req->handle ))) return;
+    if (win->thread != current)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+
+    SHARED_WRITE_BEGIN( win->shared, window_shm_t )
+    {
+        shared->destroying = !!req->destroying;
+    }
+    SHARED_WRITE_END;
 }
 
 
