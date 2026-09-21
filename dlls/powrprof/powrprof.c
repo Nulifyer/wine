@@ -28,6 +28,7 @@
 #include "winternl.h"
 #include "powersetting.h"
 #include "powrprof.h"
+#include "wine/list.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(powrprof);
@@ -47,6 +48,21 @@ WINE_DEFAULT_DEBUG_CHANNEL(powrprof);
 
 static const WCHAR szPowerCfgSubKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Controls Folder\\PowerCfg";
 static HANDLE PPRegSemaphore = NULL;
+
+#define POWER_SETTING_NOTIFY_SERVICE_HANDLE 1
+#define POWER_SETTING_NOTIFY_CALLBACK       2
+
+struct power_setting_registration
+{
+    struct list entry;
+    GUID setting;
+    DWORD session;
+    DWORD flags;
+    HANDLE recipient;
+};
+
+static struct list power_setting_registrations = LIST_INIT( power_setting_registrations );
+static SRWLOCK power_setting_lock = SRWLOCK_INIT;
 
 NTSTATUS WINAPI CallNtPowerInformation(
 	POWER_INFORMATION_LEVEL InformationLevel,
@@ -345,15 +361,53 @@ DWORD WINAPI PowerUnregisterSuspendResumeNotification(HPOWERNOTIFY handle)
 
 DWORD WINAPI PowerSettingRegisterNotification(const GUID *setting, DWORD flags, HANDLE recipient, PHPOWERNOTIFY handle)
 {
-    FIXME("(%s,0x%08lx,%p,%p) stub!\n", debugstr_guid(setting), flags, recipient, handle);
-    *handle = (PHPOWERNOTIFY)0xdeadbeef;
+    return PowerSettingRegisterNotificationEx( setting, ~0u, flags, recipient, handle );
+}
+
+DWORD WINAPI PowerSettingRegisterNotificationEx(const GUID *setting, DWORD session, DWORD flags,
+                                                 HANDLE recipient, PHPOWERNOTIFY handle)
+{
+    struct power_setting_registration *registration;
+
+    TRACE("(%s,%lu,0x%08lx,%p,%p)\n", debugstr_guid(setting), session, flags, recipient, handle);
+
+    if (!handle || !setting || !recipient ||
+        (flags != POWER_SETTING_NOTIFY_SERVICE_HANDLE && flags != POWER_SETTING_NOTIFY_CALLBACK))
+        return ERROR_INVALID_PARAMETER;
+
+    if (!(registration = malloc( sizeof(*registration) ))) return ERROR_OUTOFMEMORY;
+    registration->setting = *setting;
+    registration->session = session;
+    registration->flags = flags;
+    registration->recipient = recipient;
+
+    AcquireSRWLockExclusive( &power_setting_lock );
+    list_add_tail( &power_setting_registrations, &registration->entry );
+    ReleaseSRWLockExclusive( &power_setting_lock );
+
+    *handle = registration;
     return ERROR_SUCCESS;
 }
 
 DWORD WINAPI PowerSettingUnregisterNotification(HPOWERNOTIFY handle)
 {
-    FIXME("(%p) stub!\n", handle);
-    return ERROR_SUCCESS;
+    struct power_setting_registration *registration;
+    DWORD ret = ERROR_INVALID_PARAMETER;
+
+    TRACE("(%p)\n", handle);
+
+    AcquireSRWLockExclusive( &power_setting_lock );
+    LIST_FOR_EACH_ENTRY( registration, &power_setting_registrations, struct power_setting_registration, entry )
+    {
+        if (registration != handle) continue;
+        list_remove( &registration->entry );
+        ret = ERROR_SUCCESS;
+        break;
+    }
+    ReleaseSRWLockExclusive( &power_setting_lock );
+
+    if (!ret) free( registration );
+    return ret;
 }
 
 DWORD WINAPI PowerReadACValueIndex(HKEY key, const GUID *scheme, const GUID *subgroup, const GUID *setting, DWORD *index)

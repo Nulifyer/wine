@@ -1,0 +1,5 @@
+TESTDLL = powrprof.dll
+IMPORTS = powrprof
+
+SOURCES = \
+	powrprof.c

@@ -21,6 +21,7 @@
 @ stdcall PowerRegisterSuspendResumeNotification(long ptr ptr)
 @ stdcall PowerUnregisterSuspendResumeNotification(ptr)
 @ stdcall PowerSettingRegisterNotification(ptr long ptr ptr)
+@ stdcall PowerSettingRegisterNotificationEx(ptr long long ptr ptr)
 @ stdcall PowerSettingUnregisterNotification(ptr)
 @ stdcall PowerReadACValueIndex(ptr ptr ptr ptr ptr)
 @ stdcall PowerWriteACValueIndex(ptr ptr ptr ptr long)

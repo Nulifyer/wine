@@ -163,6 +163,7 @@ DWORD   WINAPI PowerEnumerate(HKEY, const GUID *, const GUID *, POWER_DATA_ACCES
 DWORD   WINAPI PowerRegisterSuspendResumeNotification(DWORD, HANDLE, PHPOWERNOTIFY);
 DWORD   WINAPI PowerUnregisterSuspendResumeNotification(HPOWERNOTIFY);
 DWORD   WINAPI PowerSettingRegisterNotification(const GUID *, DWORD, HANDLE, PHPOWERNOTIFY);
+DWORD   WINAPI PowerSettingRegisterNotificationEx(const GUID *, DWORD, DWORD, HANDLE, PHPOWERNOTIFY);
 DWORD   WINAPI PowerSettingUnregisterNotification(HPOWERNOTIFY);
 DWORD   WINAPI PowerWriteACValueIndex(HKEY, const GUID *, const GUID *, const GUID *, DWORD);
 BOOLEAN WINAPI ReadGlobalPwrPolicy(PGLOBAL_POWER_POLICY);

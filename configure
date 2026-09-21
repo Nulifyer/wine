@@ -22664,6 +22664,7 @@ wine_fn_config_makefile dlls/pdh/tests enable_tests
 wine_fn_config_makefile dlls/photometadatahandler enable_photometadatahandler
 wine_fn_config_makefile dlls/pidgen enable_pidgen
 wine_fn_config_makefile dlls/powrprof enable_powrprof
+wine_fn_config_makefile dlls/powrprof/tests enable_tests
 wine_fn_config_makefile dlls/printui enable_printui
 wine_fn_config_makefile dlls/prntvpt enable_prntvpt
 wine_fn_config_makefile dlls/prntvpt/tests enable_tests
@@ -24740,5 +24741,4 @@ IFS="$ac_save_IFS"
 printf '%s\n' "
 $as_me: Finished.  Do '${MAKE-make}' to compile Wine.
 " >&6
-
 
