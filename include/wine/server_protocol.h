@@ -7794,6 +7794,87 @@ struct get_dwm_desktop_id_reply
 };
 
 
+struct create_d3d11_fence_request
+{
+    struct request_header __header;
+    unsigned int flags;
+    unsigned __int64 value;
+};
+struct create_d3d11_fence_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+struct share_d3d11_fence_request
+{
+    struct request_header __header;
+    obj_handle_t fence;
+    unsigned int access;
+    /* VARARG(objattr,object_attributes); */
+    char __pad_20[4];
+};
+struct share_d3d11_fence_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+struct open_d3d11_fence_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct open_d3d11_fence_reply
+{
+    struct reply_header __header;
+    obj_handle_t fence;
+    unsigned int flags;
+};
+
+
+struct query_d3d11_fence_request
+{
+    struct request_header __header;
+    obj_handle_t fence;
+};
+struct query_d3d11_fence_reply
+{
+    struct reply_header __header;
+    unsigned __int64 value;
+};
+
+
+struct signal_d3d11_fence_request
+{
+    struct request_header __header;
+    obj_handle_t fence;
+    unsigned __int64 value;
+};
+struct signal_d3d11_fence_reply
+{
+    struct reply_header __header;
+};
+
+
+struct set_d3d11_fence_event_request
+{
+    struct request_header __header;
+    obj_handle_t fence;
+    obj_handle_t event;
+    char __pad_20[4];
+    unsigned __int64 value;
+};
+struct set_d3d11_fence_event_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -8205,6 +8286,12 @@ enum request
     REQ_destroy_dcomp_window_target,
     REQ_set_dcomp_channel_completion_event,
     REQ_get_dwm_desktop_id,
+    REQ_create_d3d11_fence,
+    REQ_share_d3d11_fence,
+    REQ_open_d3d11_fence,
+    REQ_query_d3d11_fence,
+    REQ_signal_d3d11_fence,
+    REQ_set_d3d11_fence_event,
     REQ_NB_REQUESTS
 };
 
@@ -8621,6 +8708,12 @@ union generic_request
     struct destroy_dcomp_window_target_request destroy_dcomp_window_target_request;
     struct set_dcomp_channel_completion_event_request set_dcomp_channel_completion_event_request;
     struct get_dwm_desktop_id_request get_dwm_desktop_id_request;
+    struct create_d3d11_fence_request create_d3d11_fence_request;
+    struct share_d3d11_fence_request share_d3d11_fence_request;
+    struct open_d3d11_fence_request open_d3d11_fence_request;
+    struct query_d3d11_fence_request query_d3d11_fence_request;
+    struct signal_d3d11_fence_request signal_d3d11_fence_request;
+    struct set_d3d11_fence_event_request set_d3d11_fence_event_request;
 };
 union generic_reply
 {
@@ -9035,8 +9128,14 @@ union generic_reply
     struct destroy_dcomp_window_target_reply destroy_dcomp_window_target_reply;
     struct set_dcomp_channel_completion_event_reply set_dcomp_channel_completion_event_reply;
     struct get_dwm_desktop_id_reply get_dwm_desktop_id_reply;
+    struct create_d3d11_fence_reply create_d3d11_fence_reply;
+    struct share_d3d11_fence_reply share_d3d11_fence_reply;
+    struct open_d3d11_fence_reply open_d3d11_fence_reply;
+    struct query_d3d11_fence_reply query_d3d11_fence_reply;
+    struct signal_d3d11_fence_reply signal_d3d11_fence_reply;
+    struct set_d3d11_fence_event_reply set_d3d11_fence_event_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1044
+#define SERVER_PROTOCOL_VERSION 1045
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

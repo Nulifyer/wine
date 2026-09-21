@@ -38188,6 +38188,154 @@ static void test_filter_minmax(void)
     release_test_context(&test_context);
 }
 
+static void test_fence(void)
+{
+    static const GUID private_data_guid =
+            {0xb4b2d916, 0x51c7, 0x4a91, {0x9d, 0x1b, 0x7a, 0x65, 0x5c, 0xec, 0x0e, 0x6c}};
+    ID3D11DeviceContext4 *context4 = NULL;
+    ID3D11DeviceContext *context = NULL;
+    ID3D11Device5 *device5 = NULL, *device5_2 = NULL;
+    ID3D11Device *device = NULL, *device_2 = NULL, *fence_device = NULL;
+    ID3D11Fence *fence = NULL, *fence_2 = NULL, *plain_fence = NULL;
+    IUnknown *unknown = NULL;
+    HANDLE event = NULL, shared_handle = NULL;
+    UINT data_size;
+    DWORD wait;
+    ULONG refcount;
+    UINT64 value;
+    HRESULT hr;
+    unsigned int data, data_out;
+
+    if (!(device = create_device(NULL)))
+    {
+        skip("Failed to create a D3D11 device.\n");
+        return;
+    }
+
+    hr = ID3D11Device_QueryInterface(device, &IID_ID3D11Device5, (void **)&device5);
+    if (FAILED(hr))
+    {
+        skip("ID3D11Device5 is not available, hr %#lx.\n", hr);
+        ID3D11Device_Release(device);
+        return;
+    }
+    ID3D11Device_GetImmediateContext(device, &context);
+    hr = ID3D11DeviceContext_QueryInterface(context, &IID_ID3D11DeviceContext4, (void **)&context4);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID3D11Device5_CreateFence(device5, 7, D3D11_FENCE_FLAG_SHARED,
+            &IID_ID3D11Fence, (void **)&fence);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto done;
+
+    value = ID3D11Fence_GetCompletedValue(fence);
+    ok(value == 7, "Got unexpected completed value %s.\n", wine_dbgstr_longlong(value));
+
+    hr = ID3D11Fence_QueryInterface(fence, &IID_IUnknown, (void **)&unknown);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(unknown == (IUnknown *)fence, "Got unexpected IUnknown pointer %p, fence %p.\n", unknown, fence);
+    if (unknown)
+        IUnknown_Release(unknown);
+
+    ID3D11Fence_GetDevice(fence, &fence_device);
+    ok(fence_device == device, "Got unexpected device %p, expected %p.\n", fence_device, device);
+    if (fence_device)
+        ID3D11Device_Release(fence_device);
+
+    data = 0x12345678;
+    hr = ID3D11Fence_SetPrivateData(fence, &private_data_guid, sizeof(data), &data);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    data_out = 0;
+    data_size = sizeof(data_out);
+    hr = ID3D11Fence_GetPrivateData(fence, &private_data_guid, &data_size, &data_out);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(data_size == sizeof(data_out), "Got unexpected data size %u.\n", data_size);
+    ok(data_out == data, "Got unexpected private data %#x.\n", data_out);
+
+    hr = ID3D11Device5_CreateFence(device5, 0, D3D11_FENCE_FLAG_NONE,
+            &IID_ID3D11Fence, (void **)&plain_fence);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D11Fence_CreateSharedHandle(plain_fence, NULL, GENERIC_ALL, NULL, &shared_handle);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!shared_handle, "Got unexpected shared handle %p.\n", shared_handle);
+
+    hr = ID3D11Device5_CreateFence(device5, 0, 0x80000000,
+            &IID_ID3D11Fence, (void **)&fence_2);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!fence_2, "Got unexpected fence %p.\n", fence_2);
+    hr = ID3D11Device5_CreateFence(device5, 0, D3D11_FENCE_FLAG_NONE,
+            &IID_ID3D11Fence, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#lx.\n", hr);
+
+    event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    ok(!!event, "Failed to create an event, error %lu.\n", GetLastError());
+    hr = ID3D11Fence_SetEventOnCompletion(fence, 8, event);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    wait = WaitForSingleObject(event, 0);
+    ok(wait == WAIT_TIMEOUT, "Got unexpected wait result %#lx.\n", wait);
+    hr = ID3D11DeviceContext4_Signal(context4, fence, 8);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    wait = WaitForSingleObject(event, 2000);
+    ok(wait == WAIT_OBJECT_0, "Got unexpected wait result %#lx.\n", wait);
+    value = ID3D11Fence_GetCompletedValue(fence);
+    ok(value == 8, "Got unexpected completed value %s.\n", wine_dbgstr_longlong(value));
+
+    hr = ID3D11Fence_CreateSharedHandle(fence, NULL, GENERIC_ALL, NULL, &shared_handle);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!!shared_handle, "Expected a shared handle.\n");
+
+    if (!(device_2 = create_device(NULL)))
+    {
+        skip("Failed to create a second D3D11 device.\n");
+        goto done;
+    }
+    hr = ID3D11Device_QueryInterface(device_2, &IID_ID3D11Device5, (void **)&device5_2);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D11Device5_OpenSharedFence(device5_2, shared_handle, &IID_ID3D11Fence, (void **)&fence_2);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        value = ID3D11Fence_GetCompletedValue(fence_2);
+        ok(value == 8, "Got unexpected completed value %s.\n", wine_dbgstr_longlong(value));
+        ResetEvent(event);
+        hr = ID3D11Fence_SetEventOnCompletion(fence_2, 9, event);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID3D11DeviceContext4_Signal(context4, fence, 9);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        wait = WaitForSingleObject(event, 2000);
+        ok(wait == WAIT_OBJECT_0, "Got unexpected wait result %#lx.\n", wait);
+        value = ID3D11Fence_GetCompletedValue(fence_2);
+        ok(value == 9, "Got unexpected completed value %s.\n", wine_dbgstr_longlong(value));
+    }
+
+done:
+    if (shared_handle)
+        CloseHandle(shared_handle);
+    if (event)
+        CloseHandle(event);
+    if (fence_2)
+        ID3D11Fence_Release(fence_2);
+    if (plain_fence)
+        ID3D11Fence_Release(plain_fence);
+    if (fence)
+        ID3D11Fence_Release(fence);
+    if (device5_2)
+        ID3D11Device5_Release(device5_2);
+    if (device_2)
+    {
+        refcount = ID3D11Device_Release(device_2);
+        ok(!refcount, "Device has %lu references left.\n", refcount);
+    }
+    if (context4)
+        ID3D11DeviceContext4_Release(context4);
+    if (context)
+        ID3D11DeviceContext_Release(context);
+    ID3D11Device5_Release(device5);
+    refcount = ID3D11Device_Release(device);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+}
+
 START_TEST(d3d11)
 {
     unsigned int argc, i;
@@ -38235,6 +38383,7 @@ START_TEST(d3d11)
     queue_for_each_feature_level(test_device_interfaces);
     queue_test(test_native_d2d_device_contracts);
     queue_test(test_native_xaml_device_contract);
+    queue_test(test_fence);
     queue_test(test_shader_resource_view1);
     queue_test(test_immediate_context);
     queue_test(test_create_deferred_context);

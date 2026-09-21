@@ -39,6 +39,7 @@
 #include "wine/rbtree.h"
 
 struct d3d_device;
+struct d3d11_fence;
 
 extern const struct wined3d_parent_ops d3d_null_wined3d_parent_ops;
 
@@ -527,6 +528,16 @@ HRESULT d3d_query_create(struct d3d_device *device, const D3D11_QUERY_DESC *desc
 struct d3d_query *unsafe_impl_from_ID3D11Query(ID3D11Query *iface);
 struct d3d_query *unsafe_impl_from_ID3D10Query(ID3D10Query *iface);
 struct d3d_query *unsafe_impl_from_ID3D11Asynchronous(ID3D11Asynchronous *iface);
+
+struct d3d11_fence
+{
+    ID3D11Fence ID3D11Fence_iface;
+    LONG refcount;
+    struct wined3d_private_store private_store;
+    ID3D11Device5 *device;
+    HANDLE server_handle;
+    D3D11_FENCE_FLAG flags;
+};
 
 struct d3d_device_context_state_entry
 {

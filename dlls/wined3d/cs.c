@@ -2288,6 +2288,19 @@ static void wined3d_cs_emit_callback(struct wined3d_cs *cs, void (*callback)(voi
     wined3d_device_context_submit(&cs->c, WINED3D_CS_QUEUE_DEFAULT);
 }
 
+void CDECL wined3d_device_context_enqueue_callback(struct wined3d_device_context *context,
+        void (*callback)(void *object), void *object)
+{
+    struct wined3d_cs_callback *op;
+
+    op = wined3d_device_context_require_space(context, sizeof(*op), WINED3D_CS_QUEUE_DEFAULT);
+    op->opcode = WINED3D_CS_OP_CALLBACK;
+    op->callback = callback;
+    op->object = object;
+
+    wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
+}
+
 void wined3d_cs_destroy_object(struct wined3d_cs *cs, void (*callback)(void *object), void *object)
 {
     wined3d_cs_emit_callback(cs, callback, object);

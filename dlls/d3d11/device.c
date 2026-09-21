@@ -24,6 +24,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d11);
 
+#define D3D11_DIRECTORY_TRAVERSE      0x0002
+#define D3D11_DIRECTORY_CREATE_OBJECT 0x0004
+
 static const GUID IID_ID3D11DeviceInternal =
         {0x26c5dc23, 0xe49c, 0x4b0a, {0x8f, 0x79, 0xe7, 0xb1, 0xac, 0x80, 0x4d, 0x32}};
 static const GUID IID_ID3D11DeviceFlushCount =
@@ -3192,20 +3195,322 @@ static void STDMETHODCALLTYPE d3d11_device_context_GetHardwareProtectionState(ID
         *enable = FALSE;
 }
 
+static inline struct d3d11_fence *impl_from_ID3D11Fence(ID3D11Fence *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d11_fence, ID3D11Fence_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_fence_QueryInterface(ID3D11Fence *iface, REFIID iid, void **out)
+{
+    struct d3d11_fence *fence = impl_from_ID3D11Fence(iface);
+
+    TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (IsEqualGUID(iid, &IID_ID3D11Fence)
+            || IsEqualGUID(iid, &IID_ID3D11DeviceChild)
+            || IsEqualGUID(iid, &IID_IUnknown))
+    {
+        *out = &fence->ID3D11Fence_iface;
+        ID3D11Fence_AddRef(&fence->ID3D11Fence_iface);
+        return S_OK;
+    }
+    WARN("Interface %s is not supported.\n", debugstr_guid(iid));
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_fence_AddRef(ID3D11Fence *iface)
+{
+    struct d3d11_fence *fence = impl_from_ID3D11Fence(iface);
+    ULONG refcount = InterlockedIncrement(&fence->refcount);
+
+    TRACE("iface %p increasing refcount to %lu.\n", iface, refcount);
+    return refcount;
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_fence_Release(ID3D11Fence *iface)
+{
+    struct d3d11_fence *fence = impl_from_ID3D11Fence(iface);
+    ULONG refcount = InterlockedDecrement(&fence->refcount);
+
+    TRACE("iface %p decreasing refcount to %lu.\n", iface, refcount);
+    if (!refcount)
+    {
+        ID3D11Device5 *device = fence->device;
+
+        wined3d_private_store_cleanup(&fence->private_store);
+        NtClose(fence->server_handle);
+        free(fence);
+        ID3D11Device5_Release(device);
+    }
+    return refcount;
+}
+
+static void STDMETHODCALLTYPE d3d11_fence_GetDevice(ID3D11Fence *iface, ID3D11Device **device)
+{
+    struct d3d11_fence *fence = impl_from_ID3D11Fence(iface);
+
+    TRACE("iface %p, device %p.\n", iface, device);
+    *device = (ID3D11Device *)fence->device;
+    ID3D11Device_AddRef(*device);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_fence_GetPrivateData(ID3D11Fence *iface,
+        REFGUID guid, UINT *data_size, void *data)
+{
+    struct d3d11_fence *fence = impl_from_ID3D11Fence(iface);
+
+    return d3d_get_private_data(&fence->private_store, guid, data_size, data);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_fence_SetPrivateData(ID3D11Fence *iface,
+        REFGUID guid, UINT data_size, const void *data)
+{
+    struct d3d11_fence *fence = impl_from_ID3D11Fence(iface);
+
+    return d3d_set_private_data(&fence->private_store, guid, data_size, data);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_fence_SetPrivateDataInterface(ID3D11Fence *iface,
+        REFGUID guid, const IUnknown *data)
+{
+    struct d3d11_fence *fence = impl_from_ID3D11Fence(iface);
+
+    return d3d_set_private_data_interface(&fence->private_store, guid, data);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_fence_CreateSharedHandle(ID3D11Fence *iface,
+        const SECURITY_ATTRIBUTES *attributes, DWORD access, const WCHAR *name, HANDLE *handle)
+{
+    struct d3d11_fence *fence = impl_from_ID3D11Fence(iface);
+    struct object_attributes objattr = {0};
+    OBJECT_ATTRIBUTES directory_attr;
+    UNICODE_STRING name_string;
+    WCHAR directory_name[64];
+    HANDLE directory = NULL;
+    NTSTATUS status;
+
+    TRACE("iface %p, attributes %p, access %#lx, name %s, handle %p.\n",
+            iface, attributes, access, debugstr_w(name), handle);
+    if (!handle) return E_INVALIDARG;
+    *handle = NULL;
+    if (!(fence->flags & (D3D11_FENCE_FLAG_SHARED | D3D11_FENCE_FLAG_SHARED_CROSS_ADAPTER)))
+        return E_INVALIDARG;
+    if (attributes && attributes->nLength != sizeof(*attributes))
+        return E_INVALIDARG;
+    if (attributes && attributes->lpSecurityDescriptor)
+        return E_NOTIMPL;
+
+    RtlInitUnicodeString(&name_string, name);
+    if (name)
+    {
+        swprintf(directory_name, ARRAY_SIZE(directory_name), L"\\Sessions\\%u\\BaseNamedObjects",
+                NtCurrentTeb()->Peb->SessionId);
+        RtlInitUnicodeString(&name_string, directory_name);
+        InitializeObjectAttributes(&directory_attr, &name_string, OBJ_CASE_INSENSITIVE, NULL, NULL);
+        if ((status = NtOpenDirectoryObject(&directory,
+                D3D11_DIRECTORY_CREATE_OBJECT | D3D11_DIRECTORY_TRAVERSE, &directory_attr)))
+            return HRESULT_FROM_NT(status);
+        RtlInitUnicodeString(&name_string, name);
+        objattr.rootdir = wine_server_obj_handle(directory);
+        objattr.name_len = name_string.Length;
+    }
+    objattr.attributes = OBJ_CASE_INSENSITIVE
+            | (attributes && attributes->bInheritHandle ? OBJ_INHERIT : 0);
+    SERVER_START_REQ(share_d3d11_fence)
+    {
+        req->fence = wine_server_obj_handle(fence->server_handle);
+        req->access = access;
+        wine_server_add_data(req, &objattr, sizeof(objattr));
+        if (name) wine_server_add_data(req, name, name_string.Length);
+        status = wine_server_call(req);
+        if (!status) *handle = wine_server_ptr_handle(reply->handle);
+    }
+    SERVER_END_REQ;
+    if (directory) NtClose(directory);
+    return status ? HRESULT_FROM_NT(status) : S_OK;
+}
+
+static UINT64 STDMETHODCALLTYPE d3d11_fence_GetCompletedValue(ID3D11Fence *iface)
+{
+    struct d3d11_fence *fence = impl_from_ID3D11Fence(iface);
+    UINT64 value = ~0ull;
+    NTSTATUS status;
+
+    SERVER_START_REQ(query_d3d11_fence)
+    {
+        req->fence = wine_server_obj_handle(fence->server_handle);
+        status = wine_server_call(req);
+        if (!status) value = reply->value;
+    }
+    SERVER_END_REQ;
+    if (status) WARN("Failed to query fence %p, status %#lx.\n", fence, status);
+    return value;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_fence_SetEventOnCompletion(ID3D11Fence *iface,
+        UINT64 value, HANDLE event)
+{
+    struct d3d11_fence *fence = impl_from_ID3D11Fence(iface);
+    HANDLE wait_event = event;
+    NTSTATUS status;
+
+    TRACE("iface %p, value %s, event %p.\n", iface, wine_dbgstr_longlong(value), event);
+    if (!wait_event && !(wait_event = CreateEventW(NULL, FALSE, FALSE, NULL)))
+        return HRESULT_FROM_WIN32(GetLastError());
+    SERVER_START_REQ(set_d3d11_fence_event)
+    {
+        req->fence = wine_server_obj_handle(fence->server_handle);
+        req->event = wine_server_obj_handle(wait_event);
+        req->value = value;
+        status = wine_server_call(req);
+    }
+    SERVER_END_REQ;
+    if (!status && !event) status = NtWaitForSingleObject(wait_event, FALSE, NULL);
+    if (!event) CloseHandle(wait_event);
+    return status ? HRESULT_FROM_NT(status) : S_OK;
+}
+
+static const ID3D11FenceVtbl d3d11_fence_vtbl =
+{
+    d3d11_fence_QueryInterface,
+    d3d11_fence_AddRef,
+    d3d11_fence_Release,
+    d3d11_fence_GetDevice,
+    d3d11_fence_GetPrivateData,
+    d3d11_fence_SetPrivateData,
+    d3d11_fence_SetPrivateDataInterface,
+    d3d11_fence_CreateSharedHandle,
+    d3d11_fence_GetCompletedValue,
+    d3d11_fence_SetEventOnCompletion,
+};
+
+static struct d3d11_fence *unsafe_impl_from_ID3D11Fence(ID3D11Fence *iface)
+{
+    if (!iface || iface->lpVtbl != &d3d11_fence_vtbl) return NULL;
+    return impl_from_ID3D11Fence(iface);
+}
+
+static HRESULT d3d11_fence_create_from_handle(struct d3d_device *device, HANDLE server_handle,
+        D3D11_FENCE_FLAG flags, struct d3d11_fence **fence)
+{
+    struct d3d11_fence *object;
+
+    if (!(object = calloc(1, sizeof(*object))))
+    {
+        NtClose(server_handle);
+        return E_OUTOFMEMORY;
+    }
+    object->ID3D11Fence_iface.lpVtbl = &d3d11_fence_vtbl;
+    object->refcount = 1;
+    object->device = &device->ID3D11Device5_iface;
+    object->server_handle = server_handle;
+    object->flags = flags;
+    wined3d_private_store_init(&object->private_store);
+    ID3D11Device5_AddRef(object->device);
+    *fence = object;
+    return S_OK;
+}
+
+static HRESULT d3d11_fence_create(struct d3d_device *device, UINT64 initial_value,
+        D3D11_FENCE_FLAG flags, struct d3d11_fence **fence)
+{
+    HANDLE server_handle = NULL;
+    NTSTATUS status;
+
+    SERVER_START_REQ(create_d3d11_fence)
+    {
+        req->flags = flags;
+        req->value = initial_value;
+        status = wine_server_call(req);
+        if (!status) server_handle = wine_server_ptr_handle(reply->handle);
+    }
+    SERVER_END_REQ;
+    if (status) return HRESULT_FROM_NT(status);
+    return d3d11_fence_create_from_handle(device, server_handle, flags, fence);
+}
+
+struct d3d11_fence_operation
+{
+    struct d3d11_fence *fence;
+    UINT64 value;
+};
+
+static void d3d11_fence_signal_callback(void *object)
+{
+    struct d3d11_fence_operation *operation = object;
+    NTSTATUS status;
+
+    SERVER_START_REQ(signal_d3d11_fence)
+    {
+        req->fence = wine_server_obj_handle(operation->fence->server_handle);
+        req->value = operation->value;
+        status = wine_server_call(req);
+    }
+    SERVER_END_REQ;
+    if (status) WARN("Failed to signal fence %p, status %#lx.\n", operation->fence, status);
+    ID3D11Fence_Release(&operation->fence->ID3D11Fence_iface);
+    free(operation);
+}
+
+static void d3d11_fence_wait_callback(void *object)
+{
+    struct d3d11_fence_operation *operation = object;
+    HANDLE event;
+    HRESULT hr;
+
+    if (!(event = CreateEventW(NULL, FALSE, FALSE, NULL)))
+        WARN("Failed to create fence wait event, error %lu.\n", GetLastError());
+    else
+    {
+        hr = ID3D11Fence_SetEventOnCompletion(&operation->fence->ID3D11Fence_iface,
+                operation->value, event);
+        if (SUCCEEDED(hr)) NtWaitForSingleObject(event, FALSE, NULL);
+        else WARN("Failed to register fence wait, hr %#lx.\n", hr);
+        CloseHandle(event);
+    }
+    ID3D11Fence_Release(&operation->fence->ID3D11Fence_iface);
+    free(operation);
+}
+
+static HRESULT d3d11_device_context_queue_fence_operation(struct d3d11_device_context *context,
+        struct d3d11_fence *fence, UINT64 value, void (*callback)(void *object))
+{
+    struct d3d11_fence_operation *operation;
+
+    if (context->type != D3D11_DEVICE_CONTEXT_IMMEDIATE) return E_INVALIDARG;
+    if (!(operation = malloc(sizeof(*operation)))) return E_OUTOFMEMORY;
+    operation->fence = fence;
+    operation->value = value;
+    ID3D11Fence_AddRef(&fence->ID3D11Fence_iface);
+    wined3d_device_context_enqueue_callback(context->wined3d_context, callback, operation);
+    return S_OK;
+}
+
 static HRESULT STDMETHODCALLTYPE d3d11_device_context_Signal(ID3D11DeviceContext4 *iface,
         ID3D11Fence *fence, UINT64 value)
 {
-    FIXME("iface %p, fence %p, value %I64x stub!\n", iface, fence, value);
+    struct d3d11_device_context *context = impl_from_ID3D11DeviceContext4(iface);
+    struct d3d11_fence *fence_impl;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, fence %p, value %s.\n", iface, fence, wine_dbgstr_longlong(value));
+    if (!(fence_impl = unsafe_impl_from_ID3D11Fence(fence))) return E_INVALIDARG;
+    wined3d_device_context_flush(context->wined3d_context);
+    InterlockedIncrement64(&context->device->conservative_flush_count);
+    return d3d11_device_context_queue_fence_operation(context, fence_impl, value,
+            d3d11_fence_signal_callback);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_context_Wait(ID3D11DeviceContext4 *iface,
         ID3D11Fence *fence, UINT64 value)
 {
-    FIXME("iface %p, fence %p, value %I64x stub!\n", iface, fence, value);
+    struct d3d11_device_context *context = impl_from_ID3D11DeviceContext4(iface);
+    struct d3d11_fence *fence_impl;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, fence %p, value %s.\n", iface, fence, wine_dbgstr_longlong(value));
+    if (!(fence_impl = unsafe_impl_from_ID3D11Fence(fence))) return E_INVALIDARG;
+    return d3d11_device_context_queue_fence_operation(context, fence_impl, value,
+            d3d11_fence_wait_callback);
 }
 
 static const struct ID3D11DeviceContext4Vtbl d3d11_device_context_vtbl =
@@ -5565,18 +5870,59 @@ static void STDMETHODCALLTYPE d3d11_device_UnregisterDeviceRemoved(ID3D11Device5
 static HRESULT STDMETHODCALLTYPE d3d11_device_OpenSharedFence(ID3D11Device5 *iface, HANDLE handle,
         REFIID iid, void **fence)
 {
-    FIXME("iface %p, handle %p, iid %s, fence %p stub!\n", iface, handle, debugstr_guid(iid), fence);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
+    struct d3d11_fence *object;
+    D3D11_FENCE_FLAG flags = 0;
+    HANDLE server_handle = NULL;
+    NTSTATUS status;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, handle %p, iid %s, fence %p.\n", iface, handle, debugstr_guid(iid), fence);
+    if (!fence) return E_INVALIDARG;
+    *fence = NULL;
+    SERVER_START_REQ(open_d3d11_fence)
+    {
+        req->handle = wine_server_obj_handle(handle);
+        status = wine_server_call(req);
+        if (!status)
+        {
+            server_handle = wine_server_ptr_handle(reply->fence);
+            flags = reply->flags;
+        }
+    }
+    SERVER_END_REQ;
+    if (status) return E_INVALIDARG;
+    if (FAILED(hr = d3d11_fence_create_from_handle(device, server_handle, flags, &object)))
+        return hr;
+    hr = ID3D11Fence_QueryInterface(&object->ID3D11Fence_iface, iid, fence);
+    ID3D11Fence_Release(&object->ID3D11Fence_iface);
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateFence(ID3D11Device5 *iface, UINT64 initial_value,
         D3D11_FENCE_FLAG flags, REFIID iid, void **fence)
 {
-    FIXME("iface %p, initial_value %I64x, flags %d, iid %s, fence %p stub!\n", iface, initial_value,
-            flags, debugstr_guid(iid), fence);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
+    struct d3d11_fence *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, initial_value %s, flags %#x, iid %s, fence %p.\n", iface,
+            wine_dbgstr_longlong(initial_value), flags, debugstr_guid(iid), fence);
+    if (fence) *fence = NULL;
+    if (flags & ~(D3D11_FENCE_FLAG_NONE | D3D11_FENCE_FLAG_SHARED
+            | D3D11_FENCE_FLAG_SHARED_CROSS_ADAPTER | D3D11_FENCE_FLAG_NON_MONITORED))
+        return E_INVALIDARG;
+    if ((flags & D3D11_FENCE_FLAG_SHARED_CROSS_ADAPTER)
+            && !(flags & D3D11_FENCE_FLAG_SHARED))
+        return E_INVALIDARG;
+    if (flags & D3D11_FENCE_FLAG_SHARED_CROSS_ADAPTER)
+        return E_INVALIDARG;
+    if (!fence) return S_FALSE;
+    if (FAILED(hr = d3d11_fence_create(device, initial_value, flags, &object)))
+        return hr;
+    hr = ID3D11Fence_QueryInterface(&object->ID3D11Fence_iface, iid, fence);
+    ID3D11Fence_Release(&object->ID3D11Fence_iface);
+    return hr;
 }
 
 static const struct ID3D11Device5Vtbl d3d11_device_vtbl =

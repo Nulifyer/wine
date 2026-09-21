@@ -4536,6 +4536,63 @@ static void dump_get_dwm_desktop_id_reply( const struct get_dwm_desktop_id_reply
     dump_uint64( " id=", &req->id );
 }
 
+static void dump_create_d3d11_fence_request( const struct create_d3d11_fence_request *req )
+{
+    fprintf( stderr, " flags=%08x", req->flags );
+    dump_uint64( ", value=", &req->value );
+}
+
+static void dump_create_d3d11_fence_reply( const struct create_d3d11_fence_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_share_d3d11_fence_request( const struct share_d3d11_fence_request *req )
+{
+    fprintf( stderr, " fence=%04x", req->fence );
+    fprintf( stderr, ", access=%08x", req->access );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
+}
+
+static void dump_share_d3d11_fence_reply( const struct share_d3d11_fence_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_open_d3d11_fence_request( const struct open_d3d11_fence_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_open_d3d11_fence_reply( const struct open_d3d11_fence_reply *req )
+{
+    fprintf( stderr, " fence=%04x", req->fence );
+    fprintf( stderr, ", flags=%08x", req->flags );
+}
+
+static void dump_query_d3d11_fence_request( const struct query_d3d11_fence_request *req )
+{
+    fprintf( stderr, " fence=%04x", req->fence );
+}
+
+static void dump_query_d3d11_fence_reply( const struct query_d3d11_fence_reply *req )
+{
+    dump_uint64( " value=", &req->value );
+}
+
+static void dump_signal_d3d11_fence_request( const struct signal_d3d11_fence_request *req )
+{
+    fprintf( stderr, " fence=%04x", req->fence );
+    dump_uint64( ", value=", &req->value );
+}
+
+static void dump_set_d3d11_fence_event_request( const struct set_d3d11_fence_event_request *req )
+{
+    fprintf( stderr, " fence=%04x", req->fence );
+    fprintf( stderr, ", event=%04x", req->event );
+    dump_uint64( ", value=", &req->value );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -4949,6 +5006,12 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_destroy_dcomp_window_target_request,
     (dump_func)dump_set_dcomp_channel_completion_event_request,
     (dump_func)dump_get_dwm_desktop_id_request,
+    (dump_func)dump_create_d3d11_fence_request,
+    (dump_func)dump_share_d3d11_fence_request,
+    (dump_func)dump_open_d3d11_fence_request,
+    (dump_func)dump_query_d3d11_fence_request,
+    (dump_func)dump_signal_d3d11_fence_request,
+    (dump_func)dump_set_d3d11_fence_event_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5362,6 +5425,12 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     (dump_func)dump_get_dwm_desktop_id_reply,
+    (dump_func)dump_create_d3d11_fence_reply,
+    (dump_func)dump_share_d3d11_fence_reply,
+    (dump_func)dump_open_d3d11_fence_reply,
+    (dump_func)dump_query_d3d11_fence_reply,
+    NULL,
+    NULL,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -5775,6 +5844,12 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "destroy_dcomp_window_target",
     "set_dcomp_channel_completion_event",
     "get_dwm_desktop_id",
+    "create_d3d11_fence",
+    "share_d3d11_fence",
+    "open_d3d11_fence",
+    "query_d3d11_fence",
+    "signal_d3d11_fence",
+    "set_d3d11_fence_event",
 };
 
 static const struct

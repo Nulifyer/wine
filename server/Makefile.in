@@ -9,6 +9,7 @@ SOURCES = \
 	clipboard.c \
 	completion.c \
 	console.c \
+	d3d11_fence.c \
 	dcomp.c \
 	d3dkmt.c \
 	debugger.c \

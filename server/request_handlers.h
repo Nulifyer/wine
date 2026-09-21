@@ -416,6 +416,12 @@ DECL_HANDLER(create_dcomp_window_target);
 DECL_HANDLER(destroy_dcomp_window_target);
 DECL_HANDLER(set_dcomp_channel_completion_event);
 DECL_HANDLER(get_dwm_desktop_id);
+DECL_HANDLER(create_d3d11_fence);
+DECL_HANDLER(share_d3d11_fence);
+DECL_HANDLER(open_d3d11_fence);
+DECL_HANDLER(query_d3d11_fence);
+DECL_HANDLER(signal_d3d11_fence);
+DECL_HANDLER(set_d3d11_fence_event);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -829,6 +835,12 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_destroy_dcomp_window_target,
     (req_handler)req_set_dcomp_channel_completion_event,
     (req_handler)req_get_dwm_desktop_id,
+    (req_handler)req_create_d3d11_fence,
+    (req_handler)req_share_d3d11_fence,
+    (req_handler)req_open_d3d11_fence,
+    (req_handler)req_query_d3d11_fence,
+    (req_handler)req_signal_d3d11_fence,
+    (req_handler)req_set_d3d11_fence_event,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -3112,3 +3124,29 @@ C_ASSERT( offsetof(struct get_dwm_desktop_id_request, selector) == 12 );
 C_ASSERT( sizeof(struct get_dwm_desktop_id_request) == 16 );
 C_ASSERT( offsetof(struct get_dwm_desktop_id_reply, id) == 8 );
 C_ASSERT( sizeof(struct get_dwm_desktop_id_reply) == 16 );
+C_ASSERT( offsetof(struct create_d3d11_fence_request, flags) == 12 );
+C_ASSERT( offsetof(struct create_d3d11_fence_request, value) == 16 );
+C_ASSERT( sizeof(struct create_d3d11_fence_request) == 24 );
+C_ASSERT( offsetof(struct create_d3d11_fence_reply, handle) == 8 );
+C_ASSERT( sizeof(struct create_d3d11_fence_reply) == 16 );
+C_ASSERT( offsetof(struct share_d3d11_fence_request, fence) == 12 );
+C_ASSERT( offsetof(struct share_d3d11_fence_request, access) == 16 );
+C_ASSERT( sizeof(struct share_d3d11_fence_request) == 24 );
+C_ASSERT( offsetof(struct share_d3d11_fence_reply, handle) == 8 );
+C_ASSERT( sizeof(struct share_d3d11_fence_reply) == 16 );
+C_ASSERT( offsetof(struct open_d3d11_fence_request, handle) == 12 );
+C_ASSERT( sizeof(struct open_d3d11_fence_request) == 16 );
+C_ASSERT( offsetof(struct open_d3d11_fence_reply, fence) == 8 );
+C_ASSERT( offsetof(struct open_d3d11_fence_reply, flags) == 12 );
+C_ASSERT( sizeof(struct open_d3d11_fence_reply) == 16 );
+C_ASSERT( offsetof(struct query_d3d11_fence_request, fence) == 12 );
+C_ASSERT( sizeof(struct query_d3d11_fence_request) == 16 );
+C_ASSERT( offsetof(struct query_d3d11_fence_reply, value) == 8 );
+C_ASSERT( sizeof(struct query_d3d11_fence_reply) == 16 );
+C_ASSERT( offsetof(struct signal_d3d11_fence_request, fence) == 12 );
+C_ASSERT( offsetof(struct signal_d3d11_fence_request, value) == 16 );
+C_ASSERT( sizeof(struct signal_d3d11_fence_request) == 24 );
+C_ASSERT( offsetof(struct set_d3d11_fence_event_request, fence) == 12 );
+C_ASSERT( offsetof(struct set_d3d11_fence_event_request, event) == 16 );
+C_ASSERT( offsetof(struct set_d3d11_fence_event_request, value) == 24 );
+C_ASSERT( sizeof(struct set_d3d11_fence_event_request) == 32 );

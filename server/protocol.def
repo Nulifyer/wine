@@ -5233,3 +5233,48 @@ struct alpc_message_info
 @REPLY
     object_id_t id;               /* zero when the selected role is absent */
 @END
+
+/* Create one D3D11 fence timeline. */
+@REQ(create_d3d11_fence)
+    unsigned int flags;           /* D3D11_FENCE_FLAG value */
+    unsigned __int64 value;       /* initial completed value */
+@REPLY
+    obj_handle_t handle;          /* private fence handle */
+@END
+
+/* Create a shareable handle for one D3D11 fence timeline. */
+@REQ(share_d3d11_fence)
+    obj_handle_t fence;           /* private fence handle */
+    unsigned int access;          /* requested shared-handle access */
+    VARARG(objattr,object_attributes); /* shared-handle attributes and name */
+@REPLY
+    obj_handle_t handle;          /* shared fence handle */
+@END
+
+/* Open a private D3D11 fence handle from a shared handle. */
+@REQ(open_d3d11_fence)
+    obj_handle_t handle;          /* shared fence handle */
+@REPLY
+    obj_handle_t fence;           /* private fence handle */
+    unsigned int flags;           /* creation flags */
+@END
+
+/* Query one D3D11 fence timeline. */
+@REQ(query_d3d11_fence)
+    obj_handle_t fence;           /* private fence handle */
+@REPLY
+    unsigned __int64 value;       /* current completed value */
+@END
+
+/* Complete one D3D11 fence timeline value. */
+@REQ(signal_d3d11_fence)
+    obj_handle_t fence;           /* private fence handle */
+    unsigned __int64 value;       /* new completed value */
+@END
+
+/* Signal an event when one D3D11 fence value completes. */
+@REQ(set_d3d11_fence_event)
+    obj_handle_t fence;           /* private fence handle */
+    obj_handle_t event;           /* event with modify-state access */
+    unsigned __int64 value;       /* value awaited by this registration */
+@END
