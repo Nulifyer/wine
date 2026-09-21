@@ -413,6 +413,7 @@ struct dxgi_device
     IWineDXGIDevice IWineDXGIDevice_iface;
     IWineDXGISwapChainFactory IWineDXGISwapChainFactory_iface;
     IUnknown IDXGIDeviceXAML_iface;
+    IUnknown IDXGIDeviceDWM_iface;
     IUnknown *child_layer;
     LONG refcount;
     LONG in_process_gpu_priority;

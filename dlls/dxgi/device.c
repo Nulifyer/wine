@@ -23,6 +23,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
 static const GUID IID_IDXGIDeviceXAML =
         {0xf898b024, 0xb5c8, 0x42cd, {0xa1, 0x4f, 0xac, 0x5a, 0xdb, 0xf4, 0xbe, 0x22}};
+static const GUID IID_IDXGIDeviceDWM =
+        {0xfef19e0a, 0x40c0, 0x472b, {0xae, 0x40, 0x59, 0xef, 0x97, 0xaf, 0x35, 0x29}};
 
 struct dxgi_device_xaml_vtbl
 {
@@ -31,6 +33,17 @@ struct dxgi_device_xaml_vtbl
     ULONG (STDMETHODCALLTYPE *Release)(IUnknown *iface);
     HRESULT (STDMETHODCALLTYPE *SetInProcessGPUPriority)(IUnknown *iface, INT priority);
     HRESULT (STDMETHODCALLTYPE *GetInProcessGPUPriority)(IUnknown *iface, INT *priority);
+};
+
+struct dxgi_device_dwm_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(IUnknown *iface, REFIID iid, void **out);
+    ULONG (STDMETHODCALLTYPE *AddRef)(IUnknown *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(IUnknown *iface);
+    HRESULT (STDMETHODCALLTYPE *PinResources)(IUnknown *iface,
+            IDXGIResource *const *resources, UINT resource_count);
+    HRESULT (STDMETHODCALLTYPE *UnpinResources)(IUnknown *iface,
+            IDXGIResource *const *resources, UINT resource_count);
 };
 
 static void STDMETHODCALLTYPE dxgi_null_wined3d_object_destroyed(void *parent) {}
@@ -70,6 +83,13 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_QueryInterface(IWineDXGIDevice *ifa
     {
         IUnknown_AddRef(iface);
         *object = &device->IDXGIDeviceXAML_iface;
+        return S_OK;
+    }
+
+    if (IsEqualGUID(riid, &IID_IDXGIDeviceDWM))
+    {
+        IUnknown_AddRef(iface);
+        *object = &device->IDXGIDeviceDWM_iface;
         return S_OK;
     }
 
@@ -476,6 +496,70 @@ static const struct dxgi_device_xaml_vtbl dxgi_device_xaml_vtbl =
     dxgi_device_xaml_GetInProcessGPUPriority,
 };
 
+/* Private device contract used by DWM to keep direct-flip resources resident.
+ * Native DXGI forwards the resources' allocation handles to the WDDM pin and
+ * unpin operations. Wine's host graphics backends own residency and do not
+ * expose an equivalent operation, so successful validation is sufficient. */
+
+static inline struct dxgi_device *impl_from_IDXGIDeviceDWM(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_device, IDXGIDeviceDWM_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_device_dwm_QueryInterface(IUnknown *iface, REFIID iid, void **out)
+{
+    struct dxgi_device *device = impl_from_IDXGIDeviceDWM(iface);
+
+    return IWineDXGIDevice_QueryInterface(&device->IWineDXGIDevice_iface, iid, out);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_device_dwm_AddRef(IUnknown *iface)
+{
+    struct dxgi_device *device = impl_from_IDXGIDeviceDWM(iface);
+
+    return IWineDXGIDevice_AddRef(&device->IWineDXGIDevice_iface);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_device_dwm_Release(IUnknown *iface)
+{
+    struct dxgi_device *device = impl_from_IDXGIDeviceDWM(iface);
+
+    return IWineDXGIDevice_Release(&device->IWineDXGIDevice_iface);
+}
+
+static HRESULT dxgi_device_dwm_validate_resources(IDXGIResource *const *resources, UINT resource_count)
+{
+    if (!resources || !resource_count)
+        return E_INVALIDARG;
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_device_dwm_PinResources(IUnknown *iface,
+        IDXGIResource *const *resources, UINT resource_count)
+{
+    TRACE("iface %p, resources %p, resource_count %u.\n", iface, resources, resource_count);
+
+    return dxgi_device_dwm_validate_resources(resources, resource_count);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_device_dwm_UnpinResources(IUnknown *iface,
+        IDXGIResource *const *resources, UINT resource_count)
+{
+    TRACE("iface %p, resources %p, resource_count %u.\n", iface, resources, resource_count);
+
+    return dxgi_device_dwm_validate_resources(resources, resource_count);
+}
+
+static const struct dxgi_device_dwm_vtbl dxgi_device_dwm_vtbl =
+{
+    dxgi_device_dwm_QueryInterface,
+    dxgi_device_dwm_AddRef,
+    dxgi_device_dwm_Release,
+    dxgi_device_dwm_PinResources,
+    dxgi_device_dwm_UnpinResources,
+};
+
 static inline struct dxgi_device *impl_from_IWineDXGISwapChainFactory(IWineDXGISwapChainFactory *iface)
 {
     return CONTAINING_RECORD(iface, struct dxgi_device, IWineDXGISwapChainFactory_iface);
@@ -599,6 +683,7 @@ HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *l
     device->IWineDXGIDevice_iface.lpVtbl = &dxgi_device_vtbl;
     device->IWineDXGISwapChainFactory_iface.lpVtbl = &dxgi_swapchain_factory_vtbl;
     device->IDXGIDeviceXAML_iface.lpVtbl = (const IUnknownVtbl *)&dxgi_device_xaml_vtbl;
+    device->IDXGIDeviceDWM_iface.lpVtbl = (const IUnknownVtbl *)&dxgi_device_dwm_vtbl;
     device->refcount = 1;
     device->in_process_gpu_priority = 0;
     wined3d_mutex_lock();

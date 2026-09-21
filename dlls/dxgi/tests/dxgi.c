@@ -37,6 +37,7 @@ enum frame_latency
 
 DEFINE_GUID(IID_IDXGIAdapterDWM, 0x712bd56d, 0x86ff, 0x4b71, 0x91, 0xe1, 0xc1, 0x3b, 0x27, 0x4f, 0xf2, 0xa2);
 DEFINE_GUID(IID_IDXGIAdapterInternal2, 0x2411e7e1, 0x12ac, 0x4ccf, 0xbd, 0x14, 0x97, 0x98, 0xe8, 0x53, 0x4d, 0xc0);
+DEFINE_GUID(IID_IDXGIDeviceDWM, 0xfef19e0a, 0x40c0, 0x472b, 0xae, 0x40, 0x59, 0xef, 0x97, 0xaf, 0x35, 0x29);
 DEFINE_GUID(IID_IDXGIFactoryDWM, 0x713f394e, 0x92ca, 0x47e7, 0xab, 0x81, 0x11, 0x59, 0xc2, 0x79, 0x1e, 0x54);
 DEFINE_GUID(IID_IDXGIFactoryDWM2, 0x1ddd77aa, 0x9a4a, 0x4cc8, 0x9e, 0x55, 0x98, 0xc1, 0x96, 0xba, 0xfc, 0x8f);
 DEFINE_GUID(IID_IDXGIFactoryPartner, 0xb14887d9, 0xf537, 0x4af5, 0xb3, 0x79, 0x7d, 0x33, 0x03, 0x1b, 0xe7, 0x73);
@@ -50,10 +51,28 @@ enum test_dxgi_output_dwm_display_flags
 };
 
 struct test_dxgi_adapter_dwm;
+struct test_dxgi_device_dwm;
 struct test_dxgi_factory_dwm;
 struct test_dxgi_factory_dwm2;
 struct test_dxgi_output_dwm;
 struct test_dxgi_swapchain_dwm1;
+
+struct test_dxgi_device_dwm_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(struct test_dxgi_device_dwm *iface,
+            REFIID iid, void **object);
+    ULONG (STDMETHODCALLTYPE *AddRef)(struct test_dxgi_device_dwm *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(struct test_dxgi_device_dwm *iface);
+    HRESULT (STDMETHODCALLTYPE *PinResources)(struct test_dxgi_device_dwm *iface,
+            IDXGIResource *const *resources, UINT resource_count);
+    HRESULT (STDMETHODCALLTYPE *UnpinResources)(struct test_dxgi_device_dwm *iface,
+            IDXGIResource *const *resources, UINT resource_count);
+};
+
+struct test_dxgi_device_dwm
+{
+    const struct test_dxgi_device_dwm_vtbl *lpVtbl;
+};
 
 #pragma pack(push, 4)
 struct test_dxgi_output_dwm_desc
@@ -2055,6 +2074,80 @@ static void test_create_surface(void)
         IDXGISurface_Release(surface);
     }
 
+    refcount = IDXGIDevice_Release(device);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+}
+
+static void test_dwm_device_interface(void)
+{
+    struct test_dxgi_device_dwm *device_dwm;
+    IUnknown *device_identity, *dwm_identity;
+    IDXGIResource *resources[1];
+    DXGI_SURFACE_DESC desc;
+    IDXGISurface *surface;
+    IDXGIDevice *device;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(device = create_d3d11_device()))
+    {
+        skip("Failed to create a D3D11 device.\n");
+        return;
+    }
+
+    device_dwm = NULL;
+    hr = IDXGIDevice_QueryInterface(device, &IID_IDXGIDeviceDWM, (void **)&device_dwm);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE),
+            "Got unexpected IDXGIDeviceDWM hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto done;
+
+    device_identity = NULL;
+    hr = IDXGIDevice_QueryInterface(device, &IID_IUnknown, (void **)&device_identity);
+    ok(hr == S_OK, "Failed to query device identity, hr %#lx.\n", hr);
+    dwm_identity = NULL;
+    hr = device_dwm->lpVtbl->QueryInterface(device_dwm, &IID_IUnknown, (void **)&dwm_identity);
+    ok(hr == S_OK, "Failed to query DWM device identity, hr %#lx.\n", hr);
+    ok(device_identity == dwm_identity, "Got identity %p, expected %p.\n",
+            dwm_identity, device_identity);
+    if (dwm_identity)
+        IUnknown_Release(dwm_identity);
+    if (device_identity)
+        IUnknown_Release(device_identity);
+
+    hr = device_dwm->lpVtbl->PinResources(device_dwm, NULL, 0);
+    ok(hr == E_INVALIDARG, "Got unexpected null pin hr %#lx.\n", hr);
+    hr = device_dwm->lpVtbl->UnpinResources(device_dwm, NULL, 1);
+    ok(hr == E_INVALIDARG, "Got unexpected null unpin hr %#lx.\n", hr);
+
+    desc.Width = 4;
+    desc.Height = 4;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
+    surface = NULL;
+    hr = IDXGIDevice_CreateSurface(device, &desc, 1, DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            NULL, &surface);
+    ok(hr == S_OK, "Failed to create surface, hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        resources[0] = NULL;
+        hr = IDXGISurface_QueryInterface(surface, &IID_IDXGIResource, (void **)&resources[0]);
+        ok(hr == S_OK, "Failed to query resource, hr %#lx.\n", hr);
+        if (SUCCEEDED(hr))
+        {
+            hr = device_dwm->lpVtbl->PinResources(device_dwm, resources, ARRAY_SIZE(resources));
+            ok(hr == S_OK, "Failed to pin resource, hr %#lx.\n", hr);
+            hr = device_dwm->lpVtbl->UnpinResources(device_dwm, resources, ARRAY_SIZE(resources));
+            ok(hr == S_OK, "Failed to unpin resource, hr %#lx.\n", hr);
+            IDXGIResource_Release(resources[0]);
+        }
+        IDXGISurface_Release(surface);
+    }
+
+    device_dwm->lpVtbl->Release(device_dwm);
+
+done:
     refcount = IDXGIDevice_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
 }
@@ -9822,6 +9915,7 @@ START_TEST(dxgi)
     queue_test(test_query_video_memory_info);
     queue_test(test_check_interface_support);
     queue_test(test_create_surface);
+    queue_test(test_dwm_device_interface);
     queue_test(test_subresource_surface);
     queue_test(test_parents);
     queue_test(test_output);
