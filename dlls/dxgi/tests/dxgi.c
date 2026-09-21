@@ -1749,10 +1749,22 @@ static void test_dwm_swapchain(void)
     ok(swapchain_dwm->lpVtbl->GetBackBufferImplicitRotationCount(swapchain_dwm) == 1,
             "Got unexpected implicit rotation count.\n");
 
+    hr = swapchain_dwm->lpVtbl->PresentDWM(swapchain_dwm, 0, 0, 0, NULL,
+            0, NULL, NULL, 0);
+    ok(hr == S_OK, "Failed to present DWM swap chain, hr %#lx.\n", hr);
+    present_count = 0xdeadbeef;
+    hr = swapchain_dwm->lpVtbl->GetLastPresentCount(swapchain_dwm, &present_count);
+    ok(hr == S_OK && present_count == 2, "Got present count %u, hr %#lx.\n",
+            present_count, hr);
+    ok(swapchain_dwm->lpVtbl->GetCurrentBackBufferIndex(swapchain_dwm) == 0,
+            "Got unexpected wrapped current back-buffer index.\n");
+    ok(swapchain_dwm->lpVtbl->GetBackBufferImplicitRotationCount(swapchain_dwm) == 0,
+            "Got unexpected wrapped implicit rotation count.\n");
+
     memset(&statistics, 0xcc, sizeof(statistics));
     hr = swapchain_dwm->lpVtbl->GetFrameStatisticsDWM(swapchain_dwm, &statistics);
     ok(hr == S_OK, "Failed to get swap-chain statistics, hr %#lx.\n", hr);
-    ok(statistics.present_count == 1, "Got statistics present count %u.\n",
+    ok(statistics.present_count == 2, "Got statistics present count %u.\n",
             statistics.present_count);
     ok(statistics.present_qpc_time.QuadPart != 0, "Expected a present QPC time.\n");
 

@@ -1401,9 +1401,7 @@ static UINT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetCurrentBackBufferIndex(
 static UINT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetBackBufferImplicitRotationCount(
         IDXGISwapChainDWM1 *iface)
 {
-    struct d3d11_swapchain *swapchain = d3d11_swapchain_from_IDXGISwapChainDWM1(iface);
-
-    return swapchain->present_count;
+    return d3d11_swapchain_dwm_GetCurrentBackBufferIndex(iface);
 }
 
 static UINT STDMETHODCALLTYPE d3d11_swapchain_dwm_GetFrontBufferRenderingCapability(
