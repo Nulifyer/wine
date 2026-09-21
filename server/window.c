@@ -1286,6 +1286,9 @@ static int sync_dwm_window_link( struct window *win )
     if (!notify_dwm_window_linked( win->desktop, win->dwm_context_id, win->handle,
                                    win->parent->handle, insert_before, 1 )) return 0;
     win->dwm_link_id = win->dwm_context_id;
+    if (win->style & WS_VISIBLE)
+        notify_dwm_window_visibility_changed( win->desktop, win->dwm_context_id,
+                                              win->handle, 1 );
     return 1;
 }
 
@@ -2181,6 +2184,10 @@ static void set_window_pos( struct window *win, struct window *previous,
     if (win->dwm_context_id && old_style != win->style)
         notify_dwm_window_style_changed( win->desktop, win->dwm_context_id, win->handle,
                                          GWL_STYLE, win->style );
+    if (win->parent && win->dwm_link_id == win->dwm_context_id &&
+        ((old_style ^ win->style) & WS_VISIBLE))
+        notify_dwm_window_visibility_changed( win->desktop, win->dwm_context_id,
+                                              win->handle, !!(win->style & WS_VISIBLE) );
 
     /* update window monitor dpi for toplevel windows */
     if (is_toplevel( win )) set_window_monitor_dpi( win );
@@ -2985,6 +2992,10 @@ DECL_HANDLER(set_window_info)
     if (win->dwm_context_id && old_style != win->style)
         notify_dwm_window_style_changed( win->desktop, win->dwm_context_id, win->handle,
                                          GWL_STYLE, win->style );
+    if (win->parent && win->dwm_link_id == win->dwm_context_id &&
+        ((old_style ^ win->style) & WS_VISIBLE))
+        notify_dwm_window_visibility_changed( win->desktop, win->dwm_context_id,
+                                              win->handle, !!(win->style & WS_VISIBLE) );
     if (win->dwm_context_id && old_ex_style != win->ex_style)
         notify_dwm_window_style_changed( win->desktop, win->dwm_context_id, win->handle,
                                          GWL_EXSTYLE, win->ex_style );

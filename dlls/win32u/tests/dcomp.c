@@ -2817,6 +2817,9 @@ static void test_dwm_session_message_delivery(void)
             ok( received.header.DataLength == 32, "got window link length %#x\n", received.header.DataLength );
             saw_window_link = TRUE;
         }
+        else if (received.data[0] == 0x40000007)
+            ok( received.header.DataLength == 16, "got window visibility length %#x\n",
+                received.header.DataLength );
         else ok( 0, "got unexpected startup command %#lx\n", received.data[0] );
     }
     ok( saw_input, "DWM startup did not replay input desktop %#I64x\n", input_id );
@@ -2868,6 +2871,7 @@ static void test_dwm_session_message_delivery(void)
         HWND expected_link_anchor = GetWindow( target_window, GW_HWNDNEXT );
         UINT64 message_desktop = 0, message_sequence = 0;
         DWORD message_style = 0, message_ex_style = 0, message_pid = 0;
+        BOOL saw_target_link = FALSE;
 
         memset( &received, 0, sizeof(received) );
         size = sizeof(received);
@@ -2925,6 +2929,12 @@ static void test_dwm_session_message_delivery(void)
                     received.header.DataLength );
                 continue;
             }
+            if (received.data[0] == 0x40000007)
+            {
+                ok( received.header.DataLength == 16, "got intervening visibility length %#x\n",
+                    received.header.DataLength );
+                continue;
+            }
             ok( received.data[0] == 0x40000012, "got window link command %#lx\n",
                 received.data[0] );
             ok( received.header.DataLength == 32, "got window link length %#x\n",
@@ -2942,8 +2952,10 @@ static void test_dwm_session_message_delivery(void)
                     "got link anchor %p, expected %p\n", link_anchor,
                     expected_link_anchor ? expected_link_anchor : (HWND)1 );
                 ok( received.data[7] == 1, "got window band %lu\n", received.data[7] );
+                saw_target_link = TRUE;
             }
         }
+        ok( saw_target_link, "target window link was not delivered\n" );
 
         for (i = 0; i < 3; ++i)
         {
@@ -2951,6 +2963,7 @@ static void test_dwm_session_message_delivery(void)
             LONG style_offset = 0;
             DWORD style_value = 0;
             BOOL saw_style = FALSE;
+            BOOL saw_visibility = FALSE;
             BOOL show = i != 1;
 
             ShowWindow( target_window, show ? SW_SHOW : SW_HIDE );
@@ -2964,17 +2977,32 @@ static void test_dwm_session_message_delivery(void)
                 ok( !status, "window style receive returned %#lx\n", status );
                 if (status) break;
                 memcpy( &style_window, received.data + 1, sizeof(style_window) );
-                if (received.data[0] != 0x40000016 || style_window != target_window) continue;
-                ok( received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
-                    "got window style type %#x\n", received.header.Type );
-                ok( received.header.DataLength == 20,
-                    "got window style length %#x\n", received.header.DataLength );
-                memcpy( &style_offset, received.data + 3, sizeof(style_offset) );
-                style_value = received.data[4];
-                saw_style = TRUE;
-                break;
+                if (style_window != target_window) continue;
+                if (received.data[0] == 0x40000016)
+                {
+                    ok( received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+                        "got window style type %#x\n", received.header.Type );
+                    ok( received.header.DataLength == 20,
+                        "got window style length %#x\n", received.header.DataLength );
+                    memcpy( &style_offset, received.data + 3, sizeof(style_offset) );
+                    style_value = received.data[4];
+                    saw_style = TRUE;
+                }
+                else if (received.data[0] == 0x40000007)
+                {
+                    ok( saw_style, "window visibility preceded its style change\n" );
+                    ok( received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+                        "got window visibility type %#x\n", received.header.Type );
+                    ok( received.header.DataLength == 16,
+                        "got window visibility length %#x\n", received.header.DataLength );
+                    ok( !!received.data[3] == show, "got visibility %lu, expected %u\n",
+                        received.data[3], show );
+                    saw_visibility = TRUE;
+                }
+                if (saw_style && saw_visibility) break;
             }
             ok( saw_style, "window style change was not delivered\n" );
+            ok( saw_visibility, "window visibility change was not delivered\n" );
             ok( style_window == target_window, "got style HWND %p, expected %p\n",
                 style_window, target_window );
             ok( style_offset == GWL_STYLE, "got style offset %ld\n", style_offset );
