@@ -414,6 +414,8 @@ RPC_STATUS WINAPI RpcEpUnregister( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bin
   handle_t handle;
 
   TRACE("(%p,%p,%p)\n", IfSpec, BindingVector, UuidVector);
+  if (!BindingVector) return RPC_S_NO_BINDINGS;
+
   TRACE(" ifid=%s\n", debugstr_guid(&If->InterfaceId.SyntaxGUID));
   for (i=0; i<BindingVector->Count; i++) {
     RpcBinding* bind = BindingVector->BindingH[i];
@@ -449,7 +451,7 @@ RPC_STATUS WINAPI RpcEpUnregister( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bin
           if (status != RPC_S_OK) break;
 
           if (UuidVector)
-              memcpy(&entries[i * UuidVector->Count + j].object, &UuidVector->Uuid[j], sizeof(GUID));
+              entries[i * UuidVector->Count + j].object = *UuidVector->Uuid[j];
           else
               memset(&entries[i].object, 0, sizeof(entries[i].object));
       }
@@ -459,8 +461,8 @@ RPC_STATUS WINAPI RpcEpUnregister( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bin
   {
       __TRY
       {
-          ept_insert(handle, BindingVector->Count * (UuidVector ? UuidVector->Count : 1),
-                     entries, TRUE, &status2);
+          ept_delete(handle, BindingVector->Count * (UuidVector ? UuidVector->Count : 1),
+                     entries, &status2);
       }
       __EXCEPT(rpc_filter)
       {
@@ -470,7 +472,7 @@ RPC_STATUS WINAPI RpcEpUnregister( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bin
       if (status2 == RPC_S_SERVER_UNAVAILABLE)
           status2 = EPT_S_NOT_REGISTERED;
       if (status2 != RPC_S_OK)
-          ERR("ept_insert failed with error %ld\n", status2);
+          ERR("ept_delete failed with error %ld\n", status2);
       status = status2; /* FIXME: convert status? */
   }
   RpcBindingFree(&handle);

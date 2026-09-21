@@ -1228,6 +1228,9 @@ static void test_endpoint_mapper(RPC_CSTR protseq, RPC_CSTR address)
     handle_t handle;
     unsigned char *binding;
 
+    status = RpcEpUnregister(IFoo_v0_0_s_ifspec, NULL, NULL);
+    ok(status == RPC_S_NO_BINDINGS, "%s: RpcEpUnregister returned %lu\n", protseq, status);
+
     status = RpcServerRegisterIf(IFoo_v0_0_s_ifspec, NULL, NULL);
     ok(status == RPC_S_OK, "%s: RpcServerRegisterIf failed (%lu)\n", protseq, status);
 
@@ -1262,6 +1265,9 @@ static void test_endpoint_mapper(RPC_CSTR protseq, RPC_CSTR address)
 
     status = RpcEpUnregister(IFoo_v0_0_s_ifspec, binding_vector, NULL);
     ok(status == RPC_S_OK, "%s: RpcEpUnregister failed with error %lu\n", protseq, status);
+
+    status = RpcEpResolveBinding(handle, IFoo_v0_0_s_ifspec);
+    ok(status == EPT_S_NOT_REGISTERED, "%s: unregistered RpcEpResolveBinding returned %lu\n", protseq, status);
 
     status = RpcEpRegisterA(IFoo_v0_0_s_ifspec, binding_vector, &object_vector, annotation);
     ok(status == RPC_S_OK, "%s: object RpcEpRegisterA failed with error %lu\n", protseq, status);
