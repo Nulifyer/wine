@@ -80,6 +80,9 @@ struct dcomp_resource_view
     struct dcomp_resource_view *visual_transform;
     struct dcomp_resource_view *visual_clip;
     struct dcomp_resource_view *sprite_content;
+    struct dcomp_resource_view *window_flip_surface_clip;
+    struct dcomp_resource_view *window_sprite_bitmap;
+    struct dcomp_resource_view *window_sprite_clip;
     struct dcomp_resource_view *expression_shared_section;
     struct dcomp_resource_view *parent;
     struct dcomp_resource_view *first_child;
@@ -111,6 +114,19 @@ struct dcomp_resource_view
     BOOL visual_size_dirty;
     float visual_relative_size[2];
     float visual_size[2];
+    UINT window_node_dirty;
+    BYTE window_alpha_margins[16];
+    BYTE window_content_relative_client_rect[16];
+    BYTE window_content_relative_window_rect[16];
+    BYTE window_content_size[8];
+    BYTE window_extended_bounds[16];
+    UINT64 window_flip_surface;
+    BYTE window_flags[4];
+    BYTE window_maximized_clip_margins[16];
+    BYTE window_process_attribution[16];
+    BYTE window_source_modifications[16];
+    UINT64 window_sprite_handle;
+    UINT64 window_handle;
     BOOL color_dirty;
     float color[4];
     UINT rectangle_dirty;
@@ -221,6 +237,21 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
     if ((reference = resource->sprite_content))
     {
         resource->sprite_content = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->window_flip_surface_clip))
+    {
+        resource->window_flip_surface_clip = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->window_sprite_bitmap))
+    {
+        resource->window_sprite_bitmap = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->window_sprite_clip))
+    {
+        resource->window_sprite_clip = NULL;
         release_dcomp_resource_reference( reference );
     }
     if ((reference = resource->expression_shared_section))
@@ -355,9 +386,9 @@ static BOOL is_dcomp_brush_resource_type( UINT type )
     }
 }
 
-static BOOL is_dcomp_base_resource_type( UINT type )
+static BOOL is_dcomp_derived_resource_type( UINT type, UINT base )
 {
-    /* Windows' MIL resource-parent table, rooted at MIL_RESOURCE_TYPE 0x87. */
+    /* Windows' MIL resource-parent table. */
     static const BYTE parent[0xc2] =
     {
         0xc2, 0x3d, 0x0a, 0x7b, 0x87, 0x7b, 0x3d, 0x2f,
@@ -389,7 +420,7 @@ static BOOL is_dcomp_base_resource_type( UINT type )
 
     while (type < ARRAY_SIZE(parent) && count++ < ARRAY_SIZE(parent))
     {
-        if (type == 0x87) return TRUE;
+        if (type == base) return TRUE;
         type = parent[type];
     }
     return FALSE;
@@ -464,6 +495,37 @@ static NTSTATUS set_dcomp_visual_reference_property( struct dcomp_channel_view *
             return STATUS_INVALID_PARAMETER;
         replace_dcomp_resource_reference( &resource->sprite_content, reference );
         resource->sprite_content_dirty = TRUE;
+        remove_unannounced_dcomp_resources( view );
+        return STATUS_SUCCESS;
+    }
+    if (resource->type == 0xc0 &&
+        (property == 0x3a || property == 0x42 || property == 0x43))
+    {
+        struct dcomp_resource_view **slot;
+        UINT base, dirty;
+
+        switch (property)
+        {
+        case 0x3a:
+            slot = &resource->window_flip_surface_clip;
+            base = 0x43;
+            dirty = 0x40;
+            break;
+        case 0x42:
+            slot = &resource->window_sprite_bitmap;
+            base = 0x41;
+            dirty = 0x4000;
+            break;
+        case 0x43:
+            slot = &resource->window_sprite_clip;
+            base = 0x82;
+            dirty = 0x8000;
+            break;
+        }
+        if (reference && !is_dcomp_derived_resource_type( reference->type, base ))
+            return STATUS_INVALID_PARAMETER;
+        replace_dcomp_resource_reference( slot, reference );
+        resource->window_node_dirty |= dirty;
         remove_unannounced_dcomp_resources( view );
         return STATUS_SUCCESS;
     }
@@ -585,6 +647,17 @@ static NTSTATUS set_dcomp_visual_integer_property( struct dcomp_resource_view *r
 {
     INT int_value = value;
 
+    if (resource->type == 0xc0 && property >= 0x3b && property <= 0x3e)
+    {
+        BYTE *flag = &resource->window_flags[property - 0x3b];
+        UINT dirty = 0x80 << (property - 0x3b);
+
+        if (*flag == !!value) return STATUS_SUCCESS;
+        *flag = !!value;
+        resource->window_node_dirty |= dirty;
+        return STATUS_SUCCESS;
+    }
+
     switch (property)
     {
     case 8:
@@ -626,6 +699,72 @@ static NTSTATUS set_dcomp_visual_integer_property( struct dcomp_resource_view *r
 static NTSTATUS set_dcomp_visual_buffer_property( struct dcomp_resource_view *resource,
                                                    UINT property, const BYTE *data, UINT size )
 {
+    BYTE *target = NULL;
+    UINT expected_size = 0, dirty = 0;
+
+    if (resource->type == 0xc0)
+    {
+        switch (property)
+        {
+        case 0x34:
+            target = resource->window_alpha_margins;
+            expected_size = sizeof(resource->window_alpha_margins);
+            dirty = 0x1;
+            break;
+        case 0x35:
+            target = resource->window_content_relative_client_rect;
+            expected_size = sizeof(resource->window_content_relative_client_rect);
+            dirty = 0x2;
+            break;
+        case 0x36:
+            target = resource->window_content_relative_window_rect;
+            expected_size = sizeof(resource->window_content_relative_window_rect);
+            dirty = 0x4;
+            break;
+        case 0x37:
+            target = resource->window_content_size;
+            expected_size = sizeof(resource->window_content_size);
+            dirty = 0x8;
+            break;
+        case 0x38:
+            target = resource->window_extended_bounds;
+            expected_size = sizeof(resource->window_extended_bounds);
+            dirty = 0x10;
+            break;
+        case 0x3f:
+            target = resource->window_maximized_clip_margins;
+            expected_size = sizeof(resource->window_maximized_clip_margins);
+            dirty = 0x800;
+            break;
+        case 0x40:
+            target = resource->window_process_attribution;
+            expected_size = sizeof(resource->window_process_attribution);
+            dirty = 0x1000;
+            break;
+        case 0x41:
+            target = resource->window_source_modifications;
+            expected_size = sizeof(resource->window_source_modifications);
+            dirty = 0x2000;
+            break;
+        case 0x44:
+            target = (BYTE *)&resource->window_sprite_handle;
+            expected_size = sizeof(resource->window_sprite_handle);
+            dirty = 0x10000;
+            break;
+        case 0x45:
+            target = (BYTE *)&resource->window_handle;
+            expected_size = sizeof(resource->window_handle);
+            dirty = 0x20000;
+            break;
+        }
+        if (target)
+        {
+            if (size != expected_size) return STATUS_INVALID_PARAMETER;
+            memcpy( target, data, size );
+            resource->window_node_dirty |= dirty;
+            return STATUS_SUCCESS;
+        }
+    }
     if (property == 0x1d && size == sizeof(resource->visual_size))
     {
         if (!memcmp( resource->visual_size, data, size )) return STATUS_SUCCESS;
@@ -641,6 +780,19 @@ static NTSTATUS set_dcomp_visual_buffer_property( struct dcomp_resource_view *re
         return STATUS_SUCCESS;
     }
     return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS set_dcomp_window_node_handle_property( struct dcomp_resource_view *resource,
+                                                        UINT property, UINT64 handle )
+{
+    /* Windows retains a Dxgk composition object and opens it in DWM. Preserve the
+     * value until Wine has an equivalent server-backed composition-object owner. */
+    if (resource->type != 0xc0) return STATUS_NOT_SUPPORTED;
+    if (property != 0x39) return STATUS_INVALID_PARAMETER;
+    if (resource->window_flip_surface == handle) return STATUS_SUCCESS;
+    resource->window_flip_surface = handle;
+    resource->window_node_dirty |= 0x20;
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS set_dcomp_color_brush_buffer_property( struct dcomp_resource_view *resource,
@@ -873,7 +1025,7 @@ static NTSTATUS set_dcomp_expression_reference_property( struct dcomp_channel_vi
         return STATUS_ACCESS_DENIED;
     if (property == 2)
     {
-        if (reference && !is_dcomp_base_resource_type( reference->type ))
+        if (reference && !is_dcomp_derived_resource_type( reference->type, 0x87 ))
             return STATUS_INVALID_PARAMETER;
         resource->expression_property_resource_id = reference_id;
         resource->expression_base_dirty = TRUE;
@@ -1253,6 +1405,18 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                     return status;
             }
         }
+        else if (type == 13)
+        {
+            UINT property;
+            UINT64 handle;
+
+            memcpy( &id, buffer + 4, sizeof(id) );
+            memcpy( &property, buffer + 8, sizeof(property) );
+            memcpy( &handle, buffer + 16, sizeof(handle) );
+            if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
+            status = set_dcomp_window_node_handle_property( resource, property, handle );
+            if (status != STATUS_NOT_SUPPORTED && status) return status;
+        }
         else if (type == 9)
         {
             HANDLE handle;
@@ -1457,6 +1621,112 @@ static BYTE *emit_dcomp_reference_update( BYTE *cursor, UINT opcode, UINT id,
 
     memcpy( cursor, command, sizeof(command) );
     return cursor + sizeof(command);
+}
+
+static data_size_t dcomp_window_node_update_size( const struct dcomp_resource_view *resource )
+{
+    static const BYTE sizes[] =
+    {
+        28, 28, 28, 20, 28, 20, 16, 16, 16,
+        16, 16, 28, 28, 28, 16, 16, 20, 20,
+    };
+    data_size_t size = 0;
+    UINT dirty = resource->window_node_dirty;
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(sizes); ++i)
+        if (dirty & (1u << i)) size += sizes[i];
+    return size;
+}
+
+static BYTE *emit_dcomp_window_node_value( BYTE *cursor, UINT opcode, UINT id,
+                                            const void *value, UINT value_size )
+{
+    UINT size = 12 + value_size;
+
+    memcpy( cursor, &size, sizeof(size) );
+    memcpy( cursor + 4, &opcode, sizeof(opcode) );
+    memcpy( cursor + 8, &id, sizeof(id) );
+    memcpy( cursor + 12, value, value_size );
+    return cursor + size;
+}
+
+static BYTE *emit_dcomp_window_node_updates( BYTE *cursor,
+                                              const struct dcomp_resource_view *resource )
+{
+    UINT dirty = resource->window_node_dirty, value;
+
+    if (dirty) TRACE( "window node %#x dirty %#x\n", resource->id, dirty );
+    if (dirty & 0x1)
+        cursor = emit_dcomp_window_node_value( cursor, 0x295, resource->id,
+                                               resource->window_alpha_margins, 16 );
+    if (dirty & 0x2)
+        cursor = emit_dcomp_window_node_value( cursor, 0x296, resource->id,
+                                               resource->window_content_relative_client_rect, 16 );
+    if (dirty & 0x4)
+        cursor = emit_dcomp_window_node_value( cursor, 0x297, resource->id,
+                                               resource->window_content_relative_window_rect, 16 );
+    if (dirty & 0x8)
+        cursor = emit_dcomp_window_node_value( cursor, 0x298, resource->id,
+                                               resource->window_content_size, 8 );
+    if (dirty & 0x10)
+        cursor = emit_dcomp_window_node_value( cursor, 0x299, resource->id,
+                                               resource->window_extended_bounds, 16 );
+    if (dirty & 0x20)
+        cursor = emit_dcomp_window_node_value( cursor, 0x29a, resource->id,
+                                               &resource->window_flip_surface, 8 );
+    if (dirty & 0x40)
+    {
+        value = resource->window_flip_surface_clip ?
+                resource->window_flip_surface_clip->id : 0;
+        cursor = emit_dcomp_window_node_value( cursor, 0x29b, resource->id, &value, 4 );
+    }
+    if (dirty & 0x80)
+    {
+        value = resource->window_flags[0];
+        cursor = emit_dcomp_window_node_value( cursor, 0x29c, resource->id, &value, 4 );
+    }
+    if (dirty & 0x100)
+    {
+        value = resource->window_flags[1];
+        cursor = emit_dcomp_window_node_value( cursor, 0x29d, resource->id, &value, 4 );
+    }
+    if (dirty & 0x200)
+    {
+        value = resource->window_flags[2];
+        cursor = emit_dcomp_window_node_value( cursor, 0x29e, resource->id, &value, 4 );
+    }
+    if (dirty & 0x400)
+    {
+        value = resource->window_flags[3];
+        cursor = emit_dcomp_window_node_value( cursor, 0x29f, resource->id, &value, 4 );
+    }
+    if (dirty & 0x800)
+        cursor = emit_dcomp_window_node_value( cursor, 0x2a0, resource->id,
+                                               resource->window_maximized_clip_margins, 16 );
+    if (dirty & 0x1000)
+        cursor = emit_dcomp_window_node_value( cursor, 0x2a1, resource->id,
+                                               resource->window_process_attribution, 16 );
+    if (dirty & 0x2000)
+        cursor = emit_dcomp_window_node_value( cursor, 0x2a2, resource->id,
+                                               resource->window_source_modifications, 16 );
+    if (dirty & 0x4000)
+    {
+        value = resource->window_sprite_bitmap ? resource->window_sprite_bitmap->id : 0;
+        cursor = emit_dcomp_window_node_value( cursor, 0x2a3, resource->id, &value, 4 );
+    }
+    if (dirty & 0x8000)
+    {
+        value = resource->window_sprite_clip ? resource->window_sprite_clip->id : 0;
+        cursor = emit_dcomp_window_node_value( cursor, 0x2a4, resource->id, &value, 4 );
+    }
+    if (dirty & 0x10000)
+        cursor = emit_dcomp_window_node_value( cursor, 0x2a5, resource->id,
+                                               &resource->window_sprite_handle, 8 );
+    if (dirty & 0x20000)
+        cursor = emit_dcomp_window_node_value( cursor, 0x2a6, resource->id,
+                                               &resource->window_handle, 8 );
+    return cursor;
 }
 
 static BYTE *emit_dcomp_rectangle_updates( BYTE *cursor,
@@ -1721,6 +1991,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         if (resource->visual_flags_dirty) resource_size += 16;
         if (resource->visual_relative_size_dirty) resource_size += 20;
         if (resource->visual_size_dirty) resource_size += 20;
+        if (!resource->released && resource->type == 0xc0)
+            resource_size += dcomp_window_node_update_size( resource );
         if (!resource->released && resource->color_dirty) resource_size += 28;
         if (!resource->released && resource->type == 0x7f)
             resource_size += dcomp_rectangle_update_size( resource );
@@ -1886,6 +2158,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             memcpy( cursor, command, sizeof(command) );
             cursor += sizeof(command);
         }
+        if (!resource->released && resource->type == 0xc0)
+            cursor = emit_dcomp_window_node_updates( cursor, resource );
     }
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
     {
@@ -1965,6 +2239,7 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
             resource->visual_flags_dirty = FALSE;
             resource->visual_relative_size_dirty = FALSE;
             resource->visual_size_dirty = FALSE;
+            resource->window_node_dirty = 0;
             resource->color_dirty = FALSE;
             resource->rectangle_dirty = 0;
             resource->visual_transform_dirty = FALSE;

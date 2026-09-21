@@ -1508,6 +1508,125 @@ done:
     CloseHandle( event );
 }
 
+static void test_window_node_properties(void)
+{
+    static const UINT commands[] =
+    {
+        2, 1, 0xc0, 0,
+        2, 2, 0x43, 0,
+        2, 3, 0x41, 0,
+        2, 4, 0x82, 0,
+        15, 1, 0x34, 16, 0x34000001, 0x34000002, 0x34000003, 0x34000004,
+        15, 1, 0x35, 16, 0x35000001, 0x35000002, 0x35000003, 0x35000004,
+        15, 1, 0x36, 16, 0x36000001, 0x36000002, 0x36000003, 0x36000004,
+        15, 1, 0x37, 8, 0x37000001, 0x37000002,
+        15, 1, 0x38, 16, 0x38000001, 0x38000002, 0x38000003, 0x38000004,
+        13, 1, 0x39, 0, 0x39000001, 0x39000002,
+        16, 1, 0x3a, 2,
+        11, 1, 0x3b, 0, 1, 0,
+        11, 1, 0x3c, 0, 1, 0,
+        11, 1, 0x3d, 0, 1, 0,
+        11, 1, 0x3e, 0, 1, 0,
+        15, 1, 0x3f, 16, 0x3f000001, 0x3f000002, 0x3f000003, 0x3f000004,
+        15, 1, 0x40, 16, 0x40000001, 0x40000002, 0x40000003, 0x40000004,
+        15, 1, 0x41, 16, 0x41000001, 0x41000002, 0x41000003, 0x41000004,
+        16, 1, 0x42, 3,
+        16, 1, 0x43, 4,
+        15, 1, 0x44, 8, 0x44000001, 0x44000002,
+        15, 1, 0x45, 8, 0x45000001, 0x45000002,
+    };
+    static const UINT expected[] =
+    {
+        16, 0x28, 1, 0xc0,
+        16, 0x28, 2, 0x43,
+        16, 0x28, 3, 0x41,
+        16, 0x28, 4, 0x82,
+        28, 0x295, 1, 0x34000001, 0x34000002, 0x34000003, 0x34000004,
+        28, 0x296, 1, 0x35000001, 0x35000002, 0x35000003, 0x35000004,
+        28, 0x297, 1, 0x36000001, 0x36000002, 0x36000003, 0x36000004,
+        20, 0x298, 1, 0x37000001, 0x37000002,
+        28, 0x299, 1, 0x38000001, 0x38000002, 0x38000003, 0x38000004,
+        20, 0x29a, 1, 0x39000001, 0x39000002,
+        16, 0x29b, 1, 2,
+        16, 0x29c, 1, 1,
+        16, 0x29d, 1, 1,
+        16, 0x29e, 1, 1,
+        16, 0x29f, 1, 1,
+        28, 0x2a0, 1, 0x3f000001, 0x3f000002, 0x3f000003, 0x3f000004,
+        28, 0x2a1, 1, 0x40000001, 0x40000002, 0x40000003, 0x40000004,
+        28, 0x2a2, 1, 0x41000001, 0x41000002, 0x41000003, 0x41000004,
+        16, 0x2a3, 1, 3,
+        16, 0x2a4, 1, 4,
+        20, 0x2a5, 1, 0x44000001, 0x44000002,
+        20, 0x2a6, 1, 0x45000001, 0x45000002,
+    };
+    static const UINT expected_release[] =
+    {
+        12, 0x29, 1,
+        12, 0x29, 2,
+        12, 0x29, 3,
+        12, 0x29, 4,
+    };
+    static const UINT bad_buffer[] = {15, 1, 0x34, 12, 1, 2, 3};
+    static const UINT bad_reference[] = {16, 1, 0x42, 2};
+    static const UINT bad_handle[] = {13, 1, 0x3a, 0, 1, 0};
+    static const UINT release_references[] = {4, 2, 4, 3, 4, 4};
+    static const UINT release_window[] = {4, 1};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = NULL, state;
+    UINT channel = 0, size = 0x1000, batch;
+    UINT64 cookie = 0;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create window-node event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got window-node connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got window-node channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got window-node bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got window-node create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    status = process_dcomp_test_command( channel, buffer, commands, sizeof(commands) );
+    ok( status == STATUS_SUCCESS, "got window-node property status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_buffer, sizeof(bad_buffer) );
+    ok( status == STATUS_INVALID_PARAMETER, "got bad window-node buffer status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_reference, sizeof(bad_reference) );
+    ok( status == STATUS_INVALID_PARAMETER, "got bad window-node reference status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_handle, sizeof(bad_handle) );
+    ok( status == STATUS_INVALID_PARAMETER, "got bad window-node handle status %#lx\n", status );
+
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got window-node commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got window-node batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected, sizeof(expected), "window node" );
+
+    status = process_dcomp_test_command( channel, buffer, release_references,
+                                         sizeof(release_references) );
+    ok( status == STATUS_SUCCESS, "got window-node reference release status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, release_window, sizeof(release_window) );
+    ok( status == STATUS_SUCCESS, "got window-node release status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got window-node release commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got window-node release batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_release,
+                               sizeof(expected_release), "window-node release" );
+
+done:
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_visual_target_root_lifecycle(void)
 {
     static const UINT expected_initial[] = {
@@ -2750,6 +2869,7 @@ START_TEST(dcomp)
     test_connection_queue();
     test_visual_target_root_lifecycle();
     test_shared_host_visual_lifecycle();
+    test_window_node_properties();
     test_expression_graph();
     test_shared_manipulation_transform();
     test_shared_section_lifecycle();
