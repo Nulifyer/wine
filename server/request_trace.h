@@ -4344,6 +4344,12 @@ static void dump_open_dcomp_shared_resource_request( const struct open_dcomp_sha
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", channel=%08x", req->channel );
     fprintf( stderr, ", type=%08x", req->type );
+    fprintf( stderr, ", resource=%08x", req->resource );
+}
+
+static void dump_open_dcomp_shared_resource_reply( const struct open_dcomp_shared_resource_reply *req )
+{
+    fprintf( stderr, " window_target=%d", req->window_target );
 }
 
 static void dump_get_dcomp_connection_batch_request( const struct get_dcomp_connection_batch_request *req )
@@ -5403,7 +5409,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_publish_dcomp_resource_reply,
     (dump_func)dump_create_dcomp_shared_resource_reply,
-    NULL,
+    (dump_func)dump_open_dcomp_shared_resource_reply,
     (dump_func)dump_get_dcomp_connection_batch_reply,
     (dump_func)dump_release_all_dcomp_resources_reply,
     (dump_func)dump_get_deleted_dcomp_resources_reply,

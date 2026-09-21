@@ -1444,7 +1444,7 @@ static void test_shared_host_visual_lifecycle(void)
     static const UINT expected[] =
     {
         16, 0x28, 1, 0xb8,
-        12, 0x27, 2,
+        16, 0x28, 2, 0xb8,
         24, 0x185, 1, 2, 0, 1,
     };
     struct dcomposition_connection_batch *record = NULL;
@@ -1502,6 +1502,107 @@ static void test_shared_host_visual_lifecycle(void)
 
 done:
     if (channel) NtDCompositionDestroyChannel( channel );
+    if (target) CloseHandle( target );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    if (hwnd) DestroyWindow( hwnd );
+    CloseHandle( event );
+}
+
+static void test_window_target_shared_identity(void)
+{
+    static const UINT expected_source[] = {16, 0x28, 1, 0xb8};
+    static const UINT expected_complete[] = {12, 0x27, 2};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL, target = NULL;
+    BYTE *source_buffer = NULL, *target_buffer = NULL, state, released;
+    UINT source_channel = 0, target_channel = 0, source_size = 0x1000, target_size = 0x1000;
+    UINT expected_begin[] = {16, 0x26, 1, 0};
+    UINT command[6], batch;
+    UINT64 cookie = 0, shared;
+    ULONG processed;
+    NTSTATUS status;
+    HWND hwnd = NULL;
+    BOOL ret;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create shared-target event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got shared-target connection status %#lx\n", status );
+    hwnd = CreateWindowExA( 0, "static", "shared target", WS_POPUP, 0, 0, 32, 32,
+                            NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "failed to create shared-target window, error %lu\n", GetLastError() );
+    ret = hwnd && NtUserCreateDCompositionHwndTarget( hwnd, 0, &target );
+    ok( ret, "failed to create shared target, status %#lx\n", RtlGetLastNtStatus() );
+    if (!ret) goto done;
+
+    status = NtDCompositionCreateChannel( &source_channel, &source_size,
+                                           (void **)&source_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got shared-target source channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( source_channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got shared-target source bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got shared-target source create status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    command[0] = 3; command[1] = 1;
+    shared = (UINT_PTR)target;
+    memcpy( command + 2, &shared, sizeof(shared) );
+    command[4] = 0xb8; command[5] = 0;
+    memcpy( source_buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( source_channel, sizeof(command),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS && processed == 1,
+        "got shared-target source open status %#lx count %lu\n", status, processed );
+    status = NtDCompositionCreateChannel( &target_channel, &target_size,
+                                           (void **)&target_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got shared-target destination channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( target_channel, 0, 2 );
+    ok( status == STATUS_SUCCESS, "got shared-target destination bind status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got shared-target destination create status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    command[1] = 2;
+    command[5] = 1;
+    memcpy( target_buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( target_channel, sizeof(command),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS && processed == 1,
+        "got shared-target duplicate open status %#lx count %lu\n", status, processed );
+    expected_begin[3] = target_channel;
+
+    status = NtDCompositionCommitChannel( target_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got shared-target destination commit status %#lx\n", status );
+
+    status = NtDCompositionCommitChannel( source_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got shared-target source commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got shared-target source batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, source_channel, expected_source,
+                               sizeof(expected_source), "shared-target source" );
+    record = record ? record->next : NULL;
+    if (!record) status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got shared-target begin status %#lx\n", status );
+    check_dcomp_batch_payload( record, source_channel, expected_begin,
+                               sizeof(expected_begin), "shared-target begin" );
+    record = record ? record->next : NULL;
+    if (!record) status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got shared-target complete status %#lx\n", status );
+    check_dcomp_batch_payload( record, target_channel, expected_complete,
+                               sizeof(expected_complete), "shared-target complete" );
+
+done:
+    if (target_channel) NtDCompositionDestroyChannel( target_channel );
+    if (source_channel) NtDCompositionDestroyChannel( source_channel );
     if (target) CloseHandle( target );
     if (connection) NtDCompositionDestroyConnection( connection );
     if (hwnd) DestroyWindow( hwnd );
@@ -2979,6 +3080,7 @@ START_TEST(dcomp)
     test_connection_queue();
     test_visual_target_root_lifecycle();
     test_shared_host_visual_lifecycle();
+    test_window_target_shared_identity();
     test_window_node_properties();
     test_legacy_render_target_protocol();
     test_expression_graph();

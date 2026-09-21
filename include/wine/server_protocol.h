@@ -7497,10 +7497,14 @@ struct open_dcomp_shared_resource_request
     obj_handle_t handle;
     unsigned int channel;
     unsigned int type;
+    unsigned int resource;
+    char __pad_28[4];
 };
 struct open_dcomp_shared_resource_reply
 {
     struct reply_header __header;
+    int window_target;
+    char __pad_12[4];
 };
 
 
@@ -9136,6 +9140,6 @@ union generic_reply
     struct set_d3d11_fence_event_reply set_d3d11_fence_event_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1045
+#define SERVER_PROTOCOL_VERSION 1046
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

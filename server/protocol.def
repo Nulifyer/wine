@@ -5076,6 +5076,9 @@ struct alpc_message_info
     obj_handle_t handle;       /* shared-resource or HWND-target handle */
     unsigned int channel;      /* target channel ID */
     unsigned int type;         /* expected MIL resource type */
+    unsigned int resource;     /* target channel resource ID */
+@REPLY
+    int window_target;         /* 0: regular resource, 1: duplicate, 2: canonical HWND target */
 @END
 
 /* Pop one record from a DWM connection's pending batch queue. */
