@@ -346,7 +346,9 @@ static HRESULT STDMETHODCALLTYPE dxgi_output_dwm_GetDesc(IDXGIOutputDWM *iface,
     desc->adapter_luid = adapter_id.adapter_luid;
     desc->vidpn_source_id = output_desc.ordinal;
     desc->vidpn_target_id = output_desc.ordinal;
-    desc->display_id = output_desc.ordinal;
+    /* DWM reserves display ID zero for lookup by HMONITOR.  Keep the opaque
+     * display identity distinct from the zero-based VidPn source identity. */
+    desc->display_id = output_desc.ordinal + 1;
     desc->output_luid.LowPart = adapter_id.adapter_luid.LowPart ^ (output_desc.ordinal + 1);
     desc->output_luid.HighPart = adapter_id.adapter_luid.HighPart ^ 0x4c4e5455;
     desc->monitor_resolution_width = mode.width;

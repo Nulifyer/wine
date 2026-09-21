@@ -1425,6 +1425,7 @@ static void test_dwm_output_interfaces(void)
                 ok(equal_luid(dwm_desc.adapter_luid, adapter_desc.AdapterLuid),
                         "Got unexpected adapter LUID %08lx:%08lx.\n",
                         dwm_desc.adapter_luid.HighPart, dwm_desc.adapter_luid.LowPart);
+                ok(!!dwm_desc.display_id, "Got reserved display ID 0.\n");
                 ok(dwm_desc.monitor_resolution_width != 0 && dwm_desc.monitor_resolution_height != 0,
                         "Got unexpected mode dimensions %ux%u.\n", dwm_desc.monitor_resolution_width,
                         dwm_desc.monitor_resolution_height);

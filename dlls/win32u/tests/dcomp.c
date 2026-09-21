@@ -1627,6 +1627,116 @@ done:
     CloseHandle( event );
 }
 
+static void test_legacy_render_target_protocol(void)
+{
+    static const UINT commands[] =
+    {
+        2, 1, 0x60, 0,
+        2, 2, 0x36, 0,
+        2, 3, 0xb8, 0,
+        15, 1, 2, 8, 0x02000001, 0x02000002,
+        11, 1, 3, 0, 0x303, 0,
+        11, 1, 4, 0, 0x1c, 0,
+        11, 1, 5, 0, 0x505, 0,
+        11, 1, 0xb, 0, 0xb0b, 0,
+        11, 1, 1, 0, 0x01010101, 0x01010102,
+        15, 1, 6, 16, 0x3f800000, 0x40000000, 0x42c80000, 0x43480000,
+        12, 1, 7, 0x3fc00000,
+        12, 1, 8, 0x40000000,
+        15, 1, 9, 16, 1, 2, 100, 200,
+        11, 1, 10, 0, 3, 0,
+        12, 1, 12, 0x3fa00000,
+        11, 1, 13, 0, 1, 0,
+        16, 1, 0, 2,
+        15, 2, 0, 8, 0x36000001, 0x36000002,
+        16, 2, 1, 3,
+    };
+    static const UINT expected[] =
+    {
+        16, 0x28, 1, 0x60,
+        16, 0x28, 2, 0x36,
+        16, 0x28, 3, 0xb8,
+        36, 0xe0, 1, 0x02000001, 0x02000002, 0x303, 0x1c, 0x505, 0xb0b,
+        16, 0xe1, 1, 2,
+        68, 0xe3, 1, 0x01010101, 0x01010102,
+            0x3f800000, 0x40000000, 0x42c80000, 0x43480000,
+            0x3fc00000, 0x40000000, 1, 2, 100, 200, 3, 0,
+        16, 0xe2, 1, 0x3fa00000,
+        12, 0x151, 1,
+        20, 0x203, 2, 0x36000001, 0x36000002,
+        16, 0x204, 2, 3,
+    };
+    static const UINT expected_release[] =
+    {
+        12, 0x29, 1,
+        12, 0x29, 2,
+        12, 0x29, 3,
+    };
+    static const UINT bad_buffer[] = {15, 1, 6, 12, 1, 2, 3};
+    static const UINT bad_float[] = {12, 1, 7, 0};
+    static const UINT bad_target_reference[] = {16, 1, 0, 3};
+    static const UINT bad_tree_reference[] = {16, 2, 1, 1};
+    static const UINT release_references[] = {4, 3, 4, 2};
+    static const UINT release_target[] = {4, 1};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = NULL, state;
+    UINT channel = 0, size = 0x1000, batch;
+    UINT64 cookie = 0;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create render-target event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got render-target connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got render-target channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got render-target bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got render-target create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    status = process_dcomp_test_command( channel, buffer, commands, sizeof(commands) );
+    ok( status == STATUS_SUCCESS, "got render-target property status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_buffer, sizeof(bad_buffer) );
+    ok( status == STATUS_INVALID_PARAMETER, "got bad render-target buffer status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_float, sizeof(bad_float) );
+    ok( status == STATUS_INVALID_PARAMETER, "got bad render-target float status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_target_reference,
+                                         sizeof(bad_target_reference) );
+    ok( status == STATUS_INVALID_PARAMETER, "got bad render-target reference status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_tree_reference,
+                                         sizeof(bad_tree_reference) );
+    ok( status == STATUS_INVALID_PARAMETER, "got bad desktop-tree reference status %#lx\n", status );
+
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got render-target commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got render-target batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected, sizeof(expected), "render target" );
+
+    status = process_dcomp_test_command( channel, buffer, release_references,
+                                         sizeof(release_references) );
+    ok( status == STATUS_SUCCESS, "got render-target reference release status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, release_target, sizeof(release_target) );
+    ok( status == STATUS_SUCCESS, "got render-target release status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got render-target release commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got render-target release batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_release,
+                               sizeof(expected_release), "render-target release" );
+
+done:
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_visual_target_root_lifecycle(void)
 {
     static const UINT expected_initial[] = {
@@ -2870,6 +2980,7 @@ START_TEST(dcomp)
     test_visual_target_root_lifecycle();
     test_shared_host_visual_lifecycle();
     test_window_node_properties();
+    test_legacy_render_target_protocol();
     test_expression_graph();
     test_shared_manipulation_transform();
     test_shared_section_lifecycle();

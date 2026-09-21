@@ -84,6 +84,8 @@ struct dcomp_resource_view
     struct dcomp_resource_view *window_sprite_bitmap;
     struct dcomp_resource_view *window_sprite_clip;
     struct dcomp_resource_view *expression_shared_section;
+    struct dcomp_resource_view *render_target_desktop_tree;
+    struct dcomp_resource_view *desktop_tree_root;
     struct dcomp_resource_view *parent;
     struct dcomp_resource_view *first_child;
     struct dcomp_resource_view *next_sibling;
@@ -127,6 +129,26 @@ struct dcomp_resource_view
     BYTE window_source_modifications[16];
     UINT64 window_sprite_handle;
     UINT64 window_handle;
+    UINT64 render_target_monitor;
+    UINT64 render_target_adapter_luid;
+    UINT render_target_display_id;
+    UINT render_target_format;
+    UINT render_target_color_space;
+    UINT render_target_flags;
+    float render_target_float_rect[4];
+    float render_target_scale;
+    float render_target_scale2;
+    UINT render_target_rect[4];
+    UINT render_target_rotation;
+    float render_target_sdr_to_hdr;
+    BOOL render_target_create_dirty;
+    BOOL render_target_desktop_tree_dirty;
+    BOOL render_target_transform_dirty;
+    BOOL render_target_hdr_dirty;
+    BOOL render_target_refresh_dirty;
+    UINT64 desktop_tree_adapter_luid;
+    BOOL desktop_tree_adapter_dirty;
+    BOOL desktop_tree_root_dirty;
     BOOL color_dirty;
     float color[4];
     UINT rectangle_dirty;
@@ -257,6 +279,16 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
     if ((reference = resource->expression_shared_section))
     {
         resource->expression_shared_section = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->render_target_desktop_tree))
+    {
+        resource->render_target_desktop_tree = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->desktop_tree_root))
+    {
+        resource->desktop_tree_root = NULL;
         release_dcomp_resource_reference( reference );
     }
     while ((child = resource->first_child))
@@ -439,6 +471,11 @@ static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource
         resource->rectangle[2] = resource->rectangle[3] = 2097152.0f;
     }
     if (type == 0x3c) resource->expression_base_dirty = resource->expression_property_4_dirty = TRUE;
+    if (type == 0x60)
+    {
+        resource->render_target_scale2 = 1.0f;
+        resource->render_target_sdr_to_hdr = 1.0f;
+    }
     if (type == 0x6a)
     {
         resource->manipulation_components[6] = 1.0f;
@@ -478,6 +515,175 @@ static void replace_dcomp_resource_reference( struct dcomp_resource_view **slot,
     if (resource) resource->references++;
     *slot = resource;
     if (previous) release_dcomp_resource_reference( previous );
+}
+
+static NTSTATUS set_dcomp_legacy_target_integer_property( struct dcomp_resource_view *resource,
+                                                           UINT property, INT64 value )
+{
+    UINT int_value = value;
+
+    switch (property)
+    {
+    case 1:
+        if (resource->render_target_monitor == value) return STATUS_SUCCESS;
+        resource->render_target_monitor = value;
+        resource->render_target_transform_dirty = TRUE;
+        break;
+    case 3:
+        if (resource->render_target_display_id) return STATUS_INVALID_PARAMETER;
+        resource->render_target_display_id = int_value;
+        resource->render_target_create_dirty = TRUE;
+        break;
+    case 4:
+        if (resource->render_target_format ||
+            (int_value != 10 && int_value != 0x18 && int_value != 0x1c && int_value != 0x57))
+            return STATUS_INVALID_PARAMETER;
+        resource->render_target_format = int_value;
+        resource->render_target_create_dirty = TRUE;
+        break;
+    case 5:
+        if (resource->render_target_color_space == int_value) return STATUS_SUCCESS;
+        resource->render_target_color_space = int_value;
+        resource->render_target_create_dirty = TRUE;
+        break;
+    case 10:
+        if (int_value < 1 || int_value > 4) return STATUS_INVALID_PARAMETER;
+        if (resource->render_target_rotation == int_value) return STATUS_SUCCESS;
+        resource->render_target_rotation = int_value;
+        resource->render_target_transform_dirty = TRUE;
+        break;
+    case 11:
+        if (resource->render_target_flags == int_value) return STATUS_SUCCESS;
+        resource->render_target_flags = int_value;
+        resource->render_target_create_dirty = TRUE;
+        break;
+    case 13:
+        resource->render_target_refresh_dirty = TRUE;
+        break;
+    default:
+        return STATUS_INVALID_PARAMETER;
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_legacy_target_float_property( struct dcomp_resource_view *resource,
+                                                         UINT property, float value )
+{
+    float *target;
+    BOOL *dirty;
+
+    switch (property)
+    {
+    case 7:
+        target = &resource->render_target_scale;
+        dirty = &resource->render_target_transform_dirty;
+        if (!(value > 0.0f)) return STATUS_INVALID_PARAMETER;
+        break;
+    case 8:
+        target = &resource->render_target_scale2;
+        dirty = &resource->render_target_transform_dirty;
+        if (!(value > 0.0f)) return STATUS_INVALID_PARAMETER;
+        break;
+    case 12:
+        target = &resource->render_target_sdr_to_hdr;
+        dirty = &resource->render_target_hdr_dirty;
+        if (!(value >= 1.0f)) return STATUS_INVALID_PARAMETER;
+        break;
+    default:
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (*target == value) return STATUS_SUCCESS;
+    *target = value;
+    *dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_legacy_target_buffer_property( struct dcomp_resource_view *resource,
+                                                          UINT property, const BYTE *data,
+                                                          UINT size )
+{
+    float float_rect[4];
+    UINT rect[4];
+    UINT64 luid;
+
+    switch (property)
+    {
+    case 2:
+        if (size != sizeof(luid) || resource->render_target_adapter_luid)
+            return STATUS_INVALID_PARAMETER;
+        memcpy( &luid, data, sizeof(luid) );
+        resource->render_target_adapter_luid = luid;
+        resource->render_target_create_dirty = TRUE;
+        break;
+    case 6:
+        if (size != sizeof(float_rect)) return STATUS_INVALID_PARAMETER;
+        memcpy( float_rect, data, sizeof(float_rect) );
+        if (float_rect[0] != float_rect[0] || float_rect[1] != float_rect[1] ||
+            float_rect[2] < float_rect[0] || float_rect[3] < float_rect[1])
+            return STATUS_INVALID_PARAMETER;
+        if (!memcmp( resource->render_target_float_rect, float_rect, sizeof(float_rect) ))
+            return STATUS_SUCCESS;
+        memcpy( resource->render_target_float_rect, float_rect, sizeof(float_rect) );
+        resource->render_target_transform_dirty = TRUE;
+        break;
+    case 9:
+        if (size != sizeof(rect)) return STATUS_INVALID_PARAMETER;
+        memcpy( rect, data, sizeof(rect) );
+        if (rect[2] <= rect[0] || rect[3] <= rect[1]) return STATUS_INVALID_PARAMETER;
+        if (!memcmp( resource->render_target_rect, rect, sizeof(rect) ))
+            return STATUS_SUCCESS;
+        memcpy( resource->render_target_rect, rect, sizeof(rect) );
+        resource->render_target_transform_dirty = TRUE;
+        break;
+    default:
+        return STATUS_INVALID_PARAMETER;
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_desktop_tree_buffer_property( struct dcomp_resource_view *resource,
+                                                         UINT property, const BYTE *data,
+                                                         UINT size )
+{
+    UINT64 luid;
+
+    if (property || size != sizeof(luid)) return STATUS_INVALID_PARAMETER;
+    memcpy( &luid, data, sizeof(luid) );
+    if (resource->desktop_tree_adapter_luid == luid) return STATUS_SUCCESS;
+    resource->desktop_tree_adapter_luid = luid;
+    resource->desktop_tree_adapter_dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_render_target_reference_property( struct dcomp_channel_view *view,
+                                                             struct dcomp_resource_view *resource,
+                                                             UINT property, UINT reference_id )
+{
+    struct dcomp_resource_view *reference = NULL;
+    struct dcomp_resource_view **slot;
+    BOOL *dirty;
+
+    if (reference_id && !(reference = find_dcomp_resource_view( view, reference_id )))
+        return STATUS_ACCESS_DENIED;
+    if (resource->type == 0x60)
+    {
+        if (property || (reference && reference->type != 0x36))
+            return STATUS_INVALID_PARAMETER;
+        slot = &resource->render_target_desktop_tree;
+        dirty = &resource->render_target_desktop_tree_dirty;
+    }
+    else
+    {
+        if (resource->type != 0x36 || property != 1 ||
+            (reference && !is_dcomp_derived_resource_type( reference->type, 0xb8 )))
+            return STATUS_INVALID_PARAMETER;
+        slot = &resource->desktop_tree_root;
+        dirty = &resource->desktop_tree_root_dirty;
+    }
+    replace_dcomp_resource_reference( slot, reference );
+    *dirty = TRUE;
+    remove_unannounced_dcomp_resources( view );
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS set_dcomp_visual_reference_property( struct dcomp_channel_view *view,
@@ -1360,6 +1566,25 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                 status = set_dcomp_manipulation_integer_property( resource, property, value );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 0x60)
+            {
+                if ((status = set_dcomp_legacy_target_integer_property( resource,
+                                                                         property, value )))
+                    return status;
+            }
+        }
+        else if (type == 12)
+        {
+            float value;
+            UINT property;
+
+            memcpy( &id, buffer + 4, sizeof(id) );
+            memcpy( &property, buffer + 8, sizeof(property) );
+            memcpy( &value, buffer + 12, sizeof(value) );
+            if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
+            if (resource->type == 0x60 &&
+                (status = set_dcomp_legacy_target_float_property( resource, property, value )))
+                return status;
         }
         else if (type == 15)
         {
@@ -1401,6 +1626,18 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             else if (resource->type == 0x6a && !resource->shared_duplicate)
             {
                 if ((status = set_dcomp_manipulation_buffer_property( resource, property,
+                                                                       buffer + 16, size )))
+                    return status;
+            }
+            else if (resource->type == 0x60)
+            {
+                if ((status = set_dcomp_legacy_target_buffer_property( resource, property,
+                                                                        buffer + 16, size )))
+                    return status;
+            }
+            else if (resource->type == 0x36)
+            {
+                if ((status = set_dcomp_desktop_tree_buffer_property( resource, property,
                                                                        buffer + 16, size )))
                     return status;
             }
@@ -1451,6 +1688,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                 status = set_dcomp_expression_reference_property( view, resource,
                                                                    property, root_id );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+            else if (resource->type == 0x60 || resource->type == 0x36)
+            {
+                if ((status = set_dcomp_render_target_reference_property( view, resource,
+                                                                           property, root_id )))
+                    return status;
             }
         }
         else if (type == 17)
@@ -1729,6 +1972,112 @@ static BYTE *emit_dcomp_window_node_updates( BYTE *cursor,
     return cursor;
 }
 
+static data_size_t dcomp_desktop_tree_update_size( const struct dcomp_resource_view *resource )
+{
+    data_size_t size = 0;
+
+    if (resource->desktop_tree_adapter_dirty) size += 20;
+    if (resource->desktop_tree_root_dirty) size += 16;
+    return size;
+}
+
+static BYTE *emit_dcomp_desktop_tree_updates( BYTE *cursor,
+                                               const struct dcomp_resource_view *resource )
+{
+    UINT command[5];
+
+    if (resource->desktop_tree_adapter_dirty)
+    {
+        command[0] = 20;
+        command[1] = 0x203; /* MILCMD_DESKTOPCOMPOSITIONTREE_SETADAPTERLUID */
+        command[2] = resource->id;
+        memcpy( command + 3, &resource->desktop_tree_adapter_luid,
+                sizeof(resource->desktop_tree_adapter_luid) );
+        memcpy( cursor, command, 20 );
+        cursor += 20;
+    }
+    if (resource->desktop_tree_root_dirty)
+        cursor = emit_dcomp_reference_update( cursor, 0x204, resource->id,
+                                               resource->desktop_tree_root );
+    return cursor;
+}
+
+static data_size_t dcomp_legacy_target_update_size( const struct dcomp_resource_view *resource )
+{
+    data_size_t size = 0;
+
+    if (resource->render_target_create_dirty) size += 36;
+    if (resource->render_target_desktop_tree_dirty) size += 16;
+    if (resource->render_target_transform_dirty) size += 68;
+    if (resource->render_target_hdr_dirty) size += 16;
+    if (resource->render_target_refresh_dirty) size += 12;
+    return size;
+}
+
+static BYTE *emit_dcomp_legacy_target_updates( BYTE *cursor,
+                                                const struct dcomp_resource_view *resource )
+{
+    UINT command[17];
+
+    if (resource->render_target_create_dirty)
+    {
+        memset( command, 0, 36 );
+        command[0] = 36;
+        command[1] = 0xe0; /* MILCMD_LEGACYRENDERTARGET_CREATE */
+        command[2] = resource->id;
+        memcpy( command + 3, &resource->render_target_adapter_luid,
+                sizeof(resource->render_target_adapter_luid) );
+        command[5] = resource->render_target_display_id;
+        command[6] = resource->render_target_format;
+        command[7] = resource->render_target_color_space;
+        command[8] = resource->render_target_flags;
+        memcpy( cursor, command, 36 );
+        cursor += 36;
+    }
+    if (resource->render_target_desktop_tree_dirty)
+        cursor = emit_dcomp_reference_update( cursor, 0xe1, resource->id,
+                                               resource->render_target_desktop_tree );
+    if (resource->render_target_transform_dirty)
+    {
+        memset( command, 0, sizeof(command) );
+        command[0] = sizeof(command);
+        command[1] = 0xe3; /* MILCMD_LEGACYRENDERTARGET_UPDATETRANSFORM */
+        command[2] = resource->id;
+        memcpy( command + 3, &resource->render_target_monitor,
+                sizeof(resource->render_target_monitor) );
+        memcpy( command + 5, resource->render_target_float_rect,
+                sizeof(resource->render_target_float_rect) );
+        memcpy( command + 9, &resource->render_target_scale,
+                sizeof(resource->render_target_scale) );
+        memcpy( command + 10, &resource->render_target_scale2,
+                sizeof(resource->render_target_scale2) );
+        memcpy( command + 11, resource->render_target_rect,
+                sizeof(resource->render_target_rect) );
+        command[15] = resource->render_target_rotation;
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    if (resource->render_target_hdr_dirty)
+    {
+        command[0] = 16;
+        command[1] = 0xe2; /* MILCMD_LEGACYRENDERTARGET_UPDATESDRTOHDRMULTIPLIER */
+        command[2] = resource->id;
+        memcpy( command + 3, &resource->render_target_sdr_to_hdr,
+                sizeof(resource->render_target_sdr_to_hdr) );
+        memcpy( cursor, command, 16 );
+        cursor += 16;
+    }
+    if (resource->render_target_refresh_dirty)
+    {
+        command[0] = 12;
+        command[1] = 0x151; /* MILCMD_RENDERTARGET_UPDATEREFRESHRATE */
+        command[2] = resource->id;
+        memcpy( cursor, command, 12 );
+        cursor += 12;
+    }
+    return cursor;
+}
+
 static BYTE *emit_dcomp_rectangle_updates( BYTE *cursor,
                                             const struct dcomp_resource_view *resource )
 {
@@ -1993,6 +2342,10 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         if (resource->visual_size_dirty) resource_size += 20;
         if (!resource->released && resource->type == 0xc0)
             resource_size += dcomp_window_node_update_size( resource );
+        if (!resource->released && resource->type == 0x36)
+            resource_size += dcomp_desktop_tree_update_size( resource );
+        if (!resource->released && resource->type == 0x60)
+            resource_size += dcomp_legacy_target_update_size( resource );
         if (!resource->released && resource->color_dirty) resource_size += 28;
         if (!resource->released && resource->type == 0x7f)
             resource_size += dcomp_rectangle_update_size( resource );
@@ -2036,6 +2389,17 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             memcpy( cursor, command, sizeof(command) );
             cursor += sizeof(command);
         }
+    }
+    /* Preserve proxy creation order.  Genuine clients create the legacy target
+     * before its desktop tree and send the target association before later tree
+     * updates. */
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        if (resource->released) continue;
+        if (resource->type == 0x60)
+            cursor = emit_dcomp_legacy_target_updates( cursor, resource );
+        else if (resource->type == 0x36)
+            cursor = emit_dcomp_desktop_tree_updates( cursor, resource );
     }
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
     {
@@ -2240,6 +2604,13 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
             resource->visual_relative_size_dirty = FALSE;
             resource->visual_size_dirty = FALSE;
             resource->window_node_dirty = 0;
+            resource->render_target_create_dirty = FALSE;
+            resource->render_target_desktop_tree_dirty = FALSE;
+            resource->render_target_transform_dirty = FALSE;
+            resource->render_target_hdr_dirty = FALSE;
+            resource->render_target_refresh_dirty = FALSE;
+            resource->desktop_tree_adapter_dirty = FALSE;
+            resource->desktop_tree_root_dirty = FALSE;
             resource->color_dirty = FALSE;
             resource->rectangle_dirty = 0;
             resource->visual_transform_dirty = FALSE;
