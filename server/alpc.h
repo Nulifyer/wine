@@ -27,6 +27,21 @@ extern unsigned int notify_dwm_window_created( struct desktop *desktop, unsigned
                                                 unsigned int style, unsigned int ex_style,
                                                 const struct rectangle *rect, unsigned int process_id,
                                                 unsigned __int64 process_sequence );
+extern int notify_dwm_window_sprite_created( struct desktop *desktop, unsigned int generation,
+                                              unsigned int window, unsigned int style,
+                                              unsigned int ex_style, int active,
+                                              const struct rectangle *window_rect,
+                                              const struct rectangle *client_rect,
+                                              const struct rectangle *surface_rect );
+extern void notify_dwm_window_sprite_updated( struct desktop *desktop, unsigned int generation,
+                                               unsigned int window, unsigned int style,
+                                               unsigned int ex_style, int active,
+                                               const struct rectangle *window_rect,
+                                               const struct rectangle *client_rect,
+                                               const struct rectangle *surface_rect );
+extern void notify_dwm_window_sprite_destroyed( struct desktop *desktop,
+                                                 unsigned int generation,
+                                                 unsigned int window );
 extern int notify_dwm_window_linked( struct desktop *desktop, unsigned int generation,
                                      unsigned int window, unsigned int parent,
                                      unsigned int previous, unsigned int band );

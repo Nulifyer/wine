@@ -86,6 +86,7 @@ struct window
     struct thread   *input_delegate; /* thread receiving selected input for this window */
     unsigned int     input_delegation_flags; /* QS_* classes delegated by the window */
     unsigned int     dwm_context_id;  /* DWM composition generation containing this HWND */
+    unsigned int     dwm_sprite_id;   /* DWM composition generation containing its sprite */
     unsigned int     dwm_link_id;     /* DWM composition generation containing its tree link */
     unsigned __int64 composition_flags; /* boolean private composition attributes */
     unsigned int     composition_policy; /* non-client rendering policy */
@@ -789,6 +790,7 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->input_delegate = NULL;
     win->input_delegation_flags = 0;
     win->dwm_context_id = 0;
+    win->dwm_sprite_id  = 0;
     win->dwm_link_id    = 0;
     win->composition_flags = 0;
     win->composition_policy = 0; /* DWMNCRP_USEWINDOWSTYLE */
@@ -1252,6 +1254,7 @@ struct thread *get_window_thread( user_handle_t handle )
 static unsigned int sync_dwm_window_context( struct window *win )
 {
     struct process *process = win->thread ? win->thread->process : NULL;
+    unsigned int old_context_id = win->dwm_context_id;
     unsigned int parent = win->parent ? win->parent->handle : 0;
     unsigned int process_id = process ? process->id : 0;
     unsigned __int64 sequence = process ? process->start_time : 0;
@@ -1261,7 +1264,21 @@ static unsigned int sync_dwm_window_context( struct window *win )
                                                      win->handle, parent, win->style,
                                                      win->ex_style, &win->window_rect,
                                                      process_id, sequence );
-    if (win->dwm_link_id != win->dwm_context_id) win->dwm_link_id = 0;
+    if (old_context_id != win->dwm_context_id)
+    {
+        win->dwm_sprite_id = 0;
+        win->dwm_link_id = 0;
+    }
+    if (win->dwm_context_id && win->dwm_sprite_id != win->dwm_context_id &&
+        !is_desktop_window( win ) && is_composition_window( win ))
+    {
+        if (!notify_dwm_window_sprite_created( win->desktop, win->dwm_context_id,
+                                               win->handle, win->style, win->ex_style,
+                                               win->set_foreground, &win->window_rect,
+                                               &win->client_rect, &win->surface_rect ))
+            return 0;
+        win->dwm_sprite_id = win->dwm_context_id;
+    }
     return win->dwm_context_id;
 }
 
@@ -2162,6 +2179,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     const struct rectangle old_window_rect = win->window_rect;
     const struct rectangle old_visible_rect = win->visible_rect;
     const struct rectangle old_client_rect = win->client_rect;
+    const struct rectangle old_surface_rect = win->surface_rect;
     const unsigned int old_style = win->style;
     struct rectangle rect;
     int client_changed, frame_changed;
@@ -2188,6 +2206,14 @@ static void set_window_pos( struct window *win, struct window *previous,
         ((old_style ^ win->style) & WS_VISIBLE))
         notify_dwm_window_visibility_changed( win->desktop, win->dwm_context_id,
                                               win->handle, !!(win->style & WS_VISIBLE) );
+    if (win->dwm_sprite_id == win->dwm_context_id &&
+        (memcmp( &old_window_rect, &win->window_rect, sizeof(old_window_rect) ) ||
+         memcmp( &old_client_rect, &win->client_rect, sizeof(old_client_rect) ) ||
+         memcmp( &old_surface_rect, &win->surface_rect, sizeof(old_surface_rect) )))
+        notify_dwm_window_sprite_updated( win->desktop, win->dwm_sprite_id,
+                                          win->handle, win->style, win->ex_style,
+                                          win->set_foreground, &win->window_rect,
+                                          &win->client_rect, &win->surface_rect );
 
     /* update window monitor dpi for toplevel windows */
     if (is_toplevel( win )) set_window_monitor_dpi( win );
@@ -2427,6 +2453,12 @@ void free_window_handle( struct window *win )
     cleanup_clipboard_window( win->desktop, win->handle );
     cleanup_dcomp_window_targets( win->handle );
     clear_window_input_delegation( win, 2 );
+    if (win->dwm_sprite_id)
+    {
+        notify_dwm_window_sprite_destroyed( win->desktop, win->dwm_sprite_id,
+                                             win->handle );
+        win->dwm_sprite_id = 0;
+    }
     if (win->dwm_context_id)
     {
         notify_dwm_window_destroyed( win->desktop, win->dwm_context_id, win->handle );

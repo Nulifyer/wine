@@ -1177,6 +1177,108 @@ void notify_dwm_window_visibility_changed( struct desktop *desktop, unsigned int
     queue_dwm_window_message( port, data, sizeof(data), "visibility", window );
 }
 
+static void put_dwm_mini_window_info( unsigned char *data, struct desktop *desktop,
+                                      unsigned int style, unsigned int ex_style, int active,
+                                      const struct rectangle *window_rect,
+                                      const struct rectangle *client_rect )
+{
+    unsigned __int64 desktop_id = get_shared_object_locator( desktop->shared ).id;
+
+    memcpy( data, window_rect, sizeof(*window_rect) );
+    memcpy( data + 16, client_rect, sizeof(*client_rect) );
+    put_u32( data + 32, style );
+    put_u32( data + 36, ex_style );
+    put_u32( data + 44, !!active );
+    memcpy( data + 48, &desktop_id, sizeof(desktop_id) );
+}
+
+static void build_dwm_sprite_update( unsigned char data[196], struct desktop *desktop,
+                                     unsigned int window, unsigned int style,
+                                     unsigned int ex_style, int active,
+                                     const struct rectangle *window_rect,
+                                     const struct rectangle *client_rect,
+                                     const struct rectangle *surface_rect )
+{
+    unsigned __int64 value = window;
+    unsigned int width = max( 0, surface_rect->right - surface_rect->left );
+    unsigned int height = max( 0, surface_rect->bottom - surface_rect->top );
+
+    memset( data, 0, 196 );
+    put_u32( data, 0x40000006 );
+    memcpy( data + 4, &value, sizeof(value) );
+    /* Bit 3 publishes a logical surface.  Wine's DComp channel owns the
+     * corresponding type-0x41 resource; the server HWND is its stable shared
+     * identity rather than a process-local window_surface pointer. */
+    put_u32( data + 12, 0x8 | !!(style & WS_VISIBLE) );
+    put_u32( data + 16, 1 );
+    put_dwm_mini_window_info( data + 20, desktop, style, ex_style, active,
+                              window_rect, client_rect );
+    memcpy( data + 168, &value, sizeof(value) );
+    put_u32( data + 180, width );
+    put_u32( data + 184, height );
+}
+
+int notify_dwm_window_sprite_created( struct desktop *desktop, unsigned int generation,
+                                      unsigned int window, unsigned int style,
+                                      unsigned int ex_style, int active,
+                                      const struct rectangle *window_rect,
+                                      const struct rectangle *client_rect,
+                                      const struct rectangle *surface_rect )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 value = window;
+    unsigned char create[180] = {0};
+    unsigned char update[196];
+
+    if (!port || generation != port->composition_id) return 0;
+    put_u32( create, 0x40000002 );
+    memcpy( create + 4, &value, sizeof(value) );
+    memcpy( create + 12, &value, sizeof(value) );
+    memcpy( create + 20, window_rect, sizeof(*window_rect) );
+    put_u32( create + 36, !!(style & WS_VISIBLE) );
+    put_dwm_mini_window_info( create + 40, desktop, style, ex_style, active,
+                              window_rect, client_rect );
+    /* Native DwmRedir uses this Win32 compatibility version only to retain
+     * pre-Windows-8 source-modification behavior. */
+    put_u32( create + 176, 0x0a00 );
+    build_dwm_sprite_update( update, desktop, window, style, ex_style, active,
+                             window_rect, client_rect, surface_rect );
+    if (!queue_dwm_window_message( port, create, sizeof(create), "sprite-create", window ))
+        return 0;
+    if (!queue_dwm_window_message( port, update, sizeof(update), "sprite-update", window ))
+        return 0;
+    return 1;
+}
+
+void notify_dwm_window_sprite_updated( struct desktop *desktop, unsigned int generation,
+                                       unsigned int window, unsigned int style,
+                                       unsigned int ex_style, int active,
+                                       const struct rectangle *window_rect,
+                                       const struct rectangle *client_rect,
+                                       const struct rectangle *surface_rect )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned char data[196];
+
+    if (!port || generation != port->composition_id) return;
+    build_dwm_sprite_update( data, desktop, window, style, ex_style, active,
+                             window_rect, client_rect, surface_rect );
+    queue_dwm_window_message( port, data, sizeof(data), "sprite-update", window );
+}
+
+void notify_dwm_window_sprite_destroyed( struct desktop *desktop, unsigned int generation,
+                                         unsigned int window )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 value = window;
+    unsigned char data[12] = {0};
+
+    if (!port || generation != port->composition_id) return;
+    put_u32( data, 0x40000003 );
+    memcpy( data + 4, &value, sizeof(value) );
+    queue_dwm_window_message( port, data, sizeof(data), "sprite-destroy", window );
+}
+
 void notify_dwm_window_unlinked( struct desktop *desktop, unsigned int generation,
                                  unsigned int window, unsigned int parent )
 {

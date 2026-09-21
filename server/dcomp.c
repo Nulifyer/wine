@@ -124,10 +124,13 @@ struct dcomp_shared_section
 struct dcomp_shared_resource
 {
     struct object obj;
+    struct list entry;
+    struct list pending_duplicates;
     struct dcomp_channel *channel;
     unsigned int session_id;
     unsigned int resource;
     unsigned int type;
+    int source_ready;
 };
 
 struct dcomp_surface
@@ -193,6 +196,7 @@ struct dcomp_surface_update_wire
 
 static struct list dcomp_connections = LIST_INIT( dcomp_connections );
 static struct list dcomp_channels = LIST_INIT( dcomp_channels );
+static struct list dcomp_shared_resources = LIST_INIT( dcomp_shared_resources );
 static struct list token_managers = LIST_INIT( token_managers );
 static struct list dcomp_window_targets = LIST_INIT( dcomp_window_targets );
 static unsigned int next_dcomp_channel_id = 1;
@@ -305,8 +309,17 @@ static void dcomp_shared_resource_dump( struct object *obj, int verbose )
 static void dcomp_shared_resource_destroy( struct object *obj )
 {
     struct dcomp_shared_resource *resource = (struct dcomp_shared_resource *)obj;
+    struct dcomp_window_target_duplicate *duplicate, *next;
 
     assert( obj->ops == &dcomp_shared_resource_ops );
+    LIST_FOR_EACH_ENTRY_SAFE( duplicate, next, &resource->pending_duplicates,
+                              struct dcomp_window_target_duplicate, entry )
+    {
+        list_remove( &duplicate->entry );
+        release_object( duplicate->channel );
+        free( duplicate );
+    }
+    list_remove( &resource->entry );
     if (resource->channel) release_object( resource->channel );
 }
 
@@ -580,8 +593,9 @@ static int flush_dcomp_channel_batches( struct dcomp_channel *channel )
     return 1;
 }
 
-static int dcomp_channel_has_pending_window_target_duplicate( struct dcomp_channel *channel )
+static int dcomp_channel_has_pending_duplicate( struct dcomp_channel *channel )
 {
+    struct dcomp_shared_resource *resource;
     struct dcomp_window_target_duplicate *duplicate;
     struct dcomp_window_target *target;
 
@@ -589,37 +603,59 @@ static int dcomp_channel_has_pending_window_target_duplicate( struct dcomp_chann
         LIST_FOR_EACH_ENTRY( duplicate, &target->pending_duplicates,
                              struct dcomp_window_target_duplicate, entry )
             if (duplicate->channel == channel) return 1;
+    LIST_FOR_EACH_ENTRY( resource, &dcomp_shared_resources, struct dcomp_shared_resource, entry )
+        LIST_FOR_EACH_ENTRY( duplicate, &resource->pending_duplicates,
+                             struct dcomp_window_target_duplicate, entry )
+            if (duplicate->channel == channel) return 1;
     return 0;
 }
 
-static void resolve_dcomp_window_target_duplicates( struct dcomp_channel *source )
+static int resolve_dcomp_pending_duplicates( struct dcomp_channel *source,
+                                              unsigned int source_resource,
+                                              struct list *duplicates )
 {
     struct dcomp_window_target_duplicate *duplicate, *next;
-    struct dcomp_window_target *target;
     unsigned int command[4];
+
+    LIST_FOR_EACH_ENTRY_SAFE( duplicate, next, duplicates,
+                              struct dcomp_window_target_duplicate, entry )
+    {
+        command[0] = sizeof(command);
+        command[1] = 0x26; /* MILCMD_CHANNEL_BEGINDUPLICATERESOURCE */
+        command[2] = source_resource;
+        command[3] = duplicate->channel->id;
+        if (!duplicate->begun)
+        {
+            if (!queue_dcomp_record( source->connection, DCOMP_RECORD_BATCH, source->id,
+                                     sizeof(command), 0, 0, command, sizeof(command) )) return 0;
+            duplicate->begun = 1;
+        }
+        if (!flush_dcomp_channel_batches( duplicate->channel )) return 0;
+        list_remove( &duplicate->entry );
+        release_object( duplicate->channel );
+        free( duplicate );
+    }
+    return 1;
+}
+
+static void resolve_dcomp_duplicates( struct dcomp_channel *source )
+{
+    struct dcomp_shared_resource *resource;
+    struct dcomp_window_target *target;
 
     LIST_FOR_EACH_ENTRY( target, &dcomp_window_targets, struct dcomp_window_target, entry )
     {
         if (target->source_channel != source || target->source_ready) continue;
-        LIST_FOR_EACH_ENTRY_SAFE( duplicate, next, &target->pending_duplicates,
-                                  struct dcomp_window_target_duplicate, entry )
-        {
-            command[0] = sizeof(command);
-            command[1] = 0x26; /* MILCMD_CHANNEL_BEGINDUPLICATERESOURCE */
-            command[2] = target->source_resource;
-            command[3] = duplicate->channel->id;
-            if (!duplicate->begun)
-            {
-                if (!queue_dcomp_record( source->connection, DCOMP_RECORD_BATCH, source->id,
-                                         sizeof(command), 0, 0, command, sizeof(command) )) return;
-                duplicate->begun = 1;
-            }
-            if (!flush_dcomp_channel_batches( duplicate->channel )) return;
-            list_remove( &duplicate->entry );
-            release_object( duplicate->channel );
-            free( duplicate );
-        }
+        if (!resolve_dcomp_pending_duplicates( source, target->source_resource,
+                                               &target->pending_duplicates )) return;
         target->source_ready = 1;
+    }
+    LIST_FOR_EACH_ENTRY( resource, &dcomp_shared_resources, struct dcomp_shared_resource, entry )
+    {
+        if (resource->channel != source || resource->source_ready) continue;
+        if (!resolve_dcomp_pending_duplicates( source, resource->resource,
+                                               &resource->pending_duplicates )) return;
+        resource->source_ready = 1;
     }
 }
 
@@ -1192,6 +1228,9 @@ DECL_HANDLER(publish_dcomp_resource)
     resource->session_id = channel->owner->session_id;
     resource->resource = req->resource;
     resource->type = req->type;
+    resource->source_ready = 1;
+    list_init( &resource->pending_duplicates );
+    list_add_tail( &dcomp_shared_resources, &resource->entry );
     reply->handle = alloc_handle_no_access_check( current->process, resource, 0, 0 );
     release_object( resource );
 
@@ -1214,6 +1253,9 @@ DECL_HANDLER(create_dcomp_shared_resource)
     resource->session_id = current->process->session_id;
     resource->resource = 0;
     resource->type = req->type;
+    resource->source_ready = 0;
+    list_init( &resource->pending_duplicates );
+    list_add_tail( &dcomp_shared_resources, &resource->entry );
     reply->handle = alloc_handle_no_access_check( current->process, resource, 0, 0 );
     release_object( resource );
 }
@@ -1329,14 +1371,14 @@ DECL_HANDLER(commit_dcomp_channel)
     list_add_tail( &channel->batches, &batch->entry );
     reply->batch_id = batch->id;
     reply->state = 0;
-    if (channel->connection && !dcomp_channel_has_pending_window_target_duplicate( channel ) &&
+    if (channel->connection && !dcomp_channel_has_pending_duplicate( channel ) &&
         queue_dcomp_record( channel->connection, DCOMP_RECORD_BATCH, channel->id, size,
                             0, 0, batch->data, batch->size ))
     {
         list_remove( &batch->entry );
         free( batch->data );
         free( batch );
-        resolve_dcomp_window_target_duplicates( channel );
+        resolve_dcomp_duplicates( channel );
     }
 
 done:
@@ -1695,7 +1737,26 @@ DECL_HANDLER(open_dcomp_shared_resource)
         if (resource->type != req->type ||
             resource->session_id != channel->owner->session_id)
             set_error( STATUS_INVALID_PARAMETER );
-        else if (resource->channel)
+        else if (!req->resource)
+            set_error( STATUS_INVALID_PARAMETER );
+        else if (!resource->channel)
+        {
+            /* A standalone shared-resource handle acquires its canonical MIL
+             * identity on the first channel that opens it.  Only later opens
+             * duplicate that identity into another channel. */
+            resource->channel = (struct dcomp_channel *)grab_object( channel );
+            resource->resource = req->resource;
+            reply->window_target = 2;
+        }
+        else if (!resource->source_ready)
+        {
+            if (!(duplicate = mem_alloc( sizeof(*duplicate) ))) goto done_channel;
+            duplicate->channel = (struct dcomp_channel *)grab_object( channel );
+            duplicate->begun = 0;
+            list_add_tail( &resource->pending_duplicates, &duplicate->entry );
+            reply->window_target = 1;
+        }
+        else
         {
             if (!resource->channel->connection && !attach_internal_dcomp_channel( resource->channel ))
                 goto done_channel;
@@ -1703,9 +1764,10 @@ DECL_HANDLER(open_dcomp_shared_resource)
             command[1] = 0x26; /* MILCMD_CHANNEL_BEGINDUPLICATERESOURCE */
             command[2] = resource->resource;
             command[3] = channel->id;
-            queue_dcomp_record( resource->channel->connection, DCOMP_RECORD_BATCH,
-                                resource->channel->id, sizeof(command), 0, 0,
-                                command, sizeof(command) );
+            if (queue_dcomp_record( resource->channel->connection, DCOMP_RECORD_BATCH,
+                                     resource->channel->id, sizeof(command), 0, 0,
+                                     command, sizeof(command) ))
+                reply->window_target = 1;
         }
     }
     else set_error( STATUS_OBJECT_TYPE_MISMATCH );

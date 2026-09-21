@@ -135,7 +135,7 @@
 
 2633 stub -noname CreateActivationObject  # NtUserCreateActivationObject
 2634 stub -noname SetTSFEventState  # NtUserSetTSFEventState
-2635 stub @
+2635 stdcall -noname IsWindowGdiScaledX(long)
 2636 stdcall -noname GetCurrentDpiInfoForWindow(long ptr) NtUserGetCurrentDpiInfoForWindow
 2637 stub @
 2638 stub @

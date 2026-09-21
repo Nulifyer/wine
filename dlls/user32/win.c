@@ -684,6 +684,29 @@ DPI_AWARENESS_CONTEXT WINAPI GetWindowDpiAwarenessContext( HWND hwnd )
 }
 
 /***********************************************************************
+ *              IsWindowGdiScaledX   (USER32.2635)
+ *
+ * This private helper is used by the Windows dialog and composition paths.
+ * The native implementation tests the window's stored DPI context only while
+ * the caller's desktop has an active compositor owner.
+ */
+BOOL WINAPI IsWindowGdiScaledX( HWND hwnd )
+{
+    UINT context;
+
+    if (!NtUserGetThreadState( UserThreadStateDesktopComposited )) return FALSE;
+
+    if (!hwnd || !(context = NtUserGetWindowDpiAwarenessContext( hwnd )))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    return (context & (NTUSER_DPI_CONTEXT_FLAG_GDISCALED | 0x0f)) ==
+           NTUSER_DPI_CONTEXT_FLAG_GDISCALED;
+}
+
+/***********************************************************************
  *		GetDpiAwarenessContextForProcess  (USER32.@)
  */
 DPI_AWARENESS_CONTEXT WINAPI GetDpiAwarenessContextForProcess(HANDLE process)

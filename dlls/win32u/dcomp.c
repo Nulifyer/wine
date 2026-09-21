@@ -1377,7 +1377,7 @@ static NTSTATUS create_dcomp_shared_resource( UINT type, HANDLE *handle )
 }
 
 static NTSTATUS open_dcomp_shared_resource( HANDLE handle, UINT channel, UINT resource,
-                                             UINT type, UINT *window_target )
+                                             UINT type, UINT *open_role )
 {
     NTSTATUS status;
 
@@ -1388,7 +1388,7 @@ static NTSTATUS open_dcomp_shared_resource( HANDLE handle, UINT channel, UINT re
         req->type = type;
         req->resource = resource;
         status = wine_server_call( req );
-        if (!status) *window_target = reply->window_target;
+        if (!status) *open_role = reply->window_target;
     }
     SERVER_END_REQ;
     TRACE( "handle %p, channel %#x, type %#x, status %#x\n", handle, channel, type, status );
@@ -1502,7 +1502,7 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
         else if (type == 3)
         {
             HANDLE handle;
-            UINT window_target = 0;
+            UINT open_role = 0;
             UINT mode, resource_type;
 
             memcpy( &id, buffer + 4, sizeof(id) );
@@ -1513,12 +1513,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             if (find_any_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
             if (resource_type != 0xb8 && mode) return STATUS_NOT_SUPPORTED;
             if ((status = open_dcomp_shared_resource( handle, view->channel, id,
-                                                       resource_type, &window_target ))) return status;
+                                                       resource_type, &open_role ))) return status;
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
             initialize_dcomp_resource_view( resource, id, resource_type );
             resource->visual_target = resource_type == 0xb8 && !mode;
-            resource->shared_duplicate = window_target == 1 ||
-                                         (!window_target && (resource_type != 0xb8 || !!mode));
+            resource->shared_duplicate = open_role == 1 ||
+                                         (!open_role && (resource_type != 0xb8 || !!mode));
             if (resource->shared_duplicate)
             {
                 resource->manipulation_components_dirty = FALSE;

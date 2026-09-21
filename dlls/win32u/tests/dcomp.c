@@ -61,7 +61,7 @@ struct coremsg_message
 struct dwm_session_message
 {
     ALPC_PORT_MESSAGE header;
-    DWORD data[32];
+    DWORD data[64];
 };
 
 struct coremsg_registrar_context
@@ -1106,6 +1106,90 @@ static void check_dcomp_batch_payload( const struct dcomposition_connection_batc
     ok( record->u.batch.size != expected_size ||
         !memcmp( record->u.batch.data, expected, expected_size ),
         "%s got unexpected batch payload\n", context );
+}
+
+static void test_created_shared_resource_duplication(void)
+{
+    static const UINT expected_source[] = {16, 0x28, 1, 0x82};
+    UINT expected_begin[] = {16, 0x26, 1, 0};
+    static const UINT expected_complete[] = {12, 0x27, 2};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL, shared = NULL, duplicate = NULL;
+    BYTE *source_buffer = NULL, *target_buffer = NULL, state, released;
+    UINT source_channel = 0, target_channel = 0;
+    UINT source_size = 0x1000, target_size = 0x1000;
+    UINT command[6], batch;
+    UINT64 cookie = 0;
+    ULONG processed;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create shared-resource event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got shared-resource connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &source_channel, &source_size,
+                                           (void **)&source_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got shared-resource source status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &target_channel, &target_size,
+                                           (void **)&target_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got shared-resource target status %#lx\n", status );
+    if (!source_buffer || !target_buffer) goto done;
+    status = NtDCompositionSetChannelConnectionId( source_channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got shared-resource source bind status %#lx\n", status );
+    status = NtDCompositionSetChannelConnectionId( target_channel, 0, 2 );
+    ok( status == STATUS_SUCCESS, "got shared-resource target bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got shared-resource create records status %#lx\n", status );
+
+    status = NtDCompositionCreateSharedResourceHandle( 0x82, &shared );
+    ok( status == STATUS_SUCCESS, "got shared-resource handle status %#lx\n", status );
+    command[0] = 3;
+    command[1] = 1;
+    memcpy( command + 2, &shared, sizeof(shared) );
+    command[4] = 0x82;
+    command[5] = 0;
+    memcpy( source_buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( source_channel, sizeof(command),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got canonical shared-resource open status %#lx\n", status );
+    status = NtDuplicateObject( NtCurrentProcess(), shared, NtCurrentProcess(), &duplicate,
+                                0, 0, DUPLICATE_SAME_ACCESS );
+    ok( status == STATUS_SUCCESS, "got shared-resource duplicate status %#lx\n", status );
+    command[1] = 2;
+    memcpy( command + 2, &duplicate, sizeof(duplicate) );
+    memcpy( target_buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( target_channel, sizeof(command),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got duplicate shared-resource open status %#lx\n", status );
+    status = NtDCompositionCommitChannel( target_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got duplicate shared-resource commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && !record,
+        "premature duplicate shared-resource batch status %#lx record %p\n", status, record );
+
+    status = NtDCompositionCommitChannel( source_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got canonical shared-resource commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got ordered shared-resource batches status %#lx\n", status );
+    check_dcomp_batch_payload( record, source_channel, expected_source,
+                               sizeof(expected_source), "canonical shared-resource" );
+    expected_begin[3] = target_channel;
+    check_dcomp_batch_payload( record ? record->next : NULL, source_channel, expected_begin,
+                               sizeof(expected_begin), "shared-resource begin" );
+    check_dcomp_batch_payload( record && record->next ? record->next->next : NULL, target_channel,
+                               expected_complete, sizeof(expected_complete),
+                               "shared-resource complete" );
+
+done:
+    if (duplicate) NtClose( duplicate );
+    if (shared) NtClose( shared );
+    if (target_channel) NtDCompositionDestroyChannel( target_channel );
+    if (source_channel) NtDCompositionDestroyChannel( source_channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
 }
 
 static NTSTATUS process_dcomp_test_command( UINT channel, BYTE *buffer,
@@ -2659,6 +2743,7 @@ static void test_token_manager_lifetime(void)
 static void test_dwm_session_message_delivery(void)
 {
     BOOL (WINAPI *pGetDesktopID)(UINT, UINT64 *);
+    BOOL (WINAPI *pIsWindowGdiScaledX)(HWND);
     ALPC_PORT_ATTRIBUTES attributes = {0};
     OBJECT_ATTRIBUTES object_attributes;
     struct dwm_session_message message = {0}, received = {0};
@@ -2675,13 +2760,26 @@ static void test_dwm_session_message_delivery(void)
     HWND target_window = NULL;
     HANDLE target = NULL, dwm_target = NULL;
     HANDLE port = NULL;
-    BOOL registered;
+    DPI_AWARENESS_CONTEXT previous_dpi_context;
+    BOOL registered, scaled;
     NTSTATUS status;
     SIZE_T size;
     unsigned int i, j;
 
     pGetDesktopID = (void *)GetProcAddress( GetModuleHandleW( L"user32.dll" ), "GetDesktopID" );
+    pIsWindowGdiScaledX = (void *)GetProcAddress( GetModuleHandleW( L"user32.dll" ),
+                                                  (const char *)2635 );
     ok( !!pGetDesktopID, "GetDesktopID is not exported\n" );
+    ok( !!pIsWindowGdiScaledX, "IsWindowGdiScaledX is not exported\n" );
+
+    if (pIsWindowGdiScaledX)
+    {
+        SetLastError( 0xdeadbeef );
+        scaled = pIsWindowGdiScaledX( NULL );
+        ok( !scaled, "NULL window is GDI-scaled without a compositor owner\n" );
+        ok( GetLastError() == 0xdeadbeef, "non-composited query changed error to %lu\n",
+            GetLastError() );
+    }
 
     input_id = 0xdeadbeefdeadbeefULL;
     SetLastError( 0xdeadbeef );
@@ -2820,6 +2918,12 @@ static void test_dwm_session_message_delivery(void)
         else if (received.data[0] == 0x40000007)
             ok( received.header.DataLength == 16, "got window visibility length %#x\n",
                 received.header.DataLength );
+        else if (received.data[0] == 0x40000002)
+            ok( received.header.DataLength == 180, "got sprite create length %#x\n",
+                received.header.DataLength );
+        else if (received.data[0] == 0x40000006)
+            ok( received.header.DataLength == 196, "got sprite update length %#x\n",
+                received.header.DataLength );
         else ok( 0, "got unexpected startup command %#lx\n", received.data[0] );
     }
     ok( saw_input, "DWM startup did not replay input desktop %#I64x\n", input_id );
@@ -2828,6 +2932,21 @@ static void test_dwm_session_message_delivery(void)
     ok( saw_window_create, "DWM startup did not replay a window context\n" );
     ok( saw_window_link, "DWM startup did not replay a window tree link\n" );
     ok( saw_startup_begin, "DWM startup did not release the initializing record after desktop replay\n" );
+
+    if (pIsWindowGdiScaledX)
+    {
+        SetLastError( 0xdeadbeef );
+        scaled = pIsWindowGdiScaledX( GetDesktopWindow() );
+        ok( !scaled, "desktop window unexpectedly reports GDI scaling\n" );
+        ok( GetLastError() == 0xdeadbeef, "ordinary-window query changed error to %lu\n",
+            GetLastError() );
+
+        SetLastError( 0xdeadbeef );
+        scaled = pIsWindowGdiScaledX( (HWND)(UINT_PTR)0xdeadbeef );
+        ok( !scaled, "invalid window unexpectedly reports GDI scaling\n" );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER, "invalid window set error %lu\n",
+            GetLastError() );
+    }
 
     lifecycle_desktop = CreateDesktopW( L"LinuxNTDwmLifecycle", NULL, NULL, 0,
                                         DESKTOP_ALL_ACCESS, NULL );
@@ -2862,15 +2981,25 @@ static void test_dwm_session_message_delivery(void)
             desktop_id, lifecycle_id );
     }
 
+    previous_dpi_context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED );
+    ok( previous_dpi_context != NULL, "failed to set GDI-scaled context, error %lu\n",
+        GetLastError() );
     target_window = CreateWindowExA( 0, "static", "DWM target replay", WS_POPUP,
                                      0, 0, 32, 32, NULL, NULL, NULL, NULL );
+    if (previous_dpi_context) SetThreadDpiAwarenessContext( previous_dpi_context );
     ok( !!target_window, "target window creation failed, error %lu\n", GetLastError() );
+    if (target_window && pIsWindowGdiScaledX)
+    {
+        scaled = pIsWindowGdiScaledX( target_window );
+        ok( scaled, "GDI-scaled target window was not recognized\n" );
+    }
     if (target_window)
     {
         HWND message_window = NULL, message_parent = NULL;
         HWND expected_link_anchor = GetWindow( target_window, GW_HWNDNEXT );
         UINT64 message_desktop = 0, message_sequence = 0;
         DWORD message_style = 0, message_ex_style = 0, message_pid = 0;
+        BOOL saw_sprite_create = FALSE, saw_sprite_update = FALSE;
         BOOL saw_target_link = FALSE;
 
         memset( &received, 0, sizeof(received) );
@@ -2923,6 +3052,70 @@ static void test_dwm_session_message_delivery(void)
                     received.header.DataLength );
                 continue;
             }
+            if (received.data[0] == 0x40000002)
+            {
+                HWND sprite = NULL, sprite_window = NULL;
+                RECT sprite_rect, mini_window_rect, mini_client_rect;
+                UINT64 sprite_desktop = 0;
+
+                ok( received.header.DataLength == 180, "got sprite create length %#x\n",
+                    received.header.DataLength );
+                memcpy( &sprite, received.data + 1, sizeof(sprite) );
+                memcpy( &sprite_window, received.data + 3, sizeof(sprite_window) );
+                if (sprite_window != target_window) continue;
+                ok( !saw_sprite_update, "sprite create followed its update\n" );
+                memcpy( &sprite_rect, received.data + 5, sizeof(sprite_rect) );
+                memcpy( &mini_window_rect, received.data + 10, sizeof(mini_window_rect) );
+                memcpy( &mini_client_rect, received.data + 14, sizeof(mini_client_rect) );
+                memcpy( &sprite_desktop, received.data + 22, sizeof(sprite_desktop) );
+                ok( sprite == target_window, "got sprite %p, expected %p\n", sprite, target_window );
+                ok( sprite_window == target_window, "got sprite HWND %p, expected %p\n",
+                    sprite_window, target_window );
+                ok( EqualRect( &sprite_rect, &mini_window_rect ),
+                    "sprite and mini window rectangles differ\n" );
+                ok( received.data[18] == message_style, "got mini style %#lx, expected %#lx\n",
+                    received.data[18], message_style );
+                ok( received.data[19] == message_ex_style,
+                    "got mini extended style %#lx, expected %#lx\n",
+                    received.data[19], message_ex_style );
+                ok( sprite_desktop == default_id, "got sprite desktop %#I64x, expected %#I64x\n",
+                    sprite_desktop, default_id );
+                ok( received.data[44] == 0x0a00, "got sprite compatibility version %#lx\n",
+                    received.data[44] );
+                ok( mini_client_rect.right >= mini_client_rect.left &&
+                    mini_client_rect.bottom >= mini_client_rect.top,
+                    "got invalid mini client rectangle %s\n", wine_dbgstr_rect( &mini_client_rect ) );
+                saw_sprite_create = TRUE;
+                continue;
+            }
+            if (received.data[0] == 0x40000006)
+            {
+                HWND sprite = NULL;
+                UINT64 logical_surface = 0, sprite_desktop = 0;
+
+                ok( saw_sprite_create, "sprite update preceded its create\n" );
+                ok( received.header.DataLength == 196, "got sprite update length %#x\n",
+                    received.header.DataLength );
+                memcpy( &sprite, received.data + 1, sizeof(sprite) );
+                if (sprite != target_window) continue;
+                memcpy( &sprite_desktop, received.data + 17, sizeof(sprite_desktop) );
+                memcpy( &logical_surface, received.data + 42, sizeof(logical_surface) );
+                ok( sprite == target_window, "got updated sprite %p, expected %p\n",
+                    sprite, target_window );
+                ok( received.data[3] & 0x8, "sprite update flags %#lx lack surface state\n",
+                    received.data[3] );
+                ok( received.data[4] == 1, "got mini-window-present value %#lx\n",
+                    received.data[4] );
+                ok( sprite_desktop == default_id,
+                    "got updated sprite desktop %#I64x, expected %#I64x\n",
+                    sprite_desktop, default_id );
+                ok( logical_surface == (UINT_PTR)target_window,
+                    "got logical surface %#I64x, expected %p\n", logical_surface, target_window );
+                ok( received.data[45] && received.data[46],
+                    "got sprite surface size %lux%lu\n", received.data[45], received.data[46] );
+                saw_sprite_update = TRUE;
+                continue;
+            }
             if (received.data[0] == 0x40000016)
             {
                 ok( received.header.DataLength == 20, "got intervening style length %#x\n",
@@ -2937,6 +3130,8 @@ static void test_dwm_session_message_delivery(void)
             }
             ok( received.data[0] == 0x40000012, "got window link command %#lx\n",
                 received.data[0] );
+            ok( saw_sprite_create, "window link preceded sprite creation\n" );
+            ok( saw_sprite_update, "window link preceded sprite surface update\n" );
             ok( received.header.DataLength == 32, "got window link length %#x\n",
                 received.header.DataLength );
             if (received.data[0] != 0x40000012) continue;
@@ -2956,6 +3151,8 @@ static void test_dwm_session_message_delivery(void)
             }
         }
         ok( saw_target_link, "target window link was not delivered\n" );
+        ok( saw_sprite_create, "target sprite create was not delivered\n" );
+        ok( saw_sprite_update, "target sprite update was not delivered\n" );
 
         for (i = 0; i < 3; ++i)
         {
@@ -3050,6 +3247,34 @@ static void test_dwm_session_message_delivery(void)
                 style_value, expected_ex_style );
         }
 
+        SetWindowPos( target_window, NULL, 1, 2, 40, 36, SWP_NOZORDER | SWP_NOACTIVATE );
+        for (i = 0; i < 512; ++i)
+        {
+            HWND sprite = NULL;
+            RECT updated_rect;
+
+            memset( &received, 0, sizeof(received) );
+            size = sizeof(received);
+            status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                &size, NULL, &timeout );
+            if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+            ok( !status, "sprite geometry receive returned %#lx\n", status );
+            if (status) break;
+            if (received.data[0] != 0x40000006) continue;
+            memcpy( &sprite, received.data + 1, sizeof(sprite) );
+            if (sprite != target_window) continue;
+            memcpy( &updated_rect, received.data + 5, sizeof(updated_rect) );
+            ok( received.header.DataLength == 196, "got geometry update length %#x\n",
+                received.header.DataLength );
+            ok( updated_rect.right - updated_rect.left == 40 &&
+                updated_rect.bottom - updated_rect.top == 36,
+                "got updated window rectangle %s\n", wine_dbgstr_rect( &updated_rect ) );
+            ok( received.data[45] >= 40 && received.data[46] >= 36,
+                "got undersized sprite surface %lux%lu\n", received.data[45], received.data[46] );
+            break;
+        }
+        ok( i < 512, "sprite geometry update was not delivered\n" );
+
         registered = NtUserCreateDCompositionHwndTarget( target_window, 0, &target );
         ok( registered, "target creation failed, status %#lx\n", RtlGetLastNtStatus() );
     }
@@ -3126,7 +3351,7 @@ static void test_dwm_session_message_delivery(void)
     if (target_window)
     {
         HWND message_window = NULL;
-        BOOL saw_destroy = FALSE;
+        BOOL saw_sprite_destroy = FALSE, saw_destroy = FALSE;
 
         ok( DestroyWindow( target_window ), "target window destruction failed, error %lu\n", GetLastError() );
         for (i = 0; i < 16; ++i)
@@ -3142,14 +3367,22 @@ static void test_dwm_session_message_delivery(void)
             if (received.data[0] == 0x40000013)
                 ok( received.header.DataLength == 20, "got window unlink length %#x\n",
                     received.header.DataLength );
+            else if (received.data[0] == 0x40000003)
+            {
+                ok( received.header.DataLength == 12, "got sprite destroy length %#x\n",
+                    received.header.DataLength );
+                saw_sprite_destroy = TRUE;
+            }
             else if (received.data[0] == 0x40000014)
             {
+                ok( saw_sprite_destroy, "window context was destroyed before its sprite\n" );
                 ok( received.header.DataLength == 12, "got window destroy length %#x\n",
                     received.header.DataLength );
                 saw_destroy = TRUE;
                 break;
             }
         }
+        ok( saw_sprite_destroy, "target sprite destroy was not delivered\n" );
         ok( saw_destroy, "target window destroy was not delivered\n" );
         target_window = NULL;
     }
@@ -3187,6 +3420,7 @@ START_TEST(dcomp)
     test_frame_statistics();
     test_channel_lifetime();
     test_shared_resource_handle_lifecycle();
+    test_created_shared_resource_duplication();
     test_hwnd_target_lifecycle();
     test_connection_queue();
     test_visual_target_root_lifecycle();

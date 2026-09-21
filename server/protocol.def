@@ -5078,7 +5078,7 @@ struct alpc_message_info
     unsigned int type;         /* expected MIL resource type */
     unsigned int resource;     /* target channel resource ID */
 @REPLY
-    int window_target;         /* 0: regular resource, 1: duplicate, 2: canonical HWND target */
+    int window_target;         /* 0: ordinary open, 1: duplicate, 2: canonical shared identity */
 @END
 
 /* Pop one record from a DWM connection's pending batch queue. */
