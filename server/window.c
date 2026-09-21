@@ -2159,6 +2159,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     const struct rectangle old_window_rect = win->window_rect;
     const struct rectangle old_visible_rect = win->visible_rect;
     const struct rectangle old_client_rect = win->client_rect;
+    const unsigned int old_style = win->style;
     struct rectangle rect;
     int client_changed, frame_changed;
     int visible = (win->style & WS_VISIBLE) || (swp_flags & SWP_SHOWWINDOW);
@@ -2177,6 +2178,9 @@ static void set_window_pos( struct window *win, struct window *previous,
     if (!(swp_flags & SWP_NOZORDER) && win->parent) zorder_changed |= link_window( win, previous );
     if (swp_flags & SWP_SHOWWINDOW) win->style |= WS_VISIBLE;
     else if (swp_flags & SWP_HIDEWINDOW) win->style &= ~WS_VISIBLE;
+    if (win->dwm_context_id && old_style != win->style)
+        notify_dwm_window_style_changed( win->desktop, win->dwm_context_id, win->handle,
+                                         GWL_STYLE, win->style );
 
     /* update window monitor dpi for toplevel windows */
     if (is_toplevel( win )) set_window_monitor_dpi( win );
@@ -2917,6 +2921,7 @@ DECL_HANDLER(set_window_info)
 {
     struct window *win;
     bool ansi;
+    unsigned int old_style, old_ex_style;
 
     if (!(win = get_window( req->handle ))) return;
     if (is_desktop_window( win ) && win->thread != current)
@@ -2924,6 +2929,8 @@ DECL_HANDLER(set_window_info)
         set_error( STATUS_ACCESS_DENIED );
         return;
     }
+    old_style = win->style;
+    old_ex_style = win->ex_style;
 
     SHARED_WRITE_BEGIN( win->shared, window_shm_t )
     {
@@ -2974,6 +2981,13 @@ DECL_HANDLER(set_window_info)
         }
     }
     SHARED_WRITE_END;
+
+    if (win->dwm_context_id && old_style != win->style)
+        notify_dwm_window_style_changed( win->desktop, win->dwm_context_id, win->handle,
+                                         GWL_STYLE, win->style );
+    if (win->dwm_context_id && old_ex_style != win->ex_style)
+        notify_dwm_window_style_changed( win->desktop, win->dwm_context_id, win->handle,
+                                         GWL_EXSTYLE, win->ex_style );
 }
 
 

@@ -1148,6 +1148,21 @@ int notify_dwm_window_linked( struct desktop *desktop, unsigned int generation,
     return queue_dwm_window_message( port, data, sizeof(data), "link", window );
 }
 
+void notify_dwm_window_style_changed( struct desktop *desktop, unsigned int generation,
+                                      unsigned int window, int offset, unsigned int value )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 hwnd = window;
+    unsigned char data[20] = {0};
+
+    if (!port || generation != port->composition_id) return;
+    put_u32( data, 0x40000016 );
+    memcpy( data + 4, &hwnd, sizeof(hwnd) );
+    put_u32( data + 12, offset );
+    put_u32( data + 16, value );
+    queue_dwm_window_message( port, data, sizeof(data), "style", window );
+}
+
 void notify_dwm_window_unlinked( struct desktop *desktop, unsigned int generation,
                                  unsigned int window, unsigned int parent )
 {

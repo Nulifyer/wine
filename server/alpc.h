@@ -30,6 +30,9 @@ extern unsigned int notify_dwm_window_created( struct desktop *desktop, unsigned
 extern int notify_dwm_window_linked( struct desktop *desktop, unsigned int generation,
                                      unsigned int window, unsigned int parent,
                                      unsigned int previous, unsigned int band );
+extern void notify_dwm_window_style_changed( struct desktop *desktop, unsigned int generation,
+                                             unsigned int window, int offset,
+                                             unsigned int value );
 extern void notify_dwm_window_unlinked( struct desktop *desktop, unsigned int generation,
                                         unsigned int window, unsigned int parent );
 extern void notify_dwm_window_destroyed( struct desktop *desktop, unsigned int generation,

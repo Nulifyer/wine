@@ -2678,7 +2678,7 @@ static void test_dwm_session_message_delivery(void)
     BOOL registered;
     NTSTATUS status;
     SIZE_T size;
-    unsigned int i;
+    unsigned int i, j;
 
     pGetDesktopID = (void *)GetProcAddress( GetModuleHandleW( L"user32.dll" ), "GetDesktopID" );
     ok( !!pGetDesktopID, "GetDesktopID is not exported\n" );
@@ -2901,7 +2901,7 @@ static void test_dwm_session_message_delivery(void)
             message_pid, GetCurrentProcessId() );
         ok( !!message_sequence, "window process sequence is zero\n" );
 
-        for (i = 0; i < 16; ++i)
+        for (i = 0; i < 512; ++i)
         {
             memset( &received, 0, sizeof(received) );
             size = sizeof(received);
@@ -2916,6 +2916,12 @@ static void test_dwm_session_message_delivery(void)
             if (received.data[0] == 0x40000011)
             {
                 ok( received.header.DataLength == 124, "got intervening create length %#x\n",
+                    received.header.DataLength );
+                continue;
+            }
+            if (received.data[0] == 0x40000016)
+            {
+                ok( received.header.DataLength == 20, "got intervening style length %#x\n",
                     received.header.DataLength );
                 continue;
             }
@@ -2937,6 +2943,83 @@ static void test_dwm_session_message_delivery(void)
                     expected_link_anchor ? expected_link_anchor : (HWND)1 );
                 ok( received.data[7] == 1, "got window band %lu\n", received.data[7] );
             }
+        }
+
+        for (i = 0; i < 3; ++i)
+        {
+            HWND style_window = NULL;
+            LONG style_offset = 0;
+            DWORD style_value = 0;
+            BOOL saw_style = FALSE;
+            BOOL show = i != 1;
+
+            ShowWindow( target_window, show ? SW_SHOW : SW_HIDE );
+            for (j = 0; j < 512; ++j)
+            {
+                memset( &received, 0, sizeof(received) );
+                size = sizeof(received);
+                status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                    &size, NULL, &timeout );
+                if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+                ok( !status, "window style receive returned %#lx\n", status );
+                if (status) break;
+                memcpy( &style_window, received.data + 1, sizeof(style_window) );
+                if (received.data[0] != 0x40000016 || style_window != target_window) continue;
+                ok( received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+                    "got window style type %#x\n", received.header.Type );
+                ok( received.header.DataLength == 20,
+                    "got window style length %#x\n", received.header.DataLength );
+                memcpy( &style_offset, received.data + 3, sizeof(style_offset) );
+                style_value = received.data[4];
+                saw_style = TRUE;
+                break;
+            }
+            ok( saw_style, "window style change was not delivered\n" );
+            ok( style_window == target_window, "got style HWND %p, expected %p\n",
+                style_window, target_window );
+            ok( style_offset == GWL_STYLE, "got style offset %ld\n", style_offset );
+            ok( !!(style_value & WS_VISIBLE) == show,
+                "got style %#lx, expected visible %u\n", style_value, show );
+        }
+
+        for (i = 0; i < 2; ++i)
+        {
+            HWND style_window = NULL;
+            LONG style_offset = 0;
+            DWORD old_ex_style = GetWindowLongA( target_window, GWL_EXSTYLE );
+            DWORD expected_ex_style = i ? old_ex_style & ~WS_EX_TOOLWINDOW : old_ex_style | WS_EX_TOOLWINDOW;
+            DWORD style_value = 0;
+            BOOL saw_style = FALSE;
+
+            SetWindowLongA( target_window, GWL_EXSTYLE, expected_ex_style );
+            for (j = 0; j < 512; ++j)
+            {
+                memset( &received, 0, sizeof(received) );
+                size = sizeof(received);
+                status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                    &size, NULL, &timeout );
+                if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+                ok( !status, "window extended style receive returned %#lx\n", status );
+                if (status) break;
+                memcpy( &style_window, received.data + 1, sizeof(style_window) );
+                memcpy( &style_offset, received.data + 3, sizeof(style_offset) );
+                if (received.data[0] != 0x40000016 || style_window != target_window ||
+                    style_offset != GWL_EXSTYLE)
+                    continue;
+                ok( received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+                    "got window extended style type %#x\n", received.header.Type );
+                ok( received.header.DataLength == 20,
+                    "got window extended style length %#x\n", received.header.DataLength );
+                style_value = received.data[4];
+                saw_style = TRUE;
+                break;
+            }
+            ok( saw_style, "window extended style change was not delivered\n" );
+            ok( style_window == target_window, "got extended style HWND %p, expected %p\n",
+                style_window, target_window );
+            ok( style_offset == GWL_EXSTYLE, "got extended style offset %ld\n", style_offset );
+            ok( style_value == expected_ex_style, "got extended style %#lx, expected %#lx\n",
+                style_value, expected_ex_style );
         }
 
         registered = NtUserCreateDCompositionHwndTarget( target_window, 0, &target );
