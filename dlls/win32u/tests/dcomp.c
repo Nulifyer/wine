@@ -1439,6 +1439,75 @@ done:
     CloseHandle( event );
 }
 
+static void test_shared_host_visual_lifecycle(void)
+{
+    static const UINT expected[] =
+    {
+        16, 0x28, 1, 0xb8,
+        12, 0x27, 2,
+        24, 0x185, 1, 2, 0, 1,
+    };
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL, target = NULL;
+    BYTE *buffer = NULL, state, released;
+    UINT channel = 0, size = 0x1000, batch, command[10];
+    UINT64 cookie = 0, shared;
+    ULONG processed;
+    NTSTATUS status;
+    HWND hwnd = NULL;
+    BOOL ret;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create host-visual event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got host-visual connection status %#lx\n", status );
+    hwnd = CreateWindowExA( 0, "static", "host visual target", WS_POPUP, 0, 0, 32, 32,
+                            NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "failed to create host-visual window, error %lu\n", GetLastError() );
+    ret = hwnd && NtUserCreateDCompositionHwndTarget( hwnd, 1, &target );
+    ok( ret, "failed to create host-visual target, status %#lx\n", RtlGetLastNtStatus() );
+    if (!ret) goto done;
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got host-visual channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got host-visual bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got host-visual create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    command[0] = 2; command[1] = 1; command[2] = 0xb8; command[3] = 0;
+    command[4] = 3; command[5] = 2;
+    shared = (UINT_PTR)target;
+    memcpy( command + 6, &shared, sizeof(shared) );
+    command[8] = 0xb8; command[9] = 1;
+    memcpy( buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(command),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got host-visual open status %#lx\n", status );
+    ok( processed == 2, "got host-visual open process count %lu\n", processed );
+
+    command[0] = 20; command[1] = 1; command[2] = 2; command[3] = 1; command[4] = 0;
+    memcpy( buffer, command, 20 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 20, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got host-visual child status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got host-visual commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got host-visual batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected, sizeof(expected), "host visual" );
+
+done:
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (target) CloseHandle( target );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    if (hwnd) DestroyWindow( hwnd );
+    CloseHandle( event );
+}
+
 static void test_visual_target_root_lifecycle(void)
 {
     static const UINT expected_initial[] = {
@@ -2680,6 +2749,7 @@ START_TEST(dcomp)
     test_hwnd_target_lifecycle();
     test_connection_queue();
     test_visual_target_root_lifecycle();
+    test_shared_host_visual_lifecycle();
     test_expression_graph();
     test_shared_manipulation_transform();
     test_shared_section_lifecycle();

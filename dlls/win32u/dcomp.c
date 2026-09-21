@@ -1154,8 +1154,8 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                                                        resource_type ))) return status;
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
             initialize_dcomp_resource_view( resource, id, resource_type );
-            resource->visual_target = resource_type == 0xb8;
-            resource->shared_duplicate = resource_type != 0xb8;
+            resource->visual_target = resource_type == 0xb8 && !mode;
+            resource->shared_duplicate = resource_type != 0xb8 || !!mode;
             if (resource->shared_duplicate)
             {
                 resource->manipulation_components_dirty = FALSE;
