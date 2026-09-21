@@ -47,6 +47,7 @@ enum dxgi_frame_latency
 
 /* Undocumented interfaces used by the desktop compositor. */
 typedef struct IDXGIAdapterDWM IDXGIAdapterDWM;
+typedef struct IDXGIAdapterPartner IDXGIAdapterPartner;
 typedef struct IDXGIFactoryDWM IDXGIFactoryDWM;
 typedef struct IDXGIFactoryDWM2 IDXGIFactoryDWM2;
 typedef struct IDXGIFactoryPartner IDXGIFactoryPartner;
@@ -141,6 +142,27 @@ struct IDXGIAdapterDWMVtbl
 struct IDXGIAdapterDWM
 {
     const struct IDXGIAdapterDWMVtbl *lpVtbl;
+};
+
+enum dxgi_internal_adapter_role
+{
+    DXGI_INTERNAL_ADAPTER_ROLE_UNKNOWN = 0,
+    DXGI_INTERNAL_ADAPTER_ROLE_STANDALONE = 1,
+    DXGI_INTERNAL_ADAPTER_ROLE_HYBRID_INTEGRATED = 2,
+    DXGI_INTERNAL_ADAPTER_ROLE_HYBRID_DISCRETE = 3,
+};
+
+struct IDXGIAdapterPartnerVtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(IDXGIAdapterPartner *iface, REFIID iid, void **object);
+    ULONG (STDMETHODCALLTYPE *AddRef)(IDXGIAdapterPartner *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(IDXGIAdapterPartner *iface);
+    enum dxgi_internal_adapter_role (STDMETHODCALLTYPE *GetAdapterRole)(IDXGIAdapterPartner *iface);
+};
+
+struct IDXGIAdapterPartner
+{
+    const struct IDXGIAdapterPartnerVtbl *lpVtbl;
 };
 
 struct IDXGIFactoryDWMVtbl
@@ -448,6 +470,7 @@ struct dxgi_adapter
 {
     IWineDXGIAdapter IWineDXGIAdapter_iface;
     IDXGIAdapterDWM IDXGIAdapterDWM_iface;
+    IDXGIAdapterPartner IDXGIAdapterPartner_iface;
     LONG refcount;
     struct wined3d_adapter *wined3d_adapter;
     struct wined3d_private_store private_store;

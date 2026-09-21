@@ -36,6 +36,7 @@ enum frame_latency
 };
 
 DEFINE_GUID(IID_IDXGIAdapterDWM, 0x712bd56d, 0x86ff, 0x4b71, 0x91, 0xe1, 0xc1, 0x3b, 0x27, 0x4f, 0xf2, 0xa2);
+DEFINE_GUID(IID_IDXGIAdapterPartner, 0x1ae9fb77, 0x7181, 0x4326, 0x8c, 0x90, 0x8e, 0xbc, 0x69, 0xf0, 0xae, 0xf8);
 DEFINE_GUID(IID_IDXGIAdapterInternal2, 0x2411e7e1, 0x12ac, 0x4ccf, 0xbd, 0x14, 0x97, 0x98, 0xe8, 0x53, 0x4d, 0xc0);
 DEFINE_GUID(IID_IDXGIDeviceDWM, 0xfef19e0a, 0x40c0, 0x472b, 0xae, 0x40, 0x59, 0xef, 0x97, 0xaf, 0x35, 0x29);
 DEFINE_GUID(IID_IDXGIFactoryDWM, 0x713f394e, 0x92ca, 0x47e7, 0xab, 0x81, 0x11, 0x59, 0xc2, 0x79, 0x1e, 0x54);
@@ -51,6 +52,7 @@ enum test_dxgi_output_dwm_display_flags
 };
 
 struct test_dxgi_adapter_dwm;
+struct test_dxgi_adapter_partner;
 struct test_dxgi_device_dwm;
 struct test_dxgi_factory_dwm;
 struct test_dxgi_factory_dwm2;
@@ -150,6 +152,20 @@ struct test_dxgi_adapter_dwm_vtbl
 struct test_dxgi_adapter_dwm
 {
     const struct test_dxgi_adapter_dwm_vtbl *lpVtbl;
+};
+
+struct test_dxgi_adapter_partner_vtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(struct test_dxgi_adapter_partner *iface,
+            REFIID iid, void **object);
+    ULONG (STDMETHODCALLTYPE *AddRef)(struct test_dxgi_adapter_partner *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(struct test_dxgi_adapter_partner *iface);
+    UINT (STDMETHODCALLTYPE *GetAdapterRole)(struct test_dxgi_adapter_partner *iface);
+};
+
+struct test_dxgi_adapter_partner
+{
+    const struct test_dxgi_adapter_partner_vtbl *lpVtbl;
 };
 
 struct test_dxgi_factory_dwm_vtbl
@@ -1325,6 +1341,7 @@ static void test_dwm_output_interfaces(void)
     struct test_dxgi_multiplane_overlay_caps mpo_caps;
     struct test_dxgi_output_dwm_desc dwm_desc;
     struct test_dxgi_adapter_dwm *adapter_dwm;
+    struct test_dxgi_adapter_partner *adapter_partner;
     struct test_dxgi_factory_dwm2 *factory_dwm2;
     struct test_dxgi_output_dwm *output_dwm;
     DXGI_ADAPTER_DESC adapter_desc;
@@ -1339,6 +1356,7 @@ static void test_dwm_output_interfaces(void)
     DWORD stereo_caps;
     UINT sync_target;
     HRESULT hr;
+    UINT adapter_role;
 
     hr = CreateDXGIFactory(&IID_IDXGIFactory, (void **)&factory);
     ok(hr == S_OK, "Failed to create factory, hr %#lx.\n", hr);
@@ -1398,6 +1416,24 @@ static void test_dwm_output_interfaces(void)
         ok(adapter_internal == (IUnknown *)adapter, "Got unexpected adapter-internal pointer %p, expected %p.\n",
                 adapter_internal, adapter);
         IUnknown_Release(adapter_internal);
+    }
+
+    adapter_partner = NULL;
+    hr = IDXGIAdapter_QueryInterface(adapter, &IID_IDXGIAdapterPartner, (void **)&adapter_partner);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected adapter-partner hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        identity = NULL;
+        hr = adapter_partner->lpVtbl->QueryInterface(adapter_partner, &IID_IUnknown, (void **)&identity);
+        ok(hr == S_OK, "Failed to query adapter identity, hr %#lx.\n", hr);
+        ok(identity == (IUnknown *)adapter, "Got unexpected adapter identity %p, expected %p.\n",
+                identity, adapter);
+        if (identity)
+            IUnknown_Release(identity);
+
+        adapter_role = adapter_partner->lpVtbl->GetAdapterRole(adapter_partner);
+        ok(adapter_role >= 1 && adapter_role <= 3, "Got unexpected adapter role %u.\n", adapter_role);
+        adapter_partner->lpVtbl->Release(adapter_partner);
     }
 
     hr = IDXGIAdapter_QueryInterface(adapter, &IID_IDXGIAdapterDWM, (void **)&adapter_dwm);

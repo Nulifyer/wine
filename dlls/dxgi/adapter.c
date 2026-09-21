@@ -23,6 +23,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
 static const GUID IID_IDXGIAdapterDWM =
         {0x712bd56d, 0x86ff, 0x4b71, {0x91, 0xe1, 0xc1, 0x3b, 0x27, 0x4f, 0xf2, 0xa2}};
+static const GUID IID_IDXGIAdapterPartner =
+        {0x1ae9fb77, 0x7181, 0x4326, {0x8c, 0x90, 0x8e, 0xbc, 0x69, 0xf0, 0xae, 0xf8}};
 static const GUID IID_IDXGIAdapterInternal2 =
         {0x2411e7e1, 0x12ac, 0x4ccf, {0xbd, 0x14, 0x97, 0x98, 0xe8, 0x53, 0x4d, 0xc0}};
 
@@ -43,6 +45,11 @@ static inline struct dxgi_adapter *impl_from_IWineDXGIAdapter(IWineDXGIAdapter *
 static inline struct dxgi_adapter *impl_from_IDXGIAdapterDWM(IDXGIAdapterDWM *iface)
 {
     return CONTAINING_RECORD(iface, struct dxgi_adapter, IDXGIAdapterDWM_iface);
+}
+
+static inline struct dxgi_adapter *impl_from_IDXGIAdapterPartner(IDXGIAdapterPartner *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_adapter, IDXGIAdapterPartner_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_adapter_QueryInterface(IWineDXGIAdapter *iface, REFIID iid, void **out)
@@ -70,6 +77,15 @@ static HRESULT STDMETHODCALLTYPE dxgi_adapter_QueryInterface(IWineDXGIAdapter *i
 
         IWineDXGIAdapter_AddRef(iface);
         *out = &adapter->IDXGIAdapterDWM_iface;
+        return S_OK;
+    }
+
+    if (IsEqualGUID(iid, &IID_IDXGIAdapterPartner))
+    {
+        struct dxgi_adapter *adapter = impl_from_IWineDXGIAdapter(iface);
+
+        IWineDXGIAdapter_AddRef(iface);
+        *out = &adapter->IDXGIAdapterPartner_iface;
         return S_OK;
     }
 
@@ -161,6 +177,46 @@ static const struct IDXGIAdapterDWMVtbl dxgi_adapter_dwm_vtbl =
     dxgi_adapter_dwm_OpenKernelHandle,
     dxgi_adapter_dwm_CloseKernelHandle,
     dxgi_adapter_dwm_EnumOutputs,
+};
+
+static HRESULT STDMETHODCALLTYPE dxgi_adapter_partner_QueryInterface(IDXGIAdapterPartner *iface,
+        REFIID iid, void **object)
+{
+    struct dxgi_adapter *adapter = impl_from_IDXGIAdapterPartner(iface);
+
+    return IWineDXGIAdapter_QueryInterface(&adapter->IWineDXGIAdapter_iface, iid, object);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_adapter_partner_AddRef(IDXGIAdapterPartner *iface)
+{
+    struct dxgi_adapter *adapter = impl_from_IDXGIAdapterPartner(iface);
+
+    return IWineDXGIAdapter_AddRef(&adapter->IWineDXGIAdapter_iface);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_adapter_partner_Release(IDXGIAdapterPartner *iface)
+{
+    struct dxgi_adapter *adapter = impl_from_IDXGIAdapterPartner(iface);
+
+    return IWineDXGIAdapter_Release(&adapter->IWineDXGIAdapter_iface);
+}
+
+static enum dxgi_internal_adapter_role STDMETHODCALLTYPE dxgi_adapter_partner_GetAdapterRole(
+        IDXGIAdapterPartner *iface)
+{
+    TRACE("iface %p.\n", iface);
+
+    /* WineD3D exposes adapters independently and does not model Windows'
+     * linked hybrid-integrated / hybrid-discrete adapter pairs. */
+    return DXGI_INTERNAL_ADAPTER_ROLE_STANDALONE;
+}
+
+static const struct IDXGIAdapterPartnerVtbl dxgi_adapter_partner_vtbl =
+{
+    dxgi_adapter_partner_QueryInterface,
+    dxgi_adapter_partner_AddRef,
+    dxgi_adapter_partner_Release,
+    dxgi_adapter_partner_GetAdapterRole,
 };
 
 static ULONG STDMETHODCALLTYPE dxgi_adapter_AddRef(IWineDXGIAdapter *iface)
@@ -542,6 +598,7 @@ static void dxgi_adapter_init(struct dxgi_adapter *adapter, struct dxgi_factory 
 {
     adapter->IWineDXGIAdapter_iface.lpVtbl = &dxgi_adapter_vtbl;
     adapter->IDXGIAdapterDWM_iface.lpVtbl = &dxgi_adapter_dwm_vtbl;
+    adapter->IDXGIAdapterPartner_iface.lpVtbl = &dxgi_adapter_partner_vtbl;
     adapter->refcount = 1;
     adapter->wined3d_adapter = wined3d_get_adapter(factory->wined3d, ordinal);
     wined3d_private_store_init(&adapter->private_store);
