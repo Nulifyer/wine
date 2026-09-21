@@ -886,7 +886,7 @@
 @ stdcall -syscall NtUserDeferWindowPosAndBand(long long long long long long long long long long)
 @ stub -syscall NtUserDeferredDesktopRotation
 @ stub -syscall NtUserDelegateCapturePointers
-@ stub -syscall NtUserDelegateInput
+@ stdcall -syscall NtUserDelegateInput(long ptr ptr long long)
 @ stdcall -syscall NtUserDeleteMenu(long long long)
 @ stub -syscall NtUserDeleteWindowGroup
 @ stub -syscall NtUserDeregisterShellHookWindow
@@ -1128,7 +1128,7 @@
 @ stub -syscall NtUserGetWindowThreadProcessId
 @ stub -syscall NtUserGetWindowTrackInfoAsync
 @ stub -syscall NtUserGhostWindowFromHungWindow
-@ stub -syscall NtUserHandleDelegatedInput
+@ stdcall -syscall NtUserHandleDelegatedInput(ptr long)
 @ stub -syscall NtUserHandleSystemThreadCreationFailure
 @ stub -syscall NtUserHardErrorControl
 @ stdcall -syscall NtUserHideCaret(long)
@@ -1496,7 +1496,7 @@
 @ stub -syscall NtUserTransformRect
 @ stdcall -syscall NtUserTranslateAccelerator(long long ptr)
 @ stdcall -syscall NtUserTranslateMessage(ptr long)
-@ stub -syscall NtUserUndelegateInput
+@ stdcall -syscall NtUserUndelegateInput(long long)
 @ stdcall -syscall NtUserUnhookWinEvent(long)
 @ stdcall -syscall NtUserUnhookWindowsHook(long ptr)
 @ stdcall -syscall NtUserUnhookWindowsHookEx(long)

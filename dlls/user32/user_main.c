@@ -162,6 +162,17 @@ static NTSTATUS WINAPI User32CallDispatchCallback( void *args, ULONG size )
     return callback( params, size );
 }
 
+static NTSTATUS WINAPI User32CallDelegateThread( void *args, ULONG size )
+{
+    const struct delegate_input_callback_params *params = args;
+    UINT_PTR (WINAPI *callback)( MSG *, void * ) = (void *)(UINT_PTR)params->callback;
+    UINT_PTR result;
+
+    if (size != sizeof(*params) || !callback) return STATUS_INVALID_PARAMETER;
+    result = callback( (MSG *)&params->msg, (void *)(UINT_PTR)params->context );
+    return NtCallbackReturn( &result, sizeof(result), STATUS_SUCCESS );
+}
+
 static NTSTATUS WINAPI User32DragDropEnter( void *args, ULONG size )
 {
     if (!drag_drop_enter( size, args )) return STATUS_UNSUCCESSFUL;

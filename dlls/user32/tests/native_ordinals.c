@@ -44,6 +44,8 @@ struct composition_attribute_data
 typedef BOOL (WINAPI *get_window_composition_attribute_fn)(HWND, struct composition_attribute_data *);
 typedef BOOL (WINAPI *set_window_composition_attribute_fn)(HWND, struct composition_attribute_data *);
 typedef INT (WINAPI *schedule_dispatch_notification_fn)(HWND);
+typedef UINT_PTR (WINAPI *delegate_input_fn)(DWORD, void *, void *, HWND, UINT, void *);
+typedef BOOL (WINAPI *undelegate_input_fn)(HWND, UINT);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 
@@ -69,6 +71,214 @@ static LPARAM theme_change_lparam;
 static unsigned int dispatch_notification_count;
 static WPARAM dispatch_notification_wparam;
 static LPARAM dispatch_notification_lparam;
+static HANDLE input_delegate_ready, input_delegate_stop, input_delegate_called;
+static DWORD input_delegate_tid, input_delegate_callback_tid;
+static HWND input_delegate_target, input_delegate_callback_hwnd;
+static void *input_delegate_callback_context;
+static UINT input_delegate_callback_message, input_delegate_option;
+static unsigned int input_delegate_callback_count, input_delegate_target_count;
+
+static UINT_PTR WINAPI input_delegate_callback(MSG *message, void *context)
+{
+    input_delegate_callback_count++;
+    input_delegate_callback_tid = GetCurrentThreadId();
+    input_delegate_callback_hwnd = message->hwnd;
+    input_delegate_callback_message = message->message;
+    input_delegate_callback_context = context;
+    SetEvent(input_delegate_called);
+    return input_delegate_option;
+}
+
+static LRESULT WINAPI input_delegate_target_proc(HWND hwnd, UINT message, WPARAM wparam,
+                                                  LPARAM lparam)
+{
+    if (message == WM_LBUTTONDOWN) input_delegate_target_count++;
+    return DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
+static DWORD WINAPI input_delegate_thread(void *param)
+{
+    MSG message;
+    DWORD wait;
+
+    input_delegate_tid = GetCurrentThreadId();
+    PeekMessageW(&message, NULL, 0, 0, PM_NOREMOVE);
+    SetEvent(input_delegate_ready);
+    for (;;)
+    {
+        wait = MsgWaitForMultipleObjects(1, &input_delegate_stop, FALSE, 10000, QS_ALLINPUT);
+        if (wait == WAIT_OBJECT_0) break;
+        if (wait != WAIT_OBJECT_0 + 1) continue;
+        while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+    return 0;
+}
+
+static void send_input_delegate_click(HWND window)
+{
+    INPUT inputs[2] = {0};
+    RECT rect;
+
+    GetWindowRect(window, &rect);
+    SetCursorPos((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+    inputs[0].type = INPUT_MOUSE;
+    inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    inputs[1].type = INPUT_MOUSE;
+    inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    ok(SendInput(ARRAY_SIZE(inputs), inputs, sizeof(inputs[0])) == ARRAY_SIZE(inputs),
+       "SendInput failed, error %lu.\n", GetLastError());
+}
+
+static void test_input_delegation(HMODULE module)
+{
+    static const WCHAR class_name[] = L"WineInputDelegation";
+    static const UINT delegation_flags = QS_MOUSEBUTTON;
+    delegate_input_fn delegate_input;
+    undelegate_input_fn undelegate_input;
+    WNDCLASSW class = {0};
+    HANDLE thread = NULL;
+    MSG message;
+    DWORD wait;
+    UINT_PTR result;
+    BOOL ret;
+
+    delegate_input = (void *)GetProcAddress(module, (const char *)2503);
+    undelegate_input = (void *)GetProcAddress(module, (const char *)2504);
+    ok(!!delegate_input && !!undelegate_input, "input-delegation ordinals are unavailable.\n");
+    if (!delegate_input || !undelegate_input) return;
+
+    class.lpfnWndProc = input_delegate_target_proc;
+    class.hInstance = GetModuleHandleW(NULL);
+    class.lpszClassName = class_name;
+    ok(RegisterClassW(&class), "RegisterClassW failed, error %lu.\n", GetLastError());
+    input_delegate_target = CreateWindowExW(0, class_name, NULL, WS_POPUP | WS_VISIBLE,
+                                             100, 100, 160, 120, NULL, NULL,
+                                             class.hInstance, NULL);
+    ok(!!input_delegate_target, "failed to create input target, error %lu.\n", GetLastError());
+    if (!input_delegate_target) return;
+    UpdateWindow(input_delegate_target);
+
+    input_delegate_ready = CreateEventW(NULL, TRUE, FALSE, NULL);
+    input_delegate_stop = CreateEventW(NULL, TRUE, FALSE, NULL);
+    input_delegate_called = CreateEventW(NULL, FALSE, FALSE, NULL);
+    ok(!!input_delegate_ready && !!input_delegate_stop && !!input_delegate_called,
+       "failed to create input-delegation events, error %lu.\n", GetLastError());
+    if (!input_delegate_ready || !input_delegate_stop || !input_delegate_called) goto done;
+
+    thread = CreateThread(NULL, 0, input_delegate_thread, NULL, 0, NULL);
+    ok(!!thread, "failed to create input-delegate thread, error %lu.\n", GetLastError());
+    if (!thread) goto done;
+    wait = WaitForSingleObject(input_delegate_ready, 10000);
+    ok(wait == WAIT_OBJECT_0, "input-delegate thread was not ready, wait %#lx.\n", wait);
+    if (wait != WAIT_OBJECT_0) goto done;
+
+    SetLastError(0x13579bdf);
+    result = delegate_input(input_delegate_tid, input_delegate_callback, (void *)0x12345678,
+                            input_delegate_target, 0, NULL);
+    ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+       "zero flags returned %Ix, error %lu.\n", result, GetLastError());
+
+    SetLastError(0x13579bdf);
+    result = delegate_input(GetCurrentThreadId(), input_delegate_callback, (void *)0x12345678,
+                            input_delegate_target, delegation_flags, NULL);
+    ok(!result && GetLastError() == ERROR_ACCESS_DENIED,
+       "same-thread delegation returned %Ix, error %lu.\n", result, GetLastError());
+
+    ok(AttachThreadInput(input_delegate_tid, GetCurrentThreadId(), TRUE),
+       "AttachThreadInput failed, error %lu.\n", GetLastError());
+    SetLastError(0x13579bdf);
+    result = delegate_input(input_delegate_tid, input_delegate_callback, (void *)0x12345678,
+                            input_delegate_target, delegation_flags, NULL);
+    ok(!result && GetLastError() == ERROR_ACCESS_DENIED,
+       "attached-thread delegation returned %Ix, error %lu.\n", result, GetLastError());
+    ok(AttachThreadInput(input_delegate_tid, GetCurrentThreadId(), FALSE),
+       "AttachThreadInput detach failed, error %lu.\n", GetLastError());
+
+    SetLastError(0x13579bdf);
+    result = delegate_input(input_delegate_tid, input_delegate_callback, (void *)0x12345678,
+                            input_delegate_target, delegation_flags, NULL);
+    ok(result && GetLastError() == 0x13579bdf,
+       "delegation returned %Ix, error %lu.\n", result, GetLastError());
+
+    SetLastError(0x13579bdf);
+    result = delegate_input(input_delegate_tid, input_delegate_callback, (void *)0x12345678,
+                            input_delegate_target, delegation_flags, NULL);
+    ok(!result && GetLastError() == ERROR_ALREADY_EXISTS,
+       "duplicate delegation returned %Ix, error %lu.\n", result, GetLastError());
+
+    input_delegate_callback_count = input_delegate_target_count = 0;
+    input_delegate_option = 2;
+    send_input_delegate_click(input_delegate_target);
+    wait = WaitForSingleObject(input_delegate_called, 10000);
+    ok(wait == WAIT_OBJECT_0, "release callback was not called, wait %#lx.\n", wait);
+    for (wait = 0; wait < 100 && input_delegate_callback_count < 2; wait++) Sleep(10);
+    ok(input_delegate_callback_tid == input_delegate_tid,
+       "callback ran on thread %lu instead of %lu.\n",
+       input_delegate_callback_tid, input_delegate_tid);
+    ok(input_delegate_callback_hwnd == input_delegate_target,
+       "callback received hwnd %p instead of %p.\n",
+       input_delegate_callback_hwnd, input_delegate_target);
+    ok(input_delegate_callback_context == (void *)0x12345678,
+       "callback received context %p.\n", input_delegate_callback_context);
+    ok(input_delegate_callback_message == WM_LBUTTONDOWN ||
+       input_delegate_callback_message == WM_LBUTTONUP,
+       "callback received message %#x.\n", input_delegate_callback_message);
+    while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE))
+    {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+    ok(!input_delegate_target_count, "released input reached the target %u times.\n",
+       input_delegate_target_count);
+
+    input_delegate_option = 1;
+    ResetEvent(input_delegate_called);
+    send_input_delegate_click(input_delegate_target);
+    wait = WaitForSingleObject(input_delegate_called, 10000);
+    ok(wait == WAIT_OBJECT_0, "reassign callback was not called, wait %#lx.\n", wait);
+    for (wait = 0; wait < 200 && !input_delegate_target_count; wait++)
+    {
+        while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        Sleep(10);
+    }
+    ok(input_delegate_target_count != 0, "reassigned input did not reach the target.\n");
+
+    SetLastError(0x13579bdf);
+    ret = undelegate_input(input_delegate_target, 3);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "invalid undelegate returned %d, error %lu.\n", ret, GetLastError());
+    SetLastError(0x13579bdf);
+    ret = undelegate_input(input_delegate_target, 2);
+    ok(ret && GetLastError() == 0x13579bdf,
+       "undelegate returned %d, error %lu.\n", ret, GetLastError());
+    SetLastError(0x13579bdf);
+    ret = undelegate_input(input_delegate_target, 2);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "repeated undelegate returned %d, error %lu.\n", ret, GetLastError());
+
+done:
+    if (input_delegate_stop) SetEvent(input_delegate_stop);
+    if (thread)
+    {
+        WaitForSingleObject(thread, 10000);
+        CloseHandle(thread);
+    }
+    if (input_delegate_called) CloseHandle(input_delegate_called);
+    if (input_delegate_stop) CloseHandle(input_delegate_stop);
+    if (input_delegate_ready) CloseHandle(input_delegate_ready);
+    input_delegate_called = input_delegate_stop = input_delegate_ready = NULL;
+    if (input_delegate_target) DestroyWindow(input_delegate_target);
+    input_delegate_target = NULL;
+    UnregisterClassW(class_name, class.hInstance);
+}
 
 static LRESULT WINAPI dispatch_notification_proc(HWND hwnd, UINT message, WPARAM wparam,
                                                  LPARAM lparam)
@@ -987,6 +1197,7 @@ START_TEST(native_ordinals)
     }
 
     module = GetModuleHandleW(L"user32.dll");
+    test_input_delegation(module);
     test_schedule_dispatch_notification(module);
     test_queue_status_readonly(module);
     test_broadcast_theme_change_event(module);

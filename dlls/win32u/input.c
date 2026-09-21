@@ -3570,3 +3570,81 @@ BOOL WINAPI NtUserGetPointerDeviceRects( HANDLE handle, RECT *device_rect, RECT 
     TRACE( "returning device %s, display %s\n", wine_dbgstr_rect(device_rect), wine_dbgstr_rect(display_rect) );
     return TRUE;
 }
+
+/**********************************************************************
+ *       NtUserDelegateInput    (win32u.@)
+ */
+BOOL WINAPI NtUserDelegateInput( DWORD tid, void *callback, void *context, HWND hwnd, UINT flags )
+{
+    unsigned int status;
+
+    SERVER_START_REQ( delegate_input )
+    {
+        req->tid = tid;
+        req->win = wine_server_user_handle( hwnd );
+        req->callback = wine_server_client_ptr( callback );
+        req->context = wine_server_client_ptr( context );
+        req->flags = flags;
+        status = wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return !status;
+}
+
+/**********************************************************************
+ *       NtUserUndelegateInput    (win32u.@)
+ */
+BOOL WINAPI NtUserUndelegateInput( HWND hwnd, UINT option )
+{
+    unsigned int status;
+
+    SERVER_START_REQ( undelegate_input )
+    {
+        req->win = wine_server_user_handle( hwnd );
+        req->option = option;
+        status = wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return !status;
+}
+
+/**********************************************************************
+ *       NtUserHandleDelegatedInput    (win32u.@)
+ */
+BOOL WINAPI NtUserHandleDelegatedInput( const MSG *msg, UINT option )
+{
+    MSG local;
+    unsigned int status;
+
+    if (!msg)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    __TRY
+    {
+        local = *msg;
+    }
+    __EXCEPT
+    {
+        RtlSetLastWin32Error( ERROR_NOACCESS );
+        return FALSE;
+    }
+    __ENDTRY
+
+    SERVER_START_REQ( handle_delegated_input )
+    {
+        req->hw_id = 0;
+        req->option = option;
+        req->win = wine_server_user_handle( local.hwnd );
+        req->msg = local.message;
+        req->wparam = local.wParam;
+        req->lparam = local.lParam;
+        req->time = local.time;
+        req->x = local.pt.x;
+        req->y = local.pt.y;
+        status = wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return !status;
+}

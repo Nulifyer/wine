@@ -93,6 +93,9 @@ struct thread
     bool                   dbg_hidden;    /* hidden from debugger */
     bool                   bypass_proc_suspend; /* will still run if the process is suspended */
     bool                   manipulation_registered; /* private DWM manipulation input consumer */
+    client_ptr_t           input_delegate_callback; /* private USER input-delegation callback */
+    client_ptr_t           input_delegate_context;  /* private USER input-delegation context */
+    unsigned int           input_delegate_count;    /* windows delegated to this thread */
     obj_handle_t           desktop;       /* desktop handle */
     int                    desktop_users; /* number of objects using the thread desktop */
     timeout_t              creation_time; /* Thread creation time */

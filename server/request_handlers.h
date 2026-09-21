@@ -154,6 +154,9 @@ DECL_HANDLER(create_named_pipe);
 DECL_HANDLER(set_named_pipe_info);
 DECL_HANDLER(create_window);
 DECL_HANDLER(destroy_window);
+DECL_HANDLER(delegate_input);
+DECL_HANDLER(undelegate_input);
+DECL_HANDLER(handle_delegated_input);
 DECL_HANDLER(get_desktop_window);
 DECL_HANDLER(set_window_owner);
 DECL_HANDLER(get_window_info);
@@ -563,6 +566,9 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_named_pipe_info,
     (req_handler)req_create_window,
     (req_handler)req_destroy_window,
+    (req_handler)req_delegate_input,
+    (req_handler)req_undelegate_input,
+    (req_handler)req_handle_delegated_input,
     (req_handler)req_get_desktop_window,
     (req_handler)req_set_window_owner,
     (req_handler)req_get_window_info,
@@ -872,7 +878,7 @@ C_ASSERT( sizeof(union apc_result) == 40 );
 C_ASSERT( sizeof(union debug_event_data) == 160 );
 C_ASSERT( sizeof(union hw_input) == 40 );
 C_ASSERT( sizeof(union irp_params) == 32 );
-C_ASSERT( sizeof(union message_data) == 48 );
+C_ASSERT( sizeof(union message_data) == 64 );
 C_ASSERT( sizeof(union select_op) == 264 );
 C_ASSERT( sizeof(union tcp_connection) == 60 );
 C_ASSERT( sizeof(union udp_endpoint) == 32 );
@@ -1725,6 +1731,25 @@ C_ASSERT( offsetof(struct create_window_reply, class_ptr) == 24 );
 C_ASSERT( sizeof(struct create_window_reply) == 32 );
 C_ASSERT( offsetof(struct destroy_window_request, handle) == 12 );
 C_ASSERT( sizeof(struct destroy_window_request) == 16 );
+C_ASSERT( offsetof(struct delegate_input_request, tid) == 12 );
+C_ASSERT( offsetof(struct delegate_input_request, win) == 16 );
+C_ASSERT( offsetof(struct delegate_input_request, callback) == 24 );
+C_ASSERT( offsetof(struct delegate_input_request, context) == 32 );
+C_ASSERT( offsetof(struct delegate_input_request, flags) == 40 );
+C_ASSERT( sizeof(struct delegate_input_request) == 48 );
+C_ASSERT( offsetof(struct undelegate_input_request, win) == 12 );
+C_ASSERT( offsetof(struct undelegate_input_request, option) == 16 );
+C_ASSERT( sizeof(struct undelegate_input_request) == 24 );
+C_ASSERT( offsetof(struct handle_delegated_input_request, hw_id) == 12 );
+C_ASSERT( offsetof(struct handle_delegated_input_request, option) == 16 );
+C_ASSERT( offsetof(struct handle_delegated_input_request, win) == 20 );
+C_ASSERT( offsetof(struct handle_delegated_input_request, msg) == 24 );
+C_ASSERT( offsetof(struct handle_delegated_input_request, wparam) == 32 );
+C_ASSERT( offsetof(struct handle_delegated_input_request, lparam) == 40 );
+C_ASSERT( offsetof(struct handle_delegated_input_request, time) == 48 );
+C_ASSERT( offsetof(struct handle_delegated_input_request, x) == 52 );
+C_ASSERT( offsetof(struct handle_delegated_input_request, y) == 56 );
+C_ASSERT( sizeof(struct handle_delegated_input_request) == 64 );
 C_ASSERT( offsetof(struct get_desktop_window_request, force) == 12 );
 C_ASSERT( sizeof(struct get_desktop_window_request) == 16 );
 C_ASSERT( offsetof(struct get_desktop_window_reply, top_window) == 8 );

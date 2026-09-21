@@ -924,10 +924,12 @@ HSYNTHETICPOINTERDEVICE WINAPI CreateSyntheticPointerDevice(POINTER_INPUT_TYPE t
  *
  * Undocumented. Function prototype might be wrong.
  */
-UINT_PTR WINAPI DelegateInput(void *p1, void *p2, void *p3, void *p4, void *p5, void *p6)
+UINT_PTR WINAPI DelegateInput(DWORD tid, void *callback, void *context, HWND hwnd,
+                              UINT flags, void *reserved)
 {
-    FIXME( "p1 %p p2 %p p3 %p p4 %p p5 %p p6 %p stub!\n", p1, p2, p3, p4, p5, p6 );
-    return 1;
+    TRACE( "tid %lu callback %p context %p hwnd %p flags %#x reserved %p\n",
+           tid, callback, context, hwnd, flags, reserved );
+    return NtUserDelegateInput( tid, callback, context, hwnd, flags );
 }
 
 /***********************************************************************
@@ -935,7 +937,17 @@ UINT_PTR WINAPI DelegateInput(void *p1, void *p2, void *p3, void *p4, void *p5, 
  *
  * Undocumented. Function prototype might be wrong.
  */
-void WINAPI UndelegateInput(void *p1, void *p2)
+BOOL WINAPI UndelegateInput(HWND hwnd, UINT option)
 {
-    FIXME( "p1 %p p2 %p stub!\n", p1, p2 );
+    TRACE( "hwnd %p option %u\n", hwnd, option );
+    return NtUserUndelegateInput( hwnd, option );
+}
+
+/***********************************************************************
+ *           HandleDelegatedInput (USER32.@)
+ */
+BOOL WINAPI HandleDelegatedInput(const MSG *msg, UINT option)
+{
+    TRACE( "msg %p option %u\n", msg, option );
+    return NtUserHandleDelegatedInput( msg, option );
 }

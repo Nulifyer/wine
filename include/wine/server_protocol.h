@@ -305,9 +305,13 @@ struct hardware_msg_data
     int                  __pad;
     unsigned int         hw_id;
     unsigned int         flags;
+    client_ptr_t         delegated_callback;
+    client_ptr_t         delegated_context;
     struct hw_msg_source source;
     struct rawinput      rawinput;
 };
+
+#define HW_MSG_DELEGATED 0x80000000
 
 struct callback_msg_data
 {
@@ -3625,6 +3629,60 @@ struct destroy_window_request
     user_handle_t  handle;
 };
 struct destroy_window_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct delegate_input_request
+{
+    struct request_header __header;
+    thread_id_t     tid;
+    user_handle_t   win;
+    char __pad_20[4];
+    client_ptr_t    callback;
+    client_ptr_t    context;
+    unsigned int    flags;
+    char __pad_44[4];
+};
+struct delegate_input_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct undelegate_input_request
+{
+    struct request_header __header;
+    user_handle_t   win;
+    unsigned int    option;
+    char __pad_20[4];
+};
+struct undelegate_input_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct handle_delegated_input_request
+{
+    struct request_header __header;
+    unsigned int    hw_id;
+    unsigned int    option;
+    user_handle_t   win;
+    unsigned int    msg;
+    char __pad_28[4];
+    lparam_t        wparam;
+    lparam_t        lparam;
+    unsigned int    time;
+    int             x;
+    int             y;
+    char __pad_60[4];
+};
+struct handle_delegated_input_reply
 {
     struct reply_header __header;
 };
@@ -7870,6 +7928,9 @@ enum request
     REQ_set_named_pipe_info,
     REQ_create_window,
     REQ_destroy_window,
+    REQ_delegate_input,
+    REQ_undelegate_input,
+    REQ_handle_delegated_input,
     REQ_get_desktop_window,
     REQ_set_window_owner,
     REQ_get_window_info,
@@ -8282,6 +8343,9 @@ union generic_request
     struct set_named_pipe_info_request set_named_pipe_info_request;
     struct create_window_request create_window_request;
     struct destroy_window_request destroy_window_request;
+    struct delegate_input_request delegate_input_request;
+    struct undelegate_input_request undelegate_input_request;
+    struct handle_delegated_input_request handle_delegated_input_request;
     struct get_desktop_window_request get_desktop_window_request;
     struct set_window_owner_request set_window_owner_request;
     struct get_window_info_request get_window_info_request;
@@ -8692,6 +8756,9 @@ union generic_reply
     struct set_named_pipe_info_reply set_named_pipe_info_reply;
     struct create_window_reply create_window_reply;
     struct destroy_window_reply destroy_window_reply;
+    struct delegate_input_reply delegate_input_reply;
+    struct undelegate_input_reply undelegate_input_reply;
+    struct handle_delegated_input_reply handle_delegated_input_reply;
     struct get_desktop_window_reply get_desktop_window_reply;
     struct set_window_owner_reply set_window_owner_reply;
     struct get_window_info_reply get_window_info_reply;
@@ -8952,6 +9019,6 @@ union generic_reply
     struct get_dwm_desktop_id_reply get_dwm_desktop_id_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1042
+#define SERVER_PROTOCOL_VERSION 1043
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

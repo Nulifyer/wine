@@ -138,6 +138,7 @@ extern void queue_cleanup_window( struct thread *thread, user_handle_t win );
 extern int init_thread_queue( struct thread *thread );
 extern void attach_thread_input( struct msg_queue *queue_from, struct msg_queue *queue_to );
 extern void detach_thread_input( struct msg_queue *queue_from, struct msg_queue *queue_to, struct desktop *desktop );
+extern int is_thread_input_attached( struct thread *thread );
 extern void set_clip_rectangle( struct desktop *desktop, const struct rectangle *rect,
                                 unsigned int flags, int reset );
 extern void update_cursor_pos( struct desktop *desktop );
@@ -192,6 +193,15 @@ extern void broadcast_desktop_message( struct desktop *desktop, unsigned int mes
                                        lparam_t wparam, lparam_t lparam );
 extern void free_window_handle( struct window *win );
 extern void destroy_thread_windows( struct thread *thread );
+extern struct thread *get_window_input_delegate( user_handle_t handle, unsigned int message_mask,
+                                                 client_ptr_t *callback, client_ptr_t *context );
+extern void handle_window_delegated_input( struct thread *thread, user_handle_t win,
+                                           unsigned int option );
+extern int handle_delegated_input_message( struct thread *thread, unsigned int hw_id,
+                                           user_handle_t win, unsigned int msg,
+                                           lparam_t wparam, lparam_t lparam,
+                                           unsigned int time, int x, int y,
+                                           unsigned int option );
 extern int is_child_window( user_handle_t parent, user_handle_t child );
 extern struct thread *make_window_foreground( struct desktop *desktop, user_handle_t window,
                                               int *is_desktop, int *set_foreground );

@@ -376,6 +376,9 @@ static inline void init_thread_structure( struct thread *thread )
     thread->dbg_hidden      = 0;
     thread->bypass_proc_suspend = 0;
     thread->manipulation_registered = 0;
+    thread->input_delegate_callback = 0;
+    thread->input_delegate_context = 0;
+    thread->input_delegate_count = 0;
     thread->is_system       = 0;
     thread->desktop_users   = 0;
     thread->token           = NULL;

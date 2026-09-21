@@ -888,7 +888,7 @@
     SYSCALL_ENTRY( 0x1374, NtUserDeferWindowPosAndBand, 40 ) \
     SYSCALL_ENTRY( 0x1375, NtUserDeferredDesktopRotation, 0 ) \
     SYSCALL_ENTRY( 0x1376, NtUserDelegateCapturePointers, 0 ) \
-    SYSCALL_ENTRY( 0x1377, NtUserDelegateInput, 0 ) \
+    SYSCALL_ENTRY( 0x1377, NtUserDelegateInput, 20 ) \
     SYSCALL_ENTRY( 0x1378, NtUserDeleteMenu, 12 ) \
     SYSCALL_ENTRY( 0x1379, NtUserDeleteWindowGroup, 0 ) \
     SYSCALL_ENTRY( 0x137a, NtUserDeregisterShellHookWindow, 0 ) \
@@ -1130,7 +1130,7 @@
     SYSCALL_ENTRY( 0x1466, NtUserGetWindowThreadProcessId, 0 ) \
     SYSCALL_ENTRY( 0x1467, NtUserGetWindowTrackInfoAsync, 0 ) \
     SYSCALL_ENTRY( 0x1468, NtUserGhostWindowFromHungWindow, 0 ) \
-    SYSCALL_ENTRY( 0x1469, NtUserHandleDelegatedInput, 0 ) \
+    SYSCALL_ENTRY( 0x1469, NtUserHandleDelegatedInput, 8 ) \
     SYSCALL_ENTRY( 0x146a, NtUserHandleSystemThreadCreationFailure, 0 ) \
     SYSCALL_ENTRY( 0x146b, NtUserHardErrorControl, 0 ) \
     SYSCALL_ENTRY( 0x146c, NtUserHideCaret, 4 ) \
@@ -1498,7 +1498,7 @@
     SYSCALL_ENTRY( 0x15d6, NtUserTransformRect, 0 ) \
     SYSCALL_ENTRY( 0x15d7, NtUserTranslateAccelerator, 12 ) \
     SYSCALL_ENTRY( 0x15d8, NtUserTranslateMessage, 8 ) \
-    SYSCALL_ENTRY( 0x15d9, NtUserUndelegateInput, 0 ) \
+    SYSCALL_ENTRY( 0x15d9, NtUserUndelegateInput, 8 ) \
     SYSCALL_ENTRY( 0x15da, NtUserUnhookWinEvent, 4 ) \
     SYSCALL_ENTRY( 0x15db, NtUserUnhookWindowsHook, 8 ) \
     SYSCALL_ENTRY( 0x15dc, NtUserUnhookWindowsHookEx, 4 ) \
@@ -2430,7 +2430,7 @@
     SYSCALL_ENTRY( 0x1374, NtUserDeferWindowPosAndBand, 80 ) \
     SYSCALL_ENTRY( 0x1375, NtUserDeferredDesktopRotation, 0 ) \
     SYSCALL_ENTRY( 0x1376, NtUserDelegateCapturePointers, 0 ) \
-    SYSCALL_ENTRY( 0x1377, NtUserDelegateInput, 0 ) \
+    SYSCALL_ENTRY( 0x1377, NtUserDelegateInput, 40 ) \
     SYSCALL_ENTRY( 0x1378, NtUserDeleteMenu, 24 ) \
     SYSCALL_ENTRY( 0x1379, NtUserDeleteWindowGroup, 0 ) \
     SYSCALL_ENTRY( 0x137a, NtUserDeregisterShellHookWindow, 0 ) \
@@ -2672,7 +2672,7 @@
     SYSCALL_ENTRY( 0x1466, NtUserGetWindowThreadProcessId, 0 ) \
     SYSCALL_ENTRY( 0x1467, NtUserGetWindowTrackInfoAsync, 0 ) \
     SYSCALL_ENTRY( 0x1468, NtUserGhostWindowFromHungWindow, 0 ) \
-    SYSCALL_ENTRY( 0x1469, NtUserHandleDelegatedInput, 0 ) \
+    SYSCALL_ENTRY( 0x1469, NtUserHandleDelegatedInput, 16 ) \
     SYSCALL_ENTRY( 0x146a, NtUserHandleSystemThreadCreationFailure, 0 ) \
     SYSCALL_ENTRY( 0x146b, NtUserHardErrorControl, 0 ) \
     SYSCALL_ENTRY( 0x146c, NtUserHideCaret, 8 ) \
@@ -3040,7 +3040,7 @@
     SYSCALL_ENTRY( 0x15d6, NtUserTransformRect, 0 ) \
     SYSCALL_ENTRY( 0x15d7, NtUserTranslateAccelerator, 24 ) \
     SYSCALL_ENTRY( 0x15d8, NtUserTranslateMessage, 16 ) \
-    SYSCALL_ENTRY( 0x15d9, NtUserUndelegateInput, 0 ) \
+    SYSCALL_ENTRY( 0x15d9, NtUserUndelegateInput, 16 ) \
     SYSCALL_ENTRY( 0x15da, NtUserUnhookWinEvent, 8 ) \
     SYSCALL_ENTRY( 0x15db, NtUserUnhookWindowsHook, 16 ) \
     SYSCALL_ENTRY( 0x15dc, NtUserUnhookWindowsHookEx, 8 ) \
@@ -3677,7 +3677,6 @@
     SYSCALL_STUB( NtUserDeferWindowDpiChanges ) \
     SYSCALL_STUB( NtUserDeferredDesktopRotation ) \
     SYSCALL_STUB( NtUserDelegateCapturePointers ) \
-    SYSCALL_STUB( NtUserDelegateInput ) \
     SYSCALL_STUB( NtUserDeleteWindowGroup ) \
     SYSCALL_STUB( NtUserDeregisterShellHookWindow ) \
     SYSCALL_STUB( NtUserDestroyActivationGroup ) \
@@ -3800,7 +3799,6 @@
     SYSCALL_STUB( NtUserGetWindowThreadProcessId ) \
     SYSCALL_STUB( NtUserGetWindowTrackInfoAsync ) \
     SYSCALL_STUB( NtUserGhostWindowFromHungWindow ) \
-    SYSCALL_STUB( NtUserHandleDelegatedInput ) \
     SYSCALL_STUB( NtUserHandleSystemThreadCreationFailure ) \
     SYSCALL_STUB( NtUserHardErrorControl ) \
     SYSCALL_STUB( NtUserHideCursorNoCapture ) \
@@ -4033,7 +4031,6 @@
     SYSCALL_STUB( NtUserTraceLoggingSendMixedModeTelemetry ) \
     SYSCALL_STUB( NtUserTransformPoint ) \
     SYSCALL_STUB( NtUserTransformRect ) \
-    SYSCALL_STUB( NtUserUndelegateInput ) \
     SYSCALL_STUB( NtUserUnloadKeyboardLayout ) \
     SYSCALL_STUB( NtUserUnlockWindowStation ) \
     SYSCALL_STUB( NtUserUnregisterSessionPort ) \

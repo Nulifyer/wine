@@ -101,7 +101,8 @@ struct user_entry
     USER32_CALLBACK_ENTRY(DragDropLeave) \
     USER32_CALLBACK_ENTRY(DragDropDrag) \
     USER32_CALLBACK_ENTRY(DragDropDrop) \
-    USER32_CALLBACK_ENTRY(DragDropPost)
+    USER32_CALLBACK_ENTRY(DragDropPost) \
+    USER32_CALLBACK_ENTRY(CallDelegateThread)
 
 enum
 {
@@ -115,6 +116,13 @@ enum
 struct dispatch_callback_params
 {
     UINT64 callback;
+};
+
+struct delegate_input_callback_params
+{
+    UINT64 callback;
+    UINT64 context;
+    MSG msg;
 };
 
 /* NtUserLoadUserApiHookCallback params. String offsets are relative to this structure. */
@@ -931,6 +939,8 @@ W32KAPI HDESK   WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_S
                                               DEVMODEW *devmode, DWORD flags, ACCESS_MASK access,
                                               ULONG heap_size );
 W32KAPI HIMC    WINAPI NtUserCreateInputContext( UINT_PTR client_ptr );
+W32KAPI BOOL    WINAPI NtUserDelegateInput( DWORD tid, void *callback, void *context,
+                                            HWND hwnd, UINT flags );
 W32KAPI HMENU   WINAPI NtUserCreateMenu(void);
 W32KAPI HMENU   WINAPI NtUserCreatePopupMenu(void);
 W32KAPI HWND    WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
@@ -1064,6 +1074,7 @@ W32KAPI HANDLE  WINAPI NtUserGetProp( HWND hwnd, const WCHAR *str );
 W32KAPI DWORD   WINAPI NtUserGetQueueStatus( UINT flags );
 W32KAPI DWORD   WINAPI NtUserGetQueueStatusReadonly( UINT flags );
 W32KAPI UINT    WINAPI NtUserGetRawInputBuffer( RAWINPUT *data, UINT *data_size, UINT header_size );
+W32KAPI BOOL    WINAPI NtUserHandleDelegatedInput( const MSG *msg, UINT option );
 W32KAPI UINT    WINAPI NtUserGetRawInputData( HRAWINPUT rawinput, UINT command, void *data, UINT *data_size, UINT header_size );
 W32KAPI UINT    WINAPI NtUserGetRawInputDeviceInfo( HANDLE handle, UINT command, void *data, UINT *data_size );
 W32KAPI UINT    WINAPI NtUserGetRawInputDeviceList( RAWINPUTDEVICELIST *devices, UINT *device_count, UINT size );
@@ -1241,6 +1252,7 @@ W32KAPI BOOL    WINAPI NtUserTrackMouseEvent( TRACKMOUSEEVENT *info );
 W32KAPI BOOL    WINAPI NtUserTrackPopupMenuEx( HMENU handle, UINT flags, INT x, INT y, HWND hwnd, TPMPARAMS *params );
 W32KAPI INT     WINAPI NtUserTranslateAccelerator( HWND hwnd, HACCEL accel, MSG *msg );
 W32KAPI BOOL    WINAPI NtUserTranslateMessage( const MSG *msg, UINT flags );
+W32KAPI BOOL    WINAPI NtUserUndelegateInput( HWND hwnd, UINT option );
 W32KAPI BOOL    WINAPI NtUserUnhookWinEvent( HWINEVENTHOOK hEventHook );
 W32KAPI BOOL    WINAPI NtUserUnhookWindowsHook( INT id, HOOKPROC proc );
 W32KAPI BOOL    WINAPI NtUserUnhookWindowsHookEx( HHOOK handle );

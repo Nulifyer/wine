@@ -83,6 +83,8 @@ struct window
     unsigned int     is_orphan : 1;   /* is window orphaned */
     unsigned int     set_foreground : 1;/* has window been foreground once */
     unsigned int     is_core_window : 1;/* explicitly marked as a core-window root */
+    struct thread   *input_delegate; /* thread receiving selected input for this window */
+    unsigned int     input_delegation_flags; /* QS_* classes delegated by the window */
     unsigned int     dwm_context_id;  /* DWM composition generation containing this HWND */
     unsigned int     dwm_link_id;     /* DWM composition generation containing its tree link */
     unsigned __int64 composition_flags; /* boolean private composition attributes */
@@ -173,6 +175,7 @@ static void window_destroy( struct object *obj )
     if (win->win_region) free_region( win->win_region );
     if (win->update_region) free_region( win->update_region );
     if (win->class) release_class( win->class );
+    if (win->input_delegate) release_object( win->input_delegate );
     free( win->text );
 
     if (win->shared) free_shared_object( win->shared );
@@ -184,6 +187,40 @@ static inline struct window *get_window( user_handle_t handle )
     struct window *ret = get_user_object( handle, NTUSER_OBJ_WINDOW );
     if (!ret) set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
     return ret;
+}
+
+static void clear_window_input_delegation( struct window *win, unsigned int option )
+{
+    struct thread *delegate = win->input_delegate;
+
+    if (!delegate) return;
+
+    if (win->handle) handle_window_delegated_input( delegate, win->handle, option );
+    win->input_delegate = NULL;
+    win->input_delegation_flags = 0;
+
+    assert( delegate->input_delegate_count );
+    if (!--delegate->input_delegate_count)
+    {
+        delegate->input_delegate_callback = 0;
+        delegate->input_delegate_context = 0;
+    }
+    release_object( delegate );
+}
+
+struct thread *get_window_input_delegate( user_handle_t handle, unsigned int message_mask,
+                                          client_ptr_t *callback, client_ptr_t *context )
+{
+    struct window *win = get_user_object( handle, NTUSER_OBJ_WINDOW );
+    struct thread *delegate;
+
+    if (!win || !(win->input_delegation_flags & message_mask) ||
+        !(delegate = win->input_delegate) || !delegate->queue)
+        return NULL;
+
+    if (callback) *callback = delegate->input_delegate_callback;
+    if (context) *context = delegate->input_delegate_context;
+    return (struct thread *)grab_object( delegate );
 }
 
 /* check if window is the desktop */
@@ -749,6 +786,8 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->is_orphan      = 0;
     win->set_foreground = 0;
     win->is_core_window = 0;
+    win->input_delegate = NULL;
+    win->input_delegation_flags = 0;
     win->dwm_context_id = 0;
     win->dwm_link_id    = 0;
     win->composition_flags = 0;
@@ -843,6 +882,14 @@ void destroy_thread_windows( struct thread *thread )
 {
     user_handle_t handle = 0;
     struct window *win;
+
+    /* Native USER scrubs every target window that references a dying delegate thread. */
+    while ((win = next_user_handle( &handle, NTUSER_OBJ_WINDOW )))
+    {
+        if (win->input_delegate == thread) clear_window_input_delegation( win, 2 );
+    }
+
+    handle = 0;
 
     while ((win = next_user_handle( &handle, NTUSER_OBJ_WINDOW )))
     {
@@ -2367,6 +2414,7 @@ void free_window_handle( struct window *win )
     free_hotkeys( win->desktop, win->handle );
     cleanup_clipboard_window( win->desktop, win->handle );
     cleanup_dcomp_window_targets( win->handle );
+    clear_window_input_delegation( win, 2 );
     if (win->dwm_context_id)
     {
         notify_dwm_window_destroyed( win->desktop, win->dwm_context_id, win->handle );
@@ -2639,6 +2687,83 @@ DECL_HANDLER(set_parent)
     reply->old_parent  = win->parent->handle;
     reply->full_parent = parent ? parent->handle : 0;
     set_parent_window( win, parent );
+}
+
+
+/* register a window's selected hardware input for delivery on another thread */
+DECL_HANDLER(delegate_input)
+{
+    struct thread *delegate = NULL;
+    struct desktop *desktop = NULL;
+    struct window *win;
+
+    if (!(win = get_window( req->win ))) return;
+    if (!req->flags || (req->flags & ~0x1006))
+        return set_win32_error( ERROR_INVALID_PARAMETER );
+
+    if (req->tid)
+    {
+        if (!(delegate = get_thread_from_id( req->tid )))
+        {
+            set_win32_error( ERROR_INVALID_PARAMETER );
+            return;
+        }
+    }
+    else delegate = (struct thread *)grab_object( current );
+
+    if (!win->thread || win->thread->process != current->process ||
+        delegate->process != current->process)
+        goto denied;
+
+    if (!(desktop = get_thread_desktop( delegate, 0 )) || desktop != win->desktop ||
+        delegate == win->thread || !delegate->queue ||
+        is_thread_input_attached( delegate ) ||
+        win->thread->input_delegate_count)
+        goto denied;
+
+    if (win->input_delegate)
+    {
+        if (win->input_delegate == delegate &&
+            delegate->input_delegate_callback == req->callback &&
+            delegate->input_delegate_context == req->context &&
+            win->input_delegation_flags == req->flags)
+            set_win32_error( ERROR_ALREADY_EXISTS );
+        else
+            set_win32_error( ERROR_ACCESS_DENIED );
+        goto done;
+    }
+
+    if (delegate->input_delegate_count &&
+        (delegate->input_delegate_callback != req->callback ||
+         delegate->input_delegate_context != req->context))
+        goto denied;
+
+    win->input_delegate = (struct thread *)grab_object( delegate );
+    win->input_delegation_flags = req->flags;
+    delegate->input_delegate_callback = req->callback;
+    delegate->input_delegate_context = req->context;
+    delegate->input_delegate_count++;
+    goto done;
+
+denied:
+    set_win32_error( ERROR_ACCESS_DENIED );
+done:
+    if (desktop) release_object( desktop );
+    release_object( delegate );
+}
+
+
+DECL_HANDLER(undelegate_input)
+{
+    struct window *win;
+
+    if (!(win = get_window( req->win ))) return;
+    if (!win->input_delegate || req->option < 1 || req->option > 2)
+        return set_win32_error( ERROR_INVALID_PARAMETER );
+    if (!win->thread || win->thread->process != current->process)
+        return set_win32_error( ERROR_ACCESS_DENIED );
+
+    clear_window_input_delegation( win, req->option );
 }
 
 

@@ -90,6 +90,8 @@ struct message
     void                  *data;      /* message data for sent messages */
     unsigned int           data_size; /* size of message data */
     unsigned int           unique_id; /* unique id for nested hw message waits */
+    unsigned int           delegated; /* 1 awaiting callback, 2 retained by callback */
+    user_handle_t          delegate_target; /* resolved target for delegated hardware input */
     struct message_result *result;    /* result in sender queue */
 };
 
@@ -1447,6 +1449,11 @@ void attach_thread_input( struct msg_queue *queue_from, struct msg_queue *queue_
     release_object( old_input );
 }
 
+int is_thread_input_attached( struct thread *thread )
+{
+    return thread->queue && !list_empty( &thread->queue->input->attachments );
+}
+
 /* detach two thread input data structures */
 void detach_thread_input( struct msg_queue *queue_from, struct msg_queue *queue_to, struct desktop *desktop )
 {
@@ -1714,6 +1721,104 @@ static void release_hardware_message( struct msg_queue *queue, unsigned int hw_i
     free_message( msg );
 }
 
+static void clear_delegated_queue_bit( struct msg_queue *queue, struct message *handled )
+{
+    struct thread_input *input = queue->input;
+    struct message *other;
+    int bit = get_hardware_msg_bit( handled->msg );
+
+    LIST_FOR_EACH_ENTRY( other, &input->msg_list, struct message, entry )
+    {
+        if (other == handled || other->delegated == 2) continue;
+        if (get_hardware_msg_bit( other->msg ) == bit) return;
+    }
+    clear_queue_bits( queue, bit );
+}
+
+static int resolve_delegated_message( struct thread *thread, struct message *msg,
+                                      unsigned int option )
+{
+    struct hardware_msg_data *data = msg->data;
+    struct thread *target;
+    int bit;
+
+    if (!msg->delegated) return 0;
+    if (option == 2)
+    {
+        clear_delegated_queue_bit( thread->queue, msg );
+        update_thread_input_key_state( thread->queue->input, msg->msg, msg->wparam );
+        list_remove( &msg->entry );
+        free_message( msg );
+        return 1;
+    }
+    if (option == 3)
+    {
+        msg->delegated = 2;
+        data->flags &= ~HW_MSG_DELEGATED;
+        clear_delegated_queue_bit( thread->queue, msg );
+        return 1;
+    }
+
+    if (!(target = get_window_thread( msg->delegate_target )) || !target->queue)
+    {
+        if (target) release_object( target );
+        release_hardware_message( thread->queue, msg->unique_id );
+        return 1;
+    }
+
+    bit = get_hardware_msg_bit( msg->msg );
+    clear_delegated_queue_bit( thread->queue, msg );
+    list_remove( &msg->entry );
+    msg->delegated = 0;
+    msg->delegate_target = 0;
+    msg->unique_id = 0;
+    data->flags &= ~HW_MSG_DELEGATED;
+    data->delegated_callback = 0;
+    data->delegated_context = 0;
+    list_add_tail( &target->queue->input->msg_list, &msg->entry );
+    set_queue_bits( target->queue, bit );
+    release_object( target );
+    return 1;
+}
+
+void handle_window_delegated_input( struct thread *thread, user_handle_t win,
+                                    unsigned int option )
+{
+    struct message *msg, *next;
+
+    if (!thread->queue) return;
+    LIST_FOR_EACH_ENTRY_SAFE( msg, next, &thread->queue->input->msg_list,
+                              struct message, entry )
+    {
+        if (msg->delegate_target == win && msg->delegated)
+            resolve_delegated_message( thread, msg, option );
+    }
+}
+
+int handle_delegated_input_message( struct thread *thread, unsigned int hw_id,
+                                    user_handle_t win, unsigned int message,
+                                    lparam_t wparam, lparam_t lparam,
+                                    unsigned int time, int x, int y,
+                                    unsigned int option )
+{
+    struct message *msg;
+
+    if (!thread->queue) return 0;
+    LIST_FOR_EACH_ENTRY( msg, &thread->queue->input->msg_list, struct message, entry )
+    {
+        if (!msg->delegated) continue;
+        if (hw_id)
+        {
+            if (msg->unique_id != hw_id) continue;
+        }
+        else if (msg->delegate_target != win || msg->msg != message || msg->wparam != wparam ||
+                 msg->lparam != lparam || msg->time != time || msg->x != x || msg->y != y)
+            continue;
+        return resolve_delegated_message( thread, msg, option );
+    }
+    return 0;
+}
+
 static int queue_hotkey_message( struct desktop *desktop, struct message *msg )
 {
     desktop_shm_t *desktop_shm = desktop->shared;
@@ -1836,6 +1941,8 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
     struct thread *thread;
     struct thread_input *input;
     struct hardware_msg_data *msg_data = msg->data;
+    client_ptr_t delegate_callback, delegate_context;
+    struct thread *delegate;
     unsigned int msg_code;
     int flags, msg_bit;
 
@@ -1878,6 +1985,19 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
     win = find_hardware_message_window( desktop, input, msg, &msg_code, &thread );
     flags = thread ? get_rawinput_device_flags( thread->process, msg ) : 0;
     if (thread) input = thread->queue->input;
+
+    if (thread && (delegate = get_window_input_delegate( win, msg_bit,
+                                                         &delegate_callback, &delegate_context )))
+    {
+        release_object( thread );
+        thread = delegate;
+        input = thread->queue->input;
+        msg->delegated = 1;
+        msg->delegate_target = win;
+        msg_data->flags |= HW_MSG_DELEGATED;
+        msg_data->delegated_callback = delegate_callback;
+        msg_data->delegated_context = delegate_context;
+    }
     if (input && (get_hardware_msg_bit( msg->msg ) & (QS_KEY | QS_MOUSEBUTTON)))
         input->user_time = monotonic_time;
 
@@ -2713,6 +2833,7 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
         struct hardware_msg_data *data = msg->data;
 
         ptr = list_next( &input->msg_list, ptr );
+        if (msg->delegated == 2) continue;
         if (no_legacy && msg->msg == WM_MOUSEMOVE && msg->type == MSG_HARDWARE)
         {
             list_remove( &msg->entry );
@@ -2728,7 +2849,9 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
             free_message( msg );
             continue;
         }
-        if (win_thread != thread)
+        if (win_thread != thread &&
+            !(msg->delegated == 1 && thread->input_delegate_count &&
+              data->delegated_callback == thread->input_delegate_callback))
         {
             if (win_thread->queue->input == input)
             {
@@ -3406,6 +3529,18 @@ DECL_HANDLER(accept_hardware_message)
         release_hardware_message( current->queue, req->hw_id );
     else
         set_error( STATUS_ACCESS_DENIED );
+}
+
+DECL_HANDLER(handle_delegated_input)
+{
+    if (req->option < 1 || req->option > 3)
+        return set_win32_error( ERROR_INVALID_PARAMETER );
+    if (!current->input_delegate_count)
+        return set_win32_error( ERROR_ACCESS_DENIED );
+    if (!handle_delegated_input_message( current, req->hw_id, req->win, req->msg,
+                                         req->wparam, req->lparam, req->time,
+                                         req->x, req->y, req->option ))
+        set_win32_error( ERROR_INVALID_PARAMETER );
 }
 
 

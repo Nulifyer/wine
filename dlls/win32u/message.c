@@ -2453,6 +2453,42 @@ static void accept_hardware_message( UINT hw_id )
     SERVER_END_REQ;
 }
 
+static void call_input_delegate( const MSG *msg, UINT hw_id,
+                                 const struct hardware_msg_data *msg_data )
+{
+    struct delegate_input_callback_params params;
+    UINT_PTR *result;
+    ULONG result_size;
+    NTSTATUS status;
+    UINT option = 2;
+
+    params.callback = msg_data->delegated_callback;
+    params.context = msg_data->delegated_context;
+    params.msg = *msg;
+    status = KeUserModeCallback( NtUserCallDelegateThread, &params, sizeof(params),
+                                 (void **)&result, &result_size );
+    if (!status && result_size == sizeof(*result))
+    {
+        option = *result & 3;
+        if (!option) option = 3;
+    }
+
+    SERVER_START_REQ( handle_delegated_input )
+    {
+        req->hw_id = hw_id;
+        req->option = option;
+        req->win = wine_server_user_handle( msg->hwnd );
+        req->msg = msg->message;
+        req->wparam = msg->wParam;
+        req->lparam = msg->lParam;
+        req->time = msg->time;
+        req->x = msg->pt.x;
+        req->y = msg->pt.y;
+        wine_server_call( req );
+    }
+    SERVER_END_REQ;
+}
+
 /***********************************************************************
  *           send_parent_notify
  *
@@ -3160,6 +3196,11 @@ static int peek_message( MSG *msg, const struct peek_message_filter *filter )
             if (size >= sizeof(msg_data->hardware))
             {
                 hw_id = msg_data->hardware.hw_id;
+                if (msg_data->hardware.flags & HW_MSG_DELEGATED)
+                {
+                    call_input_delegate( &info.msg, hw_id, &msg_data->hardware );
+                    continue;
+                }
                 if (!process_hardware_message( &info.msg, hw_id, &msg_data->hardware,
                                                hwnd, first, last, flags & PM_REMOVE ))
                 {

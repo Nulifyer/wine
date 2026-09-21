@@ -1754,6 +1754,34 @@ static void dump_destroy_window_request( const struct destroy_window_request *re
     fprintf( stderr, " handle=%08x", req->handle );
 }
 
+static void dump_delegate_input_request( const struct delegate_input_request *req )
+{
+    fprintf( stderr, " tid=%04x", req->tid );
+    fprintf( stderr, ", win=%08x", req->win );
+    dump_uint64( ", callback=", &req->callback );
+    dump_uint64( ", context=", &req->context );
+    fprintf( stderr, ", flags=%08x", req->flags );
+}
+
+static void dump_undelegate_input_request( const struct undelegate_input_request *req )
+{
+    fprintf( stderr, " win=%08x", req->win );
+    fprintf( stderr, ", option=%08x", req->option );
+}
+
+static void dump_handle_delegated_input_request( const struct handle_delegated_input_request *req )
+{
+    fprintf( stderr, " hw_id=%08x", req->hw_id );
+    fprintf( stderr, ", option=%08x", req->option );
+    fprintf( stderr, ", win=%08x", req->win );
+    fprintf( stderr, ", msg=%08x", req->msg );
+    dump_uint64( ", wparam=", &req->wparam );
+    dump_uint64( ", lparam=", &req->lparam );
+    fprintf( stderr, ", time=%08x", req->time );
+    fprintf( stderr, ", x=%d", req->x );
+    fprintf( stderr, ", y=%d", req->y );
+}
+
 static void dump_get_desktop_window_request( const struct get_desktop_window_request *req )
 {
     fprintf( stderr, " force=%d", req->force );
@@ -4653,6 +4681,9 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_named_pipe_info_request,
     (dump_func)dump_create_window_request,
     (dump_func)dump_destroy_window_request,
+    (dump_func)dump_delegate_input_request,
+    (dump_func)dump_undelegate_input_request,
+    (dump_func)dump_handle_delegated_input_request,
     (dump_func)dump_get_desktop_window_request,
     (dump_func)dump_set_window_owner_request,
     (dump_func)dump_get_window_info_request,
@@ -5061,6 +5092,9 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_named_pipe_reply,
     NULL,
     (dump_func)dump_create_window_reply,
+    NULL,
+    NULL,
+    NULL,
     NULL,
     (dump_func)dump_get_desktop_window_reply,
     (dump_func)dump_set_window_owner_reply,
@@ -5471,6 +5505,9 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_named_pipe_info",
     "create_window",
     "destroy_window",
+    "delegate_input",
+    "undelegate_input",
+    "handle_delegated_input",
     "get_desktop_window",
     "set_window_owner",
     "get_window_info",
@@ -5767,6 +5804,8 @@ static const struct
     { "DEVICE_NOT_READY",            STATUS_DEVICE_NOT_READY },
     { "DIRECTORY_NOT_EMPTY",         STATUS_DIRECTORY_NOT_EMPTY },
     { "DISK_FULL",                   STATUS_DISK_FULL },
+    { "ERROR_ACCESS_DENIED",         0xc0010000 | ERROR_ACCESS_DENIED },
+    { "ERROR_ALREADY_EXISTS",        0xc0010000 | ERROR_ALREADY_EXISTS },
     { "ERROR_CLASS_ALREADY_EXISTS",  0xc0010000 | ERROR_CLASS_ALREADY_EXISTS },
     { "ERROR_CLASS_DOES_NOT_EXIST",  0xc0010000 | ERROR_CLASS_DOES_NOT_EXIST },
     { "ERROR_CLASS_HAS_WINDOWS",     0xc0010000 | ERROR_CLASS_HAS_WINDOWS },

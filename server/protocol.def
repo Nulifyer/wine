@@ -321,9 +321,13 @@ struct hardware_msg_data
     int                  __pad;
     unsigned int         hw_id;     /* unique id */
     unsigned int         flags;     /* hook flags */
+    client_ptr_t         delegated_callback; /* input-delegation callback */
+    client_ptr_t         delegated_context;  /* input-delegation callback context */
     struct hw_msg_source source;    /* message source */
     struct rawinput      rawinput;  /* rawinput message data */
 };
+
+#define HW_MSG_DELEGATED 0x80000000 /* message is awaiting an input-delegation decision */
 
 struct callback_msg_data
 {
@@ -2731,6 +2735,37 @@ enum message_type
 /* Destroy a window */
 @REQ(destroy_window)
     user_handle_t  handle;      /* handle to the window */
+@END
+
+
+/* Delegate selected input for a window to another thread in the same process */
+@REQ(delegate_input)
+    thread_id_t     tid;         /* delegate thread, or zero for current */
+    user_handle_t   win;         /* target window */
+    client_ptr_t    callback;    /* callback in the client process */
+    client_ptr_t    context;     /* callback context */
+    unsigned int    flags;       /* QS_* input classes */
+@END
+
+
+/* Resolve pending delegated input and remove a window registration */
+@REQ(undelegate_input)
+    user_handle_t   win;         /* target window */
+    unsigned int    option;      /* 1 reassign, 2 release */
+@END
+
+
+/* Resolve one delegated input message */
+@REQ(handle_delegated_input)
+    unsigned int    hw_id;       /* server hardware id, or zero to match MSG fields */
+    unsigned int    option;      /* 1 reassign, 2 release, 3 retain */
+    user_handle_t   win;
+    unsigned int    msg;
+    lparam_t        wparam;
+    lparam_t        lparam;
+    unsigned int    time;
+    int             x;
+    int             y;
 @END
 
 
