@@ -1369,9 +1369,13 @@ static int sync_dwm_window_link( struct window *win, int admit_no_redirection )
     if (!win->is_linked) return 1;
     if (win->dwm_link_id == win->dwm_context_id) return 1;
     if (!sync_dwm_window_context( win->parent, 0 )) return 0;
-    /* Native win32k publishes spwndNext here.  Replay walks the sibling list
-     * from bottom to top, so a non-null insertion anchor is already linked. */
+    /* Native win32k publishes spwndNext here.  DWM can only use a sibling
+     * that has already joined this composition generation as an insertion
+     * anchor.  Replay walks the sibling list from bottom to top, but live
+     * publication can reach a window before its immediate next sibling. */
     next = get_next_window( win );
+    while (next && next->dwm_link_id != win->dwm_context_id)
+        next = get_next_window( next );
     insert_before = next ? next->handle : 1;
     if (!notify_dwm_window_linked( win->desktop, win->dwm_context_id, win->handle,
                                    win->parent->handle, insert_before, 1 )) return 0;

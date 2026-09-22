@@ -3075,7 +3075,7 @@ static void test_dwm_session_message_delivery(void)
     BOOL saw_window_create = FALSE, saw_window_link = FALSE;
     HDESK lifecycle_desktop = NULL;
     HDESK logon_desktop = NULL;
-    HWND target_window = NULL, no_redirection_window = NULL;
+    HWND target_window = NULL, no_redirection_window = NULL, unlinked_anchor_window = NULL;
     HANDLE target = NULL, dwm_target = NULL, no_redirection_target = NULL;
     HANDLE port = NULL;
     UINT64 logical_surface_token = 0;
@@ -3397,6 +3397,39 @@ static void test_dwm_session_message_delivery(void)
             desktop_id, lifecycle_id );
     }
 
+    /* Keep a no-redirection sibling outside DWM tracking.  A later live link
+     * must skip it instead of naming a window that DwmRedir cannot resolve as
+     * an insertion anchor. */
+    unlinked_anchor_window = CreateWindowExA( WS_EX_NOREDIRECTIONBITMAP, "static",
+                                               "unlinked DWM anchor", WS_POPUP,
+                                               0, 0, 32, 32, NULL, NULL, NULL, NULL );
+    ok( !!unlinked_anchor_window, "unlinked anchor creation failed, error %lu\n",
+        GetLastError() );
+    if (unlinked_anchor_window)
+    {
+        BOOL saw_unlinked_anchor_context = FALSE;
+
+        for (i = 0; i < 512; ++i)
+        {
+            HWND message_window = NULL;
+
+            memset( &received, 0, sizeof(received) );
+            size = sizeof(received);
+            status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                &size, NULL, &timeout );
+            if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+            ok( !status, "unlinked-anchor drain returned %#lx\n", status );
+            if (status) break;
+            if (received.data[0] != 0x40000011) continue;
+            memcpy( &message_window, received.data + 1, sizeof(message_window) );
+            if (message_window == unlinked_anchor_window)
+                saw_unlinked_anchor_context = TRUE;
+        }
+        ok( i < 512, "unlinked-anchor message drain did not quiesce\n" );
+        ok( !saw_unlinked_anchor_context,
+            "unlinked anchor entered DwmRedir context tracking\n" );
+    }
+
     previous_dpi_context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED );
     ok( previous_dpi_context != NULL, "failed to set GDI-scaled context, error %lu\n",
         GetLastError() );
@@ -3412,11 +3445,19 @@ static void test_dwm_session_message_delivery(void)
     if (target_window)
     {
         HWND message_window = NULL, message_parent = NULL;
-        HWND expected_link_anchor = GetWindow( target_window, GW_HWNDNEXT );
+        HWND immediate_link_anchor = GetWindow( target_window, GW_HWNDNEXT );
+        HWND expected_link_anchor = unlinked_anchor_window
+                                    ? GetWindow( unlinked_anchor_window, GW_HWNDNEXT )
+                                    : immediate_link_anchor;
         UINT64 message_desktop = 0, message_sequence = 0;
         DWORD message_style = 0, message_ex_style = 0, message_pid = 0;
         BOOL saw_sprite_create = FALSE, saw_sprite_update = FALSE;
         BOOL saw_target_link = FALSE;
+
+        if (unlinked_anchor_window)
+            ok( immediate_link_anchor == unlinked_anchor_window,
+                "got immediate sibling %p, expected unlinked anchor %p\n",
+                immediate_link_anchor, unlinked_anchor_window );
 
         memset( &received, 0, sizeof(received) );
         size = sizeof(received);
@@ -3830,6 +3871,7 @@ done:
     if (no_redirection_target) CloseHandle( no_redirection_target );
     if (target) CloseHandle( target );
     if (target_window) DestroyWindow( target_window );
+    if (unlinked_anchor_window) DestroyWindow( unlinked_anchor_window );
     if (lifecycle_desktop) CloseDesktop( lifecycle_desktop );
     if (logon_desktop) CloseDesktop( logon_desktop );
     if (port)
