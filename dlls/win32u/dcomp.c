@@ -112,8 +112,14 @@ struct dcomp_resource_view
     BYTE visual_flags_135;
     BOOL visual_modes_dirty;
     BOOL visual_flags_dirty;
+    BOOL visual_offset_dirty;
+    BOOL visual_opacity_dirty;
+    BOOL visual_relative_offset_dirty;
     BOOL visual_relative_size_dirty;
     BOOL visual_size_dirty;
+    float visual_offset[3];
+    float visual_opacity;
+    float visual_relative_offset[3];
     float visual_relative_size[2];
     float visual_size[2];
     UINT window_node_dirty;
@@ -736,6 +742,7 @@ static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource
     resource->type = type;
     resource->references = 1;
     resource->visual = is_dcomp_visual_resource_type( type );
+    resource->visual_opacity = 1.0f;
     if (type == 0x7f)
     {
         resource->rectangle[0] = resource->rectangle[1] = -2097152.0f;
@@ -1206,6 +1213,50 @@ static NTSTATUS set_dcomp_visual_integer_property( struct dcomp_resource_view *r
     default:
         return STATUS_NOT_SUPPORTED;
     }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_visual_float_property( struct dcomp_resource_view *resource,
+                                                  UINT property, float value )
+{
+    float *target;
+    BOOL *dirty;
+
+    switch (property)
+    {
+    case 1:
+    case 2:
+    case 3:
+        target = resource->visual_offset + property - 1;
+        dirty = &resource->visual_offset_dirty;
+        break;
+    case 0x18:
+    case 0x19:
+        target = resource->visual_size + property - 0x18;
+        dirty = &resource->visual_size_dirty;
+        break;
+    case 0x1a:
+        target = &resource->visual_opacity;
+        dirty = &resource->visual_opacity_dirty;
+        break;
+    case 0x20:
+    case 0x21:
+    case 0x22:
+        target = resource->visual_relative_offset + property - 0x20;
+        dirty = &resource->visual_relative_offset_dirty;
+        break;
+    case 0x23:
+    case 0x24:
+        target = resource->visual_relative_size + property - 0x23;
+        dirty = &resource->visual_relative_size_dirty;
+        break;
+    default:
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    if (*target == value) return STATUS_SUCCESS;
+    *target = value;
+    *dirty = TRUE;
     return STATUS_SUCCESS;
 }
 
@@ -1779,9 +1830,14 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
 
     while (length)
     {
+        UINT words[5] = {0};
+
         ++*processed;
         if (!dcomp_command_size( buffer, length, &command_size )) return STATUS_INVALID_PARAMETER;
         memcpy( &type, buffer, sizeof(type) );
+        memcpy( words, buffer, min( command_size, sizeof(words) ) );
+        TRACE( "channel %#x command type %#x size %u args %#x %#x %#x %#x\n",
+               view->channel, type, command_size, words[1], words[2], words[3], words[4] );
 
         if (!type)
         {
@@ -1900,8 +1956,14 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             memcpy( &property, buffer + 8, sizeof(property) );
             memcpy( &value, buffer + 12, sizeof(value) );
             if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
-            if (resource->type == 0x60 &&
-                (status = set_dcomp_legacy_target_float_property( resource, property, value )))
+            if (resource->visual)
+            {
+                status = set_dcomp_visual_float_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+            else if (resource->type == 0x60 &&
+                     (status = set_dcomp_legacy_target_float_property( resource,
+                                                                        property, value )))
                 return status;
         }
         else if (type == 15)
@@ -2702,6 +2764,9 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             if (!child->connection_announced) resource_size += 24;
         if (resource->visual_modes_dirty) resource_size += 52;
         if (resource->visual_flags_dirty) resource_size += 16;
+        if (resource->visual_offset_dirty) resource_size += 24;
+        if (resource->visual_opacity_dirty) resource_size += 16;
+        if (resource->visual_relative_offset_dirty) resource_size += 24;
         if (resource->visual_relative_size_dirty) resource_size += 20;
         if (resource->visual_size_dirty) resource_size += 20;
         if (!resource->released && resource->type == 0xc0)
@@ -2876,6 +2941,33 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             memcpy( cursor, command, sizeof(command) );
             cursor += sizeof(command);
         }
+        if (resource->visual_offset_dirty)
+        {
+            UINT command[6] = {24, 0x195, resource->id};
+
+            memcpy( command + 3, resource->visual_offset,
+                    sizeof(resource->visual_offset) );
+            memcpy( cursor, command, sizeof(command) );
+            cursor += sizeof(command);
+        }
+        if (resource->visual_opacity_dirty)
+        {
+            UINT command[4] = {16, 0x196, resource->id};
+
+            memcpy( command + 3, &resource->visual_opacity,
+                    sizeof(resource->visual_opacity) );
+            memcpy( cursor, command, sizeof(command) );
+            cursor += sizeof(command);
+        }
+        if (resource->visual_relative_offset_dirty)
+        {
+            UINT command[6] = {24, 0x19a, resource->id};
+
+            memcpy( command + 3, resource->visual_relative_offset,
+                    sizeof(resource->visual_relative_offset) );
+            memcpy( cursor, command, sizeof(command) );
+            cursor += sizeof(command);
+        }
         if (resource->visual_relative_size_dirty)
         {
             UINT command[5] = {20, 0x19b, resource->id};
@@ -2972,6 +3064,9 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
             resource->children_clear_dirty = FALSE;
             resource->visual_modes_dirty = FALSE;
             resource->visual_flags_dirty = FALSE;
+            resource->visual_offset_dirty = FALSE;
+            resource->visual_opacity_dirty = FALSE;
+            resource->visual_relative_offset_dirty = FALSE;
             resource->visual_relative_size_dirty = FALSE;
             resource->visual_size_dirty = FALSE;
             resource->window_node_dirty = 0;

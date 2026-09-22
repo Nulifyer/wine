@@ -2037,6 +2037,13 @@ static void test_visual_target_root_lifecycle(void)
         16, 0x197, 3, 0x100,
         20, 0x19b, 3, 0x3f800000, 0x3f800000,
     };
+    static const UINT expected_visual_geometry[] = {
+        24, 0x195, 2, 0x3f800000, 0x40000000, 0x40400000,
+        16, 0x196, 2, 0x3f000000,
+        24, 0x19a, 2, 0x3e800000, 0x3f000000, 0x3f400000,
+        20, 0x19b, 2, 0x3f000000, 0x3f800000,
+        20, 0x19e, 2, 0x40800000, 0x40a00000,
+    };
     static const UINT expected_visual_content[] = {
         16, 0x28, 5, 0xa6,
         16, 0x28, 6, 0x16,
@@ -2152,6 +2159,29 @@ static void test_visual_target_root_lifecycle(void)
     ok( status == STATUS_SUCCESS, "got visual update batch status %#lx\n", status );
     check_dcomp_batch_payload( record, channel, expected_visual_update,
                                sizeof(expected_visual_update), "visual update" );
+
+    command[0] = 12; command[1] = 2; command[2] = 1; command[3] = 0x3f800000;
+    command[4] = 12; command[5] = 2; command[6] = 2; command[7] = 0x40000000;
+    command[8] = 12; command[9] = 2; command[10] = 3; command[11] = 0x40400000;
+    command[12] = 12; command[13] = 2; command[14] = 0x18; command[15] = 0x40800000;
+    command[16] = 12; command[17] = 2; command[18] = 0x19; command[19] = 0x40a00000;
+    command[20] = 12; command[21] = 2; command[22] = 0x1a; command[23] = 0x3f000000;
+    command[24] = 12; command[25] = 2; command[26] = 0x20; command[27] = 0x3e800000;
+    command[28] = 12; command[29] = 2; command[30] = 0x21; command[31] = 0x3f000000;
+    command[32] = 12; command[33] = 2; command[34] = 0x22; command[35] = 0x3f400000;
+    command[36] = 12; command[37] = 2; command[38] = 0x23; command[39] = 0x3f000000;
+    command[40] = 12; command[41] = 2; command[42] = 0x24; command[43] = 0x3f800000;
+    memcpy( buffer, command, 176 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 176, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got visual geometry process status %#lx\n", status );
+    ok( processed == 11, "got visual geometry process count %lu\n", processed );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got visual geometry commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got visual geometry batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_visual_geometry,
+                               sizeof(expected_visual_geometry), "visual geometry" );
 
     command[0] = 2; command[1] = 5; command[2] = 0xa6; command[3] = 0;
     command[4] = 2; command[5] = 6; command[6] = 0x16; command[7] = 0;
