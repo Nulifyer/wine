@@ -43,6 +43,13 @@ NTSTATUS WINAPI wow64_NtUserDrainThreadCoreMessagingCompletions2( UINT *args )
     return NtUserDrainThreadCoreMessagingCompletions2( hwnd );
 }
 
+NTSTATUS WINAPI wow64_NtUserInitThreadCoreMessagingIocp( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+
+    return HandleToUlong( NtUserInitThreadCoreMessagingIocp( hwnd ));
+}
+
 NTSTATUS WINAPI wow64_NtUserInitThreadCoreMessagingIocp2( UINT *args )
 {
     HWND hwnd = get_handle( &args );
@@ -103,6 +110,13 @@ NTSTATUS WINAPI wow64_NtUserBroadcastThemeChangeEvent( UINT *args )
     LONG flags = get_ulong( &args );
 
     return NtUserBroadcastThemeChangeEvent( change, flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserCheckProcessSession( UINT *args )
+{
+    DWORD pid = get_ulong( &args );
+
+    return NtUserCheckProcessSession( pid );
 }
 
 NTSTATUS WINAPI wow64_NtUserCitSetInfo( UINT *args )
