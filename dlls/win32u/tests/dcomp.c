@@ -3046,7 +3046,7 @@ static void test_dwm_session_message_delivery(void)
     HDESK lifecycle_desktop = NULL;
     HDESK logon_desktop = NULL;
     HWND target_window = NULL, no_redirection_window = NULL;
-    HANDLE target = NULL, dwm_target = NULL;
+    HANDLE target = NULL, dwm_target = NULL, no_redirection_target = NULL;
     HANDLE port = NULL;
     UINT64 logical_surface_token = 0;
     DPI_AWARENESS_CONTEXT previous_dpi_context;
@@ -3262,6 +3262,46 @@ static void test_dwm_session_message_delivery(void)
         ok( i < 512, "no-redirection message drain did not quiesce\n" );
         ok( !saw_no_redirection_context,
             "no-redirection window entered DwmRedir context tracking\n" );
+
+        registered = NtUserCreateDCompositionHwndTarget( no_redirection_window, 0,
+                                                          &no_redirection_target );
+        ok( registered, "no-redirection target creation failed, status %#lx\n",
+            RtlGetLastNtStatus() );
+        if (registered)
+        {
+            BOOL saw_context = FALSE, saw_sprite_create = FALSE;
+            BOOL saw_sprite_update = FALSE, saw_link = FALSE;
+
+            for (i = 0; i < 512; ++i)
+            {
+                HWND message_window = NULL;
+
+                memset( &received, 0, sizeof(received) );
+                size = sizeof(received);
+                status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL,
+                                                    &received.header, &size, NULL,
+                                                    &timeout );
+                if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+                ok( !status, "no-redirection target receive returned %#lx\n", status );
+                if (status) break;
+                memcpy( &message_window, received.data + 1, sizeof(message_window) );
+                if (message_window != no_redirection_window) continue;
+                if (received.data[0] == 0x40000011) saw_context = TRUE;
+                else if (received.data[0] == 0x40000002) saw_sprite_create = TRUE;
+                else if (received.data[0] == 0x40000006) saw_sprite_update = TRUE;
+                else if (received.data[0] == 0x40000012) saw_link = TRUE;
+                if (saw_context && saw_sprite_create && saw_sprite_update && saw_link) break;
+            }
+            ok( saw_context, "no-redirection DComp target has no window context\n" );
+            ok( saw_sprite_create, "no-redirection DComp target has no sprite\n" );
+            ok( saw_sprite_update, "no-redirection DComp target has no sprite update\n" );
+            ok( saw_link, "no-redirection DComp target has no window link\n" );
+            registered = NtUserDestroyDCompositionHwndTarget( no_redirection_window, 0 );
+            ok( registered, "no-redirection target destruction failed, status %#lx\n",
+                RtlGetLastNtStatus() );
+            NtClose( no_redirection_target );
+            no_redirection_target = NULL;
+        }
         ok( DestroyWindow( no_redirection_window ),
             "no-redirection window destruction failed, error %lu\n", GetLastError() );
         no_redirection_window = NULL;
@@ -3757,6 +3797,7 @@ static void test_dwm_session_message_delivery(void)
 
 done:
     if (dwm_target) CloseHandle( dwm_target );
+    if (no_redirection_target) CloseHandle( no_redirection_target );
     if (target) CloseHandle( target );
     if (target_window) DestroyWindow( target_window );
     if (lifecycle_desktop) CloseDesktop( lifecycle_desktop );

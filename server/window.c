@@ -301,7 +301,6 @@ static bool is_toplevel( const struct window *win )
  * window-composition state. */
 static bool is_composition_window( const struct window *win )
 {
-    if (win->ex_style & WS_EX_NOREDIRECTIONBITMAP) return false;
     return is_toplevel( win ) || (win->ex_style & WS_EX_LAYERED);
 }
 
@@ -1315,7 +1314,7 @@ struct thread *get_window_thread( user_handle_t handle )
  * process. Native win32k creates every context before publishing any tree
  * links during compositor startup; the replay entry point below preserves
  * that ordering. */
-static unsigned int sync_dwm_window_context( struct window *win )
+static unsigned int sync_dwm_window_context( struct window *win, int admit_no_redirection )
 {
     struct process *process = win->thread ? win->thread->process : NULL;
     unsigned int old_context_id = win->dwm_context_id;
@@ -1324,7 +1323,13 @@ static unsigned int sync_dwm_window_context( struct window *win )
     unsigned __int64 sequence = process ? process->start_time : 0;
 
     if (!is_composition_window( win )) return 0;
-    if (win->parent && !sync_dwm_window_context( win->parent )) return 0;
+    /* A no-redirection HWND has no redirected bitmap, but it still needs a
+     * DwmRedir context when DirectComposition explicitly targets it.  Keep
+     * host-only presentation windows out until such a target admits them. */
+    if ((win->ex_style & WS_EX_NOREDIRECTIONBITMAP) &&
+        !admit_no_redirection && !win->dwm_context_id)
+        return 0;
+    if (win->parent && !sync_dwm_window_context( win->parent, 0 )) return 0;
     win->dwm_context_id = notify_dwm_window_created( win->desktop, win->dwm_context_id,
                                                      win->handle, parent, win->style,
                                                      win->ex_style, &win->window_rect,
@@ -1350,12 +1355,12 @@ static unsigned int sync_dwm_window_context( struct window *win )
     return win->dwm_context_id;
 }
 
-static int sync_dwm_window_link( struct window *win )
+static int sync_dwm_window_link( struct window *win, int admit_no_redirection )
 {
     struct window *next;
     unsigned int insert_before;
 
-    if (!sync_dwm_window_context( win )) return 0;
+    if (!sync_dwm_window_context( win, admit_no_redirection )) return 0;
     if (!win->parent)
     {
         win->dwm_link_id = win->dwm_context_id;
@@ -1363,7 +1368,7 @@ static int sync_dwm_window_link( struct window *win )
     }
     if (!win->is_linked) return 1;
     if (win->dwm_link_id == win->dwm_context_id) return 1;
-    if (!sync_dwm_window_context( win->parent )) return 0;
+    if (!sync_dwm_window_context( win->parent, 0 )) return 0;
     /* Native win32k publishes spwndNext here.  Replay walks the sibling list
      * from bottom to top, so a non-null insertion anchor is already linked. */
     next = get_next_window( win );
@@ -1381,14 +1386,14 @@ int ensure_dwm_window_context( user_handle_t handle )
 {
     struct window *win = get_user_object( handle, NTUSER_OBJ_WINDOW );
 
-    return win && sync_dwm_window_link( win );
+    return win && sync_dwm_window_link( win, 1 );
 }
 
 static void replay_dwm_window_create_tree( struct window *win )
 {
     struct window *child;
 
-    sync_dwm_window_context( win );
+    sync_dwm_window_context( win, 0 );
     LIST_FOR_EACH_ENTRY_REV( child, &win->children, struct window, entry )
         replay_dwm_window_create_tree( child );
     LIST_FOR_EACH_ENTRY_REV( child, &win->unlinked, struct window, entry )
@@ -1399,7 +1404,7 @@ static void replay_dwm_window_link_tree( struct window *win )
 {
     struct window *child;
 
-    sync_dwm_window_link( win );
+    sync_dwm_window_link( win, 0 );
     LIST_FOR_EACH_ENTRY_REV( child, &win->children, struct window, entry )
         replay_dwm_window_link_tree( child );
 }
@@ -3355,7 +3360,7 @@ DECL_HANDLER(set_window_pos)
     old_client = win->client_rect;
     set_window_pos( win, previous, flags, &window_rect, &client_rect,
                     &visible_rect, &surface_rect, &valid_rect );
-    sync_dwm_window_link( win );
+    sync_dwm_window_link( win, 0 );
     if ((win->style & old_style & WS_VISIBLE) && (memcmp( &old_client, &win->client_rect, sizeof(old_client) )
         || memcmp( &old_window, &win->window_rect, sizeof(old_window) )))
         update_cursor_pos( win->desktop );
