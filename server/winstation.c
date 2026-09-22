@@ -1132,6 +1132,22 @@ DECL_HANDLER(get_dwm_desktop_id)
     release_object( winstation );
 }
 
+/* Verify that a process belongs to the authenticated compositor's session. */
+DECL_HANDLER(check_process_session)
+{
+    struct process *process;
+
+    if (!current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!(process = get_process_from_id( req->pid ))) return;
+    if (process->session_id != current->process->session_id)
+        set_error( STATUS_ACCESS_DENIED );
+    release_object( process );
+}
+
 /* close a desktop */
 DECL_HANDLER(close_desktop)
 {

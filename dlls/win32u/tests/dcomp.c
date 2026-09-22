@@ -3060,6 +3060,7 @@ static void test_hlsurf_destroyed_window_lifetime(HANDLE surface)
 
 static void test_dwm_session_message_delivery(void)
 {
+    BOOL (WINAPI *pCheckProcessSession)(DWORD);
     BOOL (WINAPI *pGetDesktopID)(UINT, UINT64 *);
     BOOL (WINAPI *pIsWindowGdiScaledX)(HWND);
     ALPC_PORT_ATTRIBUTES attributes = {0};
@@ -3085,9 +3086,12 @@ static void test_dwm_session_message_delivery(void)
     SIZE_T size;
     unsigned int i, j;
 
+    pCheckProcessSession = (void *)GetProcAddress( GetModuleHandleW( L"user32.dll" ),
+                                                   "CheckProcessSession" );
     pGetDesktopID = (void *)GetProcAddress( GetModuleHandleW( L"user32.dll" ), "GetDesktopID" );
     pIsWindowGdiScaledX = (void *)GetProcAddress( GetModuleHandleW( L"user32.dll" ),
                                                   (const char *)2635 );
+    ok( !!pCheckProcessSession, "CheckProcessSession is not exported\n" );
     ok( !!pGetDesktopID, "GetDesktopID is not exported\n" );
     ok( !!pIsWindowGdiScaledX, "IsWindowGdiScaledX is not exported\n" );
 
@@ -3106,6 +3110,11 @@ static void test_dwm_session_message_delivery(void)
     ok( !registered, "unauthenticated NtUserGetDesktopID succeeded\n" );
     ok( GetLastError() == ERROR_ACCESS_DENIED, "got error %lu\n", GetLastError() );
     ok( input_id == 0xdeadbeefdeadbeefULL, "output changed to %#I64x\n", input_id );
+
+    SetLastError( 0xdeadbeef );
+    registered = NtUserCheckProcessSession( GetCurrentProcessId() );
+    ok( !registered, "unauthenticated NtUserCheckProcessSession succeeded\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "got error %lu\n", GetLastError() );
 
     if (!ProcessIdToSessionId( GetCurrentProcessId(), &session_id ))
     {
@@ -3138,6 +3147,22 @@ static void test_dwm_session_message_delivery(void)
     ok( registered, "NtUserRegisterSessionPort failed, error %lu\n", GetLastError() );
     ok( !registered || GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
     if (!registered) goto done;
+
+    SetLastError( 0xdeadbeef );
+    ok( NtUserCheckProcessSession( GetCurrentProcessId() ),
+        "same-session process check failed, error %lu\n", GetLastError() );
+    ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+    if (pCheckProcessSession)
+    {
+        SetLastError( 0xdeadbeef );
+        ok( pCheckProcessSession( GetCurrentProcessId() ),
+            "USER32 same-session process check failed, error %lu\n", GetLastError() );
+        ok( GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError() );
+    }
+
+    SetLastError( 0xdeadbeef );
+    ok( !NtUserCheckProcessSession( 0xffffffff ), "invalid process check succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
 
     input_id = 0;
     SetLastError( 0xdeadbeef );

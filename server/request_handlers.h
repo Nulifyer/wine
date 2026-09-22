@@ -416,6 +416,7 @@ DECL_HANDLER(create_dcomp_window_target);
 DECL_HANDLER(destroy_dcomp_window_target);
 DECL_HANDLER(set_dcomp_channel_completion_event);
 DECL_HANDLER(get_dwm_desktop_id);
+DECL_HANDLER(check_process_session);
 DECL_HANDLER(create_d3d11_fence);
 DECL_HANDLER(share_d3d11_fence);
 DECL_HANDLER(open_d3d11_fence);
@@ -841,6 +842,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_destroy_dcomp_window_target,
     (req_handler)req_set_dcomp_channel_completion_event,
     (req_handler)req_get_dwm_desktop_id,
+    (req_handler)req_check_process_session,
     (req_handler)req_create_d3d11_fence,
     (req_handler)req_share_d3d11_fence,
     (req_handler)req_open_d3d11_fence,
@@ -3139,6 +3141,8 @@ C_ASSERT( offsetof(struct get_dwm_desktop_id_request, selector) == 12 );
 C_ASSERT( sizeof(struct get_dwm_desktop_id_request) == 16 );
 C_ASSERT( offsetof(struct get_dwm_desktop_id_reply, id) == 8 );
 C_ASSERT( sizeof(struct get_dwm_desktop_id_reply) == 16 );
+C_ASSERT( offsetof(struct check_process_session_request, pid) == 12 );
+C_ASSERT( sizeof(struct check_process_session_request) == 16 );
 C_ASSERT( offsetof(struct create_d3d11_fence_request, flags) == 12 );
 C_ASSERT( offsetof(struct create_d3d11_fence_request, value) == 16 );
 C_ASSERT( sizeof(struct create_d3d11_fence_request) == 24 );

@@ -4542,6 +4542,11 @@ static void dump_get_dwm_desktop_id_reply( const struct get_dwm_desktop_id_reply
     dump_uint64( " id=", &req->id );
 }
 
+static void dump_check_process_session_request( const struct check_process_session_request *req )
+{
+    fprintf( stderr, " pid=%04x", req->pid );
+}
+
 static void dump_create_d3d11_fence_request( const struct create_d3d11_fence_request *req )
 {
     fprintf( stderr, " flags=%08x", req->flags );
@@ -5070,6 +5075,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_destroy_dcomp_window_target_request,
     (dump_func)dump_set_dcomp_channel_completion_event_request,
     (dump_func)dump_get_dwm_desktop_id_request,
+    (dump_func)dump_check_process_session_request,
     (dump_func)dump_create_d3d11_fence_request,
     (dump_func)dump_share_d3d11_fence_request,
     (dump_func)dump_open_d3d11_fence_request,
@@ -5495,6 +5501,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     (dump_func)dump_get_dwm_desktop_id_reply,
+    NULL,
     (dump_func)dump_create_d3d11_fence_reply,
     (dump_func)dump_share_d3d11_fence_reply,
     (dump_func)dump_open_d3d11_fence_reply,
@@ -5920,6 +5927,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "destroy_dcomp_window_target",
     "set_dcomp_channel_completion_event",
     "get_dwm_desktop_id",
+    "check_process_session",
     "create_d3d11_fence",
     "share_d3d11_fence",
     "open_d3d11_fence",

@@ -7799,6 +7799,17 @@ struct get_dwm_desktop_id_reply
 };
 
 
+struct check_process_session_request
+{
+    struct request_header __header;
+    process_id_t pid;
+};
+struct check_process_session_reply
+{
+    struct reply_header __header;
+};
+
+
 struct create_d3d11_fence_request
 {
     struct request_header __header;
@@ -8385,6 +8396,7 @@ enum request
     REQ_destroy_dcomp_window_target,
     REQ_set_dcomp_channel_completion_event,
     REQ_get_dwm_desktop_id,
+    REQ_check_process_session,
     REQ_create_d3d11_fence,
     REQ_share_d3d11_fence,
     REQ_open_d3d11_fence,
@@ -8813,6 +8825,7 @@ union generic_request
     struct destroy_dcomp_window_target_request destroy_dcomp_window_target_request;
     struct set_dcomp_channel_completion_event_request set_dcomp_channel_completion_event_request;
     struct get_dwm_desktop_id_request get_dwm_desktop_id_request;
+    struct check_process_session_request check_process_session_request;
     struct create_d3d11_fence_request create_d3d11_fence_request;
     struct share_d3d11_fence_request share_d3d11_fence_request;
     struct open_d3d11_fence_request open_d3d11_fence_request;
@@ -9239,6 +9252,7 @@ union generic_reply
     struct destroy_dcomp_window_target_reply destroy_dcomp_window_target_reply;
     struct set_dcomp_channel_completion_event_reply set_dcomp_channel_completion_event_reply;
     struct get_dwm_desktop_id_reply get_dwm_desktop_id_reply;
+    struct check_process_session_reply check_process_session_reply;
     struct create_d3d11_fence_reply create_d3d11_fence_reply;
     struct share_d3d11_fence_reply share_d3d11_fence_reply;
     struct open_d3d11_fence_reply open_d3d11_fence_reply;
@@ -9253,6 +9267,6 @@ union generic_reply
     struct dirty_window_logical_surface_reply dirty_window_logical_surface_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1049
+#define SERVER_PROTOCOL_VERSION 1050
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

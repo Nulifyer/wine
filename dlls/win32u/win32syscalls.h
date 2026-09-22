@@ -842,7 +842,7 @@
     SYSCALL_ENTRY( 0x1346, NtUserCheckImeShowStatusInThread, 0 ) \
     SYSCALL_ENTRY( 0x1347, NtUserCheckMenuItem, 12 ) \
     SYSCALL_ENTRY( 0x1348, NtUserCheckProcessForClipboardAccess, 0 ) \
-    SYSCALL_ENTRY( 0x1349, NtUserCheckProcessSession, 0 ) \
+    SYSCALL_ENTRY( 0x1349, NtUserCheckProcessSession, 4 ) \
     SYSCALL_ENTRY( 0x134a, NtUserCheckWindowThreadDesktop, 0 ) \
     SYSCALL_ENTRY( 0x134b, NtUserChildWindowFromPointEx, 16 ) \
     SYSCALL_ENTRY( 0x134c, NtUserCitSetInfo, 8 ) \
@@ -2384,7 +2384,7 @@
     SYSCALL_ENTRY( 0x1346, NtUserCheckImeShowStatusInThread, 0 ) \
     SYSCALL_ENTRY( 0x1347, NtUserCheckMenuItem, 24 ) \
     SYSCALL_ENTRY( 0x1348, NtUserCheckProcessForClipboardAccess, 0 ) \
-    SYSCALL_ENTRY( 0x1349, NtUserCheckProcessSession, 0 ) \
+    SYSCALL_ENTRY( 0x1349, NtUserCheckProcessSession, 8 ) \
     SYSCALL_ENTRY( 0x134a, NtUserCheckWindowThreadDesktop, 0 ) \
     SYSCALL_ENTRY( 0x134b, NtUserChildWindowFromPointEx, 32 ) \
     SYSCALL_ENTRY( 0x134c, NtUserCitSetInfo, 16 ) \
@@ -3647,7 +3647,6 @@
     SYSCALL_STUB( NtUserCheckAccessForIntegrityLevel ) \
     SYSCALL_STUB( NtUserCheckImeShowStatusInThread ) \
     SYSCALL_STUB( NtUserCheckProcessForClipboardAccess ) \
-    SYSCALL_STUB( NtUserCheckProcessSession ) \
     SYSCALL_STUB( NtUserCheckWindowThreadDesktop ) \
     SYSCALL_STUB( NtUserClearForeground ) \
     SYSCALL_STUB( NtUserClearWakeMask ) \

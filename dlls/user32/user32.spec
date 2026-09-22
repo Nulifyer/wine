@@ -289,7 +289,7 @@
 @ stdcall CheckMenuItem(long long long) NtUserCheckMenuItem
 @ stdcall CheckMenuRadioItem(long long long long long)
 # @ stub CheckProcessForClipboardAccess
-# @ stub CheckProcessSession
+@ stdcall CheckProcessSession(long) NtUserCheckProcessSession
 @ stdcall CheckRadioButton(long long long long)
 # @ stub CheckWindowThreadDesktop
 @ stdcall ChildWindowFromPoint(long int64)

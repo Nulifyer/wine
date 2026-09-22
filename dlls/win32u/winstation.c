@@ -156,6 +156,20 @@ BOOL WINAPI NtUserGetDesktopID( UINT selector, UINT64 *id )
     return TRUE;
 }
 
+BOOL WINAPI NtUserCheckProcessSession( DWORD pid )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( check_process_session )
+    {
+        req->pid = pid;
+        status = wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+
+    return !status;
+}
+
 void shared_object_acquire_seqlock( const shared_object_t *object, UINT64 *seq )
 {
     while ((*seq = ReadNoFence64( &object->seq )) & 1) YieldProcessor();

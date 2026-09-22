@@ -5238,6 +5238,11 @@ struct alpc_message_info
     object_id_t id;               /* zero when the selected role is absent */
 @END
 
+/* Verify that a process belongs to the authenticated compositor's session. */
+@REQ(check_process_session)
+    process_id_t pid;             /* process to verify */
+@END
+
 /* Create one D3D11 fence timeline. */
 @REQ(create_d3d11_fence)
     unsigned int flags;           /* D3D11_FENCE_FLAG value */

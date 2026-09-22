@@ -840,7 +840,7 @@
 @ stub -syscall NtUserCheckImeShowStatusInThread
 @ stdcall -syscall NtUserCheckMenuItem(long long long)
 @ stub -syscall NtUserCheckProcessForClipboardAccess
-@ stub -syscall NtUserCheckProcessSession
+@ stdcall -syscall NtUserCheckProcessSession(long)
 @ stub -syscall NtUserCheckWindowThreadDesktop
 @ stdcall -syscall NtUserChildWindowFromPointEx(long long long long)
 @ stdcall -syscall NtUserCitSetInfo(long ptr)
