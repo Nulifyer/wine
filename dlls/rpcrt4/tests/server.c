@@ -1244,7 +1244,6 @@ void __cdecl s_stop_autolisten(void)
 {
     RPC_STATUS status;
     status = RpcServerUnregisterIf(NULL, NULL, FALSE);
-    todo_wine
     ok(status == RPC_S_UNKNOWN_MGR_TYPE, "got %lu\n", status);
 }
 
@@ -2684,6 +2683,13 @@ server(void)
 
   /* needed for tests involving interface pointers */
   CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
+  status = RpcServerRegisterIf(s_RPCExplicitHandle_v0_0_s_ifspec, NULL, NULL);
+  ok(status == RPC_S_OK, "RpcServerRegisterIf failed with status %ld\n", status);
+  status = RpcServerUnregisterIfEx(s_RPCExplicitHandle_v0_0_s_ifspec, NULL, FALSE);
+  ok(status == RPC_S_OK, "RpcServerUnregisterIfEx failed with status %ld\n", status);
+  status = RpcServerUnregisterIf(s_RPCExplicitHandle_v0_0_s_ifspec, NULL, FALSE);
+  ok(status == RPC_S_UNKNOWN_IF, "got status %ld\n", status);
 
   iptcp_status = RpcServerUseProtseqEpA(iptcp, 20, port, NULL);
   ok(iptcp_status == RPC_S_OK, "RpcServerUseProtseqEp(ncacn_ip_tcp) failed with status %ld\n", iptcp_status);

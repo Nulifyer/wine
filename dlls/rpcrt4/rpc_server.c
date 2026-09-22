@@ -1550,55 +1550,87 @@ RPC_STATUS WINAPI RpcServerRegisterIf3( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid,
   return RPC_S_OK;
 }
 
+static BOOL rpc_server_interface_matches(const RpcServerInterface *sif,
+                                         const RPC_SERVER_INTERFACE *iface,
+                                         const UUID *mgr_type)
+{
+  if (!iface && (sif->Flags & RPC_IF_AUTOLISTEN)) return FALSE;
+  if (iface && memcmp(&iface->InterfaceId, &sif->If->InterfaceId,
+                      sizeof(RPC_SYNTAX_IDENTIFIER))) return FALSE;
+  if (mgr_type && memcmp(mgr_type, &sif->MgrTypeUuid, sizeof(*mgr_type))) return FALSE;
+  return TRUE;
+}
+
+static RPC_STATUS rpc_server_unregister_interfaces(RPC_IF_HANDLE IfSpec, UUID *MgrTypeUuid,
+                                                   BOOL wait, BOOL destroy_contexts,
+                                                   BOOL rundown_contexts)
+{
+  RPC_SERVER_INTERFACE *iface = IfSpec;
+  RpcServerInterface *sif;
+  unsigned int found = 0;
+
+  for (;;) {
+    RPC_SYNTAX_IDENTIFIER *context_guard;
+    HANDLE event = NULL;
+    BOOL completed = TRUE;
+
+    EnterCriticalSection(&server_cs);
+    LIST_FOR_EACH_ENTRY(sif, &server_interfaces, RpcServerInterface, entry) {
+      if (!rpc_server_interface_matches(sif, iface, MgrTypeUuid)) continue;
+
+      if (sif->CurrentCalls && wait && !(event = CreateEventW(NULL, FALSE, FALSE, NULL))) {
+        LeaveCriticalSection(&server_cs);
+        return RPC_S_OUT_OF_RESOURCES;
+      }
+
+      list_remove(&sif->entry);
+      TRACE("unregistering sif %p\n", sif);
+      context_guard = &sif->If->InterfaceId;
+      if (sif->CurrentCalls) {
+        completed = FALSE;
+        sif->Delete = TRUE;
+        sif->CallsCompletedEvent = event;
+      }
+      break;
+    }
+    if (&sif->entry == &server_interfaces) {
+      LeaveCriticalSection(&server_cs);
+      break;
+    }
+    LeaveCriticalSection(&server_cs);
+
+    ++found;
+    if (completed)
+      free(sif);
+    else if (event) {
+      /* sif is freed by the last completing call; do not access it here. */
+      WaitForSingleObject(event, INFINITE);
+      CloseHandle(event);
+    }
+    if (destroy_contexts)
+      RpcServerAssoc_DestroyContextHandles(context_guard, rundown_contexts);
+  }
+
+  if (found) return RPC_S_OK;
+  ERR("interface %s manager %s not found\n",
+      iface ? debugstr_guid(&iface->InterfaceId.SyntaxGUID) : "(any)",
+      debugstr_guid(MgrTypeUuid));
+  return iface ? RPC_S_UNKNOWN_IF : RPC_S_UNKNOWN_MGR_TYPE;
+}
+
 /***********************************************************************
  *             RpcServerUnregisterIf (RPCRT4.@)
  */
 RPC_STATUS WINAPI RpcServerUnregisterIf( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid, UINT WaitForCallsToComplete )
 {
-  PRPC_SERVER_INTERFACE If = IfSpec;
-  HANDLE event = NULL;
-  BOOL found = FALSE;
-  BOOL completed = TRUE;
-  RpcServerInterface *cif;
-  RPC_STATUS status;
+  RPC_SERVER_INTERFACE *iface = IfSpec;
 
   TRACE("(IfSpec == (RPC_IF_HANDLE)^%p (%s), MgrTypeUuid == %s, WaitForCallsToComplete == %u)\n",
-    IfSpec, debugstr_guid(&If->InterfaceId.SyntaxGUID), debugstr_guid(MgrTypeUuid), WaitForCallsToComplete);
+    IfSpec, iface ? debugstr_guid(&iface->InterfaceId.SyntaxGUID) : "(any)",
+    debugstr_guid(MgrTypeUuid), WaitForCallsToComplete);
 
-  EnterCriticalSection(&server_cs);
-  LIST_FOR_EACH_ENTRY(cif, &server_interfaces, RpcServerInterface, entry) {
-    if (((!IfSpec && !(cif->Flags & RPC_IF_AUTOLISTEN)) ||
-        (IfSpec && !memcmp(&If->InterfaceId, &cif->If->InterfaceId, sizeof(RPC_SYNTAX_IDENTIFIER)))) &&
-        UuidEqual(MgrTypeUuid, &cif->MgrTypeUuid, &status)) {
-      list_remove(&cif->entry);
-      TRACE("unregistering cif %p\n", cif);
-      if (cif->CurrentCalls) {
-        completed = FALSE;
-        cif->Delete = TRUE;
-        if (WaitForCallsToComplete)
-          cif->CallsCompletedEvent = event = CreateEventW(NULL, FALSE, FALSE, NULL);
-      }
-      found = TRUE;
-      break;
-    }
-  }
-  LeaveCriticalSection(&server_cs);
-
-  if (!found) {
-    ERR("not found for object %s\n", debugstr_guid(MgrTypeUuid));
-    return RPC_S_UNKNOWN_IF;
-  }
-
-  if (completed)
-    free(cif);
-  else if (event) {
-    /* sif will be freed when the last call is completed, so be careful not to
-     * touch that memory here as that could happen before we get here */
-    WaitForSingleObject(event, INFINITE);
-    CloseHandle(event);
-  }
-
-  return RPC_S_OK;
+  return rpc_server_unregister_interfaces(IfSpec, MgrTypeUuid, WaitForCallsToComplete,
+                                          FALSE, FALSE);
 }
 
 /***********************************************************************
@@ -1606,10 +1638,11 @@ RPC_STATUS WINAPI RpcServerUnregisterIf( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid
  */
 RPC_STATUS WINAPI RpcServerUnregisterIfEx( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid, int RundownContextHandles )
 {
-  FIXME("(IfSpec == (RPC_IF_HANDLE)^%p, MgrTypeUuid == %s, RundownContextHandles == %d): stub\n",
+  TRACE("(IfSpec == (RPC_IF_HANDLE)^%p, MgrTypeUuid == %s, RundownContextHandles == %d)\n",
     IfSpec, debugstr_guid(MgrTypeUuid), RundownContextHandles);
 
-  return RPC_S_OK;
+  return rpc_server_unregister_interfaces(IfSpec, MgrTypeUuid, TRUE, TRUE,
+                                          RundownContextHandles != 0);
 }
 
 /***********************************************************************

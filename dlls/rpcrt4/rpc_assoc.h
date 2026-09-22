@@ -58,6 +58,7 @@ RPC_STATUS RpcServerAssoc_AllocateContextHandle(RpcAssoc *assoc, void *CtxGuard,
 RPC_STATUS RpcServerAssoc_FindContextHandle(RpcAssoc *assoc, const UUID *uuid, void *CtxGuard, ULONG Flags, NDR_SCONTEXT *SContext);
 RPC_STATUS RpcServerAssoc_UpdateContextHandle(RpcAssoc *assoc, NDR_SCONTEXT SContext, void *CtxGuard, NDR_RUNDOWN rundown_routine);
 unsigned int RpcServerAssoc_ReleaseContextHandle(RpcAssoc *assoc, NDR_SCONTEXT SContext, BOOL release_lock);
+void RpcServerAssoc_DestroyContextHandles(void *CtxGuard, BOOL rundown);
 void RpcContextHandle_GetUuid(NDR_SCONTEXT SContext, UUID *uuid);
 BOOL RpcContextHandle_IsGuardCorrect(NDR_SCONTEXT SContext, void *CtxGuard);
 void RpcAssoc_ConnectionReleased(RpcAssoc *assoc);

@@ -59,7 +59,7 @@ typedef struct _RpcContextHandle
     unsigned int refs;
 } RpcContextHandle;
 
-static void RpcContextHandle_Destroy(RpcContextHandle *context_handle);
+static void RpcContextHandle_Destroy(RpcContextHandle *context_handle, BOOL rundown);
 
 static RPC_STATUS RpcAssoc_Alloc(LPCSTR Protseq, LPCSTR NetworkAddr,
                                  LPCSTR Endpoint, LPCWSTR NetworkOptions,
@@ -208,7 +208,7 @@ ULONG RpcAssoc_Release(RpcAssoc *assoc)
         }
 
         LIST_FOR_EACH_ENTRY_SAFE(context_handle, context_handle_cursor, &assoc->context_handle_list, RpcContextHandle, entry)
-            RpcContextHandle_Destroy(context_handle);
+            RpcContextHandle_Destroy(context_handle, TRUE);
 
         free(assoc->NetworkOptions);
         free(assoc->Endpoint);
@@ -545,11 +545,11 @@ void RpcContextHandle_GetUuid(NDR_SCONTEXT SContext, UUID *uuid)
     *uuid = context_handle->uuid;
 }
 
-static void RpcContextHandle_Destroy(RpcContextHandle *context_handle)
+static void RpcContextHandle_Destroy(RpcContextHandle *context_handle, BOOL rundown)
 {
     TRACE("freeing %p\n", context_handle);
 
-    if (context_handle->user_context && context_handle->rundown_routine)
+    if (rundown && context_handle->user_context && context_handle->rundown_routine)
     {
         TRACE("calling rundown routine %p with user context %p\n",
               context_handle->rundown_routine, context_handle->user_context);
@@ -577,7 +577,36 @@ unsigned int RpcServerAssoc_ReleaseContextHandle(RpcAssoc *assoc, NDR_SCONTEXT S
     LeaveCriticalSection(&assoc->cs);
 
     if (!refs)
-        RpcContextHandle_Destroy(context_handle);
+        RpcContextHandle_Destroy(context_handle, TRUE);
 
     return refs;
+}
+
+void RpcServerAssoc_DestroyContextHandles(void *CtxGuard, BOOL rundown)
+{
+    struct list detached = LIST_INIT(detached);
+    RpcContextHandle *context_handle, *cursor;
+    RpcAssoc *assoc;
+
+    EnterCriticalSection(&assoc_list_cs);
+    LIST_FOR_EACH_ENTRY(assoc, &server_assoc_list, RpcAssoc, entry)
+    {
+        EnterCriticalSection(&assoc->cs);
+        LIST_FOR_EACH_ENTRY_SAFE(context_handle, cursor, &assoc->context_handle_list,
+                                 RpcContextHandle, entry)
+        {
+            if (context_handle->ctx_guard != CtxGuard) continue;
+            assert(context_handle->refs == 1);
+            list_remove(&context_handle->entry);
+            list_add_tail(&detached, &context_handle->entry);
+        }
+        LeaveCriticalSection(&assoc->cs);
+    }
+    LeaveCriticalSection(&assoc_list_cs);
+
+    LIST_FOR_EACH_ENTRY_SAFE(context_handle, cursor, &detached, RpcContextHandle, entry)
+    {
+        list_remove(&context_handle->entry);
+        RpcContextHandle_Destroy(context_handle, rundown);
+    }
 }
