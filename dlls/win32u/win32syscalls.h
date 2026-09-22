@@ -1144,7 +1144,7 @@
     SYSCALL_ENTRY( 0x1474, NtUserInheritWindowMonitor, 0 ) \
     SYSCALL_ENTRY( 0x1475, NtUserInitAnsiOem, 0 ) \
     SYSCALL_ENTRY( 0x1476, NtUserInitTask, 0 ) \
-    SYSCALL_ENTRY( 0x1477, NtUserInitThreadCoreMessagingIocp, 0 ) \
+    SYSCALL_ENTRY( 0x1477, NtUserInitThreadCoreMessagingIocp, 4 ) \
     SYSCALL_ENTRY( 0x1478, NtUserInitThreadCoreMessagingIocp2, 8 ) \
     SYSCALL_ENTRY( 0x1479, NtUserInitialize, 8 ) \
     SYSCALL_ENTRY( 0x147a, NtUserInitializeClientPfnArrays, 16 ) \
@@ -2686,7 +2686,7 @@
     SYSCALL_ENTRY( 0x1474, NtUserInheritWindowMonitor, 0 ) \
     SYSCALL_ENTRY( 0x1475, NtUserInitAnsiOem, 0 ) \
     SYSCALL_ENTRY( 0x1476, NtUserInitTask, 0 ) \
-    SYSCALL_ENTRY( 0x1477, NtUserInitThreadCoreMessagingIocp, 0 ) \
+    SYSCALL_ENTRY( 0x1477, NtUserInitThreadCoreMessagingIocp, 8 ) \
     SYSCALL_ENTRY( 0x1478, NtUserInitThreadCoreMessagingIocp2, 16 ) \
     SYSCALL_ENTRY( 0x1479, NtUserInitialize, 16 ) \
     SYSCALL_ENTRY( 0x147a, NtUserInitializeClientPfnArrays, 32 ) \
@@ -3807,7 +3807,6 @@
     SYSCALL_STUB( NtUserInheritWindowMonitor ) \
     SYSCALL_STUB( NtUserInitAnsiOem ) \
     SYSCALL_STUB( NtUserInitTask ) \
-    SYSCALL_STUB( NtUserInitThreadCoreMessagingIocp ) \
     SYSCALL_STUB( NtUserInitializeGenericHidInjection ) \
     SYSCALL_STUB( NtUserInitializeInputDeviceInjection ) \
     SYSCALL_STUB( NtUserInitializePointerDeviceInjection ) \

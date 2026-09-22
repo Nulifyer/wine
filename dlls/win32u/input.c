@@ -1180,6 +1180,32 @@ HANDLE WINAPI NtUserInitThreadCoreMessagingIocp2( HWND hwnd, DWORD *mode )
 }
 
 /***********************************************************************
+ *           NtUserInitThreadCoreMessagingIocp (win32u.@)
+ */
+HANDLE WINAPI NtUserInitThreadCoreMessagingIocp( HWND hwnd )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct core_messaging_window *window;
+    HANDLE handle;
+    DWORD mode;
+
+    if (!(handle = NtUserInitThreadCoreMessagingIocp2( hwnd, &mode ))) return NULL;
+    if (!mode) return handle;
+
+    LIST_FOR_EACH_ENTRY( window, &thread_info->core_messaging_windows,
+                         struct core_messaging_window, entry )
+    {
+        if (window->hwnd != hwnd) continue;
+        list_remove( &window->entry );
+        free( window );
+        break;
+    }
+
+    RtlSetLastWin32Error( ERROR_ALREADY_INITIALIZED );
+    return NULL;
+}
+
+/***********************************************************************
  *           NtUserDrainThreadCoreMessagingCompletions (win32u.@)
  */
 ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions(void)
@@ -1194,16 +1220,95 @@ ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions(void)
     return TRUE;
 }
 
+static BOOL link_core_messaging_completion( struct user_thread_info *thread_info,
+                                            const FILE_IO_COMPLETION_INFORMATION *completion,
+                                            DWORD source_mode )
+{
+    struct core_messaging_window *window, *completion_window = NULL;
+    void **completion_lists;
+
+    if (completion->CompletionValue >= 2)
+    {
+        WARN( "invalid CoreMessaging completion context %#lx\n",
+              (unsigned long)completion->CompletionValue );
+        return FALSE;
+    }
+
+    LIST_FOR_EACH_ENTRY( window, &thread_info->core_messaging_windows,
+                         struct core_messaging_window, entry )
+    {
+        if (window->mode != completion->CompletionValue) continue;
+        completion_window = window;
+        break;
+    }
+    if (!completion_window)
+    {
+        WARN( "unregistered CoreMessaging completion context %#lx\n",
+              (unsigned long)completion->CompletionValue );
+        return FALSE;
+    }
+
+    completion_lists = (void **)NtCurrentTeb()->Win32ClientInfo[61];
+    if (!completion_lists)
+    {
+        WARN( "CoreMessaging completion-list storage is not initialized\n" );
+        return FALSE;
+    }
+
+    __TRY
+    {
+        void **node = (void **)completion->CompletionKey;
+        void *previous = completion_lists[completion->CompletionValue + 1];
+
+        *node = previous;
+        completion_lists[completion->CompletionValue + 1] = node;
+        if (!previous && source_mode != completion->CompletionValue)
+            NtUserPostMessage( completion_window->hwnd, WM_COREMESSAGING_NOTIFICATION, 1, 0 );
+    }
+    __EXCEPT
+    {
+        WARN( "invalid CoreMessaging completion key %p\n",
+              (void *)completion->CompletionKey );
+        return FALSE;
+    }
+    __ENDTRY
+
+    return TRUE;
+}
+
+void process_coremessaging_completion(void)
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    FILE_IO_COMPLETION_INFORMATION completion;
+    LARGE_INTEGER timeout = {{0}};
+    NTSTATUS status;
+    ULONG count = 0;
+
+    if (!thread_info->core_messaging_iocp) return;
+
+    status = NtRemoveIoCompletionEx( thread_info->core_messaging_iocp, &completion, 1,
+                                     &count, &timeout, FALSE );
+    if (status == STATUS_TIMEOUT) return;
+    if (status || !count)
+    {
+        WARN( "failed to remove CoreMessaging completion, status %#x, count %u\n",
+              status, count );
+        return;
+    }
+
+    if (completion.CompletionValue & 0x80000000) return;
+    link_core_messaging_completion( thread_info, &completion, ~0u );
+}
+
 /***********************************************************************
  *           NtUserDrainThreadCoreMessagingCompletions2 (win32u.@)
  */
 ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
 {
     struct user_thread_info *thread_info = get_user_thread_info();
-    struct core_messaging_window *window, *completion_window, *registered_window = NULL;
+    struct core_messaging_window *window, *registered_window = NULL;
     FILE_IO_COMPLETION_INFORMATION completion;
     LARGE_INTEGER timeout = {{0}};
-    void **completion_lists;
     NTSTATUS status;
     ULONG count;
 
@@ -1223,13 +1328,6 @@ ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
         return FALSE;
     }
 
-    completion_lists = (void **)NtCurrentTeb()->Win32ClientInfo[61];
-    if (!completion_lists)
-    {
-        WARN( "CoreMessaging completion-list storage is not initialized\n" );
-        return TRUE;
-    }
-
     for (;;)
     {
         count = 0;
@@ -1245,45 +1343,9 @@ ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
 
         /* High-bit contexts are win32k's private drain markers and external completions. */
         if (completion.CompletionValue & 0x80000000) return TRUE;
-        if (completion.CompletionValue >= 2)
-        {
-            WARN( "invalid CoreMessaging completion context %#lx\n",
-                  (unsigned long)completion.CompletionValue );
+        if (!link_core_messaging_completion( thread_info, &completion,
+                                             registered_window->mode ))
             return TRUE;
-        }
-
-        completion_window = NULL;
-        LIST_FOR_EACH_ENTRY( window, &thread_info->core_messaging_windows,
-                             struct core_messaging_window, entry )
-        {
-            if (window->mode != completion.CompletionValue) continue;
-            completion_window = window;
-            break;
-        }
-        if (!completion_window)
-        {
-            WARN( "unregistered CoreMessaging completion context %#lx\n",
-                  (unsigned long)completion.CompletionValue );
-            return TRUE;
-        }
-
-        __TRY
-        {
-            void **node = (void **)completion.CompletionKey;
-            void *previous = completion_lists[completion.CompletionValue + 1];
-
-            *node = previous;
-            completion_lists[completion.CompletionValue + 1] = node;
-            if (!previous && registered_window->mode != completion.CompletionValue)
-                NtUserPostMessage( completion_window->hwnd, WM_COREMESSAGING_NOTIFICATION, 1, 0 );
-        }
-        __EXCEPT
-        {
-            WARN( "invalid CoreMessaging completion key %p\n",
-                  (void *)completion.CompletionKey );
-            return TRUE;
-        }
-        __ENDTRY
     }
 }
 

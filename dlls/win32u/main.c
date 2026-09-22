@@ -2027,6 +2027,11 @@ NTSTATUS SYSCALL_API NtUserInitializeClientPfnArrays( const ntuser_client_func_p
     SYSCALL_FUNC( NtUserInitializeClientPfnArrays );
 }
 
+HANDLE SYSCALL_API NtUserInitThreadCoreMessagingIocp( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserInitThreadCoreMessagingIocp );
+}
+
 HANDLE SYSCALL_API NtUserInitThreadCoreMessagingIocp2( HWND hwnd, DWORD *mode )
 {
     SYSCALL_FUNC( NtUserInitThreadCoreMessagingIocp2 );

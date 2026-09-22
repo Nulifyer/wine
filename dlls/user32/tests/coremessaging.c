@@ -16,6 +16,7 @@
 #include "wine/test.h"
 #include "winternl.h"
 
+typedef HANDLE (WINAPI *init_thread_coremessaging_iocp_fn)( HWND );
 typedef HANDLE (WINAPI *init_thread_coremessaging_iocp2_fn)( HWND, DWORD * );
 typedef ULONG_PTR (WINAPI *drain_thread_coremessaging_completions2_fn)( HWND );
 typedef NTSTATUS (WINAPI *nt_set_io_completion_fn)( HANDLE, ULONG_PTR, ULONG_PTR,
@@ -36,6 +37,12 @@ struct core_messaging_completion
     ULONG_PTR local_handle;
 };
 
+struct delayed_post_state
+{
+    HWND hwnd;
+    HANDLE release;
+};
+
 static LRESULT CALLBACK window_proc( HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam )
 {
     return DefWindowProcA( hwnd, message, wparam, lparam );
@@ -53,29 +60,42 @@ static DWORD WINAPI foreign_window_thread( void *context )
     return 0;
 }
 
+static DWORD WINAPI delayed_post_thread( void *context )
+{
+    struct delayed_post_state *state = context;
+
+    if (WaitForSingleObject( state->release, 1000 ) == WAIT_TIMEOUT)
+        PostMessageA( state->hwnd, 0x60, 0xdead, 0xbeef );
+    return 0;
+}
+
 static void test_init_thread_coremessaging_iocp2(void)
 {
+    init_thread_coremessaging_iocp_fn init_legacy;
     init_thread_coremessaging_iocp2_fn init;
     drain_thread_coremessaging_completions2_fn drain;
     nt_set_io_completion_fn set_io_completion;
     struct foreign_window_state foreign = {0};
     struct core_messaging_completion completion1 = {0}, completion2 = {0}, completion3 = {0};
+    struct core_messaging_completion completion4 = {0}, completion5 = {0};
+    struct delayed_post_state delayed_post = {0};
     void *completion_lists[3] = {0};
     WNDCLASSA cls = {0};
-    HANDLE first, second, third, thread;
+    HANDLE first, second, third, thread, delayed_thread;
     ULONG_PTR saved_completion_lists;
     HWND hwnd1, hwnd2, hwnd3, destroyed;
-    DWORD mode, flags, error;
+    DWORD mode, flags, error, wait_ret;
     ULONG_PTR drain_ret;
     NTSTATUS status;
     MSG msg;
     BOOL ret;
 
+    init_legacy = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2612 ));
     init = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2669 ));
     drain = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2670 ));
     set_io_completion = (void *)GetProcAddress( GetModuleHandleA( "ntdll.dll" ),
                                                 "NtSetIoCompletion" );
-    if (!init || !drain)
+    if (!init_legacy || !init || !drain)
     {
         win_skip( "CoreMessaging thread integration exports are not available.\n" );
         return;
@@ -105,11 +125,9 @@ static void test_init_thread_coremessaging_iocp2(void)
     ok( !drain_ret, "Unregistered window returned %Ix.\n", drain_ret );
     ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "Expected error 1400, got %lu.\n", GetLastError() );
 
-    mode = 0xcccccccc;
     SetLastError( 0xdeadbeef );
-    first = init( hwnd1, &mode );
+    first = init_legacy( hwnd1 );
     ok( !!first, "First registration failed, error %lu.\n", GetLastError() );
-    ok( mode == 0, "Expected first mode 0, got %#lx.\n", mode );
     ok( GetLastError() == 0xdeadbeef, "Expected unchanged error, got %lu.\n", GetLastError() );
 
     SetLastError( 0xdeadbeef );
@@ -133,6 +151,18 @@ static void test_init_thread_coremessaging_iocp2(void)
     ok( !second, "Duplicate registration returned %p.\n", second );
     ok( mode == 0xcccccccc, "Duplicate registration changed mode to %#lx.\n", mode );
     ok( GetLastError() == ERROR_INVALID_PARAMETER, "Expected error 87, got %lu.\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    second = init_legacy( hwnd2 );
+    ok( !second, "Second legacy registration returned %p.\n", second );
+    ok( GetLastError() == ERROR_ALREADY_INITIALIZED, "Expected error 1247, got %lu.\n",
+        GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    drain_ret = drain( hwnd2 );
+    ok( !drain_ret, "Failed legacy registration retained window, returned %Ix.\n", drain_ret );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "Expected error 1400, got %lu.\n",
+        GetLastError() );
 
     mode = 0xcccccccc;
     SetLastError( 0xdeadbeef );
@@ -158,6 +188,46 @@ static void test_init_thread_coremessaging_iocp2(void)
     {
         saved_completion_lists = NtCurrentTeb()->Win32ClientInfo[61];
         NtCurrentTeb()->Win32ClientInfo[61] = (ULONG_PTR)completion_lists;
+
+        while (PeekMessageA( &msg, hwnd1, 0x60, 0x60, PM_REMOVE )) {}
+        completion4.local_handle = 0x4444;
+        status = set_io_completion( first, (ULONG_PTR)&completion4, 0,
+                                    STATUS_SUCCESS, 0 );
+        ok( status == STATUS_SUCCESS, "NtSetIoCompletion failed, status %#lx.\n", status );
+        wait_ret = MsgWaitForMultipleObjectsEx( 0, NULL, 1000, QS_POSTMESSAGE, 0 );
+        ok( wait_ret == WAIT_OBJECT_0, "Message wait returned %#lx.\n", wait_ret );
+        ok( completion_lists[1] == &completion4,
+            "Expected completion4 at head, got %p.\n", completion_lists[1] );
+        ok( PeekMessageA( &msg, hwnd1, 0x60, 0x60, PM_REMOVE ),
+            "Expected a CoreMessaging message-wait notification.\n" );
+        ok( msg.wParam == 1 && !msg.lParam, "Unexpected notification parameters %Ix/%Ix.\n",
+            msg.wParam, msg.lParam );
+        completion_lists[1] = NULL;
+
+        while (PeekMessageA( &msg, hwnd1, 0x60, 0x60, PM_REMOVE )) {}
+        completion5.local_handle = 0x5555;
+        status = set_io_completion( first, (ULONG_PTR)&completion5, 0,
+                                    STATUS_SUCCESS, 0 );
+        ok( status == STATUS_SUCCESS, "NtSetIoCompletion failed, status %#lx.\n", status );
+        delayed_post.hwnd = hwnd1;
+        delayed_post.release = CreateEventA( NULL, TRUE, FALSE, NULL );
+        delayed_thread = CreateThread( NULL, 0, delayed_post_thread, &delayed_post, 0, NULL );
+        ok( !!delayed_post.release && !!delayed_thread,
+            "Failed to create delayed post thread, error %lu.\n", GetLastError() );
+        ret = GetMessageA( &msg, hwnd1, 0x60, 0x60 );
+        ok( ret, "GetMessage failed, error %lu.\n", GetLastError() );
+        ok( msg.wParam == 1 && !msg.lParam,
+            "Expected a CoreMessaging GetMessage notification, got %Ix/%Ix.\n",
+            msg.wParam, msg.lParam );
+        ok( completion_lists[1] == &completion5,
+            "Expected completion5 at head, got %p.\n", completion_lists[1] );
+        SetEvent( delayed_post.release );
+        WaitForSingleObject( delayed_thread, INFINITE );
+        CloseHandle( delayed_thread );
+        CloseHandle( delayed_post.release );
+        while (PeekMessageA( &msg, hwnd1, 0x60, 0x60, PM_REMOVE )) {}
+        if (completion_lists[1] != &completion5) drain( hwnd1 );
+        completion_lists[1] = NULL;
 
         completion1.local_handle = 0x1111;
         completion2.local_handle = 0x2222;

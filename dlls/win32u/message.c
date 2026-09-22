@@ -3520,10 +3520,12 @@ static HANDLE normalize_std_handle( HANDLE handle )
 DWORD WINAPI NtUserMsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
                                                 DWORD timeout, DWORD mask, DWORD flags )
 {
+    struct user_thread_info *thread_info = get_user_thread_info();
     HANDLE wait_handles[MAXIMUM_WAIT_OBJECTS];
-    DWORD i;
+    DWORD start_time = NtGetTickCount(), elapsed = 0, ret, i;
+    BOOL core_messaging = !!thread_info->core_messaging_iocp && !(flags & MWMO_WAITALL);
 
-    if (count > MAXIMUM_WAIT_OBJECTS-1)
+    if (count > MAXIMUM_WAIT_OBJECTS - 1 - core_messaging)
     {
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return WAIT_FAILED;
@@ -3531,10 +3533,33 @@ DWORD WINAPI NtUserMsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handl
 
     /* add the queue to the handle list */
     for (i = 0; i < count; i++) wait_handles[i] = normalize_std_handle( handles[i] );
-    wait_handles[count] = get_server_queue_handle();
+    if (!core_messaging)
+    {
+        wait_handles[count] = get_server_queue_handle();
+        return wait_objects( count + 1, wait_handles, timeout,
+                             (flags & MWMO_INPUTAVAILABLE) ? mask : 0, mask, flags );
+    }
 
-    return wait_objects( count+1, wait_handles, timeout,
-                         (flags & MWMO_INPUTAVAILABLE) ? mask : 0, mask, flags );
+    wait_handles[count] = thread_info->core_messaging_iocp;
+    wait_handles[count + 1] = get_server_queue_handle();
+
+    for (;;)
+    {
+        ret = wait_objects( count + 2, wait_handles, timeout - elapsed,
+                            (flags & MWMO_INPUTAVAILABLE) ? mask : 0, mask, flags );
+        if (ret == WAIT_OBJECT_0 + count)
+        {
+            process_coremessaging_completion();
+            if (timeout != INFINITE)
+            {
+                elapsed = NtGetTickCount() - start_time;
+                if (elapsed > timeout) elapsed = timeout;
+            }
+            continue;
+        }
+        if (ret == WAIT_OBJECT_0 + count + 1) return WAIT_OBJECT_0 + count;
+        return ret;
+    }
 }
 
 /***********************************************************************
@@ -3607,6 +3632,7 @@ BOOL WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, U
     int ret;
 
     user_check_not_lock();
+    process_coremessaging_completion();
     check_for_driver_events();
 
     if ((ret = peek_message( &msg, &filter )) <= 0)
@@ -3651,7 +3677,9 @@ BOOL WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, U
  */
 BOOL WINAPI NtUserGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last )
 {
+    struct user_thread_info *thread_info = get_user_thread_info();
     struct peek_message_filter filter = {.hwnd = hwnd, .first = first, .last = last};
+    HANDLE wait_handles[2];
     HANDLE server_queue = get_server_queue_handle();
     unsigned int mask = QS_POSTMESSAGE | QS_SENDMESSAGE;  /* Always selected */
     int ret;
@@ -3672,9 +3700,23 @@ BOOL WINAPI NtUserGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last )
 
     filter.mask = mask;
     filter.flags = PM_REMOVE | (mask << 16);
-    while (!(ret = peek_message( msg, &filter )))
+    for (;;)
     {
-        wait_objects( 1, &server_queue, INFINITE, mask & (QS_SENDMESSAGE | QS_SMRESULT), mask, 0 );
+        process_coremessaging_completion();
+        if ((ret = peek_message( msg, &filter ))) break;
+
+        if (!thread_info->core_messaging_iocp)
+        {
+            wait_objects( 1, &server_queue, INFINITE,
+                          mask & (QS_SENDMESSAGE | QS_SMRESULT), mask, 0 );
+            continue;
+        }
+
+        wait_handles[0] = thread_info->core_messaging_iocp;
+        wait_handles[1] = server_queue;
+        ret = wait_objects( 2, wait_handles, INFINITE,
+                            mask & (QS_SENDMESSAGE | QS_SMRESULT), mask, 0 );
+        if (ret == WAIT_OBJECT_0) process_coremessaging_completion();
     }
     if (ret < 0) return -1;
 

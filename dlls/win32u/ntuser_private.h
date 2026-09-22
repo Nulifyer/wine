@@ -143,6 +143,7 @@ struct user_thread_info
 };
 
 extern struct user_thread_info *get_user_thread_info(void);
+extern void process_coremessaging_completion(void);
 
 struct hook_extra_info
 {

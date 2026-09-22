@@ -119,7 +119,7 @@
 2609 stub -noname GetInteractiveCtrlSupportedWaveforms  # NtUserGetInteractiveCtrlSupportedWaveforms
 2610 stub -noname CompositionInputSinkViewInstanceIdFromPoint  # NtUserCompositionInputSinkViewInstanceIdFromPoint
 2611 stdcall -noname EnableWindowResizeOptimization(long long long) NtUserEnableWindowResizeOptimization
-2612 stub -noname InitThreadCoreMessagingIocp  # NtUserInitThreadCoreMessagingIocp
+2612 stdcall -noname InitThreadCoreMessagingIocp(long) NtUserInitThreadCoreMessagingIocp
 2613 stdcall -noname DrainThreadCoreMessagingCompletions() NtUserDrainThreadCoreMessagingCompletions
 2614 stub -noname GetResizeDCompositionSynchronizationObject  # NtUserGetResizeDCompositionSynchronizationObject
 2615 stub -noname EnableResizeLayoutSynchronization  # NtUserEnableResizeLayoutSynchronization

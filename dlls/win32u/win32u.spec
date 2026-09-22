@@ -1142,7 +1142,7 @@
 @ stub -syscall NtUserInheritWindowMonitor
 @ stub -syscall NtUserInitAnsiOem
 @ stub -syscall NtUserInitTask
-@ stub -syscall NtUserInitThreadCoreMessagingIocp
+@ stdcall -syscall NtUserInitThreadCoreMessagingIocp(long)
 @ stdcall -syscall NtUserInitThreadCoreMessagingIocp2(long ptr)
 @ stdcall -syscall NtUserInitialize(long long)
 @ stdcall -syscall NtUserInitializeClientPfnArrays(ptr ptr ptr ptr)
