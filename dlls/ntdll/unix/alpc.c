@@ -54,13 +54,24 @@ static void trace_message_data( const char *direction, HANDLE port_handle,
 static NTSTATUS validate_message_attributes( const ALPC_MESSAGE_ATTRIBUTES *send,
                                              const ALPC_MESSAGE_ATTRIBUTES *receive )
 {
+    const ALPC_VIEW_ATTR *view;
+
     if ((send && (send->AllocatedAttributes & ~ALPC_MESSAGE_ATTRIBUTE_ALL)) ||
         (receive && (receive->AllocatedAttributes & ~ALPC_MESSAGE_ATTRIBUTE_ALL)))
         return STATUS_NOT_IMPLEMENTED;
     if (send && (send->ValidAttributes & ~send->AllocatedAttributes)) return STATUS_INVALID_PARAMETER;
     if (send && (send->ValidAttributes & ~(ALPC_MESSAGE_CONTEXT_ATTRIBUTE |
+                                           ALPC_MESSAGE_VIEW_ATTRIBUTE |
                                            ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)))
         return STATUS_NOT_IMPLEMENTED;
+    if (send && (send->ValidAttributes & ALPC_MESSAGE_VIEW_ATTRIBUTE))
+    {
+        view = wine_alpc_get_attribute( send, ALPC_MESSAGE_VIEW_ATTRIBUTE );
+        /* An empty view is metadata-only. Resource-bearing views still need
+         * cross-process section mapping and lifetime support. */
+        if (!view || view->SectionHandle || view->ViewBase || view->ViewSize)
+            return STATUS_NOT_IMPLEMENTED;
+    }
     return STATUS_SUCCESS;
 }
 

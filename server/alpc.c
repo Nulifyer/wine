@@ -186,6 +186,7 @@ struct alpc_message
 {
     struct list entry;
     struct alpc_request *request;
+    struct alpc_port *destination; /* weak; queue or accepted receive view */
     struct alpc_message_info info;
     struct token *token; /* owned security capture for this receipt */
     unsigned __int64 work_ticket; /* opaque per-message work-on-behalf receipt */
@@ -893,7 +894,7 @@ static int handle_dwm_session_message( struct alpc_port *port, const struct alpc
     unsigned int response[4];
     data_size_t size = get_req_data_size();
 
-    if (!req->send) return 0;
+    if (!req->send || req->message_id) return 0;
     if (size < sizeof(*message))
     {
         set_error( STATUS_INVALID_PARAMETER );
@@ -991,6 +992,7 @@ static struct alpc_message *new_message( const void *data, data_size_t size, uns
     if (!(message = mem_alloc( sizeof(*message) + size ))) return NULL;
     if (!id && !(id = ++next_message_id)) id = ++next_message_id;
     message->request = NULL;
+    message->destination = NULL;
     message->token = NULL;
     message->work_ticket = 0;
     memset( &message->info, 0, sizeof(message->info) );
@@ -1009,6 +1011,7 @@ static struct alpc_message *new_message( const void *data, data_size_t size, uns
 static void set_message_destination( struct alpc_message *message, struct alpc_port *port,
                                      client_ptr_t message_context )
 {
+    message->destination = port;
     message->info.port_context = port->context;
     message->info.message_context = message_context;
     message->info.sequence = ++port->receive_sequence;
@@ -1408,6 +1411,16 @@ static void free_message_request( struct alpc_request *request )
 
 static struct alpc_port *message_queue( struct alpc_port *endpoint );
 
+static struct alpc_message *find_message( struct alpc_port *port )
+{
+    struct alpc_port *queue = message_queue( port );
+    struct alpc_message *message;
+
+    LIST_FOR_EACH_ENTRY( message, &queue->messages, struct alpc_message, entry )
+        if (queue == port || message->destination == port) return message;
+    return NULL;
+}
+
 /* Canceling an undelivered request retains its queue position. A listener
  * closing returns cancellations to the originating endpoints instead. */
 static struct alpc_message *new_cancellation( struct alpc_request *request )
@@ -1600,13 +1613,12 @@ static void cleanup_thread_message_waits( struct thread *thread )
 }
 
 /* Taking a queued copy is the single transition that grants receive ownership. */
-static struct alpc_message *take_message( struct alpc_port *port )
+static struct alpc_message *take_message( struct alpc_port *queue, struct alpc_message *message )
 {
-    struct alpc_message *message = LIST_ENTRY( list_head( &port->messages ), struct alpc_message, entry );
     if ((message->info.type & 0xff) == ALPC_MESSAGE_TYPE_CONNECTION_REQUEST)
     {
         struct alpc_port *client;
-        LIST_FOR_EACH_ENTRY( client, &port->pending_connections, struct alpc_port, pending_entry )
+        LIST_FOR_EACH_ENTRY( client, &queue->pending_connections, struct alpc_port, pending_entry )
             if (client->connection_id == message->info.id) client->request_delivered = 1;
     }
     if (message->request)
@@ -1621,20 +1633,28 @@ static struct alpc_message *take_message( struct alpc_port *port )
 
 static void dispatch_receives( struct alpc_port *port )
 {
-    while (!list_empty( &port->messages ) && !list_empty( &port->receive_waiters ))
+    struct alpc_port *queue = message_queue( port );
+    struct alpc_message *message;
+
+    while (!list_empty( &port->receive_waiters ) && (message = find_message( port )))
     {
         struct alpc_wait *wait = LIST_ENTRY( list_head( &port->receive_waiters ), struct alpc_wait, receive_entry );
-        struct alpc_message *message = LIST_ENTRY( list_head( &port->messages ), struct alpc_message, entry );
         list_remove( &wait->receive_entry );
         wait->receive_port = NULL;
         wait->info = message->info;
         if (message->info.size > wait->capacity) wait->status = STATUS_BUFFER_TOO_SMALL;
         else
         {
-            wait->reply = take_message( port );
+            wait->reply = take_message( queue, message );
             wait->status = STATUS_SUCCESS;
         }
         signal_sync( wait->sync );
+    }
+    if (queue == port)
+    {
+        struct alpc_port *accepted;
+        LIST_FOR_EACH_ENTRY( accepted, &port->accepted_connections, struct alpc_port, accepted_entry )
+            dispatch_receives( accepted );
     }
 }
 
@@ -1711,6 +1731,28 @@ static void close_message_requests( struct alpc_port *port )
             }
             free_message_request( request );
         }
+    }
+}
+
+static void close_destination_messages( struct alpc_port *port )
+{
+    struct alpc_message *message, *next;
+    struct alpc_port *queue;
+
+    if (!(queue = port->connection_port)) return;
+    LIST_FOR_EACH_ENTRY_SAFE( message, next, &queue->messages, struct alpc_message, entry )
+    {
+        struct alpc_request *request;
+
+        if (message->destination != port) continue;
+        list_remove( &message->entry );
+        if ((request = message->request) && request->message == message)
+        {
+            request->message = NULL;
+            message->request = NULL;
+            free_message_request( request );
+        }
+        free_message( message );
     }
 }
 
@@ -2002,6 +2044,7 @@ static int alpc_port_close_handle( struct object *obj, struct process *process, 
     }
     close_receive_waits( port );
     close_message_requests( port );
+    close_destination_messages( port );
     queue_port_closed( port );
     LIST_FOR_EACH_ENTRY_SAFE( client, next, &port->accepted_connections, struct alpc_port, accepted_entry )
         detach_peer( client );
@@ -2148,7 +2191,7 @@ DECL_HANDLER(alpc_create_port)
 /* The listening-port queue is shared by every duplicate of its handle. */
 DECL_HANDLER(alpc_send_receive)
 {
-    struct alpc_port *port;
+    struct alpc_port *port, *queue;
     struct alpc_message *message;
     data_size_t capacity;
     data_size_t size = get_req_data_size();
@@ -2158,6 +2201,7 @@ DECL_HANDLER(alpc_send_receive)
     if (!get_receive_capacity( req->receive_attributes, &capacity )) return;
     if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
                                                     ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
+    queue = message_queue( port );
     if (port->thread->process != current->process)
     {
         set_error( STATUS_ACCESS_DENIED );
@@ -2192,7 +2236,7 @@ DECL_HANDLER(alpc_send_receive)
         goto done;
     }
     if (!req->receive) goto done;
-    if (list_empty( &port->messages ))
+    if (!(message = find_message( port )))
     {
         if (port->connection_port || !(port->flags & 0x40000))
         {
@@ -2210,7 +2254,6 @@ DECL_HANDLER(alpc_send_receive)
         else set_error( STATUS_UNSUCCESSFUL );
         goto done;
     }
-    message = LIST_ENTRY( list_head( &port->messages ), struct alpc_message, entry );
     reply->info = message->info;
     if (message->info.size > capacity)
     {
@@ -2219,7 +2262,7 @@ DECL_HANDLER(alpc_send_receive)
     }
 
     if (!set_message_reply( message, req->receive_attributes )) goto done;
-    free_message( take_message( port ) );
+    free_message( take_message( queue, message ) );
 
 done:
     if (wait)

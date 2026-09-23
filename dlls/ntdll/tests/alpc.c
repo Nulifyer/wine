@@ -594,36 +594,27 @@ static DWORD WINAPI alpc_connect_thread(void *arg)
     return 0;
 }
 
-static BOOL create_alpc_pair(HANDLE *listener, HANDLE *server, HANDLE *client, void *port_context)
+static BOOL connect_alpc_pair(HANDLE listener, UNICODE_STRING *name, ALPC_PORT_ATTRIBUTES *attr,
+                              HANDLE *server, HANDLE *client, void *port_context)
 {
-    static LONG sequence;
     struct alpc_connect_context context = {0};
     struct alpc_test_frame request = {0};
-    OBJECT_ATTRIBUTES object_attr;
-    WCHAR name[96];
     LARGE_INTEGER zero = {0};
     HANDLE thread = NULL;
     SIZE_T size = sizeof(request);
     NTSTATUS status;
     BOOL ret = FALSE;
 
-    swprintf(name, ARRAY_SIZE(name), L"\\BaseNamedObjects\\winetest_alpc_cancel_%lu_%ld",
-             GetCurrentProcessId(), InterlockedIncrement(&sequence));
-    RtlInitUnicodeString(&context.name, name);
-    init_port_attr(&context.attr, 0x70000, sizeof(request));
-    InitializeObjectAttributes(&object_attr, &context.name, 0, NULL, NULL);
-
-    status = pNtAlpcCreatePort(listener, &object_attr, &context.attr);
-    ok(status == STATUS_SUCCESS, "NtAlpcCreatePort returned %#lx.\n", status);
-    if (status) goto done;
+    context.name = *name;
+    context.attr = *attr;
     thread = CreateThread(NULL, 0, alpc_connect_thread, &context, 0, NULL);
     ok(thread != NULL, "CreateThread failed, error %lu.\n", GetLastError());
     if (!thread) goto done;
-    ok(WaitForSingleObject(*listener, 3000) == WAIT_OBJECT_0, "Listener was not signaled.\n");
-    status = pNtAlpcSendWaitReceivePort(*listener, 0, NULL, NULL, &request.header, &size, NULL, &zero);
+    ok(WaitForSingleObject(listener, 3000) == WAIT_OBJECT_0, "Listener was not signaled.\n");
+    status = pNtAlpcSendWaitReceivePort(listener, 0, NULL, NULL, &request.header, &size, NULL, &zero);
     ok(status == STATUS_SUCCESS, "Connection receive returned %#lx.\n", status);
     if (status) goto done;
-    status = pNtAlpcAcceptConnectPort(server, *listener, 0, NULL, &context.attr, port_context,
+    status = pNtAlpcAcceptConnectPort(server, listener, 0, NULL, &context.attr, port_context,
                                       &request.header, NULL, TRUE);
     ok(status == STATUS_SUCCESS, "NtAlpcAcceptConnectPort returned %#lx.\n", status);
     if (status) goto done;
@@ -637,13 +628,33 @@ static BOOL create_alpc_pair(HANDLE *listener, HANDLE *server, HANDLE *client, v
 done:
     if (thread) CloseHandle(thread);
     if (context.port) CloseHandle(context.port);
-    if (!ret)
-    {
-        if (*server) CloseHandle(*server);
-        if (*listener) CloseHandle(*listener);
-        *server = *listener = NULL;
-    }
+    if (!ret && *server) CloseHandle(*server);
+    if (!ret) *server = NULL;
     return ret;
+}
+
+static BOOL create_alpc_pair(HANDLE *listener, HANDLE *server, HANDLE *client, void *port_context)
+{
+    static LONG sequence;
+    ALPC_PORT_ATTRIBUTES attr;
+    OBJECT_ATTRIBUTES object_attr;
+    UNICODE_STRING name_string;
+    WCHAR name[96];
+    NTSTATUS status;
+
+    swprintf(name, ARRAY_SIZE(name), L"\\BaseNamedObjects\\winetest_alpc_cancel_%lu_%ld",
+             GetCurrentProcessId(), InterlockedIncrement(&sequence));
+    RtlInitUnicodeString(&name_string, name);
+    init_port_attr(&attr, 0x70000, sizeof(struct alpc_test_frame));
+    InitializeObjectAttributes(&object_attr, &name_string, 0, NULL, NULL);
+
+    status = pNtAlpcCreatePort(listener, &object_attr, &attr);
+    ok(status == STATUS_SUCCESS, "NtAlpcCreatePort returned %#lx.\n", status);
+    if (status) return FALSE;
+    if (connect_alpc_pair(*listener, &name_string, &attr, server, client, port_context)) return TRUE;
+    CloseHandle(*listener);
+    *listener = NULL;
+    return FALSE;
 }
 
 static DWORD WINAPI alpc_sender_thread(void *arg)
@@ -658,6 +669,134 @@ static DWORD WINAPI alpc_sender_thread(void *arg)
                                                  &context->received.header, &context->capacity, NULL,
                                                  &context->timeout);
     return 0;
+}
+
+static void test_accepted_port_routing(void)
+{
+    static LONG sequence;
+    ALPC_PORT_ATTRIBUTES attr;
+    struct alpc_test_frame first = {0}, second = {0}, received = {0};
+    OBJECT_ATTRIBUTES object_attr;
+    HANDLE listener = NULL, server1 = NULL, server2 = NULL, client1 = NULL, client2 = NULL;
+    LARGE_INTEGER zero = {0};
+    UNICODE_STRING name_string;
+    WCHAR name[96];
+    SIZE_T size;
+    NTSTATUS status;
+
+    if (!pNtAlpcAcceptConnectPort || !pNtAlpcConnectPort || !pNtAlpcCreatePort ||
+        !pNtAlpcSendWaitReceivePort)
+    {
+        win_skip("Accepted-port routing dependencies are unavailable.\n");
+        return;
+    }
+
+    swprintf(name, ARRAY_SIZE(name), L"\\BaseNamedObjects\\winetest_alpc_route_%lu_%ld",
+             GetCurrentProcessId(), InterlockedIncrement(&sequence));
+    RtlInitUnicodeString(&name_string, name);
+    init_port_attr(&attr, 0x70000, sizeof(first));
+    InitializeObjectAttributes(&object_attr, &name_string, 0, NULL, NULL);
+    status = pNtAlpcCreatePort(&listener, &object_attr, &attr);
+    ok(status == STATUS_SUCCESS, "NtAlpcCreatePort returned %#lx.\n", status);
+    if (status) goto done;
+    if (!connect_alpc_pair(listener, &name_string, &attr, &server1, &client1, (void *)0x1111) ||
+        !connect_alpc_pair(listener, &name_string, &attr, &server2, &client2, (void *)0x2222))
+        goto done;
+
+    first.header.DataLength = second.header.DataLength = 1;
+    first.header.TotalLength = second.header.TotalLength = sizeof(first.header) + 1;
+    first.data[0] = 0x11;
+    second.data[0] = 0x22;
+    status = pNtAlpcSendWaitReceivePort(client1, 0, &first.header, NULL, NULL, NULL, NULL, NULL);
+    ok(status == STATUS_SUCCESS, "First send returned %#lx.\n", status);
+    status = pNtAlpcSendWaitReceivePort(client2, 0, &second.header, NULL, NULL, NULL, NULL, NULL);
+    ok(status == STATUS_SUCCESS, "Second send returned %#lx.\n", status);
+
+    size = sizeof(received);
+    status = pNtAlpcSendWaitReceivePort(server2, 0, NULL, NULL, &received.header, &size, NULL, &zero);
+    ok(status == STATUS_SUCCESS, "Second endpoint receive returned %#lx.\n", status);
+    ok(received.header.DataLength == 1 && received.data[0] == 0x22,
+       "Second endpoint received length %u, payload %#x.\n",
+       received.header.DataLength, received.data[0]);
+    memset(&received, 0, sizeof(received));
+    size = sizeof(received);
+    status = pNtAlpcSendWaitReceivePort(server1, 0, NULL, NULL, &received.header, &size, NULL, &zero);
+    ok(status == STATUS_SUCCESS, "First endpoint receive returned %#lx.\n", status);
+    ok(received.header.DataLength == 1 && received.data[0] == 0x11,
+       "First endpoint received length %u, payload %#x.\n",
+       received.header.DataLength, received.data[0]);
+
+done:
+    if (client2) CloseHandle(client2);
+    if (client1) CloseHandle(client1);
+    if (server2) CloseHandle(server2);
+    if (server1) CloseHandle(server1);
+    if (listener) CloseHandle(listener);
+}
+
+static void test_empty_view_reply(void)
+{
+    union
+    {
+        ULONGLONG align;
+        BYTE bytes[128];
+    } attr_buffer = {0};
+    ALPC_MESSAGE_ATTRIBUTES *attributes = (ALPC_MESSAGE_ATTRIBUTES *)attr_buffer.bytes;
+    struct alpc_sender_context sender = {0};
+    struct alpc_test_frame message = {0};
+    ALPC_VIEW_ATTR *view;
+    HANDLE listener = NULL, server = NULL, client = NULL, thread = NULL;
+    LARGE_INTEGER zero = {0};
+    SIZE_T attr_size, size = sizeof(message);
+    NTSTATUS status;
+
+    if (!pNtAlpcAcceptConnectPort || !pNtAlpcConnectPort || !pNtAlpcCreatePort ||
+        !pNtAlpcSendWaitReceivePort || !pAlpcInitializeMessageAttribute ||
+        !pAlpcGetMessageAttribute)
+    {
+        win_skip("Empty-view reply dependencies are unavailable.\n");
+        return;
+    }
+
+    if (!create_alpc_pair(&listener, &server, &client, (void *)0x12345678)) goto done;
+    sender.port = client;
+    sender.timeout.QuadPart = -100000000;
+    thread = CreateThread(NULL, 0, alpc_sender_thread, &sender, 0, NULL);
+    ok(thread != NULL, "CreateThread failed, error %lu.\n", GetLastError());
+    if (!thread) goto done;
+    ok(WaitForSingleObject(listener, 3000) == WAIT_OBJECT_0, "Listener was not signaled.\n");
+    status = pNtAlpcSendWaitReceivePort(listener, 0, NULL, NULL, &message.header, &size, NULL, &zero);
+    ok(status == STATUS_SUCCESS, "Request receive returned %#lx.\n", status);
+    if (status) goto done;
+
+    status = pAlpcInitializeMessageAttribute(ALPC_MESSAGE_VIEW_ATTRIBUTE, attributes,
+                                              sizeof(attr_buffer), &attr_size);
+    ok(status == STATUS_SUCCESS, "AlpcInitializeMessageAttribute returned %#lx.\n", status);
+    if (status) goto done;
+    attributes->ValidAttributes = ALPC_MESSAGE_VIEW_ATTRIBUTE;
+    view = pAlpcGetMessageAttribute(attributes, ALPC_MESSAGE_VIEW_ATTRIBUTE);
+    ok(view != NULL, "AlpcGetMessageAttribute returned NULL.\n");
+    if (!view) goto done;
+    memset(view, 0, sizeof(*view));
+    view->Flags = 0x10000;
+    message.data[0] = 0x24;
+    status = pNtAlpcSendWaitReceivePort(listener, ALPC_MSGFLG_REPLY_MESSAGE,
+                                        &message.header, attributes, NULL, NULL, NULL, NULL);
+    ok(status == STATUS_SUCCESS, "Empty-view reply returned %#lx.\n", status);
+    ok(WaitForSingleObject(thread, 5000) == WAIT_OBJECT_0, "Sender did not receive reply.\n");
+    ok(sender.status == STATUS_SUCCESS, "Synchronous sender returned %#lx.\n", sender.status);
+    ok(sender.received.header.MessageId == message.header.MessageId,
+       "Reply message id %lu, request id %lu.\n",
+       sender.received.header.MessageId, message.header.MessageId);
+    ok(sender.received.header.DataLength == 1, "Reply data length %u.\n",
+       sender.received.header.DataLength);
+    ok(sender.received.data[0] == 0x24, "Reply data %#x.\n", sender.received.data[0]);
+
+done:
+    if (thread) CloseHandle(thread);
+    if (client) CloseHandle(client);
+    if (server) CloseHandle(server);
+    if (listener) CloseHandle(listener);
 }
 
 static BOOL receive_cancel_request(HANDLE listener, struct alpc_test_frame *message,
@@ -781,6 +920,8 @@ START_TEST(alpc)
     test_NtAlpcCreatePort();
     test_NtAlpcQueryInformation();
     test_reply_receive_validation();
+    test_accepted_port_routing();
+    test_empty_view_reply();
     test_NtAlpcCancelMessage();
     test_power_port();
 }
