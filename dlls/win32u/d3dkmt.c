@@ -617,6 +617,10 @@ NTSTATUS WINAPI NtGdiDdDDIEscape( const D3DKMT_ESCAPE *desc )
         return STATUS_SUCCESS;
     }
 
+    case D3DKMT_ESCAPE_DIAGNOSTICS:
+        FIXME( "diagnostics escape is not supported\n" );
+        return STATUS_NOT_SUPPORTED;
+
     default:
         FIXME( "(%p): stub\n", desc );
         return STATUS_NO_MEMORY;

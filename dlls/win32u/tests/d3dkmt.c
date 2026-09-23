@@ -7305,6 +7305,7 @@ static void test_escape(void)
 {
     D3DKMT_ESCAPE escape = {0};
     RECT rect = {0};
+    UINT diagnostics_size = 0;
 
     todo_wine ok_nt( STATUS_INVALID_PARAMETER, D3DKMTEscape( &escape ) );
 
@@ -7317,6 +7318,12 @@ static void test_escape(void)
     escape.pPrivateDriverData = (void *)&rect;
     escape.hContext = 0x1eadbeed;
     ok_nt( STATUS_INVALID_PARAMETER, D3DKMTEscape( &escape ) );
+
+    memset( &escape, 0, sizeof(escape) );
+    escape.Type = D3DKMT_ESCAPE_DIAGNOSTICS;
+    escape.pPrivateDriverData = &diagnostics_size;
+    escape.PrivateDriverDataSize = sizeof(diagnostics_size);
+    ok_nt( STATUS_NOT_SUPPORTED, D3DKMTEscape( &escape ) );
 }
 
 static void test_process_scheduling_priority_class(void)
