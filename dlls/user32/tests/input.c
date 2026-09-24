@@ -440,6 +440,8 @@ static HKL (WINAPI *pLoadKeyboardLayoutEx)(HKL, const WCHAR *, UINT);
 static INT (WINAPI *pScheduleDispatchNotification)(HWND);
 static UINT_PTR (WINAPI *pDelegateInput)(void *, void *, void *, void *, void *, void *);
 static void (WINAPI *pUndelegateInput)(void *, void *);
+static BOOL (WINAPI *pRegisterNaturalInputHandler)(void);
+static BOOL (WINAPI *pGetHimetricScaleFactorFromPixelLocation)(HANDLE, POINT, UINT *, UINT *);
 
 /**********************adapted from input.c **********************************/
 
@@ -450,6 +452,8 @@ static void init_function_pointers(void)
     HMODULE hdll = GetModuleHandleA("user32");
 
     pScheduleDispatchNotification = (void *)GetProcAddress(hdll, (LPCSTR)2582);
+    pRegisterNaturalInputHandler = (void *)GetProcAddress(hdll, (LPCSTR)2518);
+    pGetHimetricScaleFactorFromPixelLocation = (void *)GetProcAddress(hdll, (LPCSTR)2560);
 
 #define GET_PROC(func) \
     if (!(p ## func = (void*)GetProcAddress(hdll, #func))) \
@@ -6888,6 +6892,58 @@ static void test_DelegateInput(void)
     pUndelegateInput(0, 0);
 }
 
+static void test_RegisterNaturalInputHandler(void)
+{
+    BOOL first, second;
+
+    if (!pRegisterNaturalInputHandler)
+    {
+        win_skip("RegisterNaturalInputHandler is unavailable.\n");
+        return;
+    }
+
+    first = pRegisterNaturalInputHandler();
+    second = pRegisterNaturalInputHandler();
+    ok(first == second, "Expected stable result, got %d then %d.\n", first, second);
+}
+
+static void test_GetHimetricScaleFactorFromPixelLocation(void)
+{
+    POINT location = {100, 100};
+    UINT scale_x, scale_y;
+    BOOL ret;
+
+    if (!pGetHimetricScaleFactorFromPixelLocation)
+    {
+        win_skip("GetHimetricScaleFactorFromPixelLocation is unavailable.\n");
+        return;
+    }
+
+    scale_x = 0xdeadbeef;
+    scale_y = 0xdeadbeef;
+    SetLastError( 0xdeadbeef );
+    ret = pGetHimetricScaleFactorFromPixelLocation( NULL, location, &scale_x, &scale_y );
+    ok(!ret, "Expected failure for a null device.\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Got error %lu.\n", GetLastError());
+    ok(scale_x == 0xdeadbeef && scale_y == 0xdeadbeef,
+       "Expected untouched scales, got %u, %u.\n", scale_x, scale_y);
+
+    SetLastError( 0xdeadbeef );
+    ret = pGetHimetricScaleFactorFromPixelLocation( (HANDLE)1, location, NULL, &scale_y );
+    ok(!ret, "Expected failure for a null X scale.\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Got error %lu.\n", GetLastError());
+
+    if (GetSystemMetrics( SM_CMONITORS ) == 1)
+    {
+        scale_x = 0xdeadbeef;
+        scale_y = 0xdeadbeef;
+        ret = pGetHimetricScaleFactorFromPixelLocation( (HANDLE)1, location, &scale_x, &scale_y );
+        ok(ret, "Expected success, error %lu.\n", GetLastError());
+        ok(scale_x == 1 && scale_y == 1, "Expected identity scales, got %u, %u.\n",
+           scale_x, scale_y);
+    }
+}
+
 START_TEST(input)
 {
     char **argv;
@@ -6934,6 +6990,8 @@ START_TEST(input)
     test_DefRawInputProc();
     test_ScheduleDispatchNotification();
     test_DelegateInput();
+    test_RegisterNaturalInputHandler();
+    test_GetHimetricScaleFactorFromPixelLocation();
 
     if(pGetMouseMovePointsEx)
         test_GetMouseMovePointsEx( argv );

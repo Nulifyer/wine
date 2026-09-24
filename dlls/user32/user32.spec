@@ -29,7 +29,7 @@
 2515 stub @
 2516 stub -noname DelegateCapturePointers  # NtUserDelegateCapturePointers
 2517 stub -noname GetTouchValidationStatus  # NtUserGetTouchValidationStatus
-2518 stub @
+2518 stdcall -noname RegisterNaturalInputHandler()
 2519 stdcall -noname EnableMouseInputForCursorSuppression(long) NtUserEnableMouseInputForCursorSuppression
 2520 stub -noname IsMouseInputEnabled  # NtUserIsMouseInputEnabled
 2521 stdcall GetProcessUIContextInformation(ptr ptr) NtUserGetProcessUIContextInformation
@@ -71,7 +71,7 @@
 2557 stub @
 2558 stub @
 2559 stub -noname GetOwnerTransformedMonitorRect  # NtUserGetOwnerTransformedMonitorRect
-2560 stub @
+2560 stdcall -noname GetHimetricScaleFactorFromPixelLocation(long int64 ptr ptr)
 2561 stdcall -noname EnableMouseInPointerForThread() NtUserEnableMouseInPointerForThread
 
 2563 stub -noname ClearForeground  # NtUserClearForeground

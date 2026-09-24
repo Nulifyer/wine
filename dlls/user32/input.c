@@ -32,6 +32,79 @@
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
 
+typedef LRESULT (WINAPI *natural_input_handler)( HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam );
+
+static INIT_ONCE natural_input_handler_once = INIT_ONCE_STATIC_INIT;
+static natural_input_handler natural_input_handler_proc;
+static HMODULE natural_input_handler_module;
+
+static BOOL CALLBACK load_natural_input_handler( INIT_ONCE *once, void *param, void **context )
+{
+    static const WCHAR key_name[] = L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
+    static const WCHAR value_name[] = L"NaturalInputHandler";
+    WCHAR module_name[MAX_PATH], path[MAX_PATH];
+    DWORD module_name_size = sizeof(module_name);
+    UINT path_len;
+
+    if (RegGetValueW( HKEY_LOCAL_MACHINE, key_name, value_name, RRF_RT_REG_SZ, NULL,
+                      module_name, &module_name_size ))
+        return TRUE;
+
+    path_len = GetSystemDirectoryW( path, ARRAY_SIZE(path) );
+    if (!path_len || path_len >= ARRAY_SIZE(path) ||
+        path_len + 1 + lstrlenW(module_name) >= ARRAY_SIZE(path))
+        return TRUE;
+
+    path[path_len++] = '\\';
+    lstrcpyW( path + path_len, module_name );
+    if (!(natural_input_handler_module = LoadLibraryExW( path, NULL, 0 ))) return TRUE;
+
+    natural_input_handler_proc = (void *)GetProcAddress( natural_input_handler_module,
+                                                         "DefaultInputHandler" );
+    if (!natural_input_handler_proc)
+    {
+        FreeLibrary( natural_input_handler_module );
+        natural_input_handler_module = NULL;
+    }
+    return TRUE;
+}
+
+/***********************************************************************
+ *           RegisterNaturalInputHandler  (USER32.2518)
+ */
+BOOL WINAPI RegisterNaturalInputHandler(void)
+{
+    InitOnceExecuteOnce( &natural_input_handler_once, load_natural_input_handler, NULL, NULL );
+    return natural_input_handler_proc != NULL;
+}
+
+/***********************************************************************
+ *           GetHimetricScaleFactorFromPixelLocation  (USER32.2560)
+ *
+ * Windows handles the common single-monitor case in user32 and returns an
+ * identity ratio.  Its win32k path is only needed to map pointer devices in
+ * a mixed-monitor coordinate space.
+ */
+BOOL WINAPI GetHimetricScaleFactorFromPixelLocation( HANDLE device, POINT location,
+                                                     UINT *scale_x, UINT *scale_y )
+{
+    if (!device || !scale_x || !scale_y)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    if (GetSystemMetrics( SM_CMONITORS ) > 1 &&
+        GetAwarenessFromDpiAwarenessContext( GetThreadDpiAwarenessContext() ) !=
+            DPI_AWARENESS_PER_MONITOR_AWARE)
+        FIXME( "mixed-monitor pointer-device mapping is not implemented, device %p, location %s\n",
+               device, wine_dbgstr_point( &location ) );
+
+    *scale_x = 1;
+    *scale_y = 1;
+    return TRUE;
+}
+
 /***********************************************************************
  *           get_locale_kbd_layout
  */
