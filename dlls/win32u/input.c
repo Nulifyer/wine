@@ -1060,6 +1060,9 @@ static BOOL get_shared_queue_bits( UINT *wake_bits, UINT *changed_bits )
     return TRUE;
 }
 
+static ULONG_PTR drain_thread_coremessaging_completions( HWND hwnd, BOOL legacy,
+                                                         DWORD source_mode );
+
 /***********************************************************************
  *           NtUserGetQueueStatus (win32u.@)
  */
@@ -1074,6 +1077,9 @@ DWORD WINAPI NtUserGetQueueStatus( UINT flags )
     }
 
     check_for_events( flags );
+
+    if (get_user_thread_info()->core_messaging_iocp && (flags & QS_POSTMESSAGE))
+        drain_thread_coremessaging_completions( NULL, TRUE, ~0u );
 
     if (get_shared_queue_bits( &wake_bits, &changed_bits ) && !(changed_bits & flags))
         ret = MAKELONG( changed_bits & flags, wake_bits & flags );
@@ -1210,14 +1216,7 @@ HANDLE WINAPI NtUserInitThreadCoreMessagingIocp( HWND hwnd )
  */
 ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions(void)
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
-
-    if (!thread_info->core_messaging_iocp)
-    {
-        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
-        return FALSE;
-    }
-    return TRUE;
+    return drain_thread_coremessaging_completions( NULL, TRUE, 0 );
 }
 
 static BOOL link_core_messaging_completion( struct user_thread_info *thread_info,
@@ -1300,10 +1299,8 @@ void process_coremessaging_completion(void)
     link_core_messaging_completion( thread_info, &completion, ~0u );
 }
 
-/***********************************************************************
- *           NtUserDrainThreadCoreMessagingCompletions2 (win32u.@)
- */
-ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
+static ULONG_PTR drain_thread_coremessaging_completions( HWND hwnd, BOOL legacy,
+                                                         DWORD source_mode )
 {
     struct user_thread_info *thread_info = get_user_thread_info();
     struct core_messaging_window *window, *registered_window = NULL;
@@ -1315,7 +1312,7 @@ ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
     LIST_FOR_EACH_ENTRY( window, &thread_info->core_messaging_windows,
                          struct core_messaging_window, entry )
     {
-        if (window->hwnd == hwnd)
+        if (legacy || window->hwnd == hwnd)
         {
             registered_window = window;
             break;
@@ -1324,8 +1321,17 @@ ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
 
     if (!registered_window)
     {
-        RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+        RtlSetLastWin32Error( legacy ? ERROR_ACCESS_DENIED : ERROR_INVALID_WINDOW_HANDLE );
         return FALSE;
+    }
+    if (!legacy) source_mode = registered_window->mode;
+
+    status = NtSetIoCompletion( thread_info->core_messaging_iocp, 0, 0x80000001,
+                                STATUS_SUCCESS, 0 );
+    if (status)
+    {
+        WARN( "failed to queue CoreMessaging drain marker, status %#x\n", status );
+        return TRUE;
     }
 
     for (;;)
@@ -1343,10 +1349,17 @@ ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
 
         /* High-bit contexts are win32k's private drain markers and external completions. */
         if (completion.CompletionValue & 0x80000000) return TRUE;
-        if (!link_core_messaging_completion( thread_info, &completion,
-                                             registered_window->mode ))
+        if (!link_core_messaging_completion( thread_info, &completion, source_mode ))
             return TRUE;
     }
+}
+
+/***********************************************************************
+ *           NtUserDrainThreadCoreMessagingCompletions2 (win32u.@)
+ */
+ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
+{
+    return drain_thread_coremessaging_completions( hwnd, FALSE, 0 );
 }
 
 void destroy_thread_core_messaging(void)

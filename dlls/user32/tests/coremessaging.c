@@ -18,9 +18,15 @@
 
 typedef HANDLE (WINAPI *init_thread_coremessaging_iocp_fn)( HWND );
 typedef HANDLE (WINAPI *init_thread_coremessaging_iocp2_fn)( HWND, DWORD * );
+typedef ULONG_PTR (WINAPI *drain_thread_coremessaging_completions_fn)(void);
 typedef ULONG_PTR (WINAPI *drain_thread_coremessaging_completions2_fn)( HWND );
 typedef NTSTATUS (WINAPI *nt_set_io_completion_fn)( HANDLE, ULONG_PTR, ULONG_PTR,
                                                     NTSTATUS, ULONG_PTR );
+typedef NTSTATUS (WINAPI *nt_create_wait_completion_packet_fn)( HANDLE *, ACCESS_MASK,
+                                                                OBJECT_ATTRIBUTES * );
+typedef NTSTATUS (WINAPI *nt_associate_wait_completion_packet_fn)( HANDLE, HANDLE, HANDLE,
+                                                                   void *, void *, NTSTATUS,
+                                                                   ULONG_PTR, BOOLEAN * );
 
 static const char window_class[] = "CoreMessagingTestWindow";
 
@@ -73,18 +79,21 @@ static void test_init_thread_coremessaging_iocp2(void)
 {
     init_thread_coremessaging_iocp_fn init_legacy;
     init_thread_coremessaging_iocp2_fn init;
+    drain_thread_coremessaging_completions_fn drain_legacy;
     drain_thread_coremessaging_completions2_fn drain;
     nt_set_io_completion_fn set_io_completion;
+    nt_create_wait_completion_packet_fn create_wait_completion_packet;
+    nt_associate_wait_completion_packet_fn associate_wait_completion_packet;
     struct foreign_window_state foreign = {0};
     struct core_messaging_completion completion1 = {0}, completion2 = {0}, completion3 = {0};
     struct core_messaging_completion completion4 = {0}, completion5 = {0};
     struct delayed_post_state delayed_post = {0};
     void *completion_lists[3] = {0};
     WNDCLASSA cls = {0};
-    HANDLE first, second, third, thread, delayed_thread;
+    HANDLE first, second, third, thread, delayed_thread, packet, timer;
     ULONG_PTR saved_completion_lists;
     HWND hwnd1, hwnd2, hwnd3, destroyed;
-    DWORD mode, flags, error, wait_ret;
+    DWORD mode, flags, error, wait_ret, queue_status;
     ULONG_PTR drain_ret;
     NTSTATUS status;
     MSG msg;
@@ -92,10 +101,15 @@ static void test_init_thread_coremessaging_iocp2(void)
 
     init_legacy = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2612 ));
     init = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2669 ));
+    drain_legacy = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2613 ));
     drain = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ), MAKEINTRESOURCEA( 2670 ));
     set_io_completion = (void *)GetProcAddress( GetModuleHandleA( "ntdll.dll" ),
                                                 "NtSetIoCompletion" );
-    if (!init_legacy || !init || !drain)
+    create_wait_completion_packet = (void *)GetProcAddress( GetModuleHandleA( "ntdll.dll" ),
+                                                            "NtCreateWaitCompletionPacket" );
+    associate_wait_completion_packet = (void *)GetProcAddress( GetModuleHandleA( "ntdll.dll" ),
+                                                               "NtAssociateWaitCompletionPacket" );
+    if (!init_legacy || !init || !drain_legacy || !drain)
     {
         win_skip( "CoreMessaging thread integration exports are not available.\n" );
         return;
@@ -114,6 +128,28 @@ static void test_init_thread_coremessaging_iocp2(void)
                              HWND_MESSAGE, NULL, cls.hInstance, NULL );
     ok( !!hwnd1 && !!hwnd2 && !!hwnd3, "Failed to create test windows, error %lu.\n",
         GetLastError() );
+
+    while (PeekMessageA( &msg, hwnd1, WM_APP + 0x60, WM_APP + 0x60, PM_REMOVE )) {}
+    while (PeekMessageA( &msg, hwnd2, WM_APP + 0x60, WM_APP + 0x60, PM_REMOVE )) {}
+    GetQueueStatus( QS_POSTMESSAGE | QS_ALLPOSTMESSAGE );
+    ok( PostMessageA( hwnd2, WM_APP + 0x60, 0x666, 0 ), "Failed to post test message.\n" );
+    ret = PeekMessageA( &msg, hwnd1, 0, 0, PM_REMOVE | PM_NOYIELD );
+    ok( !ret, "Window-filtered peek unexpectedly returned message %#x for %p.\n",
+        msg.message, msg.hwnd );
+    queue_status = GetQueueStatus( QS_POSTMESSAGE | QS_ALLPOSTMESSAGE );
+    ok( HIWORD(queue_status) == (QS_POSTMESSAGE | QS_ALLPOSTMESSAGE),
+        "Expected unchanged posted-message status, got %#lx.\n", queue_status );
+    ok( !LOWORD(queue_status), "Expected cleared new-message status, got %#lx.\n", queue_status );
+    ret = PeekMessageA( &msg, hwnd2, WM_APP + 0x60, WM_APP + 0x60,
+                        PM_REMOVE | PM_NOYIELD );
+    ok( ret && msg.wParam == 0x666,
+        "Expected retained test message, got %d message %#x parameters %Ix/%Ix.\n",
+        ret, msg.message, msg.wParam, msg.lParam );
+
+    SetLastError( 0xdeadbeef );
+    drain_ret = drain_legacy();
+    ok( !drain_ret, "Unregistered legacy drain returned %Ix.\n", drain_ret );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "Expected error 5, got %lu.\n", GetLastError() );
 
     SetLastError( 0xdeadbeef );
     drain_ret = drain( NULL );
@@ -204,6 +240,54 @@ static void test_init_thread_coremessaging_iocp2(void)
             msg.wParam, msg.lParam );
         completion_lists[1] = NULL;
 
+        if (create_wait_completion_packet && associate_wait_completion_packet)
+        {
+            OBJECT_ATTRIBUTES attr;
+            LARGE_INTEGER due = {{0}};
+            BOOLEAN already_signaled;
+            unsigned int cycle;
+
+            InitializeObjectAttributes( &attr, NULL, 0, NULL, NULL );
+            packet = NULL;
+            status = create_wait_completion_packet( &packet, GENERIC_ALL, &attr );
+            ok( status == STATUS_SUCCESS, "NtCreateWaitCompletionPacket failed, status %#lx.\n",
+                status );
+            timer = CreateWaitableTimerExW( NULL, NULL, CREATE_WAITABLE_TIMER_MANUAL_RESET,
+                                            TIMER_ALL_ACCESS );
+            ok( !!timer, "CreateWaitableTimerExW failed, error %lu.\n", GetLastError() );
+
+            for (cycle = 0; packet && timer && cycle < 2; ++cycle)
+            {
+                completion4.next = NULL;
+                completion4.local_handle = 0x4444 + cycle;
+                already_signaled = 0xcc;
+                status = associate_wait_completion_packet( packet, first, timer,
+                                                            &completion4, 0,
+                                                            STATUS_SUCCESS, cycle,
+                                                            &already_signaled );
+                ok( status == STATUS_SUCCESS,
+                    "Cycle %u NtAssociateWaitCompletionPacket failed, status %#lx.\n",
+                    cycle, status );
+                ok( already_signaled == (cycle != 0),
+                    "Cycle %u returned already-signaled %u.\n", cycle, already_signaled );
+                ret = SetWaitableTimer( timer, &due, 0, NULL, NULL, FALSE );
+                ok( ret, "Cycle %u SetWaitableTimer failed, error %lu.\n", cycle,
+                    GetLastError() );
+                wait_ret = MsgWaitForMultipleObjectsEx( 0, NULL, 1000, QS_POSTMESSAGE, 0 );
+                ok( wait_ret == WAIT_OBJECT_0, "Cycle %u message wait returned %#lx.\n",
+                    cycle, wait_ret );
+                ok( completion_lists[1] == &completion4,
+                    "Cycle %u expected timer completion at head, got %p.\n",
+                    cycle, completion_lists[1] );
+                ok( PeekMessageA( &msg, hwnd1, 0x60, 0x60, PM_REMOVE ),
+                    "Cycle %u expected a CoreMessaging notification.\n", cycle );
+                completion_lists[1] = NULL;
+            }
+            if (timer) CloseHandle( timer );
+            if (packet) CloseHandle( packet );
+        }
+        else win_skip( "Wait completion packet exports are not available.\n" );
+
         while (PeekMessageA( &msg, hwnd1, 0x60, 0x60, PM_REMOVE )) {}
         completion5.local_handle = 0x5555;
         status = set_io_completion( first, (ULONG_PTR)&completion5, 0,
@@ -239,6 +323,42 @@ static void test_init_thread_coremessaging_iocp2(void)
         ok( status == STATUS_SUCCESS, "NtSetIoCompletion failed, status %#lx.\n", status );
         drain_ret = drain( hwnd1 );
         ok( drain_ret == TRUE, "Completion drain returned %Ix.\n", drain_ret );
+        ok( completion_lists[1] == &completion2, "Expected completion2 at head, got %p.\n",
+            completion_lists[1] );
+        ok( completion2.next == &completion1, "Expected completion1 next, got %p.\n",
+            completion2.next );
+        ok( !completion1.next, "Expected a null tail, got %p.\n", completion1.next );
+        completion_lists[1] = NULL;
+
+        while (PeekMessageA( &msg, hwnd1, 0x60, 0x60, PM_REMOVE )) {}
+        completion1.next = NULL;
+        status = set_io_completion( first, (ULONG_PTR)&completion1, 0,
+                                    STATUS_SUCCESS, 0 );
+        ok( status == STATUS_SUCCESS, "NtSetIoCompletion failed, status %#lx.\n", status );
+        GetQueueStatus( QS_POSTMESSAGE );
+        ok( completion_lists[1] == &completion1,
+            "Expected queue-status completion at head, got %p.\n", completion_lists[1] );
+        ok( !completion1.next, "Expected a null queue-status tail, got %p.\n",
+            completion1.next );
+        ok( PeekMessageA( &msg, hwnd1, 0x60, 0x60, PM_REMOVE ),
+            "Expected a queue-status CoreMessaging notification.\n" );
+        ok( msg.wParam == 1 && !msg.lParam, "Unexpected notification parameters %Ix/%Ix.\n",
+            msg.wParam, msg.lParam );
+        completion_lists[1] = NULL;
+
+        completion1.next = NULL;
+        completion2.next = NULL;
+        status = set_io_completion( first, (ULONG_PTR)&completion1, 0,
+                                    STATUS_SUCCESS, 0 );
+        ok( status == STATUS_SUCCESS, "NtSetIoCompletion failed, status %#lx.\n", status );
+        status = set_io_completion( first, (ULONG_PTR)&completion2, 0,
+                                    STATUS_SUCCESS, 0 );
+        ok( status == STATUS_SUCCESS, "NtSetIoCompletion failed, status %#lx.\n", status );
+        SetLastError( 0xdeadbeef );
+        drain_ret = drain_legacy();
+        ok( drain_ret == TRUE, "Legacy completion drain returned %Ix.\n", drain_ret );
+        ok( GetLastError() == 0xdeadbeef, "Expected unchanged error, got %lu.\n",
+            GetLastError() );
         ok( completion_lists[1] == &completion2, "Expected completion2 at head, got %p.\n",
             completion_lists[1] );
         ok( completion2.next == &completion1, "Expected completion1 next, got %p.\n",
