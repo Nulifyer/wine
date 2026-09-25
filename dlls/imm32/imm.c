@@ -22,6 +22,7 @@
 #define COBJMACROS
 #include "initguid.h"
 #include "imm_private.h"
+#include "msctf.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(imm);
 
@@ -78,6 +79,10 @@ struct ime
 
 static HRESULT (WINAPI *pCoRevokeInitializeSpy)(ULARGE_INTEGER cookie);
 static void (WINAPI *pCoUninitialize)(void);
+static const IInitializeSpyVtbl InitializeSpyVtbl;
+static HRESULT activate_or_deactivate_tim( BOOL activate, DWORD reason, BOOL load_msctf );
+static BOOL can_uninitialize_tim(void);
+static void cleanup_private_messages(void);
 
 struct imc
 {
@@ -105,7 +110,14 @@ struct coinit_spy
         IMM_APT_CAN_FREE = 0x4,
         IMM_APT_BROKEN = 0x8
     } apt_flags;
+    LONG coinit_skip_count;
+    LONG skipped_coinit_count;
+    BOOL cicero_started;
+    BOOL thread_mgr_created;
+    BOOL ime_on_protected_code;
 };
+
+#define TF_TMAE_PRIVATE_SYSTEM 0x80000000
 
 static CRITICAL_SECTION ime_cs;
 static CRITICAL_SECTION_DEBUG ime_cs_debug =
@@ -254,23 +266,51 @@ static struct coinit_spy *get_thread_coinit_spy(void)
     return (struct coinit_spy *)(UINT_PTR)NtUserGetThreadInfo()->client_imm;
 }
 
+static struct coinit_spy *create_thread_coinit_spy(void)
+{
+    struct coinit_spy *spy;
+
+    if ((spy = get_thread_coinit_spy())) return spy;
+    if (!(spy = calloc( 1, sizeof(*spy) ))) return NULL;
+
+    spy->IInitializeSpy_iface.lpVtbl = &InitializeSpyVtbl;
+    spy->ref = 1;
+    NtUserGetThreadInfo()->client_imm = (UINT_PTR)spy;
+    return spy;
+}
+
 static void imm_couninit_thread(BOOL cleanup)
 {
     struct coinit_spy *spy;
 
     TRACE("implicit COM deinitialization\n");
 
-    if (!(spy = get_thread_coinit_spy()) || (spy->apt_flags & IMM_APT_BROKEN))
-        return;
+    if (!(spy = get_thread_coinit_spy())) return;
 
-    if (cleanup && spy->cookie.QuadPart)
+    if (spy->apt_flags & IMM_APT_BROKEN)
     {
-        pCoRevokeInitializeSpy(spy->cookie);
-        spy->cookie.QuadPart = 0;
+        if (cleanup)
+        {
+            if (spy->cookie.QuadPart)
+            {
+                pCoRevokeInitializeSpy(spy->cookie);
+                spy->cookie.QuadPart = 0;
+            }
+            spy->apt_flags = 0;
+        }
+        return;
     }
 
     if (!(spy->apt_flags & IMM_APT_INIT))
+    {
+        if (cleanup && spy->cookie.QuadPart)
+        {
+            pCoRevokeInitializeSpy(spy->cookie);
+            spy->cookie.QuadPart = 0;
+            spy->apt_flags = 0;
+        }
         return;
+    }
     spy->apt_flags &= ~IMM_APT_INIT;
 
     if (spy->apt_flags & IMM_APT_CREATED)
@@ -280,7 +320,14 @@ static void imm_couninit_thread(BOOL cleanup)
             pCoUninitialize();
     }
     if (cleanup)
+    {
+        if (spy->cookie.QuadPart)
+        {
+            pCoRevokeInitializeSpy(spy->cookie);
+            spy->cookie.QuadPart = 0;
+        }
         spy->apt_flags = 0;
+    }
 }
 
 static inline struct coinit_spy *impl_from_IInitializeSpy(IInitializeSpy *iface)
@@ -324,12 +371,18 @@ static HRESULT WINAPI InitializeSpy_PreInitialize(IInitializeSpy *iface,
         DWORD coinit, DWORD refs)
 {
     struct coinit_spy *spy = impl_from_IInitializeSpy(iface);
+    LONG skipped = spy->skipped_coinit_count;
+    BOOL recreate_tim = FALSE;
 
+    if (spy->coinit_skip_count) ++spy->skipped_coinit_count;
     if ((spy->apt_flags & IMM_APT_CREATED) &&
-            !(coinit & COINIT_APARTMENTTHREADED) && refs == 1)
+            !(coinit & COINIT_APARTMENTTHREADED) && refs == skipped + 1)
     {
+        recreate_tim = spy->thread_mgr_created;
+        if (recreate_tim) recreate_tim = SUCCEEDED(activate_or_deactivate_tim( FALSE, 0, FALSE ));
         imm_couninit_thread(TRUE);
         spy->apt_flags |= IMM_APT_BROKEN;
+        if (recreate_tim) activate_or_deactivate_tim( TRUE, 3, TRUE );
     }
     return S_OK;
 }
@@ -339,7 +392,7 @@ static HRESULT WINAPI InitializeSpy_PostInitialize(IInitializeSpy *iface,
 {
     struct coinit_spy *spy = impl_from_IInitializeSpy(iface);
 
-    if ((spy->apt_flags & IMM_APT_CREATED) && hr == S_FALSE && refs == 2)
+    if ((spy->apt_flags & IMM_APT_CREATED) && hr == S_FALSE && refs == spy->skipped_coinit_count + 2)
         hr = S_OK;
     if (SUCCEEDED(hr))
         spy->apt_flags |= IMM_APT_CAN_FREE;
@@ -348,6 +401,13 @@ static HRESULT WINAPI InitializeSpy_PostInitialize(IInitializeSpy *iface,
 
 static HRESULT WINAPI InitializeSpy_PreUninitialize(IInitializeSpy *iface, DWORD refs)
 {
+    struct coinit_spy *spy = impl_from_IInitializeSpy(iface);
+
+    if (refs == 1 && !spy->coinit_skip_count && spy->thread_mgr_created &&
+        !RtlDllShutdownInProgress() && !RtlIsThreadWithinLoaderCallout() && can_uninitialize_tim())
+    {
+        if (SUCCEEDED(activate_or_deactivate_tim( FALSE, 0, FALSE ))) cleanup_private_messages();
+    }
     return S_OK;
 }
 
@@ -355,9 +415,15 @@ static HRESULT WINAPI InitializeSpy_PostUninitialize(IInitializeSpy *iface, DWOR
 {
     struct coinit_spy *spy = impl_from_IInitializeSpy(iface);
 
+    if (spy->coinit_skip_count && spy->skipped_coinit_count) --spy->skipped_coinit_count;
     TRACE("%lu %p\n", refs, ImmGetDefaultIMEWnd(0));
 
-    if (refs == 1 && !ImmGetDefaultIMEWnd(0))
+    if (!spy->coinit_skip_count && refs == 1 && spy->thread_mgr_created && can_uninitialize_tim())
+    {
+        if (SUCCEEDED(activate_or_deactivate_tim( FALSE, 0, FALSE ))) cleanup_private_messages();
+        imm_couninit_thread(FALSE);
+    }
+    else if (!spy->coinit_skip_count && refs == 1 && !ImmGetDefaultIMEWnd(0))
         imm_couninit_thread(FALSE);
     else if (!refs)
         spy->apt_flags &= ~IMM_APT_CAN_FREE;
@@ -391,16 +457,7 @@ static void imm_coinit_thread(void)
 
     TRACE("implicit COM initialization\n");
 
-    if (!(spy = get_thread_coinit_spy()))
-    {
-        if (!(spy = malloc( sizeof(*spy) ))) return;
-        spy->IInitializeSpy_iface.lpVtbl = &InitializeSpyVtbl;
-        spy->ref = 1;
-        spy->cookie.QuadPart = 0;
-        spy->apt_flags = 0;
-        NtUserGetThreadInfo()->client_imm = (UINT_PTR)spy;
-
-    }
+    if (!(spy = create_thread_coinit_spy())) return;
 
     if (spy->apt_flags & (IMM_APT_INIT | IMM_APT_BROKEN))
         return;
@@ -416,6 +473,8 @@ static void imm_coinit_thread(void)
     hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     if (SUCCEEDED(hr))
         spy->apt_flags |= IMM_APT_CREATED;
+    else if (hr == RPC_E_CHANGED_MODE)
+        spy->apt_flags |= IMM_APT_BROKEN;
 
     InitOnceExecuteOnce(&init_ole32_once, init_ole32_funcs, NULL, NULL);
 }
@@ -763,7 +822,12 @@ static void IMM_FreeThreadData(void)
     HIMC default_imc = (HIMC)NtUserGetThreadState( UserThreadStateDefaultInputContext );
 
     free_input_context_data( default_imc );
-    if ((spy = get_thread_coinit_spy())) IInitializeSpy_Release( &spy->IInitializeSpy_iface );
+    if ((spy = get_thread_coinit_spy()))
+    {
+        if (spy->thread_mgr_created) activate_or_deactivate_tim( FALSE, 0, FALSE );
+        imm_couninit_thread( TRUE );
+        IInitializeSpy_Release( &spy->IInitializeSpy_iface );
+    }
 }
 
 static void IMM_FreeAllImmHkl(void)
@@ -3060,35 +3124,59 @@ DWORD WINAPI ImmGetIMCCSize(HIMCC imcc)
     return GlobalSize(imcc);
 }
 
-/***********************************************************************
-*		ImmGenerateMessage(IMM32.@)
-*/
-BOOL WINAPI ImmGenerateMessage( HIMC himc )
+static BOOL generate_messages( HIMC himc, BOOL send, BOOL select_encoding )
 {
+    BOOL unicode;
+    TRANSMSG *msgs = NULL;
     INPUTCONTEXT *ctx;
+    HWND hwnd;
+    DWORD count, i;
 
-    TRACE( "himc %p\n", himc );
+    TRACE( "himc %p, send %u\n", himc, send );
 
     if (NtUserQueryInputContext( himc, NtUserInputContextThreadId ) != GetCurrentThreadId()) return FALSE;
     if (!(ctx = ImmLockIMC( himc ))) return FALSE;
 
-    while (ctx->dwNumMsgBuf--)
+    count = ctx->dwNumMsgBuf;
+    hwnd = ctx->hWnd;
+    unicode = !select_encoding || input_context_is_unicode( ctx );
+    if (count && count <= UINT_MAX / sizeof(*msgs))
     {
-        TRANSMSG *msgs, msg;
-        if (!(msgs = ImmLockIMCC( ctx->hMsgBuf )))
+        TRANSMSG *buffer;
+
+        if ((buffer = ImmLockIMCC( ctx->hMsgBuf )))
         {
-            ImmUnlockIMC( himc );
-            return FALSE;
+            if ((msgs = malloc( count * sizeof(*msgs) ))) memcpy( msgs, buffer, count * sizeof(*msgs) );
+            ImmUnlockIMCC( ctx->hMsgBuf );
         }
-        msg = msgs[0];
-        memmove( msgs, msgs + 1, ctx->dwNumMsgBuf * sizeof(*msgs) );
-        ImmUnlockIMCC( ctx->hMsgBuf );
-        SendMessageW( ctx->hWnd, msg.message, msg.wParam, msg.lParam );
     }
-    ctx->dwNumMsgBuf++;
+    ctx->dwNumMsgBuf = 0;
     ImmUnlockIMC( himc );
 
+    if (!msgs) return TRUE;
+    for (i = 0; i < count; ++i)
+    {
+        if (send)
+        {
+            if (unicode) SendMessageW( hwnd, msgs[i].message, msgs[i].wParam, msgs[i].lParam );
+            else SendMessageA( hwnd, msgs[i].message, msgs[i].wParam, msgs[i].lParam );
+        }
+        else
+        {
+            if (unicode) PostMessageW( hwnd, msgs[i].message, msgs[i].wParam, msgs[i].lParam );
+            else PostMessageA( hwnd, msgs[i].message, msgs[i].wParam, msgs[i].lParam );
+        }
+    }
+    free( msgs );
     return TRUE;
+}
+
+/***********************************************************************
+*              ImmGenerateMessage(IMM32.@)
+*/
+BOOL WINAPI ImmGenerateMessage( HIMC himc )
+{
+    return generate_messages( himc, TRUE, FALSE );
 }
 
 /***********************************************************************
@@ -3340,14 +3428,165 @@ LRESULT WINAPI __wine_ime_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
-/***********************************************************************
- *      CtfImmIsCiceroEnabled (IMM32.@)
- */
+static BOOL is_well_known_token_member( WELL_KNOWN_SID_TYPE type )
+{
+    BYTE sid_buffer[SECURITY_MAX_SID_SIZE];
+    DWORD sid_size = sizeof(sid_buffer);
+    BOOL member = FALSE;
+
+    if (!CreateWellKnownSid( type, NULL, sid_buffer, &sid_size )) return FALSE;
+    return CheckTokenMembership( NULL, sid_buffer, &member ) && member;
+}
+
+typedef HRESULT (WINAPI *pCtfImeCreateThreadMgr_t)(DWORD flags, DWORD reason);
+typedef HRESULT (WINAPI *pCtfImeDestroyThreadMgr_t)(void);
+typedef BOOL (WINAPI *pTF_CanUninitialize_t)(void);
+typedef BOOL (WINAPI *pTF_CleanUpPrivateMessages_t)(DWORD flags);
+
+static pCtfImeCreateThreadMgr_t pCtfImeCreateThreadMgr;
+static pCtfImeDestroyThreadMgr_t pCtfImeDestroyThreadMgr;
+static pTF_CanUninitialize_t pTF_CanUninitialize;
+static pTF_CleanUpPrivateMessages_t pTF_CleanUpPrivateMessages;
+static INIT_ONCE init_msctf_once = INIT_ONCE_STATIC_INIT;
+
+static BOOL WINAPI init_msctf_funcs( INIT_ONCE *once, void *param, void **context )
+{
+    HMODULE module = GetModuleHandleW( L"msctf.dll" );
+
+    if (!module) module = LoadLibraryW( L"msctf.dll" );
+    if (module)
+    {
+        pCtfImeCreateThreadMgr = (void *)GetProcAddress( module, "CtfImeCreateThreadMgr" );
+        pCtfImeDestroyThreadMgr = (void *)GetProcAddress( module, "CtfImeDestroyThreadMgr" );
+        pTF_CanUninitialize = (void *)GetProcAddress( module, "TF_CanUninitialize" );
+        pTF_CleanUpPrivateMessages = (void *)GetProcAddress( module, "TF_CleanUpPrivateMessages" );
+    }
+    return TRUE;
+}
+
+void WINAPI CtfImmAppCompatEnableIMEonProtectedCode(void)
+{
+    struct coinit_spy *spy;
+
+    if ((spy = create_thread_coinit_spy())) spy->ime_on_protected_code = TRUE;
+}
+
+void WINAPI CtfImmCoUninitialize(void)
+{
+    imm_couninit_thread( TRUE );
+}
+
+BOOL WINAPI CtfImmEnterCoInitCountSkipMode(void)
+{
+    struct coinit_spy *spy = get_thread_coinit_spy();
+
+    if (!spy) return FALSE;
+    ++spy->coinit_skip_count;
+    return TRUE;
+}
+
+BOOL WINAPI CtfImmLeaveCoInitCountSkipMode(void)
+{
+    struct coinit_spy *spy = get_thread_coinit_spy();
+
+    if (!spy || !spy->coinit_skip_count) return FALSE;
+    --spy->coinit_skip_count;
+    return TRUE;
+}
+
+BOOL WINAPI CtfImmGenerateMessage(HIMC himc, BOOL send)
+{
+    return generate_messages( himc, send, TRUE );
+}
+
+DWORD WINAPI CtfImmGetTMAEFlags(void)
+{
+    struct coinit_spy *spy = get_thread_coinit_spy();
+    DWORD flags = 0;
+
+    InitOnceExecuteOnce( &init_msctf_once, init_msctf_funcs, NULL, NULL );
+    if (pCtfImeCreateThreadMgr) flags |= TF_TMAE_PRIVATE_SYSTEM;
+    if (spy && (spy->apt_flags & IMM_APT_BROKEN)) flags |= TF_TMAE_COMLESS;
+    if (is_well_known_token_member( WinLocalSystemSid )) flags |= TF_TMAE_SECUREMODE;
+    return flags;
+}
+
+static BOOL can_uninitialize_tim(void)
+{
+    return pTF_CanUninitialize && pTF_CanUninitialize();
+}
+
+static void cleanup_private_messages(void)
+{
+    if (pTF_CleanUpPrivateMessages) pTF_CleanUpPrivateMessages( 0 );
+}
+
+static HRESULT activate_or_deactivate_tim( BOOL activate, DWORD reason, BOOL load_msctf )
+{
+    struct coinit_spy *spy = get_thread_coinit_spy();
+    HRESULT hr;
+
+    if (activate)
+    {
+        imm_coinit_thread();
+        if (!(spy = get_thread_coinit_spy())) return E_OUTOFMEMORY;
+        if (!(spy->apt_flags & (IMM_APT_INIT | IMM_APT_BROKEN))) return E_FAIL;
+        if (spy->thread_mgr_created) return S_OK;
+    }
+    else if (!spy || !spy->thread_mgr_created) return S_OK;
+
+    if (load_msctf) InitOnceExecuteOnce( &init_msctf_once, init_msctf_funcs, NULL, NULL );
+    if (activate)
+    {
+        if (!pCtfImeCreateThreadMgr) return HRESULT_FROM_WIN32( ERROR_PROC_NOT_FOUND );
+        hr = pCtfImeCreateThreadMgr( CtfImmGetTMAEFlags(), reason );
+        if (SUCCEEDED(hr)) spy->thread_mgr_created = TRUE;
+        else CtfImmCoUninitialize();
+    }
+    else
+    {
+        if (!pCtfImeDestroyThreadMgr) return HRESULT_FROM_WIN32( ERROR_PROC_NOT_FOUND );
+        hr = pCtfImeDestroyThreadMgr();
+        if (SUCCEEDED(hr)) spy->thread_mgr_created = FALSE;
+    }
+    return hr;
+}
+
 BOOL WINAPI CtfImmIsCiceroEnabled(void)
 {
-    FIXME("(): stub\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    InitOnceExecuteOnce( &init_msctf_once, init_msctf_funcs, NULL, NULL );
+    return !!pCtfImeCreateThreadMgr;
+}
+
+BOOL WINAPI CtfImmIsCiceroStartedInThread(void)
+{
+    struct coinit_spy *spy = get_thread_coinit_spy();
+
+    return spy && spy->cicero_started;
+}
+
+void WINAPI CtfImmSetCiceroStartInThread(BOOL started)
+{
+    struct coinit_spy *spy;
+
+    if ((spy = create_thread_coinit_spy())) spy->cicero_started = started;
+}
+
+HRESULT WINAPI CtfImmTIMActivate(HKL layout, DWORD reason)
+{
+    TRACE("layout %p, reason %lu\n", layout, reason);
+
+    if (RtlDllShutdownInProgress() || RtlIsThreadWithinLoaderCallout()) return S_OK;
+    if (!is_well_known_token_member( WinLocalSystemSid ) &&
+        !is_well_known_token_member( WinInteractiveSid )) return S_OK;
+    if (!reason && !CtfImmIsCiceroStartedInThread()) return S_OK;
+    return activate_or_deactivate_tim( TRUE, reason, TRUE );
+}
+
+void WINAPI CtfImmLastEnabledWndDestroy(HWND hwnd)
+{
+    if (hwnd) CtfImmTIMActivate( 0, 4 );
+    else activate_or_deactivate_tim( FALSE, 4, TRUE );
 }
 
 /***********************************************************************

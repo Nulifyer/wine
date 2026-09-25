@@ -32,6 +32,7 @@
 #include "wingdi.h"
 #include "imm.h"
 #include "immdev.h"
+#include "msctf.h"
 
 #include "ime_test.h"
 
@@ -101,6 +102,15 @@ static BOOL (WINAPI *pImmAssociateContextEx)(HWND,HIMC,DWORD);
 static UINT (WINAPI *pNtUserAssociateInputContext)(HWND,HIMC,ULONG);
 static BOOL (WINAPI *pImmIsUIMessageA)(HWND,UINT,WPARAM,LPARAM);
 static UINT (WINAPI *pSendInput) (UINT, INPUT*, size_t);
+static void (WINAPI *pCtfImmAppCompatEnableIMEonProtectedCode)(void);
+static void (WINAPI *pCtfImmCoUninitialize)(void);
+static BOOL (WINAPI *pCtfImmEnterCoInitCountSkipMode)(void);
+static BOOL (WINAPI *pCtfImmGenerateMessage)(HIMC, BOOL);
+static DWORD (WINAPI *pCtfImmGetTMAEFlags)(void);
+static BOOL (WINAPI *pCtfImmIsCiceroEnabled)(void);
+static BOOL (WINAPI *pCtfImmIsCiceroStartedInThread)(void);
+static BOOL (WINAPI *pCtfImmLeaveCoInitCountSkipMode)(void);
+static void (WINAPI *pCtfImmSetCiceroStartInThread)(BOOL);
 
 extern BOOL WINAPI ImmFreeLayout(HKL);
 extern BOOL WINAPI ImmLoadIME(HKL);
@@ -891,6 +901,98 @@ static BOOL is_ime_enabled(void)
     ImmReleaseContext(wnd, himc);
     DestroyWindow(wnd);
     return TRUE;
+}
+
+static DWORD WINAPI ctf_thread_state_proc(void *arg)
+{
+    BYTE sid_buffer[SECURITY_MAX_SID_SIZE];
+    DWORD sid_size = sizeof(sid_buffer), flags;
+    BOOL local_system = FALSE;
+
+    ok( CreateWellKnownSid( WinLocalSystemSid, NULL, sid_buffer, &sid_size ),
+        "CreateWellKnownSid failed, error %lu\n", GetLastError() );
+    ok( CheckTokenMembership( NULL, sid_buffer, &local_system ),
+        "CheckTokenMembership failed, error %lu\n", GetLastError() );
+
+    flags = pCtfImmGetTMAEFlags();
+    ok( !(flags & ~(0x80000000 | TF_TMAE_COMLESS | TF_TMAE_SECUREMODE)),
+        "unexpected activation flags %#lx\n", flags );
+    ok( !!(flags & 0x80000000) == pCtfImmIsCiceroEnabled(),
+        "provider flag %#lx, Cicero availability %u\n", flags, pCtfImmIsCiceroEnabled() );
+    ok( !!(flags & TF_TMAE_SECUREMODE) == local_system,
+        "secure flag %#lx, local system %u\n", flags, local_system );
+
+    pCtfImmSetCiceroStartInThread( FALSE );
+    ok( !pCtfImmIsCiceroStartedInThread(), "Cicero started unexpectedly\n" );
+    pCtfImmSetCiceroStartInThread( TRUE );
+    ok( pCtfImmIsCiceroStartedInThread(), "Cicero did not start\n" );
+
+    ok( pCtfImmEnterCoInitCountSkipMode(), "failed to enter skip mode\n" );
+    ok( pCtfImmEnterCoInitCountSkipMode(), "failed to nest skip mode\n" );
+    ok( pCtfImmLeaveCoInitCountSkipMode(), "failed to leave nested skip mode\n" );
+    ok( pCtfImmLeaveCoInitCountSkipMode(), "failed to leave skip mode\n" );
+    ok( !pCtfImmLeaveCoInitCountSkipMode(), "left skip mode below zero\n" );
+
+    pCtfImmAppCompatEnableIMEonProtectedCode();
+    pCtfImmSetCiceroStartInThread( FALSE );
+    pCtfImmCoUninitialize();
+    return 0;
+}
+
+static DWORD WINAPI ctf_comless_proc(void *arg)
+{
+    HRESULT hr;
+    DWORD flags;
+
+    hr = CoInitializeEx( NULL, COINIT_MULTITHREADED );
+    ok( hr == S_OK, "CoInitializeEx returned %#lx\n", hr );
+    ok( ImmSetActiveContext( NULL, NULL, TRUE ), "ImmSetActiveContext failed\n" );
+    flags = pCtfImmGetTMAEFlags();
+    ok( flags & TF_TMAE_COMLESS, "expected COM-less flag, got %#lx\n", flags );
+    pCtfImmCoUninitialize();
+    CoUninitialize();
+    return 0;
+}
+
+static void test_CtfImm_thread_state(void)
+{
+    HMODULE module = GetModuleHandleW( L"imm32.dll" );
+    HANDLE thread;
+
+    pCtfImmAppCompatEnableIMEonProtectedCode = (void *)GetProcAddress( module, "CtfImmAppCompatEnableIMEonProtectedCode" );
+    pCtfImmCoUninitialize = (void *)GetProcAddress( module, "CtfImmCoUninitialize" );
+    pCtfImmEnterCoInitCountSkipMode = (void *)GetProcAddress( module, "CtfImmEnterCoInitCountSkipMode" );
+    pCtfImmGenerateMessage = (void *)GetProcAddress( module, "CtfImmGenerateMessage" );
+    pCtfImmGetTMAEFlags = (void *)GetProcAddress( module, "CtfImmGetTMAEFlags" );
+    pCtfImmIsCiceroEnabled = (void *)GetProcAddress( module, "CtfImmIsCiceroEnabled" );
+    pCtfImmIsCiceroStartedInThread = (void *)GetProcAddress( module, "CtfImmIsCiceroStartedInThread" );
+    pCtfImmLeaveCoInitCountSkipMode = (void *)GetProcAddress( module, "CtfImmLeaveCoInitCountSkipMode" );
+    pCtfImmSetCiceroStartInThread = (void *)GetProcAddress( module, "CtfImmSetCiceroStartInThread" );
+
+    if (!pCtfImmAppCompatEnableIMEonProtectedCode || !pCtfImmCoUninitialize ||
+        !pCtfImmEnterCoInitCountSkipMode || !pCtfImmGenerateMessage || !pCtfImmGetTMAEFlags ||
+        !pCtfImmIsCiceroEnabled || !pCtfImmIsCiceroStartedInThread ||
+        !pCtfImmLeaveCoInitCountSkipMode || !pCtfImmSetCiceroStartInThread)
+    {
+        win_skip( "CtfImm thread-state exports are unavailable\n" );
+        return;
+    }
+
+    thread = CreateThread( NULL, 0, ctf_thread_state_proc, NULL, 0, NULL );
+    ok( !!thread, "CreateThread failed, error %lu\n", GetLastError() );
+    if (thread)
+    {
+        WaitForSingleObject( thread, INFINITE );
+        CloseHandle( thread );
+    }
+
+    thread = CreateThread( NULL, 0, ctf_comless_proc, NULL, 0, NULL );
+    ok( !!thread, "CreateThread failed, error %lu\n", GetLastError() );
+    if (thread)
+    {
+        WaitForSingleObject( thread, INFINITE );
+        CloseHandle( thread );
+    }
 }
 
 static BOOL init(void) {
@@ -7101,6 +7203,21 @@ static void test_ImmGenerateMessage(void)
     ok_eq( msgs, tmp_msgs, TRANSMSG *, "%p" );
     ok_ret( 0, ImmUnlockIMCC( ctx->hMsgBuf ) );
 
+    if (pCtfImmGenerateMessage)
+    {
+        ctx->dwNumMsgBuf = 1;
+        ok_ret( 1, pCtfImmGenerateMessage( himc, TRUE ) );
+        ok_seq( generate_sequence );
+        ok_eq( 0, ctx->dwNumMsgBuf, UINT, "%u" );
+
+        ctx->dwNumMsgBuf = 1;
+        ok_ret( 1, pCtfImmGenerateMessage( himc, FALSE ) );
+        ok_seq( empty_sequence );
+        ok_eq( 0, ctx->dwNumMsgBuf, UINT, "%u" );
+        process_messages();
+        ok_seq( generate_sequence );
+    }
+
     tmp_msgs = ImmLockIMCC( ctx->hMsgBuf );
     ok_eq( msgs, tmp_msgs, TRANSMSG *, "%p" );
     ok_ret( 0, ImmUnlockIMCC( ctx->hMsgBuf ) );
@@ -8447,6 +8564,8 @@ START_TEST(imm32)
 
     test_class.hInstance = GetModuleHandleW( NULL );
     RegisterClassExW( &test_class );
+
+    test_CtfImm_thread_state();
 
     if (!is_ime_enabled())
     {
