@@ -1621,6 +1621,17 @@ static void test_apisets(void)
     static const struct
     {
         const char *name;
+        const char *function;
+    }
+    resolved_tests[] =
+    {
+        { "ext-ms-win-gdi-draw-l1-1-0.dll", "StretchDIBits" },
+        { "ext-ms-win-gdi-draw-l1-1-1.dll", "DPtoLP" },
+        { "ext-ms-win-gdi-draw-l1-1-2.dll", "GetMapMode" },
+    };
+    static const struct
+    {
+        const char *name;
         BOOLEAN present;
         NTSTATUS status;
         BOOLEAN present_ex, in_schema, broken;
@@ -1648,6 +1659,9 @@ static void test_apisets(void)
     NTSTATUS status;
     BOOLEAN present, in_schema;
     UNICODE_STRING name;
+    HMODULE module;
+    HMODULE target;
+    FARPROC function;
 
     if (!pApiSetQueryApiSetPresence)
     {
@@ -1690,6 +1704,29 @@ static void test_apisets(void)
         }
         winetest_pop_context();
         RtlFreeUnicodeString( &name );
+    }
+
+    for (i = 0; i < ARRAY_SIZE(resolved_tests); ++i)
+    {
+        winetest_push_context( "%s", resolved_tests[i].name );
+        module = LoadLibraryA( resolved_tests[i].name );
+        ok( !!module, "LoadLibrary failed, error %lu.\n", GetLastError() );
+        if (module)
+        {
+            function = GetProcAddress( module, resolved_tests[i].function );
+            ok( !!function, "%s is unavailable.\n", resolved_tests[i].function );
+            if (winetest_platform_is_wine)
+            {
+                target = GetModuleHandleA( "gdi32.dll" );
+                ok( !!target, "gdi32.dll is not loaded.\n" );
+                ok( module == target, "got module %p, expected gdi32 %p.\n", module, target );
+                if (target)
+                    ok( function == GetProcAddress( target, resolved_tests[i].function ),
+                        "got function %p from unexpected provider.\n", function );
+            }
+            FreeLibrary( module );
+        }
+        winetest_pop_context();
     }
 }
 

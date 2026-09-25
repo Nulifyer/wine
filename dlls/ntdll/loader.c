@@ -753,15 +753,38 @@ static NTSTATUS get_apiset_target( const API_SET_NAMESPACE *map, const API_SET_N
 
 static BOOL get_linuxnt_apiset_target( const WCHAR *name, UNICODE_STRING *ret )
 {
-    static const WCHAR contract[] = L"ext-ms-win-gdi-private-l1-1-0";
-    static const WCHAR target[] = L"gdi32.dll";
-    ULONG len;
+    static const WCHAR gdi_private[] = L"ext-ms-win-gdi-private-l1-1-0";
+    static const WCHAR gdi_draw_0[] = L"ext-ms-win-gdi-draw-l1-1-0";
+    static const WCHAR gdi_draw_1[] = L"ext-ms-win-gdi-draw-l1-1-1";
+    static const WCHAR gdi_draw_2[] = L"ext-ms-win-gdi-draw-l1-1-2";
+    static const WCHAR gdi32[] = L"gdi32.dll";
+    static const struct
+    {
+        const WCHAR *name;
+        ULONG name_len;
+        const WCHAR *target;
+        ULONG target_len;
+    } overrides[] =
+    {
+        { gdi_private, ARRAY_SIZE(gdi_private) - 1, gdi32, ARRAY_SIZE(gdi32) - 1 },
+        { gdi_draw_0, ARRAY_SIZE(gdi_draw_0) - 1, gdi32, ARRAY_SIZE(gdi32) - 1 },
+        { gdi_draw_1, ARRAY_SIZE(gdi_draw_1) - 1, gdi32, ARRAY_SIZE(gdi32) - 1 },
+        { gdi_draw_2, ARRAY_SIZE(gdi_draw_2) - 1, gdi32, ARRAY_SIZE(gdi32) - 1 },
+    };
+    ULONG i, len;
 
     for (len = 0; name[len] && name[len] != '.'; ++len) {}
-    if (len != ARRAY_SIZE(contract) - 1 || wcsnicmp( name, contract, len )) return FALSE;
-    ret->Buffer = (WCHAR *)target;
-    ret->Length = (ARRAY_SIZE(target) - 1) * sizeof(WCHAR);
-    return TRUE;
+
+    for (i = 0; i < ARRAY_SIZE(overrides); ++i)
+    {
+        if (len == overrides[i].name_len && !wcsnicmp( name, overrides[i].name, len ))
+        {
+            ret->Buffer = (WCHAR *)overrides[i].target;
+            ret->Length = overrides[i].target_len * sizeof(WCHAR);
+            return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 
