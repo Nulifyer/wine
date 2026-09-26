@@ -126,6 +126,7 @@ struct user_thread_info
     INPUT                         mouse_motion;           /* accumulated hardware mouse motion */
     HWND                          mouse_hwnd;             /* hardware mouse motion target window */
     BOOL                          mouse_in_pointer;       /* mouse promotion enabled for this thread */
+    UINT                          promoted_mouse_hw_id;   /* newest hardware mouse message promoted to pointer */
     struct hardware_msg_data     *rawinput;               /* Current rawinput message data */
     UINT                          spy_indent;             /* Current spy indent */
     BOOL                          clipping_cursor;        /* thread is currently clipping */

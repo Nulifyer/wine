@@ -5921,6 +5921,7 @@ static void test_GetPointerInfo( BOOL mouse_in_pointer_enabled )
     ATOM class;
     DWORD res;
     HWND hwnd;
+    MSG msg;
     POINT pt[3];
     BOOL ret;
 
@@ -5985,6 +5986,20 @@ static void test_GetPointerInfo( BOOL mouse_in_pointer_enabled )
     p_accept_message = accept_pointer_messages;
 
     mouse_event( MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0 );
+    if (mouse_in_pointer_enabled)
+    {
+        ok( PeekMessageW( &msg, 0, WM_MOUSEFIRST, WM_MOUSELAST, PM_NOREMOVE ),
+            "expected queued mouse message\n" );
+        ok( msg.message == WM_LBUTTONDOWN, "expected WM_LBUTTONDOWN, got %#x\n", msg.message );
+        ok( PeekMessageW( &msg, 0, WM_MOUSEFIRST, WM_MOUSELAST, PM_NOREMOVE ),
+            "expected queued mouse message\n" );
+        ok( msg.message == WM_LBUTTONDOWN, "expected WM_LBUTTONDOWN, got %#x\n", msg.message );
+        ok( PeekMessageW( &msg, 0, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE ),
+            "expected queued mouse message\n" );
+        ok( msg.message == WM_LBUTTONDOWN, "expected WM_LBUTTONDOWN, got %#x\n", msg.message );
+        TranslateMessage( &msg );
+        DispatchMessageW( &msg );
+    }
     wait_messages( 100, FALSE );
 
     /* fixup flaky windows mouse position */

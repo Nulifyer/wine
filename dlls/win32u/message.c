@@ -2634,6 +2634,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
 {
     static MSG clk_msg;
 
+    struct user_thread_info *thread_info = get_user_thread_info();
     POINT pt;
     UINT message;
     INT hittest;
@@ -2677,7 +2678,9 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
     set_thread_dpi_awareness_context( get_window_dpi_awareness_context( msg->hwnd ));
 
-    if ((extra_info & 0xffffff00) != 0xff515700 && is_mouse_in_pointer_enabled( msg->hwnd ))
+    if ((extra_info & 0xffffff00) != 0xff515700 && is_mouse_in_pointer_enabled( msg->hwnd ) &&
+        (!thread_info->promoted_mouse_hw_id ||
+         (INT)(hw_id - thread_info->promoted_mouse_hw_id) > 0))
     {
         WORD flags = POINTER_MESSAGE_FLAG_INRANGE, pointer_button_flags;
         DWORD message = 0;
@@ -2736,6 +2739,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
                 .pt = msg->pt,
             };
 
+            thread_info->promoted_mouse_hw_id = hw_id;
             update_pointer_from_msg( PT_MOUSE, &pointer_msg );
             send_message( msg->hwnd, message, pointer_msg.wParam, pointer_msg.lParam );
         }
