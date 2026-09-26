@@ -4,11 +4,15 @@ IMPORTS   = advapi32 rpcrt4
 EXTRADLLFLAGS = -mwindows -municode
 
 SOURCES = \
-	lsass.c \
-	lsass.idl \
+	local_accounts.c \
 	lsapolicylookup.idl \
 	lsarpc.c \
 	lsarpc.idl \
+	lsass.c \
+	lsass.idl \
 	main.c \
 	negotiate.c \
-	policy_lookup.c
+	policy_lookup.c \
+	samr.c \
+	samr.idl \
+	samr_interface.idl

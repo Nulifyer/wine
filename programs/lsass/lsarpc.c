@@ -18,6 +18,7 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "lsarpc.h"
+#include "local_accounts.h"
 
 #include "wine/debug.h"
 
@@ -141,23 +142,6 @@ static BOOL copy_rpc_unicode_string( LSARPC_UNICODE_STRING *dst, const WCHAR *sr
     return TRUE;
 }
 
-static SID *create_rpc_computer_sid(void)
-{
-    static const SID_IDENTIFIER_AUTHORITY authority = { SECURITY_NT_AUTHORITY };
-    const DWORD size = offsetof( SID, SubAuthority[4] );
-    SID *sid;
-
-    if (!(sid = MIDL_user_allocate( size ))) return NULL;
-    sid->Revision = SID_REVISION;
-    sid->SubAuthorityCount = 4;
-    sid->IdentifierAuthority = authority;
-    sid->SubAuthority[0] = SECURITY_NT_NON_UNIQUE;
-    sid->SubAuthority[1] = 0;
-    sid->SubAuthority[2] = 0;
-    sid->SubAuthority[3] = 0;
-    return sid;
-}
-
 static void free_policy_information( LSARPC_POLICY_INFORMATION *info,
                                      LSARPC_POLICY_INFORMATION_CLASS info_class )
 {
@@ -220,7 +204,7 @@ static NTSTATUS query_information_policy( LSARPC_HANDLE handle,
 
         if (!copy_rpc_unicode_string( &domain->DomainName, computer_name,
                                       computer_name_len * sizeof(WCHAR) ) ||
-            !(domain->DomainSid = create_rpc_computer_sid()))
+            !(domain->DomainSid = lsa_allocate_computer_sid()))
             status = STATUS_NO_MEMORY;
     }
     else
@@ -233,7 +217,7 @@ static NTSTATUS query_information_policy( LSARPC_HANDLE handle,
                                       computer_name_len * sizeof(WCHAR) ) ||
             !copy_rpc_unicode_string( &domain->DnsDomainName, L"", 0 ) ||
             !copy_rpc_unicode_string( &domain->DnsForestName, L"", 0 ) ||
-            !(domain->Sid = create_rpc_computer_sid()))
+            !(domain->Sid = lsa_allocate_computer_sid()))
             status = STATUS_NO_MEMORY;
     }
 

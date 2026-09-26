@@ -23179,6 +23179,7 @@ wine_fn_config_makefile programs/linuxntsrm enable_linuxntsrm
 wine_fn_config_makefile programs/linuxntsrm/tests enable_tests
 wine_fn_config_makefile programs/lodctr enable_lodctr
 wine_fn_config_makefile programs/lsass enable_lsass
+wine_fn_config_makefile programs/lsass/tests enable_tests
 wine_fn_config_makefile programs/makecab enable_makecab
 wine_fn_config_makefile programs/mofcomp enable_mofcomp
 wine_fn_config_makefile programs/mshta enable_mshta

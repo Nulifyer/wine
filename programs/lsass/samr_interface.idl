@@ -1,0 +1,186 @@
+#pragma makedep header
+
+import "wtypes.idl";
+
+cpp_quote("#include <winternl.h>")
+cpp_quote("#define SAMR_PROTSEQ {'n','c','a','c','n','_','n','p',0}")
+cpp_quote("#define SAMR_ENDPOINT {'\\\\','p','i','p','e','\\\\','s','a','m','r',0}")
+cpp_quote("#define SAMR_LOCAL_PROTSEQ {'n','c','a','l','r','p','c',0}")
+cpp_quote("#define SAMR_LOCAL_ENDPOINT {'s','a','m','s','s',' ','l','p','c',0}")
+
+[
+    uuid(12345778-1234-abcd-ef00-0123456789ac),
+    version(1.0),
+    pointer_default(unique),
+    strict_context_handle
+#ifdef SAMR_CLIENT_STUB
+    , implicit_handle(handle_t samr_binding)
+#endif
+]
+interface samr
+{
+    cpp_quote("#if 0")
+    typedef LONG NTSTATUS;
+    cpp_quote("#endif")
+
+    typedef [context_handle] void *SAMR_HANDLE;
+
+    typedef struct
+    {
+        USHORT Length;
+        USHORT MaximumLength;
+        [size_is(MaximumLength / 2), length_is(Length / 2)] WCHAR *Buffer;
+    } SAMR_UNICODE_STRING;
+
+    typedef struct
+    {
+        ULONG RelativeId;
+        SAMR_UNICODE_STRING Name;
+    } SAMR_RID_ENUMERATION;
+
+    typedef struct
+    {
+        ULONG EntriesRead;
+        [size_is(EntriesRead)] SAMR_RID_ENUMERATION *Buffer;
+    } SAMR_ENUMERATION_BUFFER;
+
+    typedef struct
+    {
+        ULONG Count;
+        [size_is(Count)] ULONG *Element;
+    } SAMR_ULONG_ARRAY;
+
+    typedef struct
+    {
+        ULONG Count;
+        [size_is(Count)] SAMR_UNICODE_STRING *Element;
+    } SAMR_RETURNED_USTRING_ARRAY;
+
+    typedef struct
+    {
+        ULONG Revision;
+        ULONG SupportedFeatures;
+    } SAMR_REVISION_INFO_V1;
+
+    typedef [switch_type(ULONG)] union
+    {
+        [case(1)] SAMR_REVISION_INFO_V1 V1;
+    } SAMR_IN_REVISION_INFO;
+
+    typedef [switch_type(ULONG)] union
+    {
+        [case(1)] SAMR_REVISION_INFO_V1 V1;
+    } SAMR_OUT_REVISION_INFO;
+
+    NTSTATUS samr_unused_0(void);
+    NTSTATUS samr_close_handle([in, out] SAMR_HANDLE *handle);
+    NTSTATUS samr_unused_2(void);
+    NTSTATUS samr_unused_3(void);
+    NTSTATUS samr_unused_4(void);
+    NTSTATUS samr_unused_5(void);
+    NTSTATUS samr_unused_6(void);
+    NTSTATUS samr_open_domain(
+        [in] SAMR_HANDLE server_handle,
+        [in] ULONG desired_access,
+        [in] SID *domain_sid,
+        [out] SAMR_HANDLE *domain_handle);
+    NTSTATUS samr_unused_8(void);
+    NTSTATUS samr_unused_9(void);
+    NTSTATUS samr_unused_10(void);
+    NTSTATUS samr_unused_11(void);
+    NTSTATUS samr_unused_12(void);
+    NTSTATUS samr_enumerate_users_in_domain(
+        [in] SAMR_HANDLE domain_handle,
+        [in, out] ULONG *enumeration_context,
+        [in] ULONG user_account_control,
+        [out] SAMR_ENUMERATION_BUFFER **buffer,
+        [in] ULONG preferred_maximum_length,
+        [out] ULONG *count_returned);
+    NTSTATUS samr_unused_14(void);
+    NTSTATUS samr_unused_15(void);
+    NTSTATUS samr_unused_16(void);
+    NTSTATUS samr_lookup_names_in_domain(
+        [in] SAMR_HANDLE domain_handle,
+        [in, range(0, 1000)] ULONG count,
+        [in, size_is(1000), length_is(count)] SAMR_UNICODE_STRING names[*],
+        [out] SAMR_ULONG_ARRAY *relative_ids,
+        [out] SAMR_ULONG_ARRAY *use);
+    NTSTATUS samr_lookup_ids_in_domain(
+        [in] SAMR_HANDLE domain_handle,
+        [in, range(0, 1000)] ULONG count,
+        [in, size_is(1000), length_is(count)] ULONG relative_ids[*],
+        [out] SAMR_RETURNED_USTRING_ARRAY *names,
+        [out] SAMR_ULONG_ARRAY *use);
+    NTSTATUS samr_unused_19(void);
+    NTSTATUS samr_unused_20(void);
+    NTSTATUS samr_unused_21(void);
+    NTSTATUS samr_unused_22(void);
+    NTSTATUS samr_unused_23(void);
+    NTSTATUS samr_unused_24(void);
+    NTSTATUS samr_unused_25(void);
+    NTSTATUS samr_unused_26(void);
+    NTSTATUS samr_unused_27(void);
+    NTSTATUS samr_unused_28(void);
+    NTSTATUS samr_unused_29(void);
+    NTSTATUS samr_unused_30(void);
+    NTSTATUS samr_unused_31(void);
+    NTSTATUS samr_unused_32(void);
+    NTSTATUS samr_unused_33(void);
+    NTSTATUS samr_unused_34(void);
+    NTSTATUS samr_unused_35(void);
+    NTSTATUS samr_unused_36(void);
+    NTSTATUS samr_unused_37(void);
+    NTSTATUS samr_unused_38(void);
+    NTSTATUS samr_unused_39(void);
+    NTSTATUS samr_unused_40(void);
+    NTSTATUS samr_unused_41(void);
+    NTSTATUS samr_unused_42(void);
+    NTSTATUS samr_unused_43(void);
+    NTSTATUS samr_unused_44(void);
+    NTSTATUS samr_unused_45(void);
+    NTSTATUS samr_unused_46(void);
+    NTSTATUS samr_unused_47(void);
+    NTSTATUS samr_unused_48(void);
+    NTSTATUS samr_unused_49(void);
+    NTSTATUS samr_unused_50(void);
+    NTSTATUS samr_unused_51(void);
+    NTSTATUS samr_unused_52(void);
+    NTSTATUS samr_unused_53(void);
+    NTSTATUS samr_unused_54(void);
+    NTSTATUS samr_unused_55(void);
+    NTSTATUS samr_unused_56(void);
+    NTSTATUS samr_unused_57(void);
+    NTSTATUS samr_unused_58(void);
+    NTSTATUS samr_unused_59(void);
+    NTSTATUS samr_unused_60(void);
+    NTSTATUS samr_unused_61(void);
+    NTSTATUS samr_connect4(
+        [in, unique, string] WCHAR *server_name,
+        [out] SAMR_HANDLE *server_handle,
+        [in] ULONG client_revision,
+        [in] ULONG desired_access);
+    NTSTATUS samr_unused_63(void);
+    NTSTATUS samr_connect5(
+        [in, unique, string] WCHAR *server_name,
+        [in] ULONG desired_access,
+        [in] ULONG in_version,
+        [in, switch_is(in_version)] SAMR_IN_REVISION_INFO *in_revision_info,
+        [out] ULONG *out_version,
+        [out, switch_is(*out_version)] SAMR_OUT_REVISION_INFO *out_revision_info,
+        [out] SAMR_HANDLE *server_handle);
+    NTSTATUS samr_rid_to_sid(
+        [in] SAMR_HANDLE object_handle,
+        [in] ULONG relative_id,
+        [out] SID **sid);
+    NTSTATUS samr_unused_66(void);
+    NTSTATUS samr_unused_67(void);
+    NTSTATUS samr_unused_68(void);
+    NTSTATUS samr_unused_69(void);
+    NTSTATUS samr_unused_70(void);
+    NTSTATUS samr_lookup_names_in_domain2(
+        [in] SAMR_HANDLE domain_handle,
+        [in, range(0, 1000)] ULONG count,
+        [in, size_is(1000), length_is(count)] SAMR_UNICODE_STRING names[*],
+        [out] SAMR_ULONG_ARRAY *relative_ids,
+        [out] SAMR_ULONG_ARRAY *use);
+}

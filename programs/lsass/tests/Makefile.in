@@ -1,0 +1,6 @@
+TESTDLL = lsass.exe
+IMPORTS = advapi32 rpcrt4
+
+SOURCES = \
+	samr.c \
+	samr_test.idl

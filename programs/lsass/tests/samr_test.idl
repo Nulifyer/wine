@@ -1,0 +1,4 @@
+#pragma makedep client
+
+#define SAMR_CLIENT_STUB
+#include "../samr_interface.idl"
