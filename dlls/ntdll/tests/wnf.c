@@ -23,6 +23,8 @@
 #define WNF_FT_LAST_PROCESS_PROMOTION_TRIGGER 0x41c61a2ba3bc2875ULL
 #define WNF_GPOL_SYSTEM_CHANGES 0x0d891e2aa3bc0875ULL
 #define WNF_SPI_LOGICALDPIOVERRIDE 0x418f1e3ea3bc0835ULL
+#define WNF_IME_EXPLICIT_PRIVATE_MODE 0x41830324a3bc1035ULL
+#define WNF_IME_AUTOMATIC_PRIVATE_MODE 0x41830324a3bc1835ULL
 #define WNF_DX_MODE_CHANGE_NOTIFICATION 0x41c61629a3bc1035ULL
 #define WNF_DX_MONITOR_CHANGE_NOTIFICATION 0x41c61629a3bc2835ULL
 #define WNF_DX_MODERN_OUTPUTDUPLICATION_CONTEXTS 0x41c61629a3bc6835ULL
@@ -384,6 +386,8 @@ START_TEST(wnf)
         {
             WNF_GPOL_SYSTEM_CHANGES,
             WNF_SPI_LOGICALDPIOVERRIDE,
+            WNF_IME_EXPLICIT_PRIVATE_MODE,
+            WNF_IME_AUTOMATIC_PRIVATE_MODE,
             WNF_DX_MODE_CHANGE_NOTIFICATION,
             WNF_DX_MONITOR_CHANGE_NOTIFICATION,
             WNF_DX_MODERN_OUTPUTDUPLICATION_CONTEXTS,
@@ -423,6 +427,47 @@ START_TEST(wnf)
                 status = pNtUnsubscribeWnfStateChange( &well_known_names[i] );
                 ok( status == STATUS_SUCCESS, "%#I64x: expected STATUS_SUCCESS, got %#lx\n",
                     well_known_names[i], status );
+            }
+        }
+    }
+
+    {
+        const ULONGLONG ime_private_mode_states[] =
+        {
+            WNF_IME_EXPLICIT_PRIVATE_MODE,
+            WNF_IME_AUTOMATIC_PRIVATE_MODE,
+        };
+        unsigned int i;
+
+        for (i = 0; i < ARRAY_SIZE(ime_private_mode_states); i++)
+        {
+            ULONG value = 0xdeadbeef;
+
+            stamp = 0xdeadbeef;
+            size = sizeof(value);
+            status = pNtQueryWnfStateData( &ime_private_mode_states[i], NULL, NULL,
+                                           &stamp, &value, &size );
+            ok( status == STATUS_SUCCESS, "%#I64x: expected STATUS_SUCCESS, got %#lx\n",
+                ime_private_mode_states[i], status );
+            ok( !stamp, "%#I64x: expected stamp 0, got %lu\n",
+                ime_private_mode_states[i], stamp );
+            ok( !size, "%#I64x: expected empty initial data, got %lu bytes\n",
+                ime_private_mode_states[i], size );
+            ok( value == 0xdeadbeef, "%#I64x: query changed unused output to %#lx\n",
+                ime_private_mode_states[i], value );
+
+            subscription = NULL;
+            status = pRtlSubscribeWnfStateChangeNotification( &subscription,
+                                                              ime_private_mode_states[i], 0,
+                                                              callback, NULL, NULL, 0, 0 );
+            ok( status == STATUS_SUCCESS, "%#I64x: expected STATUS_SUCCESS, got %#lx\n",
+                ime_private_mode_states[i], status );
+            ok( !!subscription, "%#I64x: expected a subscription\n", ime_private_mode_states[i] );
+            if (!status)
+            {
+                status = pRtlUnsubscribeWnfNotificationWaitForCompletion( subscription );
+                ok( status == STATUS_SUCCESS, "%#I64x: expected STATUS_SUCCESS, got %#lx\n",
+                    ime_private_mode_states[i], status );
             }
         }
     }
