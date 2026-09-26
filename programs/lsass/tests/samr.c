@@ -321,6 +321,29 @@ static void test_account_enumeration(void)
     }
     free_enumeration_buffer( buffer );
 
+    enumeration_context = count = 0;
+    buffer = (void *)0xdeadbeef;
+    status = samr_enumerate_users_in_domain2( domain, &enumeration_context, 0, 1,
+                                              &buffer, ~0u, &count );
+    ok( status == STATUS_SUCCESS, "private local enumeration returned %#lx\n", status );
+    ok( enumeration_context == 1, "private local enumeration context is %lu\n",
+        enumeration_context );
+    ok( count == 1 && buffer && buffer->EntriesRead == 1,
+        "private local enumeration returned count %lu, buffer %p\n", count, buffer );
+    if (buffer && buffer->EntriesRead)
+        ok( buffer->Buffer[0].RelativeId == SAMR_LOCAL_USER_RID,
+            "private local enumeration RID is %lu\n", buffer->Buffer[0].RelativeId );
+    free_enumeration_buffer( buffer );
+
+    enumeration_context = count = 0;
+    buffer = (void *)0xdeadbeef;
+    status = samr_enumerate_users_in_domain2( domain, &enumeration_context, 0, 2,
+                                              &buffer, ~0u, &count );
+    ok( status == STATUS_SUCCESS, "private connected enumeration returned %#lx\n", status );
+    ok( enumeration_context == 1 && !count && !buffer,
+        "private connected enumeration returned context %lu, count %lu, buffer %p\n",
+        enumeration_context, count, buffer );
+
     {
         SAMR_UNICODE_STRING lookup_names[2];
         SAMR_ULONG_ARRAY ids = {0}, use = {0};

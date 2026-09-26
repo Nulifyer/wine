@@ -312,4 +312,12 @@ interface samr
         [in, size_is(1000), length_is(count)] SAMR_UNICODE_STRING names[*],
         [out] SAMR_ULONG_ARRAY *relative_ids,
         [out] SAMR_ULONG_ARRAY *use);
+    NTSTATUS samr_enumerate_users_in_domain2(
+        [in] SAMR_HANDLE domain_handle,
+        [in, out] ULONG *enumeration_context,
+        [in] ULONG user_account_control,
+        [in] ULONG account_kind_filter,
+        [out] SAMR_ENUMERATION_BUFFER **buffer,
+        [in] ULONG preferred_maximum_length,
+        [out] ULONG *count_returned);
 }

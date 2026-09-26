@@ -180,20 +180,20 @@ static void free_enumeration_buffer( SAMR_ENUMERATION_BUFFER *buffer )
     MIDL_user_free( buffer );
 }
 
-NTSTATUS samr_enumerate_users_in_domain( SAMR_HANDLE domain_handle, ULONG *enumeration_context,
-                                         ULONG user_account_control,
-                                         SAMR_ENUMERATION_BUFFER **buffer,
-                                         ULONG preferred_maximum_length,
-                                         ULONG *count_returned )
+static NTSTATUS enumerate_users_in_domain( SAMR_HANDLE domain_handle, ULONG *enumeration_context,
+                                           ULONG user_account_control, ULONG account_kind_filter,
+                                           SAMR_ENUMERATION_BUFFER **buffer,
+                                           ULONG preferred_maximum_length,
+                                           ULONG *count_returned )
 {
     struct samr_context *domain = domain_handle;
     SAMR_ENUMERATION_BUFFER *result = NULL;
     struct lsa_local_account account;
     SIZE_T name_bytes, required;
 
-    TRACE( "domain %p, context %p, control %#lx, buffer %p, maximum %lu, count %p\n",
-           domain_handle, enumeration_context, user_account_control, buffer,
-           preferred_maximum_length, count_returned );
+    TRACE( "domain %p, context %p, control %#lx, kinds %#lx, buffer %p, maximum %lu, count %p\n",
+           domain_handle, enumeration_context, user_account_control, account_kind_filter,
+           buffer, preferred_maximum_length, count_returned );
 
     if (!domain || domain->magic != SAMR_CONTEXT_MAGIC ||
         (domain->type != SAMR_CONTEXT_ACCOUNT_DOMAIN &&
@@ -204,10 +204,20 @@ NTSTATUS samr_enumerate_users_in_domain( SAMR_HANDLE domain_handle, ULONG *enume
     *buffer = NULL;
     *count_returned = 0;
 
+    /* The private local opnum 72 classifies accounts as local (bit 0),
+     * connected-provider (bit 1), or shadow-admin (bit 2).  LinuxNT's
+     * synthetic account is local and has neither of the other properties. */
     if (*enumeration_context || domain->type == SAMR_CONTEXT_BUILTIN_DOMAIN ||
         (user_account_control & ~UF_NORMAL_ACCOUNT))
         return STATUS_SUCCESS;
     if (!lsa_get_local_account( &account )) return STATUS_UNSUCCESSFUL;
+
+    /* Native advances past accounts rejected by the kind filter. */
+    if (account_kind_filter && !(account_kind_filter & 1))
+    {
+        *enumeration_context = 1;
+        return STATUS_SUCCESS;
+    }
     name_bytes = wcslen(account.name) * sizeof(WCHAR);
     required = sizeof(*result) + sizeof(*result->Buffer) + name_bytes + sizeof(WCHAR);
     if (preferred_maximum_length && preferred_maximum_length < required)
@@ -232,6 +242,27 @@ NTSTATUS samr_enumerate_users_in_domain( SAMR_HANDLE domain_handle, ULONG *enume
 no_memory:
     free_enumeration_buffer( result );
     return STATUS_NO_MEMORY;
+}
+
+NTSTATUS samr_enumerate_users_in_domain( SAMR_HANDLE domain_handle, ULONG *enumeration_context,
+                                         ULONG user_account_control,
+                                         SAMR_ENUMERATION_BUFFER **buffer,
+                                         ULONG preferred_maximum_length,
+                                         ULONG *count_returned )
+{
+    return enumerate_users_in_domain( domain_handle, enumeration_context, user_account_control, 0,
+                                      buffer, preferred_maximum_length, count_returned );
+}
+
+NTSTATUS samr_enumerate_users_in_domain2( SAMR_HANDLE domain_handle, ULONG *enumeration_context,
+                                          ULONG user_account_control, ULONG account_kind_filter,
+                                          SAMR_ENUMERATION_BUFFER **buffer,
+                                          ULONG preferred_maximum_length,
+                                          ULONG *count_returned )
+{
+    return enumerate_users_in_domain( domain_handle, enumeration_context, user_account_control,
+                                      account_kind_filter, buffer, preferred_maximum_length,
+                                      count_returned );
 }
 
 static NTSTATUS lookup_names_in_domain( SAMR_HANDLE domain_handle, ULONG count,
