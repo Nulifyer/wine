@@ -969,7 +969,7 @@
     SYSCALL_ENTRY( 0x13c5, NtUserFindExistingCursorIcon, 12 ) \
     SYSCALL_ENTRY( 0x13c6, NtUserFindWindowEx, 20 ) \
     SYSCALL_ENTRY( 0x13c7, NtUserFlashWindowEx, 4 ) \
-    SYSCALL_ENTRY( 0x13c8, NtUserForceEnableNumpadTranslation, 0 ) \
+    SYSCALL_ENTRY( 0x13c8, NtUserForceEnableNumpadTranslation, 4 ) \
     SYSCALL_ENTRY( 0x13c9, NtUserForceWindowToDpiForTest, 0 ) \
     SYSCALL_ENTRY( 0x13ca, NtUserFrostCrashedWindow, 0 ) \
     SYSCALL_ENTRY( 0x13cb, NtUserFunctionalizeDisplayConfig, 0 ) \
@@ -2511,7 +2511,7 @@
     SYSCALL_ENTRY( 0x13c5, NtUserFindExistingCursorIcon, 24 ) \
     SYSCALL_ENTRY( 0x13c6, NtUserFindWindowEx, 40 ) \
     SYSCALL_ENTRY( 0x13c7, NtUserFlashWindowEx, 8 ) \
-    SYSCALL_ENTRY( 0x13c8, NtUserForceEnableNumpadTranslation, 0 ) \
+    SYSCALL_ENTRY( 0x13c8, NtUserForceEnableNumpadTranslation, 8 ) \
     SYSCALL_ENTRY( 0x13c9, NtUserForceWindowToDpiForTest, 0 ) \
     SYSCALL_ENTRY( 0x13ca, NtUserFrostCrashedWindow, 0 ) \
     SYSCALL_ENTRY( 0x13cb, NtUserFunctionalizeDisplayConfig, 0 ) \
@@ -3713,7 +3713,6 @@
     SYSCALL_STUB( NtUserEnsureDpiDepSysMetCacheForPlateau ) \
     SYSCALL_STUB( NtUserEvent ) \
     SYSCALL_STUB( NtUserFillWindow ) \
-    SYSCALL_STUB( NtUserForceEnableNumpadTranslation ) \
     SYSCALL_STUB( NtUserForceWindowToDpiForTest ) \
     SYSCALL_STUB( NtUserFrostCrashedWindow ) \
     SYSCALL_STUB( NtUserFunctionalizeDisplayConfig ) \

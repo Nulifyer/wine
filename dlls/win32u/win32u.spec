@@ -967,7 +967,7 @@
 @ stdcall -syscall NtUserFindExistingCursorIcon(ptr ptr ptr)
 @ stdcall -syscall NtUserFindWindowEx(long long ptr ptr long)
 @ stdcall -syscall NtUserFlashWindowEx(ptr)
-@ stub -syscall NtUserForceEnableNumpadTranslation
+@ stdcall -syscall NtUserForceEnableNumpadTranslation(long)
 @ stub -syscall NtUserForceWindowToDpiForTest
 @ stub -syscall NtUserFrostCrashedWindow
 @ stub -syscall NtUserFunctionalizeDisplayConfig

@@ -2394,6 +2394,16 @@ static void dump_set_user_input_time_reply( const struct set_user_input_time_rep
     fprintf( stderr, " time=%08x", req->time );
 }
 
+static void dump_force_enable_numpad_translation_request( const struct force_enable_numpad_translation_request *req )
+{
+    fprintf( stderr, " enable=%d", req->enable );
+}
+
+static void dump_force_enable_numpad_translation_reply( const struct force_enable_numpad_translation_reply *req )
+{
+    fprintf( stderr, " previous=%d", req->previous );
+}
+
 static void dump_get_key_state_request( const struct get_key_state_request *req )
 {
     fprintf( stderr, " async=%d", req->async );
@@ -4872,6 +4882,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_attach_thread_input_request,
     (dump_func)dump_get_thread_input_request,
     (dump_func)dump_set_user_input_time_request,
+    (dump_func)dump_force_enable_numpad_translation_request,
     (dump_func)dump_get_key_state_request,
     (dump_func)dump_set_key_state_request,
     (dump_func)dump_set_foreground_window_request,
@@ -5298,6 +5309,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_get_thread_input_reply,
     (dump_func)dump_set_user_input_time_reply,
+    (dump_func)dump_force_enable_numpad_translation_reply,
     (dump_func)dump_get_key_state_reply,
     NULL,
     (dump_func)dump_set_foreground_window_reply,
@@ -5724,6 +5736,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "attach_thread_input",
     "get_thread_input",
     "set_user_input_time",
+    "force_enable_numpad_translation",
     "get_key_state",
     "set_key_state",
     "set_foreground_window",

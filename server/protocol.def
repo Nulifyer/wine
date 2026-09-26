@@ -3339,6 +3339,14 @@ enum coords_relative
 @END
 
 
+/* Force numeric keypad translation for the current foreground thread. */
+@REQ(force_enable_numpad_translation)
+    int          enable;          /* whether forced translation is enabled */
+@REPLY
+    int          previous;        /* previous state for the current thread */
+@END
+
+
 /* Retrieve queue keyboard state for current thread or global async state */
 @REQ(get_key_state)
     int            async;         /* whether to query the async state */

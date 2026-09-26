@@ -376,6 +376,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->dbg_hidden      = 0;
     thread->bypass_proc_suspend = 0;
     thread->manipulation_registered = 0;
+    thread->force_enable_numpad_translation = 0;
     thread->input_delegate_callback = 0;
     thread->input_delegate_context = 0;
     thread->input_delegate_count = 0;

@@ -48,6 +48,7 @@ typedef UINT_PTR (WINAPI *delegate_input_fn)(DWORD, void *, void *, HWND, UINT, 
 typedef BOOL (WINAPI *undelegate_input_fn)(HWND, UINT);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
+typedef BOOL (WINAPI *force_enable_numpad_translation_fn)(BOOL);
 
 static get_process_ui_context_information_fn pGetProcessUIContextInformation;
 static is_immersive_process_fn pIsImmersiveProcess;
@@ -77,6 +78,65 @@ static HWND input_delegate_target, input_delegate_callback_hwnd;
 static void *input_delegate_callback_context;
 static UINT input_delegate_callback_message, input_delegate_option;
 static unsigned int input_delegate_callback_count, input_delegate_target_count;
+
+struct numpad_translation_thread_params
+{
+    force_enable_numpad_translation_fn function;
+    BOOL first_previous;
+    BOOL second_previous;
+};
+
+static DWORD WINAPI numpad_translation_thread(void *arg)
+{
+    struct numpad_translation_thread_params *params = arg;
+
+    params->first_previous = params->function(TRUE);
+    params->second_previous = params->function(FALSE);
+    return 0;
+}
+
+static void test_force_enable_numpad_translation(HMODULE module)
+{
+    force_enable_numpad_translation_fn function =
+        (void *)GetProcAddress(module, (const char *)2600);
+    struct numpad_translation_thread_params params = {0};
+    HANDLE thread;
+    BOOL previous;
+
+    ok(!!function, "ForceEnableNumpadTranslation ordinal is unavailable.\n");
+    if (!function) return;
+
+    previous = function(FALSE);
+    ok(!previous, "initial disable returned previous state %d.\n", previous);
+    previous = function(TRUE);
+    ok(!previous, "first enable returned previous state %d.\n", previous);
+    previous = function(TRUE);
+    ok(previous, "repeated enable returned previous state %d.\n", previous);
+    previous = function(2);
+    ok(previous, "noncanonical disable returned previous state %d.\n", previous);
+    previous = function(FALSE);
+    ok(!previous, "noncanonical disable retained state %d.\n", previous);
+    previous = function(TRUE);
+    ok(!previous, "enable after noncanonical disable returned previous state %d.\n", previous);
+
+    params.function = function;
+    thread = CreateThread(NULL, 0, numpad_translation_thread, &params, 0, NULL);
+    ok(!!thread, "failed to create numpad translation thread, error %lu.\n", GetLastError());
+    if (thread)
+    {
+        ok(WaitForSingleObject(thread, 10000) == WAIT_OBJECT_0,
+           "numpad translation thread did not exit.\n");
+        CloseHandle(thread);
+        ok(!params.first_previous, "new thread inherited state %d.\n", params.first_previous);
+        ok(params.second_previous, "new thread did not retain enabled state %d.\n",
+           params.second_previous);
+    }
+
+    previous = function(FALSE);
+    ok(previous, "main thread lost enabled state %d.\n", previous);
+    previous = function(FALSE);
+    ok(!previous, "repeated disable returned previous state %d.\n", previous);
+}
 
 static UINT_PTR WINAPI input_delegate_callback(MSG *message, void *context)
 {
@@ -1197,6 +1257,7 @@ START_TEST(native_ordinals)
     }
 
     module = GetModuleHandleW(L"user32.dll");
+    test_force_enable_numpad_translation(module);
     test_input_delegation(module);
     test_schedule_dispatch_notification(module);
     test_queue_status_readonly(module);

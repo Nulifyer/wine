@@ -4606,6 +4606,20 @@ struct set_user_input_time_reply
 
 
 
+struct force_enable_numpad_translation_request
+{
+    struct request_header __header;
+    int          enable;
+};
+struct force_enable_numpad_translation_reply
+{
+    struct reply_header __header;
+    int          previous;
+    char __pad_12[4];
+};
+
+
+
 struct get_key_state_request
 {
     struct request_header __header;
@@ -8193,6 +8207,7 @@ enum request
     REQ_attach_thread_input,
     REQ_get_thread_input,
     REQ_set_user_input_time,
+    REQ_force_enable_numpad_translation,
     REQ_get_key_state,
     REQ_set_key_state,
     REQ_set_foreground_window,
@@ -8622,6 +8637,7 @@ union generic_request
     struct attach_thread_input_request attach_thread_input_request;
     struct get_thread_input_request get_thread_input_request;
     struct set_user_input_time_request set_user_input_time_request;
+    struct force_enable_numpad_translation_request force_enable_numpad_translation_request;
     struct get_key_state_request get_key_state_request;
     struct set_key_state_request set_key_state_request;
     struct set_foreground_window_request set_foreground_window_request;
@@ -9049,6 +9065,7 @@ union generic_reply
     struct attach_thread_input_reply attach_thread_input_reply;
     struct get_thread_input_reply get_thread_input_reply;
     struct set_user_input_time_reply set_user_input_time_reply;
+    struct force_enable_numpad_translation_reply force_enable_numpad_translation_reply;
     struct get_key_state_reply get_key_state_reply;
     struct set_key_state_reply set_key_state_reply;
     struct set_foreground_window_reply set_foreground_window_reply;

@@ -3209,6 +3209,29 @@ BOOL WINAPI NtUserEnableMouseInputForCursorSuppression( BOOL enable )
 }
 
 /**********************************************************************
+ *       NtUserForceEnableNumpadTranslation    (win32u.@)
+ *
+ * Enable numeric keypad translation for the current thread and return
+ * its previous state.  The server retains the state because hardware key
+ * translation is performed against the foreground thread there.
+ */
+BOOL WINAPI NtUserForceEnableNumpadTranslation( BOOL enable )
+{
+    BOOL previous = FALSE;
+
+    TRACE( "enable %u\n", enable );
+
+    SERVER_START_REQ( force_enable_numpad_translation )
+    {
+        req->enable = enable & 1;
+        if (!wine_server_call( req )) previous = reply->previous;
+    }
+    SERVER_END_REQ;
+
+    return previous;
+}
+
+/**********************************************************************
  *       NtUserIsMouseInPointerEnabled    (win32u.@)
  */
 BOOL WINAPI NtUserIsMouseInPointerEnabled(void)

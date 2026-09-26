@@ -2438,7 +2438,7 @@ static int queue_keyboard_message( struct desktop *desktop, user_handle_t win, c
     struct hw_msg_source source = { IMDT_KEYBOARD, origin };
     struct hardware_msg_data *msg_data;
     struct message *msg;
-    struct thread *foreground;
+    struct thread *foreground = get_foreground_thread( desktop, win );
     unsigned char vkey = input->kbd.vkey, hook_vkey = vkey;
     unsigned int message_code, time;
     lparam_t lparam = input->kbd.scan << 16;
@@ -2514,9 +2514,12 @@ static int queue_keyboard_message( struct desktop *desktop, user_handle_t win, c
         break;
     }
 
-    /* send numpad vkeys if NumLock is active */
-    if ((input->kbd.vkey & KBDNUMPAD) && (desktop_shm->keystate[VK_NUMLOCK] & 0x01) &&
-        !(desktop_shm->keystate[VK_SHIFT] & 0x80))
+    /* Send numpad vkeys when NumLock is active, or when the foreground thread
+     * explicitly forces the numeric translation for a numeric input field. */
+    if ((input->kbd.vkey & KBDNUMPAD) &&
+        (((desktop_shm->keystate[VK_NUMLOCK] & 0x01) && !(desktop_shm->keystate[VK_SHIFT] & 0x80)) ||
+         (foreground && foreground->force_enable_numpad_translation &&
+          !(input->kbd.vkey & KBDINJECTEDVK))))
     {
         switch (vkey)
         {
@@ -2555,7 +2558,7 @@ static int queue_keyboard_message( struct desktop *desktop, user_handle_t win, c
         }
     }
 
-    if (!unicode && (foreground = get_foreground_thread( desktop, win )))
+    if (!unicode && foreground)
     {
         struct rawinput_message raw_msg = {0};
         raw_msg.foreground = foreground;
@@ -2568,7 +2571,10 @@ static int queue_keyboard_message( struct desktop *desktop, user_handle_t win, c
 
         dispatch_rawinput_message( desktop, &raw_msg );
         release_object( foreground );
+        foreground = NULL;
     }
+
+    if (foreground) release_object( foreground );
 
     if (!(msg = alloc_hardware_message( input->kbd.info, source, time, 0 ))) return 0;
     msg_data = msg->data;
@@ -4122,6 +4128,13 @@ DECL_HANDLER(set_user_input_time)
     }
 
     reply->time = last_input_time;
+}
+
+/* force numeric keypad translation for the current foreground thread */
+DECL_HANDLER(force_enable_numpad_translation)
+{
+    reply->previous = current->force_enable_numpad_translation;
+    current->force_enable_numpad_translation = req->enable & 1;
 }
 
 /* set/get the current cursor */

@@ -111,7 +111,7 @@
 2597 stdcall -noname CitSetInfo(long ptr) NtUserCitSetInfo
 2598 stub @
 2599 stub @
-2600 stub -noname ForceEnableNumpadTranslation  # NtUserForceEnableNumpadTranslation
+2600 stdcall -noname ForceEnableNumpadTranslation(long) NtUserForceEnableNumpadTranslation
 
 2606 stub -noname EnableSoftwareCursorForScreenCapture  # NtUserEnableSoftwareCursorForScreenCapture
 

@@ -988,6 +988,7 @@ W32KAPI BOOL    WINAPI NtUserEnableMouseInputForCursorSuppression( BOOL enable )
 W32KAPI BOOL    WINAPI NtUserEnableScrollBar( HWND hwnd, UINT bar, UINT flags );
 W32KAPI BOOL    WINAPI NtUserEnableWindow( HWND hwnd, BOOL enable );
 W32KAPI BOOL    WINAPI NtUserEnableWindowResizeOptimization( UINT flags, UINT value, UINT timeout );
+W32KAPI BOOL    WINAPI NtUserForceEnableNumpadTranslation( BOOL enable );
 W32KAPI BOOL    WINAPI NtUserEndDeferWindowPosEx( HDWP hdwp, BOOL async );
 W32KAPI BOOL    WINAPI NtUserEndMenu(void);
 W32KAPI BOOL    WINAPI NtUserEndPaint( HWND hwnd, const PAINTSTRUCT *ps );

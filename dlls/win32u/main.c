@@ -1622,6 +1622,11 @@ BOOL SYSCALL_API NtUserFlashWindowEx( FLASHWINFO *info )
     SYSCALL_FUNC( NtUserFlashWindowEx );
 }
 
+BOOL SYSCALL_API NtUserForceEnableNumpadTranslation( BOOL enable )
+{
+    SYSCALL_FUNC( NtUserForceEnableNumpadTranslation );
+}
+
 HWND SYSCALL_API NtUserGetAncestor( HWND hwnd, UINT type )
 {
     SYSCALL_FUNC( NtUserGetAncestor );
