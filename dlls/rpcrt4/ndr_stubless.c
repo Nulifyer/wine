@@ -846,19 +846,6 @@ static LONG_PTR ndr_client_call( const MIDL_STUB_DESC *stub_desc, const PFORMAT_
         client_do_args(stub_msg, format, STUBLESS_UNMARSHAL, fpu_args,
                        number_of_params, (unsigned char *)&retval);
 
-        if (procedure_number == 7 && stack_top[1])
-        {
-            DWORD *status = stack_top[1];
-            HMODULE rpcss = GetModuleHandleW(L"rpcss.dll");
-
-            TRACE("linuxnt: proc7 rpcss %p status %08lx %08lx %08lx %08lx\n",
-                  rpcss, status[0], status[1], status[2], status[3]);
-            if (status[1] == 4 && rpcss)
-            {
-                TRACE("linuxnt: delaying rpcss.dll after SERVICE_RUNNING\n");
-                Sleep(10000);
-            }
-        }
     }
     __FINALLY_CTX(ndr_client_call_finally, &finally_ctx)
 
