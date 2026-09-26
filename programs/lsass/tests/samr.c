@@ -28,7 +28,17 @@
 #define SAMR_SERVER_LOOKUP_DOMAIN 0x00000020
 #define SAMR_DOMAIN_LIST_ACCOUNTS 0x00000100
 #define SAMR_DOMAIN_OPEN_ACCOUNT 0x00000200
+#define SAMR_USER_READ_GENERAL 0x00000001
+#define SAMR_USER_READ_PREFERENCES 0x00000002
+#define SAMR_USER_READ_LOGON 0x00000008
+#define SAMR_USER_READ_ACCOUNT 0x00000010
+#define SAMR_USER_LIST_GROUPS 0x00000100
+#define SAMR_USER_READ_GROUP_INFORMATION 0x00000200
 #define SAMR_LOCAL_USER_RID 1000
+#define SAMR_SHACCT_USER_ACCESS (STANDARD_RIGHTS_READ | SAMR_USER_READ_GENERAL | \
+                                 SAMR_USER_READ_PREFERENCES | SAMR_USER_READ_LOGON | \
+                                 SAMR_USER_READ_ACCOUNT | SAMR_USER_LIST_GROUPS | \
+                                 SAMR_USER_READ_GROUP_INFORMATION)
 
 void *__RPC_USER MIDL_user_allocate( SIZE_T size )
 {
@@ -109,6 +119,133 @@ static BOOL wait_for_server(void)
         ok( 0, "SAMR server did not become ready, status %ld\n", rpc_status );
     CloseHandle( process.hProcess );
     return rpc_status == RPC_S_OK;
+}
+
+static void free_user_info( SAMR_USER_INFO_BUFFER *info,
+                            SAMR_USER_INFORMATION_CLASS info_class )
+{
+    if (!info) return;
+    if (info_class == SamrUserAllInformation)
+    {
+        MIDL_user_free( info->All.UserName.Buffer );
+        MIDL_user_free( info->All.LogonHours.LogonHours );
+    }
+    MIDL_user_free( info );
+}
+
+static void test_user_information( SAMR_HANDLE domain, const WCHAR *user_name )
+{
+    SAMR_USER_INFO_BUFFER *info;
+    SAMR_HANDLE user = NULL, maximum_user = NULL, empty_user = NULL;
+    NTSTATUS status;
+    ULONG i;
+
+    info = (void *)0xdeadbeef;
+    status = samr_query_information_user( domain, SamrUserAllInformation, &info );
+    ok( status == STATUS_INVALID_HANDLE, "domain query returned %#lx\n", status );
+    ok( !info, "domain query returned buffer %p\n", info );
+
+    status = samr_open_user( domain, SAMR_SHACCT_USER_ACCESS, 999, &user );
+    ok( status == STATUS_NO_SUCH_USER, "unknown RID returned %#lx\n", status );
+    ok( !user, "unknown RID returned handle %p\n", user );
+
+    status = samr_open_user( domain, 0x04000000, SAMR_LOCAL_USER_RID, &user );
+    ok( status == STATUS_ACCESS_DENIED, "unsupported access returned %#lx\n", status );
+    ok( !user, "unsupported access returned handle %p\n", user );
+
+    status = samr_open_user( domain, SAMR_SHACCT_USER_ACCESS,
+                             SAMR_LOCAL_USER_RID, &user );
+    ok( status == STATUS_SUCCESS && user, "user open returned %#lx, %p\n", status, user );
+
+    info = (void *)0xdeadbeef;
+    status = samr_query_information_user( user, SamrUserAllInformation, &info );
+    ok( status == STATUS_SUCCESS && info, "all-information query returned %#lx, %p\n",
+        status, info );
+    if (info)
+    {
+        ok( info->All.WhichFields == 0x00ffffff,
+            "all-information fields are %#lx\n", info->All.WhichFields );
+        ok( info->All.UserId == SAMR_LOCAL_USER_RID, "user RID is %lu\n",
+            info->All.UserId );
+        ok( info->All.PrimaryGroupId == DOMAIN_GROUP_RID_USERS,
+            "primary group is %lu\n", info->All.PrimaryGroupId );
+        ok( info->All.UserAccountControl == (UF_NORMAL_ACCOUNT | UF_DONT_EXPIRE_PASSWD),
+            "account control is %#lx\n", info->All.UserAccountControl );
+        ok( info->All.UserName.Buffer && !wcsicmp( info->All.UserName.Buffer, user_name ),
+            "user name is %s\n", wine_dbgstr_w(info->All.UserName.Buffer) );
+        ok( info->All.LogonHours.UnitsPerWeek == 168,
+            "logon-hours units are %u\n", info->All.LogonHours.UnitsPerWeek );
+        ok( info->All.LogonHours.LogonHours != NULL, "logon-hours data is null\n" );
+        if (info->All.LogonHours.LogonHours)
+            for (i = 0; i < 21; ++i)
+                ok( info->All.LogonHours.LogonHours[i] == 0xff,
+                    "logon-hours byte %lu is %#x\n", i,
+                    info->All.LogonHours.LogonHours[i] );
+        ok( info->All.AccountExpires.LowPart == ~0u &&
+            info->All.AccountExpires.HighPart == 0x7fffffff,
+            "account expiry is %#lx:%#lx\n", info->All.AccountExpires.HighPart,
+            info->All.AccountExpires.LowPart );
+        ok( !info->All.PrivateData.Buffer && !info->All.SecurityDescriptor.SecurityDescriptor,
+            "private data or security descriptor was exposed\n" );
+    }
+    free_user_info( info, SamrUserAllInformation );
+
+    info = (void *)0xdeadbeef;
+    status = samr_query_information_user( user, SamrUserExtendedInformation, &info );
+    ok( status == STATUS_SUCCESS && info, "extended query returned %#lx, %p\n", status, info );
+    if (info)
+    {
+        ok( !info->Extended.ExtendedWhichFields, "extended fields are %#lx\n",
+            info->Extended.ExtendedWhichFields );
+        ok( !info->Extended.UserTile.Data && !info->Extended.PasswordHint.Buffer &&
+            !info->Extended.ShellAdminObjectProperties.Data &&
+            !info->Extended.ReservedString1.Buffer && !info->Extended.ReservedString2.Buffer &&
+            !info->Extended.ReservedString3.Buffer && !info->Extended.ReservedBlob1.Data &&
+            !info->Extended.ReservedBlob2.Data,
+            "empty extended information returned nested data\n" );
+    }
+    free_user_info( info, SamrUserExtendedInformation );
+
+    info = (void *)0xdeadbeef;
+    status = samr_query_information_user( user, SamrUserLogonUIInformation, &info );
+    ok( status == STATUS_SUCCESS && info, "LogonUI query returned %#lx, %p\n", status, info );
+    if (info)
+    {
+        ok( info->LogonUI.PasswordIsBlank, "password was reported nonblank\n" );
+        ok( !info->LogonUI.AccountIsDisabled, "account was reported disabled\n" );
+    }
+    free_user_info( info, SamrUserLogonUIInformation );
+
+    info = (void *)0xdeadbeef;
+    status = samr_query_information_user( user, SamrUserAuthInformation, &info );
+    ok( status == STATUS_ACCESS_DENIED, "auth query without force access returned %#lx\n", status );
+    ok( !info, "denied auth query returned buffer %p\n", info );
+
+    status = samr_open_user( domain, MAXIMUM_ALLOWED, SAMR_LOCAL_USER_RID, &maximum_user );
+    ok( status == STATUS_SUCCESS && maximum_user,
+        "maximum-access user open returned %#lx, %p\n", status, maximum_user );
+    info = (void *)0xdeadbeef;
+    status = samr_query_information_user( maximum_user, SamrUserAuthInformation, &info );
+    ok( status == STATUS_NOT_SUPPORTED, "auth query returned %#lx\n", status );
+    ok( !info, "unsupported auth query returned buffer %p\n", info );
+
+    status = samr_open_user( domain, 0, SAMR_LOCAL_USER_RID, &empty_user );
+    ok( status == STATUS_SUCCESS && empty_user,
+        "zero-access user open returned %#lx, %p\n", status, empty_user );
+    info = (void *)0xdeadbeef;
+    status = samr_query_information_user( empty_user, SamrUserAllInformation, &info );
+    ok( status == STATUS_SUCCESS && info, "zero-access query returned %#lx, %p\n", status, info );
+    if (info) ok( !info->All.WhichFields, "zero-access fields are %#lx\n", info->All.WhichFields );
+    free_user_info( info, SamrUserAllInformation );
+
+    status = samr_close_handle( &empty_user );
+    ok( status == STATUS_SUCCESS && !empty_user, "zero-access close returned %#lx, %p\n",
+        status, empty_user );
+    status = samr_close_handle( &maximum_user );
+    ok( status == STATUS_SUCCESS && !maximum_user, "maximum close returned %#lx, %p\n",
+        status, maximum_user );
+    status = samr_close_handle( &user );
+    ok( status == STATUS_SUCCESS && !user, "user close returned %#lx, %p\n", status, user );
 }
 
 static void test_account_enumeration(void)
@@ -242,6 +379,8 @@ static void test_account_enumeration(void)
         MIDL_user_free( user_sid );
     }
 
+    test_user_information( domain, user_name );
+
     buffer = (void *)0xdeadbeef;
     count = 7;
     status = samr_enumerate_users_in_domain( domain, &enumeration_context, 0,
@@ -308,6 +447,15 @@ START_TEST(samr)
 {
     RPC_WSTR string_binding;
     RPC_STATUS status;
+
+    ok( sizeof(SAMR_USER_ALL_INFORMATION) == 0x13c,
+        "all-information size is %#Ix\n", sizeof(SAMR_USER_ALL_INFORMATION) );
+    ok( sizeof(SAMR_USER_EXTENDED_INFORMATION) == 0xa8,
+        "extended-information size is %#Ix\n", sizeof(SAMR_USER_EXTENDED_INFORMATION) );
+    ok( sizeof(SAMR_USER_LOGON_UI_INFORMATION) == 2,
+        "LogonUI-information size is %#Ix\n", sizeof(SAMR_USER_LOGON_UI_INFORMATION) );
+    ok( sizeof(SAMR_USER_AUTH_INFORMATION) == 0x18,
+        "auth-information size is %#Ix\n", sizeof(SAMR_USER_AUTH_INFORMATION) );
 
     status = RpcStringBindingComposeW( NULL, (RPC_WSTR)L"ncalrpc", NULL,
                                        (RPC_WSTR)L"samss lpc", NULL, &string_binding );

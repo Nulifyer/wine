@@ -72,6 +72,128 @@ interface samr
         [case(1)] SAMR_REVISION_INFO_V1 V1;
     } SAMR_OUT_REVISION_INFO;
 
+    typedef struct
+    {
+        ULONG LowPart;
+        LONG HighPart;
+    } SAMR_OLD_LARGE_INTEGER;
+
+    typedef struct
+    {
+        USHORT Length;
+        USHORT MaximumLength;
+        [size_is(MaximumLength / 2), length_is(Length / 2)] USHORT *Buffer;
+    } SAMR_SHORT_BLOB;
+
+    typedef struct
+    {
+        [range(0, 256 * 1024)] ULONG Length;
+        [size_is(Length)] BYTE *SecurityDescriptor;
+    } SAMR_SECURITY_DESCRIPTOR;
+
+    typedef struct
+    {
+        USHORT UnitsPerWeek;
+        [size_is(1260), length_is((UnitsPerWeek + 7) / 8)] BYTE *LogonHours;
+    } SAMR_LOGON_HOURS;
+
+#pragma pack(push, 4)
+    typedef struct
+    {
+        SAMR_OLD_LARGE_INTEGER LastLogon;
+        SAMR_OLD_LARGE_INTEGER LastLogoff;
+        SAMR_OLD_LARGE_INTEGER PasswordLastSet;
+        SAMR_OLD_LARGE_INTEGER AccountExpires;
+        SAMR_OLD_LARGE_INTEGER PasswordCanChange;
+        SAMR_OLD_LARGE_INTEGER PasswordMustChange;
+        SAMR_UNICODE_STRING UserName;
+        SAMR_UNICODE_STRING FullName;
+        SAMR_UNICODE_STRING HomeDirectory;
+        SAMR_UNICODE_STRING HomeDirectoryDrive;
+        SAMR_UNICODE_STRING ScriptPath;
+        SAMR_UNICODE_STRING ProfilePath;
+        SAMR_UNICODE_STRING AdminComment;
+        SAMR_UNICODE_STRING WorkStations;
+        SAMR_UNICODE_STRING UserComment;
+        SAMR_UNICODE_STRING Parameters;
+        SAMR_SHORT_BLOB LmOwfPassword;
+        SAMR_SHORT_BLOB NtOwfPassword;
+        SAMR_UNICODE_STRING PrivateData;
+        SAMR_SECURITY_DESCRIPTOR SecurityDescriptor;
+        ULONG UserId;
+        ULONG PrimaryGroupId;
+        ULONG UserAccountControl;
+        ULONG WhichFields;
+        SAMR_LOGON_HOURS LogonHours;
+        USHORT BadPasswordCount;
+        USHORT LogonCount;
+        USHORT CountryCode;
+        USHORT CodePage;
+        BYTE LmPasswordPresent;
+        BYTE NtPasswordPresent;
+        BYTE PasswordExpired;
+        BYTE PrivateDataSensitive;
+    } SAMR_USER_ALL_INFORMATION;
+#pragma pack(pop)
+
+    typedef struct
+    {
+        ULONG Size;
+        [size_is(Size)] BYTE *Data;
+    } SAMR_BYTE_ARRAY;
+
+    typedef struct
+    {
+        ULONG Value;
+        USHORT Field1;
+        USHORT Field2;
+        BYTE Data[8];
+    } SAMR_EXTENDED_INLINE;
+
+    typedef struct
+    {
+        ULONG ExtendedWhichFields;
+        SAMR_BYTE_ARRAY UserTile;
+        SAMR_UNICODE_STRING PasswordHint;
+        BYTE DontShowInLogonUI;
+        SAMR_BYTE_ARRAY ShellAdminObjectProperties;
+        SAMR_UNICODE_STRING ReservedString1;
+        SAMR_UNICODE_STRING ReservedString2;
+        SAMR_EXTENDED_INLINE ReservedInline;
+        SAMR_UNICODE_STRING ReservedString3;
+        SAMR_BYTE_ARRAY ReservedBlob1;
+        SAMR_BYTE_ARRAY ReservedBlob2;
+        ULONG ReservedFlags;
+    } SAMR_USER_EXTENDED_INFORMATION;
+
+    typedef struct
+    {
+        BYTE PasswordIsBlank;
+        BYTE AccountIsDisabled;
+    } SAMR_USER_LOGON_UI_INFORMATION;
+
+    typedef struct
+    {
+        ULONG WhichFields;
+        SAMR_UNICODE_STRING ResetData;
+    } SAMR_USER_AUTH_INFORMATION;
+
+    typedef enum
+    {
+        SamrUserAllInformation = 21,
+        SamrUserExtendedInformation = 28,
+        SamrUserLogonUIInformation = 29,
+        SamrUserAuthInformation = 30
+    } SAMR_USER_INFORMATION_CLASS;
+
+    typedef [switch_type(SAMR_USER_INFORMATION_CLASS)] union
+    {
+        [case(SamrUserAllInformation)] SAMR_USER_ALL_INFORMATION All;
+        [case(SamrUserExtendedInformation)] SAMR_USER_EXTENDED_INFORMATION Extended;
+        [case(SamrUserLogonUIInformation)] SAMR_USER_LOGON_UI_INFORMATION LogonUI;
+        [case(SamrUserAuthInformation)] SAMR_USER_AUTH_INFORMATION Auth;
+    } SAMR_USER_INFO_BUFFER;
+
     NTSTATUS samr_unused_0(void);
     NTSTATUS samr_close_handle([in, out] SAMR_HANDLE *handle);
     NTSTATUS samr_unused_2(void);
@@ -126,9 +248,16 @@ interface samr
     NTSTATUS samr_unused_31(void);
     NTSTATUS samr_unused_32(void);
     NTSTATUS samr_unused_33(void);
-    NTSTATUS samr_unused_34(void);
+    NTSTATUS samr_open_user(
+        [in] SAMR_HANDLE domain_handle,
+        [in] ULONG desired_access,
+        [in] ULONG user_id,
+        [out] SAMR_HANDLE *user_handle);
     NTSTATUS samr_unused_35(void);
-    NTSTATUS samr_unused_36(void);
+    NTSTATUS samr_query_information_user(
+        [in] SAMR_HANDLE user_handle,
+        [in] SAMR_USER_INFORMATION_CLASS user_information_class,
+        [out, switch_is(user_information_class)] SAMR_USER_INFO_BUFFER **buffer);
     NTSTATUS samr_unused_37(void);
     NTSTATUS samr_unused_38(void);
     NTSTATUS samr_unused_39(void);

@@ -31,15 +31,32 @@ WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 #define SAMR_DOMAIN_ALL_ACCESS 0x000f07ff
 #define SAMR_DOMAIN_LIST_ACCOUNTS 0x00000100
 #define SAMR_DOMAIN_OPEN_ACCOUNT 0x00000200
-#define SAMR_LOCAL_USER_RID 1000
+#define SAMR_USER_READ_GENERAL 0x00000001
+#define SAMR_USER_READ_PREFERENCES 0x00000002
+#define SAMR_USER_WRITE_PREFERENCES 0x00000004
+#define SAMR_USER_READ_LOGON 0x00000008
+#define SAMR_USER_READ_ACCOUNT 0x00000010
+#define SAMR_USER_WRITE_ACCOUNT 0x00000020
+#define SAMR_USER_CHANGE_PASSWORD 0x00000040
+#define SAMR_USER_FORCE_PASSWORD_CHANGE 0x00000080
+#define SAMR_USER_LIST_GROUPS 0x00000100
+#define SAMR_USER_READ_GROUP_INFORMATION 0x00000200
+#define SAMR_USER_WRITE_GROUP_INFORMATION 0x00000400
+#define SAMR_USER_ALL_ACCESS 0x000f07ff
 #define SAMR_SID_TYPE_USER 1
 #define SAMR_SID_TYPE_UNKNOWN 8
+
+#define SAMR_FIELD_READ_GENERAL 0x0000003f
+#define SAMR_FIELD_READ_LOGON 0x0003ffc0
+#define SAMR_FIELD_READ_ACCOUNT 0x003c0000
+#define SAMR_FIELD_READ_PREFERENCES 0x00c00000
 
 enum samr_context_type
 {
     SAMR_CONTEXT_SERVER,
     SAMR_CONTEXT_ACCOUNT_DOMAIN,
-    SAMR_CONTEXT_BUILTIN_DOMAIN
+    SAMR_CONTEXT_BUILTIN_DOMAIN,
+    SAMR_CONTEXT_USER
 };
 
 struct samr_context
@@ -47,6 +64,7 @@ struct samr_context
     DWORD magic;
     enum samr_context_type type;
     ACCESS_MASK access;
+    DWORD rid;
 };
 
 static NTSTATUS create_context( enum samr_context_type type, ACCESS_MASK requested,
@@ -63,6 +81,7 @@ static NTSTATUS create_context( enum samr_context_type type, ACCESS_MASK request
     context->magic = SAMR_CONTEXT_MAGIC;
     context->type = type;
     context->access = access;
+    context->rid = 0;
     *handle = context;
     return STATUS_SUCCESS;
 }
@@ -169,8 +188,7 @@ NTSTATUS samr_enumerate_users_in_domain( SAMR_HANDLE domain_handle, ULONG *enume
 {
     struct samr_context *domain = domain_handle;
     SAMR_ENUMERATION_BUFFER *result = NULL;
-    WCHAR user_name[UNLEN + 1];
-    DWORD user_name_chars = ARRAY_SIZE(user_name);
+    struct lsa_local_account account;
     SIZE_T name_bytes, required;
 
     TRACE( "domain %p, context %p, control %#lx, buffer %p, maximum %lu, count %p\n",
@@ -189,8 +207,8 @@ NTSTATUS samr_enumerate_users_in_domain( SAMR_HANDLE domain_handle, ULONG *enume
     if (*enumeration_context || domain->type == SAMR_CONTEXT_BUILTIN_DOMAIN ||
         (user_account_control & ~UF_NORMAL_ACCOUNT))
         return STATUS_SUCCESS;
-    if (!GetUserNameW( user_name, &user_name_chars )) return STATUS_UNSUCCESSFUL;
-    name_bytes = (user_name_chars - 1) * sizeof(WCHAR);
+    if (!lsa_get_local_account( &account )) return STATUS_UNSUCCESSFUL;
+    name_bytes = wcslen(account.name) * sizeof(WCHAR);
     required = sizeof(*result) + sizeof(*result->Buffer) + name_bytes + sizeof(WCHAR);
     if (preferred_maximum_length && preferred_maximum_length < required)
         return STATUS_MORE_ENTRIES;
@@ -201,9 +219,9 @@ NTSTATUS samr_enumerate_users_in_domain( SAMR_HANDLE domain_handle, ULONG *enume
     memset( result->Buffer, 0, sizeof(*result->Buffer) );
     if (!(result->Buffer[0].Name.Buffer = MIDL_user_allocate( name_bytes + sizeof(WCHAR) )))
         goto no_memory;
-    memcpy( result->Buffer[0].Name.Buffer, user_name, name_bytes + sizeof(WCHAR) );
+    memcpy( result->Buffer[0].Name.Buffer, account.name, name_bytes + sizeof(WCHAR) );
     result->EntriesRead = 1;
-    result->Buffer[0].RelativeId = SAMR_LOCAL_USER_RID;
+    result->Buffer[0].RelativeId = account.rid;
     result->Buffer[0].Name.Length = name_bytes;
     result->Buffer[0].Name.MaximumLength = name_bytes + sizeof(WCHAR);
     *enumeration_context = 1;
@@ -223,8 +241,7 @@ static NTSTATUS lookup_names_in_domain( SAMR_HANDLE domain_handle, ULONG count,
 {
     struct samr_context *domain = domain_handle;
     UNICODE_STRING local_name;
-    WCHAR user_name[UNLEN + 1];
-    DWORD user_name_chars = ARRAY_SIZE(user_name);
+    struct lsa_local_account account;
     ULONG mapped = 0, i;
 
     if (!domain || domain->magic != SAMR_CONTEXT_MAGIC ||
@@ -237,8 +254,8 @@ static NTSTATUS lookup_names_in_domain( SAMR_HANDLE domain_handle, ULONG count,
     relative_ids->Element = use->Element = NULL;
     if (!count) return STATUS_SUCCESS;
     if (count > 1000) return STATUS_INVALID_PARAMETER;
-    if (!GetUserNameW( user_name, &user_name_chars )) return STATUS_UNSUCCESSFUL;
-    RtlInitUnicodeString( &local_name, user_name );
+    if (!lsa_get_local_account( &account )) return STATUS_UNSUCCESSFUL;
+    RtlInitUnicodeString( &local_name, account.name );
 
     if (!(relative_ids->Element = MIDL_user_allocate( count * sizeof(*relative_ids->Element) )))
         return STATUS_NO_MEMORY;
@@ -255,7 +272,7 @@ static NTSTATUS lookup_names_in_domain( SAMR_HANDLE domain_handle, ULONG count,
         BOOL match = domain->type == SAMR_CONTEXT_ACCOUNT_DOMAIN &&
                      name.Buffer && RtlEqualUnicodeString( &name, &local_name, TRUE );
 
-        relative_ids->Element[i] = match ? SAMR_LOCAL_USER_RID : 0;
+        relative_ids->Element[i] = match ? account.rid : 0;
         use->Element[i] = match ? SAMR_SID_TYPE_USER : SAMR_SID_TYPE_UNKNOWN;
         if (match) ++mapped;
     }
@@ -300,8 +317,7 @@ NTSTATUS samr_lookup_ids_in_domain( SAMR_HANDLE domain_handle, ULONG count,
                                     SAMR_ULONG_ARRAY *use )
 {
     struct samr_context *domain = domain_handle;
-    WCHAR user_name[UNLEN + 1];
-    DWORD user_name_chars = ARRAY_SIZE(user_name);
+    struct lsa_local_account account;
     SIZE_T name_bytes;
     ULONG mapped = 0, i;
 
@@ -318,8 +334,8 @@ NTSTATUS samr_lookup_ids_in_domain( SAMR_HANDLE domain_handle, ULONG count,
     use->Element = NULL;
     if (!count) return STATUS_SUCCESS;
     if (count > 1000) return STATUS_INVALID_PARAMETER;
-    if (!GetUserNameW( user_name, &user_name_chars )) return STATUS_UNSUCCESSFUL;
-    name_bytes = (user_name_chars - 1) * sizeof(WCHAR);
+    if (!lsa_get_local_account( &account )) return STATUS_UNSUCCESSFUL;
+    name_bytes = wcslen(account.name) * sizeof(WCHAR);
 
     if (!(names->Element = MIDL_user_allocate( count * sizeof(*names->Element) )))
         return STATUS_NO_MEMORY;
@@ -331,13 +347,13 @@ NTSTATUS samr_lookup_ids_in_domain( SAMR_HANDLE domain_handle, ULONG count,
     for (i = 0; i < count; ++i)
     {
         BOOL match = domain->type == SAMR_CONTEXT_ACCOUNT_DOMAIN &&
-                     relative_ids[i] == SAMR_LOCAL_USER_RID;
+                     relative_ids[i] == account.rid;
 
         use->Element[i] = match ? SAMR_SID_TYPE_USER : SAMR_SID_TYPE_UNKNOWN;
         if (!match) continue;
         if (!(names->Element[i].Buffer = MIDL_user_allocate( name_bytes + sizeof(WCHAR) )))
             goto no_memory;
-        memcpy( names->Element[i].Buffer, user_name, name_bytes + sizeof(WCHAR) );
+        memcpy( names->Element[i].Buffer, account.name, name_bytes + sizeof(WCHAR) );
         names->Element[i].Length = name_bytes;
         names->Element[i].MaximumLength = name_bytes + sizeof(WCHAR);
         ++mapped;
@@ -382,6 +398,167 @@ NTSTATUS samr_rid_to_sid( SAMR_HANDLE object_handle, ULONG relative_id, SID **si
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS map_user_access( ACCESS_MASK requested, ACCESS_MASK *granted )
+{
+    ACCESS_MASK access = requested;
+
+    if (access & GENERIC_READ)
+        access = (access & ~GENERIC_READ) | STANDARD_RIGHTS_READ | SAMR_USER_READ_GENERAL |
+                 SAMR_USER_READ_PREFERENCES | SAMR_USER_READ_LOGON | SAMR_USER_READ_ACCOUNT |
+                 SAMR_USER_LIST_GROUPS | SAMR_USER_READ_GROUP_INFORMATION;
+    if (access & GENERIC_WRITE)
+        access = (access & ~GENERIC_WRITE) | STANDARD_RIGHTS_WRITE |
+                 SAMR_USER_WRITE_PREFERENCES | SAMR_USER_WRITE_ACCOUNT |
+                 SAMR_USER_CHANGE_PASSWORD | SAMR_USER_FORCE_PASSWORD_CHANGE |
+                 SAMR_USER_WRITE_GROUP_INFORMATION;
+    if (access & GENERIC_EXECUTE)
+        access = (access & ~GENERIC_EXECUTE) | STANDARD_RIGHTS_EXECUTE |
+                 SAMR_USER_READ_GENERAL;
+    if (access & GENERIC_ALL) access = (access & ~GENERIC_ALL) | SAMR_USER_ALL_ACCESS;
+    if (access & MAXIMUM_ALLOWED) access = SAMR_USER_ALL_ACCESS;
+    if (access & ~SAMR_USER_ALL_ACCESS) return STATUS_ACCESS_DENIED;
+    *granted = access;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS samr_open_user( SAMR_HANDLE domain_handle, ULONG desired_access,
+                         ULONG user_id, SAMR_HANDLE *user_handle )
+{
+    struct samr_context *domain = domain_handle, *user;
+    struct lsa_local_account account;
+    ACCESS_MASK granted;
+    NTSTATUS status;
+
+    TRACE( "domain %p, access %#lx, RID %lu, user %p\n",
+           domain_handle, desired_access, user_id, user_handle );
+    if (!user_handle) return STATUS_INVALID_PARAMETER;
+    *user_handle = NULL;
+    if (!domain || domain->magic != SAMR_CONTEXT_MAGIC ||
+        (domain->type != SAMR_CONTEXT_ACCOUNT_DOMAIN &&
+         domain->type != SAMR_CONTEXT_BUILTIN_DOMAIN))
+        return STATUS_INVALID_HANDLE;
+    if (!(domain->access & SAMR_DOMAIN_OPEN_ACCOUNT)) return STATUS_ACCESS_DENIED;
+    if (!lsa_get_local_account( &account )) return STATUS_UNSUCCESSFUL;
+    if (domain->type != SAMR_CONTEXT_ACCOUNT_DOMAIN || user_id != account.rid)
+        return STATUS_NO_SUCH_USER;
+    if ((status = map_user_access( desired_access, &granted ))) return status;
+    if (!(user = malloc( sizeof(*user) ))) return STATUS_NO_MEMORY;
+    user->magic = SAMR_CONTEXT_MAGIC;
+    user->type = SAMR_CONTEXT_USER;
+    user->access = granted;
+    user->rid = user_id;
+    *user_handle = user;
+    return STATUS_SUCCESS;
+}
+
+static void free_user_info( SAMR_USER_INFO_BUFFER *buffer,
+                            SAMR_USER_INFORMATION_CLASS info_class )
+{
+    if (!buffer) return;
+    if (info_class == SamrUserAllInformation)
+    {
+        MIDL_user_free( buffer->All.UserName.Buffer );
+        MIDL_user_free( buffer->All.LogonHours.LogonHours );
+    }
+    MIDL_user_free( buffer );
+}
+
+static NTSTATUS query_user_all( struct samr_context *user,
+                                const struct lsa_local_account *account,
+                                SAMR_USER_INFO_BUFFER **buffer )
+{
+    SAMR_USER_INFO_BUFFER *result;
+    SAMR_USER_ALL_INFORMATION *info;
+    SIZE_T name_bytes;
+
+    if (!(result = MIDL_user_allocate( sizeof(*result) ))) return STATUS_NO_MEMORY;
+    memset( result, 0, sizeof(*result) );
+    info = &result->All;
+    if (user->access & SAMR_USER_READ_GENERAL)
+    {
+        name_bytes = wcslen(account->name) * sizeof(WCHAR);
+        if (!(info->UserName.Buffer = MIDL_user_allocate( name_bytes + sizeof(WCHAR) )))
+            goto no_memory;
+        memcpy( info->UserName.Buffer, account->name, name_bytes + sizeof(WCHAR) );
+        info->UserName.Length = name_bytes;
+        info->UserName.MaximumLength = name_bytes + sizeof(WCHAR);
+        info->UserId = account->rid;
+        info->PrimaryGroupId = account->primary_group_rid;
+        info->WhichFields |= SAMR_FIELD_READ_GENERAL;
+    }
+    if (user->access & SAMR_USER_READ_LOGON)
+    {
+        if (!(info->LogonHours.LogonHours = MIDL_user_allocate( 21 ))) goto no_memory;
+        memset( info->LogonHours.LogonHours, 0xff, 21 );
+        info->LogonHours.UnitsPerWeek = 168;
+        info->PasswordMustChange.LowPart = ~0u;
+        info->PasswordMustChange.HighPart = 0x7fffffff;
+        info->WhichFields |= SAMR_FIELD_READ_LOGON;
+    }
+    if (user->access & SAMR_USER_READ_ACCOUNT)
+    {
+        info->AccountExpires.LowPart = ~0u;
+        info->AccountExpires.HighPart = 0x7fffffff;
+        info->UserAccountControl = account->account_control;
+        info->WhichFields |= SAMR_FIELD_READ_ACCOUNT;
+    }
+    if (user->access & SAMR_USER_READ_PREFERENCES)
+        info->WhichFields |= SAMR_FIELD_READ_PREFERENCES;
+    *buffer = result;
+    return STATUS_SUCCESS;
+
+no_memory:
+    free_user_info( result, SamrUserAllInformation );
+    return STATUS_NO_MEMORY;
+}
+
+NTSTATUS samr_query_information_user( SAMR_HANDLE user_handle,
+                                      SAMR_USER_INFORMATION_CLASS info_class,
+                                      SAMR_USER_INFO_BUFFER **buffer )
+{
+    struct samr_context *user = get_context( user_handle, SAMR_CONTEXT_USER );
+    struct lsa_local_account account;
+    SAMR_USER_INFO_BUFFER *result;
+
+    TRACE( "user %p, class %u, buffer %p\n", user_handle, info_class, buffer );
+    if (!buffer) return STATUS_INVALID_PARAMETER;
+    *buffer = NULL;
+    if (!user) return STATUS_INVALID_HANDLE;
+    if (!lsa_get_local_account( &account ) || user->rid != account.rid)
+        return STATUS_NO_SUCH_USER;
+
+    switch (info_class)
+    {
+    case SamrUserAllInformation:
+        return query_user_all( user, &account, buffer );
+
+    case SamrUserExtendedInformation:
+        if (!(user->access & SAMR_USER_READ_PREFERENCES)) return STATUS_ACCESS_DENIED;
+        if (!(result = MIDL_user_allocate( sizeof(*result) ))) return STATUS_NO_MEMORY;
+        memset( result, 0, sizeof(*result) );
+        *buffer = result;
+        return STATUS_SUCCESS;
+
+    case SamrUserLogonUIInformation:
+        if ((user->access & (SAMR_USER_READ_GENERAL | SAMR_USER_READ_ACCOUNT)) !=
+            (SAMR_USER_READ_GENERAL | SAMR_USER_READ_ACCOUNT))
+            return STATUS_ACCESS_DENIED;
+        if (!(result = MIDL_user_allocate( sizeof(*result) ))) return STATUS_NO_MEMORY;
+        memset( result, 0, sizeof(*result) );
+        result->LogonUI.PasswordIsBlank = account.password_is_blank;
+        result->LogonUI.AccountIsDisabled = !!(account.account_control & UF_ACCOUNTDISABLE);
+        *buffer = result;
+        return STATUS_SUCCESS;
+
+    case SamrUserAuthInformation:
+        if (!(user->access & SAMR_USER_FORCE_PASSWORD_CHANGE)) return STATUS_ACCESS_DENIED;
+        return STATUS_NOT_SUPPORTED;
+
+    default:
+        return STATUS_INVALID_INFO_CLASS;
+    }
+}
+
 #define DEFINE_UNUSED_OPNUM(n) \
     NTSTATUS samr_unused_##n(void) { return STATUS_NOT_IMPLEMENTED; }
 
@@ -414,9 +591,7 @@ DEFINE_UNUSED_OPNUM(30)
 DEFINE_UNUSED_OPNUM(31)
 DEFINE_UNUSED_OPNUM(32)
 DEFINE_UNUSED_OPNUM(33)
-DEFINE_UNUSED_OPNUM(34)
 DEFINE_UNUSED_OPNUM(35)
-DEFINE_UNUSED_OPNUM(36)
 DEFINE_UNUSED_OPNUM(37)
 DEFINE_UNUSED_OPNUM(38)
 DEFINE_UNUSED_OPNUM(39)

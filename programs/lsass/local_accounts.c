@@ -14,9 +14,25 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnt.h"
+#include "lmaccess.h"
 #include "rpc.h"
 #include "rpcndr.h"
 #include "local_accounts.h"
+
+BOOL lsa_get_local_account( struct lsa_local_account *account )
+{
+    DWORD name_chars;
+
+    if (!account) return FALSE;
+    memset( account, 0, sizeof(*account) );
+    name_chars = ARRAY_SIZE(account->name);
+    if (!GetUserNameW( account->name, &name_chars )) return FALSE;
+    account->rid = LSA_LOCAL_USER_RID;
+    account->primary_group_rid = DOMAIN_GROUP_RID_USERS;
+    account->account_control = UF_NORMAL_ACCOUNT | UF_DONT_EXPIRE_PASSWD;
+    account->password_is_blank = TRUE;
+    return TRUE;
+}
 
 SID *lsa_allocate_computer_sid(void)
 {

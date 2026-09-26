@@ -4,7 +4,20 @@
 
 #include "windef.h"
 #include "winnt.h"
+#include "lmcons.h"
+
+#define LSA_LOCAL_USER_RID 1000
+
+struct lsa_local_account
+{
+    WCHAR name[UNLEN + 1];
+    DWORD rid;
+    DWORD primary_group_rid;
+    DWORD account_control;
+    BOOL password_is_blank;
+};
 
 SID *lsa_allocate_computer_sid( void );
 BOOL lsa_is_computer_sid( const SID *sid );
 BOOL lsa_is_builtin_domain_sid( const SID *sid );
+BOOL lsa_get_local_account( struct lsa_local_account *account );
