@@ -19,6 +19,8 @@
  */
 #include <stdio.h>
 #include <stdarg.h>
+#include <ntstatus.h>
+#define WIN32_NO_STATUS
 #include <windef.h>
 #include <winbase.h>
 #include <winnls.h>
@@ -31,6 +33,7 @@
 #include <winsock2.h>
 #include <ntsecapi.h>
 #include <winternl.h>
+#include <lmcons.h>
 
 #include "wine/test.h"
 
@@ -720,6 +723,187 @@ static void test_ticket_cache(void)
     LsaDeregisterLogonProcess( lsa );
 }
 
+struct test_kerb_interactive_logon
+{
+    ULONG message_type;
+    UNICODE_STRING domain;
+    UNICODE_STRING user;
+    UNICODE_STRING password;
+};
+
+struct test_auth_buffer
+{
+    struct test_kerb_interactive_logon logon;
+    WCHAR strings[3 * (UNLEN + 1)];
+};
+
+struct test_msv1_0_interactive_profile
+{
+    ULONG message_type;
+    USHORT logon_count;
+    USHORT bad_password_count;
+    LARGE_INTEGER logon_time;
+    LARGE_INTEGER logoff_time;
+    LARGE_INTEGER kick_off_time;
+    LARGE_INTEGER password_last_set;
+    LARGE_INTEGER password_can_change;
+    LARGE_INTEGER password_must_change;
+    UNICODE_STRING logon_script;
+    UNICODE_STRING home_directory;
+    UNICODE_STRING full_name;
+    UNICODE_STRING profile_path;
+    UNICODE_STRING home_directory_drive;
+    UNICODE_STRING logon_server;
+    ULONG user_flags;
+};
+
+static ULONG init_test_logon( struct test_auth_buffer *buffer,
+                              const WCHAR *domain, const WCHAR *user, const WCHAR *password )
+{
+    WCHAR *ptr = buffer->strings;
+
+    memset( buffer, 0, sizeof(*buffer) );
+    buffer->logon.message_type = 2;
+    wcscpy( ptr, domain );
+    RtlInitUnicodeString( &buffer->logon.domain, ptr );
+    ptr += wcslen(ptr) + 1;
+    wcscpy( ptr, user );
+    RtlInitUnicodeString( &buffer->logon.user, ptr );
+    ptr += wcslen(ptr) + 1;
+    wcscpy( ptr, password );
+    RtlInitUnicodeString( &buffer->logon.password, ptr );
+    ptr += wcslen(ptr) + 1;
+    return (BYTE *)ptr - (BYTE *)buffer;
+}
+
+static void test_local_interactive_logon(void)
+{
+    struct test_msv1_0_interactive_profile *profile;
+    struct test_auth_buffer auth;
+    TOKEN_SOURCE source = {{'W','i','n','l','o','g','o','n'}};
+    TOKEN_STATISTICS statistics;
+    TOKEN_USER *token_user;
+    LSA_OPERATIONAL_MODE mode;
+    LSA_STRING name, package_name;
+    BOOLEAN previous_tcb, ignored;
+    QUOTA_LIMITS quotas;
+    WCHAR username[UNLEN + 1], wrong_user[] = L"not-the-local-user", wrong_password[] = L"wrong";
+    WCHAR empty[] = L"";
+    ULONG username_len = ARRAY_SIZE(username), package, profile_len, size, auth_len;
+    HANDLE untrusted, trusted, token;
+    LUID logon_id;
+    NTSTATUS status, substatus;
+
+    if (!winetest_platform_is_wine)
+    {
+        win_skip( "The local synthetic-account partition is Wine-specific.\n" );
+        return;
+    }
+    ok( GetUserNameW( username, &username_len ), "GetUserNameW failed: %lu.\n", GetLastError() );
+    RtlInitAnsiString( &package_name, "MICROSOFT_AUTHENTICATION_PACKAGE_V1_0" );
+    status = LsaConnectUntrusted( &untrusted );
+    ok( status == STATUS_SUCCESS, "LsaConnectUntrusted returned %#lx.\n", status );
+    status = LsaLookupAuthenticationPackage( untrusted, &package_name, &package );
+    ok( status == STATUS_SUCCESS, "MSV1_0 alias lookup returned %#lx.\n", status );
+
+    auth_len = init_test_logon( &auth, empty, username, empty );
+    profile = (void *)0xdeadbeef;
+    profile_len = 0xdeadbeef;
+    token = (HANDLE)0xdeadbeef;
+    substatus = 0xdeadbeef;
+    status = LsaLogonUser( untrusted, &package_name, Interactive, package, &auth, auth_len,
+                           NULL, &source, (void **)&profile, &profile_len, &logon_id,
+                           &token, &quotas, &substatus );
+    ok( status == STATUS_INVALID_HANDLE, "untrusted LsaLogonUser returned %#lx.\n", status );
+    ok( !profile && !profile_len && !token, "failure outputs were not cleared.\n" );
+    LsaDeregisterLogonProcess( untrusted );
+
+    status = RtlAdjustPrivilege( SE_TCB_PRIVILEGE, TRUE, FALSE, &previous_tcb );
+    if (status)
+    {
+        win_skip( "SeTcbPrivilege is unavailable, status %#lx.\n", status );
+        return;
+    }
+    RtlInitAnsiString( &name, "Winlogon" );
+    status = LsaRegisterLogonProcess( &name, &trusted, &mode );
+    ok( status == STATUS_SUCCESS, "LsaRegisterLogonProcess returned %#lx.\n", status );
+    if (status)
+    {
+        RtlAdjustPrivilege( SE_TCB_PRIVILEGE, previous_tcb, FALSE, &ignored );
+        return;
+    }
+
+    status = NtAllocateLocallyUniqueId( &source.SourceIdentifier );
+    ok( status == STATUS_SUCCESS, "NtAllocateLocallyUniqueId returned %#lx.\n", status );
+    profile = NULL;
+    profile_len = 0;
+    token = NULL;
+    substatus = 0xdeadbeef;
+    status = LsaLogonUser( trusted, &name, Interactive, package, &auth, auth_len,
+                           NULL, &source, (void **)&profile, &profile_len, &logon_id,
+                           &token, &quotas, &substatus );
+    ok( status == STATUS_SUCCESS, "blank local logon returned %#lx, substatus %#lx.\n", status, substatus );
+    ok( substatus == STATUS_SUCCESS, "got substatus %#lx.\n", substatus );
+    ok( !!profile && profile_len >= sizeof(*profile), "got profile %p length %lu.\n", profile, profile_len );
+    ok( !!token, "expected a primary token.\n" );
+    if (profile)
+    {
+        ok( profile->message_type == 2, "got profile type %lu.\n", profile->message_type );
+        ok( !wcsicmp( profile->full_name.Buffer, username ), "got profile user %s.\n",
+            wine_dbgstr_w(profile->full_name.Buffer) );
+        ok( profile->profile_path.Buffer >= (WCHAR *)profile &&
+            (BYTE *)profile->profile_path.Buffer < (BYTE *)profile + profile_len,
+            "profile path %p is outside returned allocation.\n", profile->profile_path.Buffer );
+        status = LsaFreeReturnBuffer( profile );
+        ok( status == STATUS_SUCCESS, "LsaFreeReturnBuffer returned %#lx.\n", status );
+    }
+    if (token)
+    {
+        size = sizeof(statistics);
+        status = NtQueryInformationToken( token, TokenStatistics, &statistics, size, &size );
+        ok( status == STATUS_SUCCESS, "TokenStatistics returned %#lx.\n", status );
+        ok( statistics.TokenType == TokenPrimary, "got token type %u.\n", statistics.TokenType );
+        ok( !memcmp( &statistics.AuthenticationId, &logon_id, sizeof(logon_id) ),
+            "token authentication id does not match the logon id.\n" );
+        size = 0;
+        status = NtQueryInformationToken( token, TokenUser, NULL, 0, &size );
+        ok( status == STATUS_BUFFER_TOO_SMALL, "TokenUser size returned %#lx.\n", status );
+        token_user = malloc( size );
+        status = NtQueryInformationToken( token, TokenUser, token_user, size, &size );
+        ok( status == STATUS_SUCCESS, "TokenUser returned %#lx.\n", status );
+        ok( *GetSidSubAuthority( token_user->User.Sid,
+                                *GetSidSubAuthorityCount(token_user->User.Sid) - 1 ) == 1000,
+            "got unexpected local-account RID.\n" );
+        free( token_user );
+        NtClose( token );
+    }
+
+    auth_len = init_test_logon( &auth, empty, username, wrong_password );
+    profile = (void *)0xdeadbeef;
+    profile_len = 0xdeadbeef;
+    token = (HANDLE)0xdeadbeef;
+    substatus = STATUS_SUCCESS;
+    status = LsaLogonUser( trusted, &name, Interactive, package, &auth, auth_len,
+                           NULL, &source, (void **)&profile, &profile_len, &logon_id,
+                           &token, &quotas, &substatus );
+    ok( status == STATUS_LOGON_FAILURE, "wrong password returned %#lx.\n", status );
+    ok( substatus == STATUS_WRONG_PASSWORD, "wrong password substatus %#lx.\n", substatus );
+    ok( !profile && !profile_len && !token, "wrong-password outputs were not cleared.\n" );
+
+    auth_len = init_test_logon( &auth, empty, wrong_user, empty );
+    substatus = STATUS_SUCCESS;
+    status = LsaLogonUser( trusted, &name, Interactive, package, &auth, auth_len,
+                           NULL, &source, (void **)&profile, &profile_len, &logon_id,
+                           &token, &quotas, &substatus );
+    ok( status == STATUS_LOGON_FAILURE, "unknown user returned %#lx.\n", status );
+    ok( substatus == STATUS_NO_SUCH_USER, "unknown-user substatus %#lx.\n", substatus );
+    ok( !profile && !profile_len && !token, "unknown-user outputs were not cleared.\n" );
+
+    status = LsaDeregisterLogonProcess( trusted );
+    ok( status == STATUS_SUCCESS, "LsaDeregisterLogonProcess returned %#lx.\n", status );
+    RtlAdjustPrivilege( SE_TCB_PRIVILEGE, previous_tcb, FALSE, &ignored );
+}
+
 START_TEST(secur32)
 {
     secdll = LoadLibraryA("secur32.dll");
@@ -774,4 +958,5 @@ START_TEST(secur32)
 
     test_kerberos();
     test_ticket_cache();
+    test_local_interactive_logon();
 }

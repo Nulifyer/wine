@@ -110,6 +110,13 @@ SECPKG_FUNCTION_TABLE *lsa_find_func_table( const WCHAR *name )
     return NULL;
 }
 
+BOOL lsa_package_supports_local_interactive( ULONG package_id )
+{
+    if (package_id >= packages_count) return FALSE;
+    return !wcsicmp( packages[package_id].info.Name, L"Negotiate" ) ||
+           !wcsicmp( packages[package_id].info.Name, L"NTLM" );
+}
+
 static NTSTATUS NTAPI lsa_CreateLogonSession( LUID *logon_id )
 {
     FIXME( "%p: stub\n", logon_id );

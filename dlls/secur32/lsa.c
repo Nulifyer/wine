@@ -22,6 +22,7 @@
 
 #include <stdarg.h>
 #include <stdlib.h>
+#include <limits.h>
 
 #include "ntstatus.h"
 #include "windef.h"
@@ -47,6 +48,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 #define LSA_MAGIC_CONTEXT     ('L' << 24 | 'S' << 16 | 'A' << 8 | '2')
 
 static const WCHAR *default_authentication_package = L"Negotiate";
+static const UNICODE_STRING msv1_0_authentication_package =
+    RTL_CONSTANT_STRING( L"MICROSOFT_AUTHENTICATION_PACKAGE_V1_0" );
 
 struct lsa_package
 {
@@ -65,6 +68,28 @@ struct lsa_handle
     struct lsa_package *package;
     ULONG64 handle;
 };
+
+struct msv1_0_interactive_profile
+{
+    ULONG MessageType;
+    USHORT LogonCount;
+    USHORT BadPasswordCount;
+    LARGE_INTEGER LogonTime;
+    LARGE_INTEGER LogoffTime;
+    LARGE_INTEGER KickOffTime;
+    LARGE_INTEGER PasswordLastSet;
+    LARGE_INTEGER PasswordCanChange;
+    LARGE_INTEGER PasswordMustChange;
+    UNICODE_STRING LogonScript;
+    UNICODE_STRING HomeDirectory;
+    UNICODE_STRING FullName;
+    UNICODE_STRING ProfilePath;
+    UNICODE_STRING HomeDirectoryDrive;
+    UNICODE_STRING LogonServer;
+    ULONG UserFlags;
+};
+
+#define MSV1_0_INTERACTIVE_PROFILE_MESSAGE 2
 
 static char *strdupWA( const WCHAR *str )
 {
@@ -281,10 +306,28 @@ NTSTATUS WINAPI LsaRegisterLogonProcess(PLSA_STRING LogonProcessName,
         PHANDLE LsaHandle, PLSA_OPERATIONAL_MODE SecurityMode)
 {
     struct lsa_handle *lsa_conn;
+    LSASS_LOGON_HANDLE rpc_handle = NULL;
+    NTSTATUS status;
 
-    FIXME("%s %p %p stub\n", debugstr_as(LogonProcessName), LsaHandle, SecurityMode);
+    TRACE("%s %p %p\n", debugstr_as(LogonProcessName), LsaHandle, SecurityMode);
 
-    if (!(lsa_conn = alloc_lsa_handle(LSA_MAGIC_CONNECTION))) return STATUS_NO_MEMORY;
+    if (!LogonProcessName || !LogonProcessName->Buffer || !LsaHandle || !SecurityMode ||
+        LogonProcessName->Length > LogonProcessName->MaximumLength)
+        return STATUS_INVALID_PARAMETER;
+    *LsaHandle = NULL;
+    *SecurityMode = 0;
+    LSASS_CALL_START
+    status = register_logon_process( get_lsass_handle(), GetCurrentThreadId(),
+                                     (BYTE *)LogonProcessName->Buffer, LogonProcessName->Length,
+                                     SecurityMode, &rpc_handle );
+    LSASS_CALL_END
+    if (status) return status;
+    if (!(lsa_conn = alloc_lsa_handle(LSA_MAGIC_CONNECTION)))
+    {
+        deregister_logon_process( &rpc_handle );
+        return STATUS_NO_MEMORY;
+    }
+    lsa_conn->handle = (ULONG_PTR)rpc_handle;
     *LsaHandle = lsa_conn;
     return STATUS_SUCCESS;
 }
@@ -292,15 +335,24 @@ NTSTATUS WINAPI LsaRegisterLogonProcess(PLSA_STRING LogonProcessName,
 NTSTATUS WINAPI LsaDeregisterLogonProcess(HANDLE LsaHandle)
 {
     struct lsa_handle *lsa_conn = (struct lsa_handle *)LsaHandle;
+    LSASS_LOGON_HANDLE rpc_handle;
+    NTSTATUS status = STATUS_SUCCESS;
 
     TRACE("%p\n", LsaHandle);
 
     if (!lsa_conn || lsa_conn->magic != LSA_MAGIC_CONNECTION) return STATUS_INVALID_HANDLE;
+    rpc_handle = (LSASS_LOGON_HANDLE)(ULONG_PTR)lsa_conn->handle;
+    if (rpc_handle)
+    {
+        LSASS_CALL_START
+        status = deregister_logon_process( &rpc_handle );
+        LSASS_CALL_END
+    }
     /* Ensure compiler doesn't optimize out the assignment with 0. */
     SecureZeroMemory(&lsa_conn->magic, sizeof(lsa_conn->magic));
     free(lsa_conn);
 
-    return STATUS_SUCCESS;
+    return status;
 }
 
 NTSTATUS WINAPI LsaEnumerateLogonSessions(PULONG LogonSessionCount,
@@ -316,7 +368,8 @@ NTSTATUS WINAPI LsaEnumerateLogonSessions(PULONG LogonSessionCount,
 NTSTATUS WINAPI LsaFreeReturnBuffer(PVOID buffer)
 {
     TRACE("%p\n", buffer);
-    return VirtualFree(buffer, 0, MEM_RELEASE);
+    if (VirtualFree(buffer, 0, MEM_RELEASE)) return STATUS_SUCCESS;
+    return STATUS_UNSUCCESSFUL;
 }
 
 NTSTATUS WINAPI LsaGetLogonSessionData(PLUID LogonId,
@@ -356,12 +409,138 @@ NTSTATUS WINAPI LsaLogonUser(HANDLE LsaHandle, PLSA_STRING OriginName,
         PVOID* ProfileBuffer, PULONG ProfileBufferLength, PLUID LogonId,
         PHANDLE Token, PQUOTA_LIMITS Quotas, PNTSTATUS SubStatus)
 {
-    FIXME("%p %s %d %ld %p %ld %p %p %p %p %p %p %p %p stub\n", LsaHandle,
-            debugstr_as(OriginName), LogonType, AuthenticationPackage,
-            AuthenticationInformation, AuthenticationInformationLength,
-            LocalGroups, SourceContext, ProfileBuffer, ProfileBufferLength,
-            LogonId, Token, Quotas, SubStatus);
-    return STATUS_SUCCESS;
+    struct lsa_handle *lsa_conn = LsaHandle;
+    LSASS_INTERACTIVE_PROFILE wire_profile;
+    struct msv1_0_interactive_profile *profile = NULL;
+    LSASS_QUOTA_LIMITS wire_quotas;
+    LSASS_LOGON_HANDLE rpc_handle;
+    ULONG64 wire_token = 0;
+    SIZE_T total, offset;
+    const WCHAR *strings[6];
+    UNICODE_STRING *dest_strings[6];
+    NTSTATUS status;
+    ULONG i;
+
+    TRACE("%p %s %d %ld %p %ld %p %p %p %p %p %p %p %p\n", LsaHandle,
+          debugstr_as(OriginName), LogonType, AuthenticationPackage,
+          AuthenticationInformation, AuthenticationInformationLength,
+          LocalGroups, SourceContext, ProfileBuffer, ProfileBufferLength,
+          LogonId, Token, Quotas, SubStatus);
+
+    if (ProfileBuffer) *ProfileBuffer = NULL;
+    if (ProfileBufferLength) *ProfileBufferLength = 0;
+    if (LogonId) memset( LogonId, 0, sizeof(*LogonId) );
+    if (Token) *Token = NULL;
+    if (Quotas) memset( Quotas, 0, sizeof(*Quotas) );
+    if (SubStatus) *SubStatus = STATUS_SUCCESS;
+    if (!lsa_conn || lsa_conn->magic != LSA_MAGIC_CONNECTION || !lsa_conn->handle)
+        return STATUS_INVALID_HANDLE;
+    if (!OriginName || (!OriginName->Buffer && OriginName->Length) ||
+        OriginName->Length > OriginName->MaximumLength ||
+        !AuthenticationInformation || !AuthenticationInformationLength || !SourceContext ||
+        !ProfileBuffer || !ProfileBufferLength || !LogonId || !Token || !Quotas || !SubStatus)
+        return STATUS_INVALID_PARAMETER;
+    if (LocalGroups) return STATUS_NOT_SUPPORTED;
+
+    rpc_handle = (LSASS_LOGON_HANDLE)(ULONG_PTR)lsa_conn->handle;
+    LSASS_CALL_START
+    status = logon_user( get_lsass_handle(), GetCurrentThreadId(), rpc_handle,
+                         (BYTE *)OriginName->Buffer, OriginName->Length, LogonType,
+                         AuthenticationPackage, AuthenticationInformation,
+                         AuthenticationInformation, AuthenticationInformationLength,
+                         (BYTE *)SourceContext->SourceName, SourceContext->SourceIdentifier,
+                         &wire_profile, LogonId, &wire_token, &wire_quotas, SubStatus );
+    LSASS_CALL_END
+    if (status) goto done;
+    if (!wire_token)
+    {
+        status = STATUS_INTERNAL_ERROR;
+        goto done;
+    }
+
+    strings[0] = wire_profile.LogonScript;
+    strings[1] = wire_profile.HomeDirectory;
+    strings[2] = wire_profile.FullName;
+    strings[3] = wire_profile.ProfilePath;
+    strings[4] = wire_profile.HomeDirectoryDrive;
+    strings[5] = wire_profile.LogonServer;
+    total = sizeof(*profile);
+    for (i = 0; i < ARRAY_SIZE(strings); ++i)
+    {
+        SIZE_T bytes;
+        if (!strings[i] || wcslen(strings[i]) > (USHRT_MAX / sizeof(WCHAR)) - 1)
+        {
+            status = STATUS_INVALID_BUFFER_SIZE;
+            goto done;
+        }
+        bytes = (wcslen(strings[i]) + 1) * sizeof(WCHAR);
+        if (total > ~(SIZE_T)0 - bytes)
+        {
+            status = STATUS_INTEGER_OVERFLOW;
+            goto done;
+        }
+        total += bytes;
+    }
+    if (!(profile = VirtualAlloc( NULL, total, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE )))
+    {
+        status = STATUS_NO_MEMORY;
+        goto done;
+    }
+
+    memset( profile, 0, sizeof(*profile) );
+    profile->MessageType = MSV1_0_INTERACTIVE_PROFILE_MESSAGE;
+    profile->LogonCount = wire_profile.LogonCount;
+    profile->BadPasswordCount = wire_profile.BadPasswordCount;
+    profile->LogonTime = *(LARGE_INTEGER *)&wire_profile.LogonTime;
+    profile->LogoffTime = *(LARGE_INTEGER *)&wire_profile.LogoffTime;
+    profile->KickOffTime = *(LARGE_INTEGER *)&wire_profile.KickOffTime;
+    profile->PasswordLastSet = *(LARGE_INTEGER *)&wire_profile.PasswordLastSet;
+    profile->PasswordCanChange = *(LARGE_INTEGER *)&wire_profile.PasswordCanChange;
+    profile->PasswordMustChange = *(LARGE_INTEGER *)&wire_profile.PasswordMustChange;
+    profile->UserFlags = wire_profile.UserFlags;
+    dest_strings[0] = &profile->LogonScript;
+    dest_strings[1] = &profile->HomeDirectory;
+    dest_strings[2] = &profile->FullName;
+    dest_strings[3] = &profile->ProfilePath;
+    dest_strings[4] = &profile->HomeDirectoryDrive;
+    dest_strings[5] = &profile->LogonServer;
+    offset = sizeof(*profile);
+    for (i = 0; i < ARRAY_SIZE(strings); ++i)
+    {
+        SIZE_T chars = wcslen(strings[i]), bytes = (chars + 1) * sizeof(WCHAR);
+        WCHAR *buffer = (WCHAR *)((BYTE *)profile + offset);
+        memcpy( buffer, strings[i], bytes );
+        dest_strings[i]->Length = chars * sizeof(WCHAR);
+        dest_strings[i]->MaximumLength = bytes;
+        dest_strings[i]->Buffer = buffer;
+        offset += bytes;
+    }
+
+#ifndef _WIN64
+    if (wire_quotas.PagedPoolLimit > MAXDWORD || wire_quotas.NonPagedPoolLimit > MAXDWORD ||
+        wire_quotas.MinimumWorkingSetSize > MAXDWORD ||
+        wire_quotas.MaximumWorkingSetSize > MAXDWORD || wire_quotas.PagefileLimit > MAXDWORD)
+    {
+        status = STATUS_INTEGER_OVERFLOW;
+        goto done;
+    }
+#endif
+    Quotas->PagedPoolLimit = wire_quotas.PagedPoolLimit;
+    Quotas->NonPagedPoolLimit = wire_quotas.NonPagedPoolLimit;
+    Quotas->MinimumWorkingSetSize = wire_quotas.MinimumWorkingSetSize;
+    Quotas->MaximumWorkingSetSize = wire_quotas.MaximumWorkingSetSize;
+    Quotas->PagefileLimit = wire_quotas.PagefileLimit;
+    Quotas->TimeLimit = *(LARGE_INTEGER *)&wire_quotas.TimeLimit;
+    *ProfileBuffer = profile;
+    *ProfileBufferLength = total;
+    *Token = (HANDLE)(ULONG_PTR)wire_token;
+    profile = NULL;
+    wire_token = 0;
+
+done:
+    if (profile) VirtualFree( profile, 0, MEM_RELEASE );
+    if (wire_token) NtClose( (HANDLE)(ULONG_PTR)wire_token );
+    return status;
 }
 
 static void * NTAPI lsa_AllocateLsaHeap(ULONG size)
@@ -1096,7 +1275,9 @@ NTSTATUS WINAPI LsaLookupAuthenticationPackage(HANDLE lsa_handle,
     {
         RtlInitUnicodeString(&str, loaded_packages[i].info.Name);
 
-        if (RtlEqualUnicodeString(&package_name_us, &str, TRUE))
+        if (RtlEqualUnicodeString(&package_name_us, &str, TRUE) ||
+            (!RtlCompareUnicodeString( &package_name_us, &msv1_0_authentication_package, TRUE ) &&
+             !wcsicmp( loaded_packages[i].info.Name, L"NTLM" )))
         {
             RtlFreeUnicodeString(&package_name_us);
             *package_id = i;

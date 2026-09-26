@@ -22,5 +22,6 @@
 extern void load_auth_packages( void );
 
 extern SECPKG_FUNCTION_TABLE *lsa_find_func_table( const WCHAR *name );
+extern BOOL lsa_package_supports_local_interactive( ULONG package_id );
 extern NTSTATUS NTAPI nego_SpLsaModeInitialize( ULONG lsa_version,
         PULONG package_version, PSECPKG_FUNCTION_TABLE *table, PULONG table_count );

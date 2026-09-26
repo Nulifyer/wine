@@ -4,7 +4,9 @@ IMPORTS   = advapi32 rpcrt4
 EXTRADLLFLAGS = -mwindows -municode
 
 SOURCES = \
+	ksec.c \
 	local_accounts.c \
+	logon.c \
 	lsapolicylookup.idl \
 	lsarpc.c \
 	lsarpc.idl \

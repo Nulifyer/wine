@@ -31,6 +31,7 @@ cpp_quote("#define LSASS_ENDPOINT {'l','s','a','s','s','p','i','r','p','c',0}")
 interface lsass
 {
     typedef [wire_marshal(ULONG64)] void* CLIENT_PTR;
+    typedef [context_handle] void *LSASS_LOGON_HANDLE;
 
     cpp_quote("#if 0")
     typedef LONG NTSTATUS;
@@ -65,6 +66,35 @@ interface lsass
         SecBuffer *pBuffers;
     } SecBufferDesc;
     cpp_quote("#endif")
+
+    typedef struct
+    {
+        ULONG64 PagedPoolLimit;
+        ULONG64 NonPagedPoolLimit;
+        ULONG64 MinimumWorkingSetSize;
+        ULONG64 MaximumWorkingSetSize;
+        ULONG64 PagefileLimit;
+        TimeStamp TimeLimit;
+    } LSASS_QUOTA_LIMITS;
+
+    typedef struct
+    {
+        USHORT LogonCount;
+        USHORT BadPasswordCount;
+        TimeStamp LogonTime;
+        TimeStamp LogoffTime;
+        TimeStamp KickOffTime;
+        TimeStamp PasswordLastSet;
+        TimeStamp PasswordCanChange;
+        TimeStamp PasswordMustChange;
+        ULONG UserFlags;
+        WCHAR LogonScript[260];
+        WCHAR HomeDirectory[260];
+        WCHAR FullName[257];
+        WCHAR ProfilePath[260];
+        WCHAR HomeDirectoryDrive[3];
+        WCHAR LogonServer[18];
+    } LSASS_INTERACTIVE_PROFILE;
 
     cpp_quote("#define MAX_SEC_BUFFERS 20")
     typedef struct
@@ -165,4 +195,34 @@ interface lsass
         [in] ULONG64 handle,
         [in] ULONG attr,
         [in] CLIENT_PTR buf);
+
+    NTSTATUS register_logon_process(
+        [in] handle_t binding,
+        [in] DWORD thread_id,
+        [in, size_is(name_len)] BYTE *name,
+        [in] ULONG name_len,
+        [out] ULONG *security_mode,
+        [out] LSASS_LOGON_HANDLE *handle);
+
+    NTSTATUS deregister_logon_process(
+        [in, out] LSASS_LOGON_HANDLE *handle);
+
+    NTSTATUS logon_user(
+        [in] handle_t binding,
+        [in] DWORD thread_id,
+        [in] LSASS_LOGON_HANDLE handle,
+        [in, size_is(origin_len)] BYTE *origin,
+        [in] ULONG origin_len,
+        [in] ULONG logon_type,
+        [in] ULONG package_id,
+        [in, size_is(auth_len)] BYTE *auth_buf,
+        [in] CLIENT_PTR client_auth_base,
+        [in] ULONG auth_len,
+        [in] BYTE source_name[8],
+        [in] LUID source_id,
+        [out] LSASS_INTERACTIVE_PROFILE *profile,
+        [out] LUID *logon_id,
+        [out] ULONG64 *token,
+        [out] LSASS_QUOTA_LIMITS *quotas,
+        [out] NTSTATUS *substatus);
 }

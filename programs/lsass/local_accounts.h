@@ -4,6 +4,7 @@
 
 #include "windef.h"
 #include "winnt.h"
+#include "winternl.h"
 #include "lmcons.h"
 
 #define LSA_LOCAL_USER_RID 1000
@@ -18,6 +19,10 @@ struct lsa_local_account
 };
 
 SID *lsa_allocate_computer_sid( void );
+SID *lsa_allocate_local_account_sid( DWORD rid );
 BOOL lsa_is_computer_sid( const SID *sid );
 BOOL lsa_is_builtin_domain_sid( const SID *sid );
 BOOL lsa_get_local_account( struct lsa_local_account *account );
+NTSTATUS lsa_validate_local_credentials( const WCHAR *domain, const WCHAR *user,
+                                         const WCHAR *password, struct lsa_local_account *account,
+                                         NTSTATUS *substatus );

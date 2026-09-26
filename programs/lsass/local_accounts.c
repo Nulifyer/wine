@@ -11,6 +11,8 @@
 
 #include <stdarg.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winnt.h"
@@ -49,6 +51,58 @@ SID *lsa_allocate_computer_sid(void)
     sid->SubAuthority[2] = 0;
     sid->SubAuthority[3] = 0;
     return sid;
+}
+
+SID *lsa_allocate_local_account_sid( DWORD rid )
+{
+    static const SID_IDENTIFIER_AUTHORITY authority = { SECURITY_NT_AUTHORITY };
+    const DWORD size = offsetof( SID, SubAuthority[5] );
+    SID *sid;
+
+    if (!(sid = MIDL_user_allocate( size ))) return NULL;
+    sid->Revision = SID_REVISION;
+    sid->SubAuthorityCount = 5;
+    sid->IdentifierAuthority = authority;
+    sid->SubAuthority[0] = SECURITY_NT_NON_UNIQUE;
+    sid->SubAuthority[1] = 0;
+    sid->SubAuthority[2] = 0;
+    sid->SubAuthority[3] = 0;
+    sid->SubAuthority[4] = rid;
+    return sid;
+}
+
+NTSTATUS lsa_validate_local_credentials( const WCHAR *domain, const WCHAR *user,
+                                         const WCHAR *password, struct lsa_local_account *account,
+                                         NTSTATUS *substatus )
+{
+    WCHAR computer[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD computer_len = ARRAY_SIZE(computer);
+
+    if (substatus) *substatus = STATUS_SUCCESS;
+    if (!account || !lsa_get_local_account( account )) return STATUS_NO_MEMORY;
+
+    if (!user || !*user || wcsicmp( user, account->name ))
+    {
+        if (substatus) *substatus = STATUS_NO_SUCH_USER;
+        return STATUS_LOGON_FAILURE;
+    }
+    if (domain && *domain && wcscmp( domain, L"." ) &&
+        (!GetComputerNameW( computer, &computer_len ) || wcsicmp( domain, computer )))
+    {
+        if (substatus) *substatus = STATUS_NO_SUCH_USER;
+        return STATUS_LOGON_FAILURE;
+    }
+    if (account->account_control & UF_ACCOUNTDISABLE)
+    {
+        if (substatus) *substatus = STATUS_ACCOUNT_DISABLED;
+        return STATUS_ACCOUNT_RESTRICTION;
+    }
+    if (!account->password_is_blank || (password && *password))
+    {
+        if (substatus) *substatus = STATUS_WRONG_PASSWORD;
+        return STATUS_LOGON_FAILURE;
+    }
+    return STATUS_SUCCESS;
 }
 
 BOOL lsa_is_computer_sid( const SID *sid )

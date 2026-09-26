@@ -26,6 +26,7 @@
 #include "lsarpc.h"
 #include "samr.h"
 #include "lsass_private.h"
+#include "ksec.h"
 
 #include "wine/debug.h"
 
@@ -195,9 +196,17 @@ int WINAPI wWinMain( HINSTANCE instance, HINSTANCE prev_instance, WCHAR *cmdline
         WARN( "Failed to create process exit event, error %lu.\n", GetLastError() );
         return 0;
     }
+    if (!lsa_ksec_initialize())
+    {
+        WARN( "Failed to initialize the protected LSA handle-transfer path.\n" );
+        CloseHandle( exit_event );
+        return 0;
+    }
     if ((ret = rpc_initialize()))
     {
         WARN( "Failed to initialize rpc interfaces, status %ld.\n", ret );
+        lsa_ksec_cleanup();
+        CloseHandle( exit_event );
         return 0;
     }
     load_auth_packages();
@@ -220,5 +229,7 @@ int WINAPI wWinMain( HINSTANCE instance, HINSTANCE prev_instance, WCHAR *cmdline
      * process also owns the local LSA RPC endpoints.  Keep those endpoints
      * alive until an actual Wine service stop signals the shared exit event. */
     if (!dispatcher_result) WaitForSingleObject( exit_event, INFINITE );
+    lsa_ksec_cleanup();
+    CloseHandle( exit_event );
     return 0;
 }
