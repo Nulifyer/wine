@@ -44,6 +44,7 @@
 #include "rpc_binding.h"
 
 #include "wine/debug.h"
+#include "wine/exception.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
@@ -727,6 +728,94 @@ static void NdrFree(MIDL_STUB_MESSAGE *pStubMsg, unsigned char *Pointer)
     pStubMsg->pfnFree(Pointer);
 }
 
+static void unlink_memory_list_allocation(MIDL_STUB_MESSAGE *stub_msg, unsigned char *allocation)
+{
+    NDR_MEMORY_LIST **link = (NDR_MEMORY_LIST **)&stub_msg->pMemoryList;
+
+    while (*link)
+    {
+        NDR_MEMORY_LIST *entry = *link;
+
+        if ((unsigned char *)entry - entry->size == allocation)
+        {
+            *link = entry->next;
+            return;
+        }
+        link = &entry->next;
+    }
+}
+
+struct all_nodes_size_state
+{
+    MIDL_STUB_MESSAGE *stub_msg;
+    MIDL_STUB_MESSAGE saved;
+    PFULL_PTR_XLAT_TABLES full_ptr_table;
+};
+
+static void CALLBACK restore_all_nodes_size_state(BOOL normal, void *arg)
+{
+    struct all_nodes_size_state *state = arg;
+
+    if (state->full_ptr_table) NdrFullPointerXlatFree(state->full_ptr_table);
+    *state->stub_msg = state->saved;
+}
+
+static ULONG all_nodes_memory_size(MIDL_STUB_MESSAGE *stub_msg, PFORMAT_STRING format)
+{
+    struct all_nodes_size_state state = {stub_msg, *stub_msg, NULL};
+    NDR_MEMORYSIZE sizer = NdrMemorySizer[*format & NDR_TABLE_MASK];
+    ULONG fixed_size = 0, size = 0;
+
+    if (!sizer) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+
+    state.full_ptr_table = NdrFullPointerXlatInit(0, XLAT_CLIENT);
+    stub_msg->FullPtrXlatTables = state.full_ptr_table;
+    stub_msg->pAllocAllNodesContext = NULL;
+    stub_msg->MemorySize = 0;
+
+    __TRY
+    {
+        if ((*format == FC_BOGUS_STRUCT || *format == FC_BOGUS_ARRAY) &&
+            !stub_msg->PointerBufferMark)
+        {
+            stub_msg->IgnoreEmbeddedPointers = TRUE;
+            fixed_size = sizer(stub_msg, format);
+            stub_msg->PointerBufferMark = stub_msg->Buffer;
+            stub_msg->Buffer = state.saved.Buffer;
+            stub_msg->MemorySize = *format == FC_BOGUS_STRUCT ? fixed_size : 0;
+            stub_msg->IgnoreEmbeddedPointers = FALSE;
+        }
+        size = sizer(stub_msg, format);
+        if (*format == FC_BOGUS_STRUCT || *format == FC_BOGUS_ARRAY ||
+            size < stub_msg->MemorySize)
+            size = stub_msg->MemorySize;
+    }
+    __FINALLY_CTX(restore_all_nodes_size_state, &state)
+
+    return size;
+}
+
+struct all_nodes_unmarshall_state
+{
+    MIDL_STUB_MESSAGE *stub_msg;
+    struct NDR_ALLOC_ALL_NODES_CONTEXT *saved_context;
+    unsigned char **pointer;
+    unsigned char *allocation;
+};
+
+static void CALLBACK finish_all_nodes_unmarshall(BOOL normal, void *arg)
+{
+    struct all_nodes_unmarshall_state *state = arg;
+
+    state->stub_msg->pAllocAllNodesContext = state->saved_context;
+    if (!normal)
+    {
+        *state->pointer = NULL;
+        unlink_memory_list_allocation(state->stub_msg, state->allocation);
+        state->stub_msg->pfnFree(state->allocation);
+    }
+}
+
 static inline BOOL IsConformanceOrVariancePresent(PFORMAT_STRING pFormat)
 {
     return (*(const ULONG *)pFormat != -1);
@@ -977,6 +1066,13 @@ static inline ULONG safe_multiply(ULONG a, ULONG b)
     return ret;
 }
 
+static inline void safe_memory_size_increment(MIDL_STUB_MESSAGE *stub_msg, ULONG size)
+{
+    if (stub_msg->MemorySize + size < stub_msg->MemorySize)
+        RpcRaiseException(RPC_S_INVALID_BOUND);
+    stub_msg->MemorySize += size;
+}
+
 static inline void validate_size(MIDL_STUB_MESSAGE *msg, unsigned char *end, ULONG size)
 {
     if ((ULONG_PTR)msg->Buffer + size < (ULONG_PTR)msg->Buffer || msg->Buffer + size > end)
@@ -1146,6 +1242,9 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
   NDR_UNMARSHALL m;
   DWORD pointer_id = 0;
   BOOL pointer_needs_unmarshaling, need_alloc = FALSE, inner_must_alloc = FALSE;
+  BOOL allocate_all_nodes = FALSE;
+  struct NDR_ALLOC_ALL_NODES_CONTEXT *saved_all_nodes_context = NULL;
+  unsigned char *all_nodes_allocation = NULL;
 
   TRACE("(%p,%p,%p,%p,%p,%d)\n", pStubMsg, Buffer, pPointer, pSrcPointer, pFormat, fMustAlloc);
   TRACE("type=0x%x, attr=", type); dump_pointer_attr(attr);
@@ -1231,19 +1330,66 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
         *pPointer = NULL;
     }
 
-    if (attr & FC_ALLOCATE_ALL_NODES)
-        FIXME("FC_ALLOCATE_ALL_NODES not implemented\n");
-
-    if (attr & FC_POINTER_DEREF) {
-      if (need_alloc)
-        *pPointer = NdrAllocateZero(pStubMsg, sizeof(void *));
-
-      current_ptr = *(unsigned char***)current_ptr;
-      TRACE("deref => %p\n", current_ptr);
-    }
     m = NdrUnmarshaller[*desc & NDR_TABLE_MASK];
-    if (m) m(pStubMsg, current_ptr, desc, inner_must_alloc);
-    else FIXME("no unmarshaller for data type=%02x\n", *desc);
+    if (!m) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+
+    if ((attr & FC_ALLOCATE_ALL_NODES) && !pStubMsg->pAllocAllNodesContext)
+    {
+      struct NDR_ALLOC_ALL_NODES_CONTEXT *context;
+      SIZE_T memory_size = all_nodes_memory_size(pStubMsg, desc);
+      SIZE_T arena_size = (memory_size + 7) & ~(SIZE_T)7;
+      unsigned char *allocation;
+
+      if (arena_size < memory_size || arena_size + sizeof(*context) < arena_size)
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+      if (arena_size + sizeof(*context) >= 0x80000000)
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+
+      allocation = NdrAllocateZero(pStubMsg, arena_size + sizeof(*context));
+      context = (struct NDR_ALLOC_ALL_NODES_CONTEXT *)(allocation + arena_size);
+      context->current = context->start = allocation;
+      context->end = allocation + arena_size;
+      context->raise_bad_stub_data = FALSE;
+      context->reserved = 0;
+
+      saved_all_nodes_context = pStubMsg->pAllocAllNodesContext;
+      all_nodes_allocation = allocation;
+      pStubMsg->pAllocAllNodesContext = context;
+      *pPointer = NULL;
+      need_alloc = inner_must_alloc = TRUE;
+      allocate_all_nodes = TRUE;
+    }
+
+    if (allocate_all_nodes)
+    {
+      struct all_nodes_unmarshall_state state;
+
+      state.stub_msg = pStubMsg;
+      state.saved_context = saved_all_nodes_context;
+      state.pointer = pPointer;
+      state.allocation = all_nodes_allocation;
+      __TRY
+      {
+        if (attr & FC_POINTER_DEREF)
+        {
+          if (need_alloc) *pPointer = NdrAllocateZero(pStubMsg, sizeof(void *));
+          current_ptr = *(unsigned char ***)current_ptr;
+          TRACE("deref => %p\n", current_ptr);
+        }
+        m(pStubMsg, current_ptr, desc, inner_must_alloc);
+      }
+      __FINALLY_CTX(finish_all_nodes_unmarshall, &state)
+    }
+    else
+    {
+      if (attr & FC_POINTER_DEREF)
+      {
+        if (need_alloc) *pPointer = NdrAllocateZero(pStubMsg, sizeof(void *));
+        current_ptr = *(unsigned char ***)current_ptr;
+        TRACE("deref => %p\n", current_ptr);
+      }
+      m(pStubMsg, current_ptr, desc, inner_must_alloc);
+    }
 
     if (type == FC_FP)
       NdrFullPointerInsertRefId(pStubMsg->FullPtrXlatTables, pointer_id,
@@ -1354,9 +1500,20 @@ static ULONG PointerMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
     return 0;
   }
 
+  if (pointer_needs_sizing)
+  {
+    if (pStubMsg->MemorySize > ~0u - 7) RpcRaiseException(RPC_S_INVALID_BOUND);
+    align_length(&pStubMsg->MemorySize, 8);
+  }
+
   if (attr & FC_POINTER_DEREF) {
     align_length(&pStubMsg->MemorySize, sizeof(void*));
-    pStubMsg->MemorySize += sizeof(void*);
+    safe_memory_size_increment(pStubMsg, sizeof(void*));
+    if (pointer_needs_sizing)
+    {
+      if (pStubMsg->MemorySize > ~0u - 7) RpcRaiseException(RPC_S_INVALID_BOUND);
+      align_length(&pStubMsg->MemorySize, 8);
+    }
     TRACE("deref\n");
   }
 
@@ -1402,8 +1559,11 @@ static void PointerFree(PMIDL_STUB_MESSAGE pStubMsg,
     TRACE("deref => %p\n", current_pointer);
   }
 
-  m = NdrFreer[*desc & NDR_TABLE_MASK];
-  if (m) m(pStubMsg, current_pointer, desc);
+  if (!(attr & FC_ALLOCATE_ALL_NODES))
+  {
+    m = NdrFreer[*desc & NDR_TABLE_MASK];
+    if (m) m(pStubMsg, current_pointer, desc);
+  }
 
   /* this check stops us from trying to free buffer memory. we don't have to
    * worry about clients, since they won't call this function.
@@ -1419,6 +1579,8 @@ static void PointerFree(PMIDL_STUB_MESSAGE pStubMsg,
     return;
   }
   TRACE("freeing %p\n", Pointer);
+  if (attr & FC_ALLOCATE_ALL_NODES)
+      unlink_memory_list_allocation(pStubMsg, Pointer);
   NdrFree(pStubMsg, Pointer);
   return;
 notfree:
@@ -2635,16 +2797,16 @@ static inline void array_memory_size(
 
     align_pointer(&pStubMsg->Buffer, alignment);
 
-    SavedMemorySize = pStubMsg->MemorySize;
-
     esize = ComplexStructSize(pStubMsg, pFormat);
     memsize = safe_multiply(pStubMsg->MaxCount, esize);
+    SavedMemorySize = pStubMsg->MemorySize;
+    safe_memory_size_increment(pStubMsg, memsize);
 
     count = pStubMsg->ActualCount;
     for (i = 0; i < count; i++)
         ComplexStructMemorySize(pStubMsg, pFormat, NULL);
-
-    pStubMsg->MemorySize = SavedMemorySize + memsize;
+    if (pStubMsg->MemorySize < SavedMemorySize)
+        RpcRaiseException(RPC_S_INVALID_BOUND);
     break;
   default:
     ERR("unknown array format 0x%x\n", fc);

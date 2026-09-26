@@ -38,9 +38,11 @@
 
 static int my_alloc_called;
 static int my_free_called;
+static SIZE_T my_alloc_size;
 static void * CALLBACK my_alloc(SIZE_T size)
 {
     my_alloc_called++;
+    my_alloc_size = size;
     return malloc(size);
 }
 
@@ -2244,6 +2246,311 @@ static void test_byte_count_pointer(void)
     ok(my_free_called == 1, "free called %d\n", my_free_called);
 }
 
+static void test_allocate_all_nodes(void)
+{
+    struct pointer_graph
+    {
+        DWORD value;
+        DWORD *number;
+        char *character;
+    } *graph, *old_graph;
+    MIDL_STUB_DESC desc = Object_StubDesc;
+    RPC_MESSAGE rpc_msg;
+    MIDL_STUB_MESSAGE msg;
+    DWORD exception;
+    unsigned char wire[32];
+    unsigned char format[] =
+    {
+        FC_UP, FC_ALLOCATE_ALL_NODES,
+        NdrFcShort(2),
+        FC_BOGUS_STRUCT, 3,
+        NdrFcShort(sizeof(struct pointer_graph)),
+        NdrFcShort(0),
+#ifdef _WIN64
+        NdrFcShort(8),
+        FC_LONG,
+        FC_ALIGNM8,
+        FC_POINTER,
+        FC_POINTER,
+        FC_PAD,
+        FC_END,
+#else
+        NdrFcShort(6),
+        FC_LONG,
+        FC_POINTER,
+        FC_POINTER,
+        FC_END,
+#endif
+        FC_UP, FC_SIMPLE_POINTER,
+        FC_LONG,
+        FC_PAD,
+        FC_UP, FC_SIMPLE_POINTER,
+        FC_CHAR,
+        FC_PAD,
+    };
+
+    desc.pFormatTypes = format;
+    NdrClientInitializeNew(&rpc_msg, &msg, &desc, 0);
+
+    memset(wire, 0, sizeof(wire));
+    *(DWORD *)(wire + 0) = 0x20000;
+    *(DWORD *)(wire + 4) = 0x12345678;
+    *(DWORD *)(wire + 8) = 0x20004;
+    *(DWORD *)(wire + 12) = 0x20008;
+    *(DWORD *)(wire + 16) = 0xabcdef01;
+    wire[20] = 0x5a;
+    rpc_msg.Buffer = msg.BufferStart = msg.Buffer = wire;
+    msg.BufferEnd = wire + 21;
+    msg.BufferLength = 21;
+
+    old_graph = calloc(1, sizeof(*old_graph));
+    graph = old_graph;
+    my_alloc_called = my_free_called = 0;
+    exception = 0;
+    RpcTryExcept
+    {
+        NdrPointerUnmarshall(&msg, (unsigned char **)&graph, format, FALSE);
+    }
+    RpcExcept(TRUE)
+    {
+        exception = RpcExceptionCode();
+    }
+    RpcEndExcept
+    ok(!exception, "all-nodes unmarshal raised %lu at buffer offset %Id\n",
+       exception, msg.Buffer - wire);
+    if (exception)
+    {
+        free(old_graph);
+        return;
+    }
+    ok(graph != old_graph, "all-nodes graph reused caller memory %p\n", graph);
+    ok(my_alloc_called == 1, "allocator called %d times\n", my_alloc_called);
+    ok(graph && graph->value == 0x12345678, "got graph value %#lx\n", graph ? graph->value : 0);
+    ok(graph && graph->number && *graph->number == 0xabcdef01,
+       "got graph number %#lx\n", graph && graph->number ? *graph->number : 0);
+    ok(graph && graph->character && *graph->character == 0x5a,
+       "got graph character %#x\n", graph && graph->character ? *graph->character : 0);
+    ok(graph && (unsigned char *)graph->number >= (unsigned char *)graph &&
+       (unsigned char *)graph->number < (unsigned char *)graph + 40,
+       "number %p outside graph arena rooted at %p\n", graph ? graph->number : NULL, graph);
+    ok(graph && (unsigned char *)graph->character >= (unsigned char *)graph &&
+       (unsigned char *)graph->character < (unsigned char *)graph + 40,
+       "character %p outside graph arena rooted at %p\n", graph ? graph->character : NULL, graph);
+    ok(!((ULONG_PTR)graph->number & 7), "number %p is not 8-byte aligned\n", graph->number);
+    ok(!((ULONG_PTR)graph->character & 7), "character %p is not 8-byte aligned\n", graph->character);
+    ok(msg.Buffer == wire + 21, "got buffer %p\n", msg.Buffer);
+    ok(!msg.pAllocAllNodesContext, "allocation context was not cleared\n");
+    ok(!my_free_called, "free called %d times\n", my_free_called);
+    free(old_graph);
+
+    my_free_called = 0;
+    NdrPointerFree(&msg, (unsigned char *)graph, format);
+    ok(my_free_called == 1, "free called %d times\n", my_free_called);
+    ok(!msg.pMemoryList, "all-nodes memory list was not cleared\n");
+
+    format[1] |= FC_DONT_FREE;
+    msg.Buffer = wire;
+    graph = NULL;
+    my_alloc_called = my_free_called = 0;
+    NdrPointerUnmarshall(&msg, (unsigned char **)&graph, format, FALSE);
+    ok(my_alloc_called == 1, "allocator called %d times\n", my_alloc_called);
+    NdrPointerFree(&msg, (unsigned char *)graph, format);
+    ok(!my_free_called, "dont-free graph freed %d times\n", my_free_called);
+    my_free(graph);
+    msg.pMemoryList = NULL;
+}
+
+static void test_allocate_all_nodes_samr_graph(void)
+{
+    struct samr_inner
+    {
+        DWORD value;
+        WCHAR *name;
+    };
+    struct samr_entry
+    {
+        struct samr_inner inner;
+    } *entries;
+    MIDL_STUB_DESC desc = Object_StubDesc;
+    RPC_MESSAGE rpc_msg;
+    MIDL_STUB_MESSAGE msg;
+    DWORD exception;
+    unsigned char wire[64];
+    unsigned char format[] =
+    {
+        FC_UP, FC_ALLOCATE_ALL_NODES,
+        NdrFcShort(2),
+        FC_BOGUS_ARRAY, 3,
+        NdrFcShort(2),
+        NdrFcLong(0xffffffff),
+        NdrFcLong(0xffffffff),
+        FC_EMBEDDED_COMPLEX, 0,
+        NdrFcShort(4),
+        FC_PAD,
+        FC_END,
+        FC_BOGUS_STRUCT, 3,
+        NdrFcShort(sizeof(struct samr_entry)),
+        NdrFcShort(0),
+        NdrFcShort(0),
+        FC_EMBEDDED_COMPLEX, 0,
+        NdrFcShort(4),
+        FC_PAD,
+        FC_END,
+        FC_BOGUS_STRUCT, 3,
+        NdrFcShort(sizeof(struct samr_inner)),
+        NdrFcShort(0),
+#ifdef _WIN64
+        NdrFcShort(7),
+        FC_LONG,
+        FC_ALIGNM8,
+        FC_POINTER,
+        FC_PAD,
+        FC_END,
+#else
+        NdrFcShort(5),
+        FC_LONG,
+        FC_POINTER,
+        FC_END,
+#endif
+        FC_UP, 0,
+        NdrFcShort(2),
+        FC_C_WSTRING,
+        FC_PAD,
+    };
+
+    desc.pFormatTypes = format;
+    NdrClientInitializeNew(&rpc_msg, &msg, &desc, 0);
+
+    memset(wire, 0, sizeof(wire));
+    *(DWORD *)(wire + 0) = 0x20000;
+    *(DWORD *)(wire + 4) = 0x11111111;
+    *(DWORD *)(wire + 8) = 0x20004;
+    *(DWORD *)(wire + 12) = 0x22222222;
+    *(DWORD *)(wire + 16) = 0;
+    *(DWORD *)(wire + 20) = 4;
+    *(DWORD *)(wire + 24) = 0;
+    *(DWORD *)(wire + 28) = 4;
+    memcpy(wire + 32, L"one", 4 * sizeof(WCHAR));
+    rpc_msg.Buffer = msg.BufferStart = msg.Buffer = wire;
+    msg.BufferEnd = wire + 40;
+    msg.BufferLength = 40;
+
+    entries = NULL;
+    my_alloc_called = my_free_called = 0;
+    exception = 0;
+    RpcTryExcept
+    {
+        NdrPointerUnmarshall(&msg, (unsigned char **)&entries, format, FALSE);
+    }
+    RpcExcept(TRUE)
+    {
+        exception = RpcExceptionCode();
+    }
+    RpcEndExcept
+    ok(!exception, "SAMR-shaped all-nodes graph raised %lu at buffer offset %Id\n",
+       exception, msg.Buffer - wire);
+    if (exception) return;
+
+    ok(my_alloc_called == 1, "allocator called %d times\n", my_alloc_called);
+    ok(entries && entries[0].inner.value == 0x11111111,
+       "got first value %#lx\n", entries ? entries[0].inner.value : 0);
+    ok(entries && entries[1].inner.value == 0x22222222,
+       "got second value %#lx\n", entries ? entries[1].inner.value : 0);
+    ok(entries && entries[0].inner.name && !wcscmp(entries[0].inner.name, L"one"),
+       "got first name %s\n", entries ? wine_dbgstr_w(entries[0].inner.name) : "(null)");
+    ok(entries && !entries[1].inner.name, "got second name %p\n",
+       entries ? entries[1].inner.name : NULL);
+    ok(entries && (unsigned char *)entries[0].inner.name >= (unsigned char *)entries &&
+       (unsigned char *)entries[0].inner.name < (unsigned char *)entries + my_alloc_size,
+       "name %p outside %Iu-byte arena rooted at %p\n",
+       entries ? entries[0].inner.name : NULL, my_alloc_size, entries);
+    ok(entries && !((ULONG_PTR)entries[0].inner.name & 7),
+       "name %p is not 8-byte aligned\n", entries ? entries[0].inner.name : NULL);
+    ok(msg.Buffer == wire + 40, "got buffer %p\n", msg.Buffer);
+    ok(!msg.pAllocAllNodesContext, "allocation context was not cleared\n");
+
+    my_free_called = 0;
+    NdrPointerFree(&msg, (unsigned char *)entries, format);
+    ok(my_free_called == 1, "free called %d times\n", my_free_called);
+    ok(!msg.pMemoryList, "SAMR-shaped memory list was not cleared\n");
+
+    format[6] = 1;
+    msg.Buffer = wire;
+    msg.BufferEnd = wire + 40;
+    msg.BufferLength = 40;
+    entries = NULL;
+    my_alloc_called = my_free_called = 0;
+    NdrPointerUnmarshall(&msg, (unsigned char **)&entries, format, FALSE);
+    ok(my_alloc_called == 1, "one-entry allocator called %d times\n", my_alloc_called);
+    ok(entries && entries[0].inner.value == 0x11111111,
+       "got one-entry value %#lx\n", entries ? entries[0].inner.value : 0);
+    ok(entries && entries[0].inner.name && !wcscmp(entries[0].inner.name, L"one"),
+       "got one-entry name %s\n", entries ? wine_dbgstr_w(entries[0].inner.name) : "(null)");
+    ok(msg.Buffer == wire + 40, "one-entry buffer %p\n", msg.Buffer);
+    NdrPointerFree(&msg, (unsigned char *)entries, format);
+    ok(my_free_called == 1, "one-entry free called %d times\n", my_free_called);
+
+    format[6] = 0;
+    msg.Buffer = wire;
+    msg.BufferEnd = wire + 4;
+    msg.BufferLength = 4;
+    entries = NULL;
+    my_alloc_called = my_free_called = 0;
+    NdrPointerUnmarshall(&msg, (unsigned char **)&entries, format, FALSE);
+    ok(entries != NULL, "zero-entry graph is NULL\n");
+    ok(my_alloc_called == 1, "zero-entry allocator called %d times\n", my_alloc_called);
+    ok(msg.Buffer == wire + 4, "zero-entry buffer %p\n", msg.Buffer);
+    ok(!msg.pAllocAllNodesContext, "zero-entry allocation context was not cleared\n");
+    NdrPointerFree(&msg, (unsigned char *)entries, format);
+    ok(my_free_called == 1, "zero-entry free called %d times\n", my_free_called);
+}
+
+static void test_allocate_all_nodes_cleanup(void)
+{
+    MIDL_STUB_DESC desc = Object_StubDesc;
+    RPC_MESSAGE rpc_msg;
+    MIDL_STUB_MESSAGE msg;
+    DWORD exception;
+    unsigned char wire[8];
+    unsigned char *value = (unsigned char *)0xdeadbeef;
+    static const unsigned char format[] =
+    {
+        FC_UP, FC_ALLOCATE_ALL_NODES,
+        NdrFcShort(2),
+        FC_RANGE, FC_LONG,
+        NdrFcLong(0),
+        NdrFcLong(1),
+    };
+
+    desc.pFormatTypes = format;
+    NdrClientInitializeNew(&rpc_msg, &msg, &desc, 0);
+    memset(wire, 0, sizeof(wire));
+    *(DWORD *)(wire + 0) = 0x20000;
+    *(DWORD *)(wire + 4) = 2;
+    rpc_msg.Buffer = msg.BufferStart = msg.Buffer = wire;
+    msg.BufferEnd = wire + 8;
+    msg.BufferLength = 8;
+
+    my_alloc_called = my_free_called = 0;
+    exception = 0;
+    RpcTryExcept
+    {
+        NdrPointerUnmarshall(&msg, &value, format, FALSE);
+    }
+    RpcExcept(TRUE)
+    {
+        exception = RpcExceptionCode();
+    }
+    RpcEndExcept
+
+    ok(exception == RPC_S_INVALID_BOUND, "got exception %lu\n", exception);
+    ok(!value, "got output pointer %p\n", value);
+    ok(my_alloc_called == 1, "allocator called %d times\n", my_alloc_called);
+    ok(my_free_called == 1, "free called %d times\n", my_free_called);
+    ok(!msg.pAllocAllNodesContext, "allocation context was not cleared\n");
+    ok(!msg.pMemoryList, "exception memory list was not cleared\n");
+}
+
 static void test_conformant_array(void)
 {
     RPC_MESSAGE RpcMessage;
@@ -3371,6 +3678,9 @@ static void test_pointer_validation(void)
 
 START_TEST( ndr_marshall )
 {
+    test_allocate_all_nodes();
+    test_allocate_all_nodes_samr_graph();
+    test_allocate_all_nodes_cleanup();
     determine_pointer_marshalling_style();
 
     test_ndr_simple_type();
