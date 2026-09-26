@@ -36,6 +36,29 @@ static const GUID d3d11_guard_rect_state_guid =
 static const GUID d3d11_composition_buffer_state_guid =
         {0xf0f61793, 0x0c39, 0x4fd5, {0x8c, 0x81, 0x89, 0x79, 0x5b, 0x42, 0x4d, 0x73}};
 
+#define LINUXNT_COMPOSITION_MAPPING_MAGIC   0x4c4e5443
+#define LINUXNT_COMPOSITION_MAPPING_VERSION 1
+#define LINUXNT_COMPOSITION_MAX_SUBRESOURCES 2
+
+struct linuxnt_composition_subresource
+{
+    UINT offset;
+    UINT row_pitch;
+    UINT row_count;
+    UINT data_size;
+};
+
+struct linuxnt_composition_mapping
+{
+    UINT magic;
+    UINT version;
+    UINT header_size;
+    volatile LONG generation;
+    D3D11_TEXTURE2D_DESC desc;
+    UINT subresource_count;
+    struct linuxnt_composition_subresource subresources[LINUXNT_COMPOSITION_MAX_SUBRESOURCES];
+};
+
 struct d3d11_guard_rect_state
 {
     BOOL guarded;
@@ -48,6 +71,12 @@ struct d3d11_composition_buffer_state
     LONG refcount;
     struct d3d_device *device;
     HANDLE surface;
+    HANDLE mapping;
+    struct linuxnt_composition_mapping *mapping_view;
+    SIZE_T mapping_size;
+    ID3D11Texture2D *staging;
+    LONG imported_generation;
+    BOOL producer;
 };
 
 static inline struct d3d11_composition_buffer_state *composition_state_from_IUnknown(IUnknown *iface)
@@ -78,8 +107,14 @@ static ULONG STDMETHODCALLTYPE composition_state_Release(IUnknown *iface)
 
     if (!refcount)
     {
-        NtUnBindCompositionSurface(state->surface, TRUE, FALSE);
-        NtClose(state->surface);
+        if (state->surface)
+        {
+            NtUnBindCompositionSurface(state->surface, TRUE, FALSE);
+            NtClose(state->surface);
+        }
+        if (state->staging) ID3D11Texture2D_Release(state->staging);
+        if (state->mapping_view) UnmapViewOfFile(state->mapping_view);
+        if (state->mapping) CloseHandle(state->mapping);
         free(state);
     }
     return refcount;
@@ -91,6 +126,312 @@ static const IUnknownVtbl composition_state_vtbl =
     composition_state_AddRef,
     composition_state_Release,
 };
+
+static BOOL composition_format_layout(DXGI_FORMAT format, UINT width, UINT height,
+        UINT *row_pitch, UINT *row_count)
+{
+    UINT bytes_per_pixel = 0, block_size = 0;
+
+    switch (format)
+    {
+        case DXGI_FORMAT_R8_UNORM:
+        case DXGI_FORMAT_A8_UNORM:
+            bytes_per_pixel = 1;
+            break;
+        case DXGI_FORMAT_R8G8_UNORM:
+            bytes_per_pixel = 2;
+            break;
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+            bytes_per_pixel = 4;
+            break;
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+            bytes_per_pixel = 8;
+            break;
+        case DXGI_FORMAT_BC1_UNORM:
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+            block_size = 8;
+            break;
+        case DXGI_FORMAT_BC2_UNORM:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_UNORM:
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+            block_size = 16;
+            break;
+        default:
+            return FALSE;
+    }
+
+    if (block_size)
+    {
+        if (width > UINT_MAX - 3 || height > UINT_MAX - 3) return FALSE;
+        if ((width + 3) / 4 > UINT_MAX / block_size) return FALSE;
+        *row_pitch = max(1u, (width + 3) / 4) * block_size;
+        *row_count = max(1u, (height + 3) / 4);
+    }
+    else
+    {
+        if (width > UINT_MAX / bytes_per_pixel) return FALSE;
+        *row_pitch = width * bytes_per_pixel;
+        *row_count = height;
+    }
+    return TRUE;
+}
+
+static HRESULT composition_mapping_snapshot(const struct linuxnt_composition_mapping *mapping,
+        SIZE_T mapping_size, BYTE **snapshot, D3D11_SUBRESOURCE_DATA *data,
+        LONG *snapshot_generation)
+{
+    SIZE_T snapshot_size = 0, offset;
+    LONG generation, completed_generation;
+    unsigned int attempt, i;
+    BYTE *copy;
+
+    for (i = 0; i < mapping->subresource_count; ++i)
+    {
+        const struct linuxnt_composition_subresource *subresource = &mapping->subresources[i];
+
+        if (subresource->offset < mapping->header_size ||
+            subresource->offset > mapping_size ||
+            subresource->data_size > mapping_size - subresource->offset ||
+            snapshot_size > SIZE_MAX - subresource->data_size)
+            return E_INVALIDARG;
+        snapshot_size += subresource->data_size;
+    }
+    if (!(copy = malloc(snapshot_size))) return E_OUTOFMEMORY;
+
+    for (attempt = 0; attempt < 4; ++attempt)
+    {
+        generation = mapping->generation;
+        MemoryBarrier();
+        if (generation & 1)
+        {
+            SwitchToThread();
+            continue;
+        }
+        offset = 0;
+        for (i = 0; i < mapping->subresource_count; ++i)
+        {
+            const struct linuxnt_composition_subresource *subresource = &mapping->subresources[i];
+
+            memcpy(copy + offset, (const BYTE *)mapping + subresource->offset,
+                    subresource->data_size);
+            data[i].pSysMem = copy + offset;
+            data[i].SysMemPitch = subresource->row_pitch;
+            data[i].SysMemSlicePitch = subresource->data_size;
+            offset += subresource->data_size;
+        }
+        MemoryBarrier();
+        completed_generation = mapping->generation;
+        if (generation == completed_generation && !(completed_generation & 1))
+        {
+            *snapshot = copy;
+            if (snapshot_generation) *snapshot_generation = completed_generation;
+            return S_OK;
+        }
+    }
+    free(copy);
+    return DXGI_ERROR_WAS_STILL_DRAWING;
+}
+
+static HRESULT composition_mapping_create(const D3D11_TEXTURE2D_DESC *desc,
+        struct d3d11_composition_buffer_state *state)
+{
+    struct linuxnt_composition_mapping layout = {0};
+    SIZE_T size = sizeof(layout);
+    unsigned int i;
+
+    if (!desc->ArraySize || desc->ArraySize > LINUXNT_COMPOSITION_MAX_SUBRESOURCES || desc->MipLevels != 1)
+        return E_NOTIMPL;
+
+    layout.magic = LINUXNT_COMPOSITION_MAPPING_MAGIC;
+    layout.version = LINUXNT_COMPOSITION_MAPPING_VERSION;
+    layout.header_size = sizeof(layout);
+    layout.desc = *desc;
+    layout.desc.Usage = D3D11_USAGE_DEFAULT;
+    layout.desc.CPUAccessFlags = 0;
+    layout.desc.MiscFlags = 0;
+    layout.desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
+    layout.subresource_count = desc->ArraySize;
+    for (i = 0; i < layout.subresource_count; ++i)
+    {
+        struct linuxnt_composition_subresource *subresource = &layout.subresources[i];
+
+        if (!composition_format_layout(desc->Format, desc->Width, desc->Height,
+                &subresource->row_pitch, &subresource->row_count)) return E_NOTIMPL;
+        if (subresource->row_count && subresource->row_pitch > UINT_MAX / subresource->row_count)
+            return E_OUTOFMEMORY;
+        subresource->data_size = subresource->row_pitch * subresource->row_count;
+        if (size > UINT_MAX - subresource->data_size) return E_OUTOFMEMORY;
+        subresource->offset = size;
+        size += subresource->data_size;
+    }
+
+    if (!(state->mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+            0, size, NULL))) return HRESULT_FROM_WIN32(GetLastError());
+    if (!(state->mapping_view = MapViewOfFile(state->mapping, FILE_MAP_READ | FILE_MAP_WRITE,
+            0, 0, size)))
+    {
+        HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+        CloseHandle(state->mapping);
+        state->mapping = NULL;
+        return hr;
+    }
+    state->mapping_size = size;
+    memcpy(state->mapping_view, &layout, sizeof(layout));
+    return S_OK;
+}
+
+static HRESULT composition_mapping_publish(struct d3d11_composition_buffer_state *state,
+        ID3D11Texture2D *texture)
+{
+    ID3D11DeviceContext4 *context = &state->device->immediate_context.ID3D11DeviceContext4_iface;
+    struct linuxnt_composition_mapping *mapping = state->mapping_view;
+    D3D11_MAPPED_SUBRESOURCE mapped[LINUXNT_COMPOSITION_MAX_SUBRESOURCES];
+    unsigned int i, row;
+    BYTE *dst;
+    HRESULT hr;
+
+    if (!state->producer || !mapping || !state->staging) return E_INVALIDARG;
+    ID3D11DeviceContext4_CopyResource(context, (ID3D11Resource *)state->staging,
+            (ID3D11Resource *)texture);
+    for (i = 0; i < mapping->subresource_count; ++i)
+    {
+        if (FAILED(hr = ID3D11DeviceContext4_Map(context, (ID3D11Resource *)state->staging,
+                i, D3D11_MAP_READ, 0, &mapped[i])))
+        {
+            while (i--) ID3D11DeviceContext4_Unmap(context,
+                    (ID3D11Resource *)state->staging, i);
+            return hr;
+        }
+    }
+    InterlockedIncrement(&mapping->generation);
+    MemoryBarrier();
+    for (i = 0; i < mapping->subresource_count; ++i)
+    {
+        const struct linuxnt_composition_subresource *subresource = &mapping->subresources[i];
+
+        dst = (BYTE *)mapping + subresource->offset;
+        for (row = 0; row < subresource->row_count; ++row)
+            memcpy(dst + row * subresource->row_pitch,
+                    (BYTE *)mapped[i].pData + row * mapped[i].RowPitch, subresource->row_pitch);
+    }
+    MemoryBarrier();
+    InterlockedIncrement(&mapping->generation);
+    for (i = 0; i < mapping->subresource_count; ++i)
+        ID3D11DeviceContext4_Unmap(context, (ID3D11Resource *)state->staging, i);
+    return S_OK;
+}
+
+static void composition_mapping_sync_import(ID3D11DeviceContext4 *context,
+        ID3D11Resource *resource)
+{
+    struct d3d11_composition_buffer_state *state;
+    struct linuxnt_composition_mapping *mapping;
+    D3D11_SUBRESOURCE_DATA data[LINUXNT_COMPOSITION_MAX_SUBRESOURCES] = {{0}};
+    BYTE *snapshot = NULL;
+    IUnknown *unknown = NULL;
+    UINT size = sizeof(unknown);
+    LONG generation, snapshot_generation;
+    unsigned int i;
+
+    if (FAILED(ID3D11Resource_GetPrivateData(resource, &d3d11_composition_buffer_state_guid,
+            &size, &unknown)) || !unknown) return;
+    state = composition_state_from_IUnknown(unknown);
+    mapping = state->mapping_view;
+    if (state->producer || !mapping)
+    {
+        IUnknown_Release(unknown);
+        return;
+    }
+    generation = mapping->generation;
+    MemoryBarrier();
+    if (generation == state->imported_generation)
+    {
+        IUnknown_Release(unknown);
+        return;
+    }
+
+    if (FAILED(composition_mapping_snapshot(mapping, state->mapping_size, &snapshot, data,
+            &snapshot_generation)))
+    {
+        IUnknown_Release(unknown);
+        return;
+    }
+    for (i = 0; i < mapping->subresource_count; ++i)
+        ID3D11DeviceContext4_UpdateSubresource(context, resource, i, NULL, data[i].pSysMem,
+                data[i].SysMemPitch, data[i].SysMemSlicePitch);
+    free(snapshot);
+    state->imported_generation = snapshot_generation;
+    IUnknown_Release(unknown);
+}
+
+static HRESULT composition_mapping_open(struct d3d_device *device, HANDLE handle, REFIID iid, void **out)
+{
+    struct d3d11_composition_buffer_state *state = NULL;
+    struct linuxnt_composition_mapping *mapping;
+    D3D11_SUBRESOURCE_DATA data[LINUXNT_COMPOSITION_MAX_SUBRESOURCES] = {{0}};
+    MEMORY_BASIC_INFORMATION memory_info;
+    ID3D11Texture2D *texture = NULL;
+    BYTE *snapshot = NULL;
+    HRESULT hr = E_INVALIDARG;
+    LONG snapshot_generation;
+    UINT row_pitch, row_count;
+    unsigned int i;
+
+    *out = NULL;
+    if (!(mapping = MapViewOfFile(handle, FILE_MAP_READ, 0, 0, 0))) return E_INVALIDARG;
+    if (!VirtualQuery(mapping, &memory_info, sizeof(memory_info)) ||
+        memory_info.RegionSize < sizeof(*mapping) ||
+        mapping->magic != LINUXNT_COMPOSITION_MAPPING_MAGIC ||
+        mapping->version != LINUXNT_COMPOSITION_MAPPING_VERSION ||
+        mapping->header_size != sizeof(*mapping) ||
+        !mapping->subresource_count ||
+        mapping->subresource_count > LINUXNT_COMPOSITION_MAX_SUBRESOURCES ||
+        mapping->subresource_count != mapping->desc.ArraySize ||
+        !mapping->desc.Width || !mapping->desc.Height || mapping->desc.MipLevels != 1 ||
+        mapping->desc.SampleDesc.Count != 1 || mapping->desc.SampleDesc.Quality ||
+        mapping->desc.Usage != D3D11_USAGE_DEFAULT || mapping->desc.CPUAccessFlags ||
+        mapping->desc.MiscFlags) goto done;
+
+    for (i = 0; i < mapping->subresource_count; ++i)
+    {
+        const struct linuxnt_composition_subresource *subresource = &mapping->subresources[i];
+
+        if (!composition_format_layout(mapping->desc.Format, mapping->desc.Width,
+                mapping->desc.Height, &row_pitch, &row_count) ||
+            subresource->row_pitch != row_pitch || subresource->row_count != row_count ||
+            row_count > UINT_MAX / row_pitch || subresource->data_size != row_pitch * row_count)
+            goto done;
+    }
+    if (FAILED(hr = composition_mapping_snapshot(mapping, memory_info.RegionSize,
+            &snapshot, data, &snapshot_generation))) goto done;
+    if (FAILED(hr = ID3D11Device5_CreateTexture2D(&device->ID3D11Device5_iface,
+            &mapping->desc, data, &texture))) goto done;
+    if (!(state = calloc(1, sizeof(*state))))
+    {
+        hr = E_OUTOFMEMORY;
+        goto done;
+    }
+    state->IUnknown_iface.lpVtbl = &composition_state_vtbl;
+    state->refcount = 1;
+    state->device = device;
+    state->mapping_view = mapping;
+    state->mapping_size = memory_info.RegionSize;
+    state->imported_generation = snapshot_generation;
+    if (FAILED(hr = ID3D11Texture2D_SetPrivateDataInterface(texture,
+            &d3d11_composition_buffer_state_guid, &state->IUnknown_iface))) goto done;
+    mapping = NULL;
+    if (SUCCEEDED(hr = ID3D11Texture2D_QueryInterface(texture, iid, out)))
+        TRACE("opened LinuxNT composition mapping %p as %s\n", handle, debugstr_guid(iid));
+
+done:
+    free(snapshot);
+    if (state) IUnknown_Release(&state->IUnknown_iface);
+    if (texture) ID3D11Texture2D_Release(texture);
+    if (mapping) UnmapViewOfFile(mapping);
+    return hr;
+}
 
 struct d3d11_device_internal_vtbl
 {
@@ -752,6 +1093,7 @@ static void d3d11_device_context_set_shader_resource_views(ID3D11DeviceContext4 
     {
         struct d3d_shader_resource_view *view = unsafe_impl_from_ID3D11ShaderResourceView(views[i]);
 
+        if (view) composition_mapping_sync_import(iface, view->resource);
         wined3d_views[i] = view ? view->wined3d_view : NULL;
     }
 
@@ -1465,6 +1807,8 @@ static void STDMETHODCALLTYPE d3d11_device_context_CopySubresourceRegion(ID3D11D
     if (!dst_resource || !src_resource)
         return;
 
+    composition_mapping_sync_import(iface, src_resource);
+
     if (src_box)
         wined3d_box_set(&wined3d_src_box, src_box->left, src_box->top,
                 src_box->right, src_box->bottom, src_box->front, src_box->back);
@@ -1482,6 +1826,11 @@ static void STDMETHODCALLTYPE d3d11_device_context_CopyResource(ID3D11DeviceCont
     struct wined3d_resource *wined3d_dst_resource, *wined3d_src_resource;
 
     TRACE("iface %p, dst_resource %p, src_resource %p.\n", iface, dst_resource, src_resource);
+
+    if (!dst_resource || !src_resource)
+        return;
+
+    composition_mapping_sync_import(iface, src_resource);
 
     wined3d_dst_resource = wined3d_resource_from_d3d11_resource(dst_resource);
     wined3d_src_resource = wined3d_resource_from_d3d11_resource(src_resource);
@@ -1630,6 +1979,11 @@ static void STDMETHODCALLTYPE d3d11_device_context_ResolveSubresource(ID3D11Devi
             "src_resource %p, src_subresource_idx %u, format %s.\n",
             iface, dst_resource, dst_subresource_idx,
             src_resource, src_subresource_idx, debug_dxgi_format(format));
+
+    if (!dst_resource || !src_resource)
+        return;
+
+    composition_mapping_sync_import(iface, src_resource);
 
     wined3d_dst_resource = wined3d_resource_from_d3d11_resource(dst_resource);
     wined3d_src_resource = wined3d_resource_from_d3d11_resource(src_resource);
@@ -2865,6 +3219,8 @@ static void STDMETHODCALLTYPE d3d11_device_context_CopySubresourceRegion1(ID3D11
     if (!dst_resource || !src_resource)
         return;
 
+    composition_mapping_sync_import(iface, src_resource);
+
     if (src_box)
         wined3d_box_set(&wined3d_src_box, src_box->left, src_box->top,
                 src_box->right, src_box->bottom, src_box->front, src_box->back);
@@ -2898,12 +3254,15 @@ static void STDMETHODCALLTYPE d3d11_device_context_UpdateSubresource1(ID3D11Devi
 static void STDMETHODCALLTYPE d3d11_device_context_DiscardResource(ID3D11DeviceContext4 *iface,
         ID3D11Resource *resource)
 {
-    FIXME("iface %p, resource %p stub!\n", iface, resource);
+    TRACE("iface %p, resource %p.\n", iface, resource);
+
+    /* This is a lifetime hint. Keeping the backing allocation is valid because
+     * the resource contents are undefined to the caller after this call. */
 }
 
 static void STDMETHODCALLTYPE d3d11_device_context_DiscardView(ID3D11DeviceContext4 *iface, ID3D11View *view)
 {
-    FIXME("iface %p, view %p stub!\n", iface, view);
+    TRACE("iface %p, view %p.\n", iface, view);
 }
 
 static void STDMETHODCALLTYPE d3d11_device_context_VSSetConstantBuffers1(ID3D11DeviceContext4 *iface,
@@ -3084,7 +3443,7 @@ static void STDMETHODCALLTYPE d3d11_device_context_ClearView(ID3D11DeviceContext
 static void STDMETHODCALLTYPE d3d11_device_context_DiscardView1(ID3D11DeviceContext4 *iface, ID3D11View *view,
         const D3D11_RECT *rects, UINT num_rects)
 {
-    FIXME("iface %p, view %p, rects %p, num_rects %u stub!\n", iface, view, rects, num_rects);
+    TRACE("iface %p, view %p, rects %p, num_rects %u.\n", iface, view, rects, num_rects);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_context_UpdateTileMappings(ID3D11DeviceContext4 *iface,
@@ -5022,9 +5381,12 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDeferredContext(ID3D11Device
 static HRESULT STDMETHODCALLTYPE d3d11_device_OpenSharedResource(ID3D11Device5 *iface, HANDLE resource, REFIID iid,
         void **out)
 {
-    FIXME("iface %p, resource %p, iid %s, out %p stub!\n", iface, resource, debugstr_guid(iid), out);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, resource %p, iid %s, out %p.\n", iface, resource, debugstr_guid(iid), out);
+
+    if (!out) return E_INVALIDARG;
+    return composition_mapping_open(device, resource, iid, out);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFormatSupport(ID3D11Device5 *iface, DXGI_FORMAT format,
@@ -5669,9 +6031,12 @@ fail:
 static HRESULT STDMETHODCALLTYPE d3d11_device_OpenSharedResource1(ID3D11Device5 *iface, HANDLE handle,
         REFIID iid, void **resource)
 {
-    FIXME("iface %p, handle %p, iid %s, resource %p stub!\n", iface, handle, debugstr_guid(iid), resource);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, handle %p, iid %s, resource %p.\n", iface, handle, debugstr_guid(iid), resource);
+
+    if (!resource) return E_INVALIDARG;
+    return composition_mapping_open(device, handle, iid, resource);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_OpenSharedResourceByName(ID3D11Device5 *iface, const WCHAR *name,
@@ -6169,6 +6534,10 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_internal_CreateCompositionBuffer(I
     struct d3d11_composition_buffer_state *state;
     struct d3d_device *device = impl_from_ID3D11DeviceInternal(iface);
     D3D11_TEXTURE2D_DESC desc = {0};
+    D3D11_TEXTURE2D_DESC staging_desc;
+    DXGI_ADAPTER_DESC adapter_desc;
+    IDXGIDevice *dxgi_device;
+    IDXGIAdapter *adapter;
     BYTE binding_info[0x520] = {0};
     ID3D11Texture2D *texture = NULL;
     HANDLE surface;
@@ -6193,6 +6562,18 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_internal_CreateCompositionBuffer(I
         return E_INVALIDARG;
     if ((flags & ~1u) || (buffer_count & ~0x430u)) return E_INVALIDARG;
 
+    if (FAILED(hr = ID3D11Device5_QueryInterface(&device->ID3D11Device5_iface,
+            &IID_IDXGIDevice, (void **)&dxgi_device)))
+        return hr;
+    hr = IDXGIDevice_GetAdapter(dxgi_device, &adapter);
+    IDXGIDevice_Release(dxgi_device);
+    if (FAILED(hr))
+        return hr;
+    hr = IDXGIAdapter_GetDesc(adapter, &adapter_desc);
+    IDXGIAdapter_Release(adapter);
+    if (FAILED(hr))
+        return hr;
+
     desc.Width = width;
     desc.Height = height;
     desc.MipLevels = 1;
@@ -6207,27 +6588,54 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_internal_CreateCompositionBuffer(I
     if (FAILED(hr = ID3D11Device5_CreateTexture2D(&device->ID3D11Device5_iface, &desc, NULL, &texture)))
         return hr;
 
-    if ((status = NtCreateCompositionSurfaceHandle(NULL, 3, &surface)))
-    {
-        ID3D11Texture2D_Release(texture);
-        return HRESULT_FROM_NT(status);
-    }
-    if ((status = NtBindCompositionSurface(surface, TRUE, 0, FALSE, binding_info, &binding_id)))
-    {
-        NtClose(surface);
-        ID3D11Texture2D_Release(texture);
-        return HRESULT_FROM_NT(status);
-    }
     if (!(state = calloc(1, sizeof(*state))))
     {
-        NtUnBindCompositionSurface(surface, TRUE, FALSE);
-        NtClose(surface);
         ID3D11Texture2D_Release(texture);
         return E_OUTOFMEMORY;
     }
     state->IUnknown_iface.lpVtbl = &composition_state_vtbl;
     state->refcount = 1;
     state->device = device;
+    state->producer = TRUE;
+    if (FAILED(hr = composition_mapping_create(&desc, state)))
+    {
+        IUnknown_Release(&state->IUnknown_iface);
+        ID3D11Texture2D_Release(texture);
+        return hr;
+    }
+    staging_desc = desc;
+    staging_desc.Usage = D3D11_USAGE_STAGING;
+    staging_desc.BindFlags = 0;
+    staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    staging_desc.MiscFlags = 0;
+    if (FAILED(hr = ID3D11Device5_CreateTexture2D(&device->ID3D11Device5_iface,
+            &staging_desc, NULL, &state->staging)))
+    {
+        IUnknown_Release(&state->IUnknown_iface);
+        ID3D11Texture2D_Release(texture);
+        return hr;
+    }
+
+    if ((status = NtCreateCompositionSurfaceHandle(NULL, 3, &surface)))
+    {
+        IUnknown_Release(&state->IUnknown_iface);
+        ID3D11Texture2D_Release(texture);
+        return HRESULT_FROM_NT(status);
+    }
+    *(UINT *)(binding_info + 0x00) = 1; /* single composition buffer */
+    *(UINT *)(binding_info + 0x54) = 1;
+    *(UINT *)(binding_info + 0x98) = stereo ? 3 : 2;
+    *(UINT *)(binding_info + 0x9c) = 1;
+    *(UINT *)(binding_info + 0xa0) = 2; /* DX handle realization */
+    *(HANDLE *)(binding_info + 0xa8) = state->mapping;
+    *(LUID *)(binding_info + 0xb0) = adapter_desc.AdapterLuid;
+    if ((status = NtBindCompositionSurface(surface, TRUE, 0, FALSE, binding_info, &binding_id)))
+    {
+        NtClose(surface);
+        IUnknown_Release(&state->IUnknown_iface);
+        ID3D11Texture2D_Release(texture);
+        return HRESULT_FROM_NT(status);
+    }
     state->surface = surface;
     if (FAILED(hr = ID3D11Texture2D_SetPrivateDataInterface(texture,
             &d3d11_composition_buffer_state_guid, &state->IUnknown_iface)))
@@ -6283,16 +6691,19 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_internal_PresentCompositionBuffers
         }
         hr = ID3D11Texture2D_GetPrivateData(texture, &d3d11_composition_buffer_state_guid,
                 &size, &unknown);
-        ID3D11Texture2D_Release(texture);
         if (FAILED(hr) || !unknown)
         {
+            ID3D11Texture2D_Release(texture);
             status = STATUS_INVALID_PARAMETER;
             break;
         }
         state = composition_state_from_IUnknown(unknown);
         if (state->device != device) status = STATUS_INVALID_PARAMETER;
+        else if (FAILED(hr = composition_mapping_publish(state, texture)))
+            status = hr == E_OUTOFMEMORY ? STATUS_NO_MEMORY : STATUS_UNSUCCESSFUL;
         else surfaces[surface_count++] = wine_server_obj_handle(state->surface);
         IUnknown_Release(unknown);
+        ID3D11Texture2D_Release(texture);
         if (status) break;
     }
     if (!status && !surface_count) status = STATUS_INVALID_PARAMETER;

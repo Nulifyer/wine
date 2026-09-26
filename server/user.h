@@ -33,6 +33,7 @@ struct hook_table;
 struct window_class;
 struct atom_table;
 struct clipboard;
+struct inertia_info;
 
 #define DESKTOP_ATOM  ((atom_t)32769)
 
@@ -66,6 +67,7 @@ struct winstation
     unsigned __int64   adapter_fingerprint; /* stable fingerprint of the adapter population */
     unsigned __int64   monitor_fingerprint; /* stable fingerprint of the monitor population */
     int                composited;         /* desktops are owned by the session compositor */
+    struct inertia_info *inertia;          /* active session Direct Manipulation inertia */
 };
 
 struct key_repeat
@@ -153,6 +155,7 @@ extern void post_win_event( struct thread *thread, unsigned int event,
                             user_handle_t handle );
 extern void free_hotkeys( struct desktop *desktop, user_handle_t window );
 extern void free_pointers( struct desktop *desktop );
+extern void free_inertia_info( struct winstation *winstation, struct thread *thread );
 extern void set_rawinput_process( struct process *process, int enable );
 
 /* region functions */
@@ -210,6 +213,9 @@ extern int is_window_transparent( user_handle_t window );
 extern int make_window_active( user_handle_t window );
 extern struct thread *get_window_thread( user_handle_t handle );
 extern int ensure_dwm_window_context( user_handle_t window );
+extern void add_dwm_window_target( user_handle_t window, unsigned int type );
+extern void sync_dwm_window_target( user_handle_t window, unsigned int type );
+extern void remove_dwm_window_target( user_handle_t window, unsigned int type );
 extern void replay_dwm_window_contexts( struct winstation *winstation );
 extern void cleanup_dwm_logical_surfaces( unsigned int generation );
 extern void cleanup_dcomp_window_targets( user_handle_t window );

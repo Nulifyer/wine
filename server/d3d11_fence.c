@@ -134,7 +134,10 @@ DECL_HANDLER(create_d3d11_fence)
     fence->flags = req->flags;
     fence->value = req->value;
     list_init(&fence->waiters);
-    reply->handle = alloc_handle(current->process, fence, STANDARD_RIGHTS_ALL, 0);
+    /* This handle is private to d3d11.dll and is only used as an object
+     * identity in the fence protocol.  It must not inherit the caller's
+     * object DACL or expose user-visible access rights. */
+    reply->handle = alloc_handle_no_access_check(current->process, fence, 0, 0);
     release_object(fence);
 }
 
@@ -157,7 +160,11 @@ DECL_HANDLER(share_d3d11_fence)
         release_object(shared);
         goto done_params;
     }
-    reply->handle = alloc_handle(current->process, shared, req->access, params.attr);
+    /* create_named_obj_handle() also skips the access check for a newly
+     * created object.  Do the same here; the requested access is still
+     * mapped onto the returned handle. */
+    reply->handle = alloc_handle_no_access_check(current->process, shared,
+            req->access, params.attr);
     release_object(shared);
 
 done_params:

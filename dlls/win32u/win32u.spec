@@ -59,11 +59,11 @@
 @ stub -syscall NtDCompositionSubmitDWMBatch
 @ stub -syscall NtDCompositionSuspendAnimations
 @ stub -syscall NtDCompositionSyncWait
-@ stub -syscall NtDCompositionSynchronize
+@ stdcall -syscall NtDCompositionSynchronize(long ptr)
 @ stub -syscall NtDCompositionTelemetryAnimationScenarioBegin
 @ stub -syscall NtDCompositionTelemetryAnimationScenarioReference
 @ stub -syscall NtDCompositionTelemetryAnimationScenarioUnreference
-@ stub -syscall NtDCompositionTelemetrySetApplicationId
+@ stdcall -syscall NtDCompositionTelemetrySetApplicationId(long long ptr)
 @ stub -syscall NtDCompositionTelemetryTouchInteractionBegin
 @ stub -syscall NtDCompositionTelemetryTouchInteractionEnd
 @ stub -syscall NtDCompositionTelemetryTouchInteractionUpdate
@@ -733,7 +733,7 @@
 @ stub -syscall NtModerncoreSetNavigationServiceSid
 @ stub -syscall NtModerncoreUnregisterNavigationWindowHandle
 @ stub -syscall NtNotifyPresentToCompositionSurface
-@ stub -syscall NtOpenCompositionSurfaceDirtyRegion
+@ stdcall -syscall NtOpenCompositionSurfaceDirtyRegion(long ptr ptr ptr)
 @ stub -syscall NtOpenCompositionSurfaceRealizationInfo
 @ stub -syscall NtOpenCompositionSurfaceSectionInfo
 @ stub -syscall NtOpenCompositionSurfaceSwapChainHandleInfo
@@ -742,10 +742,10 @@
 @ stub -syscall NtQueryCompositionInputSink
 @ stub -syscall NtQueryCompositionInputSinkLuid
 @ stub -syscall NtQueryCompositionInputSinkViewId
-@ stub -syscall NtQueryCompositionSurfaceBinding
+@ stdcall -syscall NtQueryCompositionSurfaceBinding(long ptr ptr)
 @ stub -syscall NtQueryCompositionSurfaceFrameRate
 @ stub -syscall NtQueryCompositionSurfaceHDRMetaData
-@ stub -syscall NtQueryCompositionSurfaceRenderingRealization
+@ stdcall -syscall NtQueryCompositionSurfaceRenderingRealization(long ptr)
 @ stub -syscall NtQueryCompositionSurfaceStatistics
 @ stub -syscall NtRIMAddInputObserver
 @ stub -syscall NtRIMAreSiblingDevices
@@ -1313,7 +1313,7 @@
 @ stub -syscall NtUserRemoveQueueCompletion
 @ stub -syscall NtUserRemoveVisualIdentifier
 @ stdcall -syscall NtUserReplyMessage(long)
-@ stub -syscall NtUserReportInertia
+@ stdcall -syscall NtUserReportInertia(long long long ptr ptr ptr)
 @ stub -syscall NtUserRequestMoveSizeOperation
 @ stub -syscall NtUserResetDblClk
 @ stub -syscall NtUserResolveDesktopForWOW
@@ -1537,6 +1537,6 @@
 @ stdcall -syscall NtUserWindowFromPoint(long long)
 @ stub -syscall NtUserYieldTask
 @ stub -syscall NtUserZapActiveAndFocus
-@ stub -syscall NtValidateCompositionSurfaceHandle
+@ stdcall -syscall NtValidateCompositionSurfaceHandle(long ptr)
 @ stub -syscall NtVisualCaptureBits
 # extern gDispatchTableValues

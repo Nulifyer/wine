@@ -155,6 +155,98 @@ BOOL WINAPI NtUserRegisterManipulationThread( void *registration )
     return TRUE;
 }
 
+struct ntuser_inertia_info
+{
+    float velocity_x;
+    float velocity_y;
+    UINT source;
+};
+
+struct ntuser_inertia_region
+{
+    RECT rect;
+    float transform[6];
+};
+
+struct inertia_request_data
+{
+    float velocity_x;
+    float velocity_y;
+    UINT source;
+    UINT has_region;
+    LONG region[4];
+    float transform[6];
+    UINT has_routing;
+    unsigned char routing[48];
+};
+
+C_ASSERT( sizeof(struct ntuser_inertia_info) == 12 );
+C_ASSERT( sizeof(struct ntuser_inertia_region) == 40 );
+C_ASSERT( sizeof(struct inertia_request_data) == 108 );
+
+/***********************************************************************
+ *           NtUserReportInertia    (win32u.@)
+ *
+ * USER session state owns one active Direct Manipulation inertia record.
+ * Copy the complete undocumented pointer payload at the syscall boundary;
+ * validation, replacement and teardown are authoritative in wineserver.
+ */
+BOOL WINAPI NtUserReportInertia( ULONG_PTR id, UINT flags, HWND hwnd, const void *routing,
+                                 const void *info_ptr, const void *region_ptr )
+{
+    const struct ntuser_inertia_info *info = info_ptr;
+    const struct ntuser_inertia_region *region = region_ptr;
+    struct inertia_request_data data = {0};
+    BOOL ret = FALSE;
+
+    TRACE( "id %p, flags %#x, hwnd %p, routing %p, info %p, region %p\n",
+           (void *)id, flags, hwnd, routing, info, region );
+
+    if ((flags & 1) && !info)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    if (flags & 1)
+    {
+        __TRY
+        {
+            data.velocity_x = info->velocity_x;
+            data.velocity_y = info->velocity_y;
+            data.source = info->source;
+            if (region)
+            {
+                data.has_region = TRUE;
+                memcpy( data.region, &region->rect, sizeof(data.region) );
+                memcpy( data.transform, region->transform, sizeof(data.transform) );
+            }
+            if (routing)
+            {
+                data.has_routing = TRUE;
+                memcpy( data.routing, routing, sizeof(data.routing) );
+            }
+        }
+        __EXCEPT
+        {
+            RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
+        __ENDTRY
+    }
+
+    SERVER_START_REQ( report_inertia )
+    {
+        req->id = id;
+        req->flags = flags;
+        req->window = wine_server_user_handle( hwnd );
+        if (flags & 1) wine_server_add_data( req, &data, sizeof(data) );
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
 static const WCHAR keyboard_layouts_keyW[] =
 {
     '\\','R','e','g','i','s','t','r','y',

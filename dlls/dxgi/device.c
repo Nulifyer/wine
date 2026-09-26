@@ -337,22 +337,62 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_GetMaximumFrameLatency(IWineDXGIDev
     return S_OK;
 }
 
+static BOOL dxgi_device_validate_resources(IWineDXGIDevice *iface, UINT resource_count,
+        IDXGIResource * const *resources)
+{
+    IDXGIDevice *resource_device;
+    unsigned int i;
+    HRESULT hr;
+
+    if (resource_count && !resources)
+        return FALSE;
+
+    for (i = 0; i < resource_count; ++i)
+    {
+        if (!resources[i])
+            return FALSE;
+        resource_device = NULL;
+        hr = IDXGIResource_GetDevice(resources[i], &IID_IDXGIDevice,
+                (void **)&resource_device);
+        if (FAILED(hr) || resource_device != (IDXGIDevice *)iface)
+        {
+            if (resource_device) IDXGIDevice_Release(resource_device);
+            return FALSE;
+        }
+        IDXGIDevice_Release(resource_device);
+    }
+
+    return TRUE;
+}
+
 static HRESULT STDMETHODCALLTYPE dxgi_device_OfferResources(IWineDXGIDevice *iface, UINT resource_count,
         IDXGIResource * const *resources, DXGI_OFFER_RESOURCE_PRIORITY priority)
 {
-    FIXME("iface %p, resource_count %u, resources %p, priority %u stub!\n", iface, resource_count,
-        resources, priority);
+    TRACE("iface %p, resource_count %u, resources %p, priority %u.\n", iface, resource_count,
+            resources, priority);
 
-    return E_NOTIMPL;
+    if (priority < DXGI_OFFER_RESOURCE_PRIORITY_LOW ||
+            priority > DXGI_OFFER_RESOURCE_PRIORITY_HIGH ||
+            !dxgi_device_validate_resources(iface, resource_count, resources))
+        return E_INVALIDARG;
+
+    /* Wined3d does not expose allocation eviction. Keep the resources resident;
+     * a later reclaim can consequently report their contents as preserved. */
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_device_ReclaimResources(IWineDXGIDevice *iface, UINT resource_count,
         IDXGIResource * const *resources, BOOL *discarded)
 {
-    FIXME("iface %p, resource_count %u, resources %p, discarded %p stub!\n", iface, resource_count,
-        resources, discarded);
+    TRACE("iface %p, resource_count %u, resources %p, discarded %p.\n", iface, resource_count,
+            resources, discarded);
 
-    return E_NOTIMPL;
+    if (!dxgi_device_validate_resources(iface, resource_count, resources))
+        return E_INVALIDARG;
+
+    if (discarded)
+        memset(discarded, 0, resource_count * sizeof(*discarded));
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_device_EnqueueSetEvent(IWineDXGIDevice *iface, HANDLE event)

@@ -61,11 +61,11 @@
     SYSCALL_ENTRY( 0x1039, NtDCompositionSubmitDWMBatch, 0 ) \
     SYSCALL_ENTRY( 0x103a, NtDCompositionSuspendAnimations, 0 ) \
     SYSCALL_ENTRY( 0x103b, NtDCompositionSyncWait, 0 ) \
-    SYSCALL_ENTRY( 0x103c, NtDCompositionSynchronize, 0 ) \
+    SYSCALL_ENTRY( 0x103c, NtDCompositionSynchronize, 8 ) \
     SYSCALL_ENTRY( 0x103d, NtDCompositionTelemetryAnimationScenarioBegin, 0 ) \
     SYSCALL_ENTRY( 0x103e, NtDCompositionTelemetryAnimationScenarioReference, 0 ) \
     SYSCALL_ENTRY( 0x103f, NtDCompositionTelemetryAnimationScenarioUnreference, 0 ) \
-    SYSCALL_ENTRY( 0x1040, NtDCompositionTelemetrySetApplicationId, 0 ) \
+    SYSCALL_ENTRY( 0x1040, NtDCompositionTelemetrySetApplicationId, 12 ) \
     SYSCALL_ENTRY( 0x1041, NtDCompositionTelemetryTouchInteractionBegin, 0 ) \
     SYSCALL_ENTRY( 0x1042, NtDCompositionTelemetryTouchInteractionEnd, 0 ) \
     SYSCALL_ENTRY( 0x1043, NtDCompositionTelemetryTouchInteractionUpdate, 0 ) \
@@ -735,7 +735,7 @@
     SYSCALL_ENTRY( 0x12db, NtModerncoreSetNavigationServiceSid, 0 ) \
     SYSCALL_ENTRY( 0x12dc, NtModerncoreUnregisterNavigationWindowHandle, 0 ) \
     SYSCALL_ENTRY( 0x12dd, NtNotifyPresentToCompositionSurface, 0 ) \
-    SYSCALL_ENTRY( 0x12de, NtOpenCompositionSurfaceDirtyRegion, 0 ) \
+    SYSCALL_ENTRY( 0x12de, NtOpenCompositionSurfaceDirtyRegion, 16 ) \
     SYSCALL_ENTRY( 0x12df, NtOpenCompositionSurfaceRealizationInfo, 0 ) \
     SYSCALL_ENTRY( 0x12e0, NtOpenCompositionSurfaceSectionInfo, 0 ) \
     SYSCALL_ENTRY( 0x12e1, NtOpenCompositionSurfaceSwapChainHandleInfo, 0 ) \
@@ -744,10 +744,10 @@
     SYSCALL_ENTRY( 0x12e4, NtQueryCompositionInputSink, 0 ) \
     SYSCALL_ENTRY( 0x12e5, NtQueryCompositionInputSinkLuid, 0 ) \
     SYSCALL_ENTRY( 0x12e6, NtQueryCompositionInputSinkViewId, 0 ) \
-    SYSCALL_ENTRY( 0x12e7, NtQueryCompositionSurfaceBinding, 0 ) \
+    SYSCALL_ENTRY( 0x12e7, NtQueryCompositionSurfaceBinding, 12 ) \
     SYSCALL_ENTRY( 0x12e8, NtQueryCompositionSurfaceFrameRate, 0 ) \
     SYSCALL_ENTRY( 0x12e9, NtQueryCompositionSurfaceHDRMetaData, 0 ) \
-    SYSCALL_ENTRY( 0x12ea, NtQueryCompositionSurfaceRenderingRealization, 0 ) \
+    SYSCALL_ENTRY( 0x12ea, NtQueryCompositionSurfaceRenderingRealization, 8 ) \
     SYSCALL_ENTRY( 0x12eb, NtQueryCompositionSurfaceStatistics, 0 ) \
     SYSCALL_ENTRY( 0x12ec, NtRIMAddInputObserver, 0 ) \
     SYSCALL_ENTRY( 0x12ed, NtRIMAreSiblingDevices, 0 ) \
@@ -1315,7 +1315,7 @@
     SYSCALL_ENTRY( 0x151f, NtUserRemoveQueueCompletion, 0 ) \
     SYSCALL_ENTRY( 0x1520, NtUserRemoveVisualIdentifier, 0 ) \
     SYSCALL_ENTRY( 0x1521, NtUserReplyMessage, 4 ) \
-    SYSCALL_ENTRY( 0x1522, NtUserReportInertia, 0 ) \
+    SYSCALL_ENTRY( 0x1522, NtUserReportInertia, 24 ) \
     SYSCALL_ENTRY( 0x1523, NtUserRequestMoveSizeOperation, 0 ) \
     SYSCALL_ENTRY( 0x1524, NtUserResetDblClk, 0 ) \
     SYSCALL_ENTRY( 0x1525, NtUserResolveDesktopForWOW, 0 ) \
@@ -1539,7 +1539,7 @@
     SYSCALL_ENTRY( 0x15ff, NtUserWindowFromPoint, 8 ) \
     SYSCALL_ENTRY( 0x1600, NtUserYieldTask, 0 ) \
     SYSCALL_ENTRY( 0x1601, NtUserZapActiveAndFocus, 0 ) \
-    SYSCALL_ENTRY( 0x1602, NtValidateCompositionSurfaceHandle, 0 ) \
+    SYSCALL_ENTRY( 0x1602, NtValidateCompositionSurfaceHandle, 8 ) \
     SYSCALL_ENTRY( 0x1603, NtVisualCaptureBits, 0 )
 #ifdef _WIN64
 #define ALL_SYSCALLS \
@@ -1603,11 +1603,11 @@
     SYSCALL_ENTRY( 0x1039, NtDCompositionSubmitDWMBatch, 0 ) \
     SYSCALL_ENTRY( 0x103a, NtDCompositionSuspendAnimations, 0 ) \
     SYSCALL_ENTRY( 0x103b, NtDCompositionSyncWait, 0 ) \
-    SYSCALL_ENTRY( 0x103c, NtDCompositionSynchronize, 0 ) \
+    SYSCALL_ENTRY( 0x103c, NtDCompositionSynchronize, 16 ) \
     SYSCALL_ENTRY( 0x103d, NtDCompositionTelemetryAnimationScenarioBegin, 0 ) \
     SYSCALL_ENTRY( 0x103e, NtDCompositionTelemetryAnimationScenarioReference, 0 ) \
     SYSCALL_ENTRY( 0x103f, NtDCompositionTelemetryAnimationScenarioUnreference, 0 ) \
-    SYSCALL_ENTRY( 0x1040, NtDCompositionTelemetrySetApplicationId, 0 ) \
+    SYSCALL_ENTRY( 0x1040, NtDCompositionTelemetrySetApplicationId, 24 ) \
     SYSCALL_ENTRY( 0x1041, NtDCompositionTelemetryTouchInteractionBegin, 0 ) \
     SYSCALL_ENTRY( 0x1042, NtDCompositionTelemetryTouchInteractionEnd, 0 ) \
     SYSCALL_ENTRY( 0x1043, NtDCompositionTelemetryTouchInteractionUpdate, 0 ) \
@@ -2277,7 +2277,7 @@
     SYSCALL_ENTRY( 0x12db, NtModerncoreSetNavigationServiceSid, 0 ) \
     SYSCALL_ENTRY( 0x12dc, NtModerncoreUnregisterNavigationWindowHandle, 0 ) \
     SYSCALL_ENTRY( 0x12dd, NtNotifyPresentToCompositionSurface, 0 ) \
-    SYSCALL_ENTRY( 0x12de, NtOpenCompositionSurfaceDirtyRegion, 0 ) \
+    SYSCALL_ENTRY( 0x12de, NtOpenCompositionSurfaceDirtyRegion, 32 ) \
     SYSCALL_ENTRY( 0x12df, NtOpenCompositionSurfaceRealizationInfo, 0 ) \
     SYSCALL_ENTRY( 0x12e0, NtOpenCompositionSurfaceSectionInfo, 0 ) \
     SYSCALL_ENTRY( 0x12e1, NtOpenCompositionSurfaceSwapChainHandleInfo, 0 ) \
@@ -2286,10 +2286,10 @@
     SYSCALL_ENTRY( 0x12e4, NtQueryCompositionInputSink, 0 ) \
     SYSCALL_ENTRY( 0x12e5, NtQueryCompositionInputSinkLuid, 0 ) \
     SYSCALL_ENTRY( 0x12e6, NtQueryCompositionInputSinkViewId, 0 ) \
-    SYSCALL_ENTRY( 0x12e7, NtQueryCompositionSurfaceBinding, 0 ) \
+    SYSCALL_ENTRY( 0x12e7, NtQueryCompositionSurfaceBinding, 24 ) \
     SYSCALL_ENTRY( 0x12e8, NtQueryCompositionSurfaceFrameRate, 0 ) \
     SYSCALL_ENTRY( 0x12e9, NtQueryCompositionSurfaceHDRMetaData, 0 ) \
-    SYSCALL_ENTRY( 0x12ea, NtQueryCompositionSurfaceRenderingRealization, 0 ) \
+    SYSCALL_ENTRY( 0x12ea, NtQueryCompositionSurfaceRenderingRealization, 16 ) \
     SYSCALL_ENTRY( 0x12eb, NtQueryCompositionSurfaceStatistics, 0 ) \
     SYSCALL_ENTRY( 0x12ec, NtRIMAddInputObserver, 0 ) \
     SYSCALL_ENTRY( 0x12ed, NtRIMAreSiblingDevices, 0 ) \
@@ -2857,7 +2857,7 @@
     SYSCALL_ENTRY( 0x151f, NtUserRemoveQueueCompletion, 0 ) \
     SYSCALL_ENTRY( 0x1520, NtUserRemoveVisualIdentifier, 0 ) \
     SYSCALL_ENTRY( 0x1521, NtUserReplyMessage, 8 ) \
-    SYSCALL_ENTRY( 0x1522, NtUserReportInertia, 0 ) \
+    SYSCALL_ENTRY( 0x1522, NtUserReportInertia, 48 ) \
     SYSCALL_ENTRY( 0x1523, NtUserRequestMoveSizeOperation, 0 ) \
     SYSCALL_ENTRY( 0x1524, NtUserResetDblClk, 0 ) \
     SYSCALL_ENTRY( 0x1525, NtUserResolveDesktopForWOW, 0 ) \
@@ -3081,7 +3081,7 @@
     SYSCALL_ENTRY( 0x15ff, NtUserWindowFromPoint, 16 ) \
     SYSCALL_ENTRY( 0x1600, NtUserYieldTask, 0 ) \
     SYSCALL_ENTRY( 0x1601, NtUserZapActiveAndFocus, 0 ) \
-    SYSCALL_ENTRY( 0x1602, NtValidateCompositionSurfaceHandle, 0 ) \
+    SYSCALL_ENTRY( 0x1602, NtValidateCompositionSurfaceHandle, 16 ) \
     SYSCALL_ENTRY( 0x1603, NtVisualCaptureBits, 0 )
 #else
 #define ALL_SYSCALLS ALL_SYSCALLS32
@@ -3125,11 +3125,9 @@
     SYSCALL_STUB( NtDCompositionSubmitDWMBatch ) \
     SYSCALL_STUB( NtDCompositionSuspendAnimations ) \
     SYSCALL_STUB( NtDCompositionSyncWait ) \
-    SYSCALL_STUB( NtDCompositionSynchronize ) \
     SYSCALL_STUB( NtDCompositionTelemetryAnimationScenarioBegin ) \
     SYSCALL_STUB( NtDCompositionTelemetryAnimationScenarioReference ) \
     SYSCALL_STUB( NtDCompositionTelemetryAnimationScenarioUnreference ) \
-    SYSCALL_STUB( NtDCompositionTelemetrySetApplicationId ) \
     SYSCALL_STUB( NtDCompositionTelemetryTouchInteractionBegin ) \
     SYSCALL_STUB( NtDCompositionTelemetryTouchInteractionEnd ) \
     SYSCALL_STUB( NtDCompositionTelemetryTouchInteractionUpdate ) \
@@ -3567,7 +3565,6 @@
     SYSCALL_STUB( NtModerncoreSetNavigationServiceSid ) \
     SYSCALL_STUB( NtModerncoreUnregisterNavigationWindowHandle ) \
     SYSCALL_STUB( NtNotifyPresentToCompositionSurface ) \
-    SYSCALL_STUB( NtOpenCompositionSurfaceDirtyRegion ) \
     SYSCALL_STUB( NtOpenCompositionSurfaceRealizationInfo ) \
     SYSCALL_STUB( NtOpenCompositionSurfaceSectionInfo ) \
     SYSCALL_STUB( NtOpenCompositionSurfaceSwapChainHandleInfo ) \
@@ -3576,10 +3573,8 @@
     SYSCALL_STUB( NtQueryCompositionInputSink ) \
     SYSCALL_STUB( NtQueryCompositionInputSinkLuid ) \
     SYSCALL_STUB( NtQueryCompositionInputSinkViewId ) \
-    SYSCALL_STUB( NtQueryCompositionSurfaceBinding ) \
     SYSCALL_STUB( NtQueryCompositionSurfaceFrameRate ) \
     SYSCALL_STUB( NtQueryCompositionSurfaceHDRMetaData ) \
-    SYSCALL_STUB( NtQueryCompositionSurfaceRenderingRealization ) \
     SYSCALL_STUB( NtQueryCompositionSurfaceStatistics ) \
     SYSCALL_STUB( NtRIMAddInputObserver ) \
     SYSCALL_STUB( NtRIMAreSiblingDevices ) \
@@ -3915,7 +3910,6 @@
     SYSCALL_STUB( NtUserRemoveInjectionDevice ) \
     SYSCALL_STUB( NtUserRemoveQueueCompletion ) \
     SYSCALL_STUB( NtUserRemoveVisualIdentifier ) \
-    SYSCALL_STUB( NtUserReportInertia ) \
     SYSCALL_STUB( NtUserRequestMoveSizeOperation ) \
     SYSCALL_STUB( NtUserResetDblClk ) \
     SYSCALL_STUB( NtUserResolveDesktopForWOW ) \
@@ -4050,5 +4044,4 @@
     SYSCALL_STUB( NtUserWindowFromPhysicalPoint ) \
     SYSCALL_STUB( NtUserYieldTask ) \
     SYSCALL_STUB( NtUserZapActiveAndFocus ) \
-    SYSCALL_STUB( NtValidateCompositionSurfaceHandle ) \
     SYSCALL_STUB( NtVisualCaptureBits )

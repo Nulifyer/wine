@@ -390,6 +390,7 @@ DECL_HANDLER(end_token_manager_thread);
 DECL_HANDLER(create_dcomp_channel);
 DECL_HANDLER(destroy_dcomp_channel);
 DECL_HANDLER(set_dcomp_channel_connection);
+DECL_HANDLER(set_dcomp_channel_application_id);
 DECL_HANDLER(create_dcomp_shared_section);
 DECL_HANDLER(get_dcomp_shared_section_update);
 DECL_HANDLER(release_dcomp_shared_section);
@@ -400,6 +401,7 @@ DECL_HANDLER(get_dcomp_connection_batch);
 DECL_HANDLER(release_all_dcomp_resources);
 DECL_HANDLER(get_deleted_dcomp_resources);
 DECL_HANDLER(get_dcomp_channel_batch_id);
+DECL_HANDLER(synchronize_dcomp_channel);
 DECL_HANDLER(commit_dcomp_channel);
 DECL_HANDLER(get_d3dkmt_process_scheduling_priority_class);
 DECL_HANDLER(set_d3dkmt_process_scheduling_priority_class);
@@ -430,6 +432,11 @@ DECL_HANDLER(get_window_logical_surface);
 DECL_HANDLER(set_window_logical_surface_metadata);
 DECL_HANDLER(signal_window_logical_surface);
 DECL_HANDLER(dirty_window_logical_surface);
+DECL_HANDLER(duplicate_dcomp_surface);
+DECL_HANDLER(set_dcomp_surface_ink_cookie);
+DECL_HANDLER(get_dcomp_surface_state);
+DECL_HANDLER(open_dcomp_surface_dirty_region);
+DECL_HANDLER(report_inertia);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -817,6 +824,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_create_dcomp_channel,
     (req_handler)req_destroy_dcomp_channel,
     (req_handler)req_set_dcomp_channel_connection,
+    (req_handler)req_set_dcomp_channel_application_id,
     (req_handler)req_create_dcomp_shared_section,
     (req_handler)req_get_dcomp_shared_section_update,
     (req_handler)req_release_dcomp_shared_section,
@@ -827,6 +835,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_release_all_dcomp_resources,
     (req_handler)req_get_deleted_dcomp_resources,
     (req_handler)req_get_dcomp_channel_batch_id,
+    (req_handler)req_synchronize_dcomp_channel,
     (req_handler)req_commit_dcomp_channel,
     (req_handler)req_get_d3dkmt_process_scheduling_priority_class,
     (req_handler)req_set_d3dkmt_process_scheduling_priority_class,
@@ -857,6 +866,11 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_window_logical_surface_metadata,
     (req_handler)req_signal_window_logical_surface,
     (req_handler)req_dirty_window_logical_surface,
+    (req_handler)req_duplicate_dcomp_surface,
+    (req_handler)req_set_dcomp_surface_ink_cookie,
+    (req_handler)req_get_dcomp_surface_state,
+    (req_handler)req_open_dcomp_surface_dirty_region,
+    (req_handler)req_report_inertia,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -3029,6 +3043,8 @@ C_ASSERT( offsetof(struct set_dcomp_channel_connection_request, channel) == 12 )
 C_ASSERT( offsetof(struct set_dcomp_channel_connection_request, connection_id) == 16 );
 C_ASSERT( offsetof(struct set_dcomp_channel_connection_request, connection) == 24 );
 C_ASSERT( sizeof(struct set_dcomp_channel_connection_request) == 32 );
+C_ASSERT( offsetof(struct set_dcomp_channel_application_id_request, channel) == 12 );
+C_ASSERT( sizeof(struct set_dcomp_channel_application_id_request) == 16 );
 C_ASSERT( offsetof(struct create_dcomp_shared_section_request, channel) == 12 );
 C_ASSERT( offsetof(struct create_dcomp_shared_section_request, resource) == 16 );
 C_ASSERT( offsetof(struct create_dcomp_shared_section_request, size) == 24 );
@@ -3047,7 +3063,8 @@ C_ASSERT( sizeof(struct release_dcomp_shared_section_request) == 24 );
 C_ASSERT( offsetof(struct publish_dcomp_resource_request, channel) == 12 );
 C_ASSERT( offsetof(struct publish_dcomp_resource_request, resource) == 16 );
 C_ASSERT( offsetof(struct publish_dcomp_resource_request, type) == 20 );
-C_ASSERT( sizeof(struct publish_dcomp_resource_request) == 24 );
+C_ASSERT( offsetof(struct publish_dcomp_resource_request, source_ready) == 24 );
+C_ASSERT( sizeof(struct publish_dcomp_resource_request) == 32 );
 C_ASSERT( offsetof(struct publish_dcomp_resource_reply, handle) == 8 );
 C_ASSERT( sizeof(struct publish_dcomp_resource_reply) == 16 );
 C_ASSERT( offsetof(struct create_dcomp_shared_resource_request, type) == 12 );
@@ -3062,10 +3079,12 @@ C_ASSERT( sizeof(struct open_dcomp_shared_resource_request) == 32 );
 C_ASSERT( offsetof(struct open_dcomp_shared_resource_reply, window_target) == 8 );
 C_ASSERT( sizeof(struct open_dcomp_shared_resource_reply) == 16 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_request, connection) == 12 );
-C_ASSERT( sizeof(struct get_dcomp_connection_batch_request) == 16 );
+C_ASSERT( offsetof(struct get_dcomp_connection_batch_request, synchronization_id) == 16 );
+C_ASSERT( sizeof(struct get_dcomp_connection_batch_request) == 24 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, type) == 8 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, channel) == 12 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, value) == 16 );
+C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, more) == 20 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, connection) == 24 );
 C_ASSERT( offsetof(struct get_dcomp_connection_batch_reply, object) == 32 );
 C_ASSERT( sizeof(struct get_dcomp_connection_batch_reply) == 40 );
@@ -3083,6 +3102,10 @@ C_ASSERT( offsetof(struct get_dcomp_channel_batch_id_request, selector) == 16 );
 C_ASSERT( sizeof(struct get_dcomp_channel_batch_id_request) == 24 );
 C_ASSERT( offsetof(struct get_dcomp_channel_batch_id_reply, batch_id) == 8 );
 C_ASSERT( sizeof(struct get_dcomp_channel_batch_id_reply) == 16 );
+C_ASSERT( offsetof(struct synchronize_dcomp_channel_request, channel) == 12 );
+C_ASSERT( sizeof(struct synchronize_dcomp_channel_request) == 16 );
+C_ASSERT( offsetof(struct synchronize_dcomp_channel_reply, synchronization_id) == 8 );
+C_ASSERT( sizeof(struct synchronize_dcomp_channel_reply) == 16 );
 C_ASSERT( offsetof(struct commit_dcomp_channel_request, channel) == 12 );
 C_ASSERT( offsetof(struct commit_dcomp_channel_request, protocol_blocks) == 16 );
 C_ASSERT( offsetof(struct commit_dcomp_channel_request, payload_size) == 24 );
@@ -3120,7 +3143,9 @@ C_ASSERT( offsetof(struct create_dcomp_surface_reply, handle) == 8 );
 C_ASSERT( sizeof(struct create_dcomp_surface_reply) == 16 );
 C_ASSERT( offsetof(struct set_dcomp_surface_bound_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_dcomp_surface_bound_request, bound) == 16 );
-C_ASSERT( sizeof(struct set_dcomp_surface_bound_request) == 24 );
+C_ASSERT( offsetof(struct set_dcomp_surface_bound_request, flags) == 20 );
+C_ASSERT( offsetof(struct set_dcomp_surface_bound_request, shared) == 24 );
+C_ASSERT( sizeof(struct set_dcomp_surface_bound_request) == 32 );
 C_ASSERT( offsetof(struct set_dcomp_surface_bound_reply, binding_id) == 8 );
 C_ASSERT( sizeof(struct set_dcomp_surface_bound_reply) == 16 );
 C_ASSERT( offsetof(struct create_dcomp_token_request, surface_count) == 12 );
@@ -3209,3 +3234,31 @@ C_ASSERT( sizeof(struct signal_window_logical_surface_request) == 24 );
 C_ASSERT( offsetof(struct dirty_window_logical_surface_request, handle) == 12 );
 C_ASSERT( offsetof(struct dirty_window_logical_surface_request, serial) == 16 );
 C_ASSERT( sizeof(struct dirty_window_logical_surface_request) == 24 );
+C_ASSERT( offsetof(struct duplicate_dcomp_surface_request, handle) == 12 );
+C_ASSERT( offsetof(struct duplicate_dcomp_surface_request, consumer) == 16 );
+C_ASSERT( sizeof(struct duplicate_dcomp_surface_request) == 24 );
+C_ASSERT( offsetof(struct duplicate_dcomp_surface_reply, handle) == 8 );
+C_ASSERT( offsetof(struct duplicate_dcomp_surface_reply, binding_id) == 16 );
+C_ASSERT( sizeof(struct duplicate_dcomp_surface_reply) == 24 );
+C_ASSERT( offsetof(struct set_dcomp_surface_ink_cookie_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_dcomp_surface_ink_cookie_request, cookie) == 16 );
+C_ASSERT( sizeof(struct set_dcomp_surface_ink_cookie_request) == 24 );
+C_ASSERT( offsetof(struct get_dcomp_surface_state_request, handle) == 12 );
+C_ASSERT( offsetof(struct get_dcomp_surface_state_request, include_info) == 16 );
+C_ASSERT( sizeof(struct get_dcomp_surface_state_request) == 24 );
+C_ASSERT( offsetof(struct get_dcomp_surface_state_reply, binding_id) == 8 );
+C_ASSERT( offsetof(struct get_dcomp_surface_state_reply, ink_cookie) == 16 );
+C_ASSERT( offsetof(struct get_dcomp_surface_state_reply, present_count) == 20 );
+C_ASSERT( offsetof(struct get_dcomp_surface_state_reply, bound) == 24 );
+C_ASSERT( offsetof(struct get_dcomp_surface_state_reply, realization) == 28 );
+C_ASSERT( sizeof(struct get_dcomp_surface_state_reply) == 32 );
+C_ASSERT( offsetof(struct open_dcomp_surface_dirty_region_request, handle) == 12 );
+C_ASSERT( offsetof(struct open_dcomp_surface_dirty_region_request, binding_id) == 16 );
+C_ASSERT( offsetof(struct open_dcomp_surface_dirty_region_request, realization) == 24 );
+C_ASSERT( sizeof(struct open_dcomp_surface_dirty_region_request) == 32 );
+C_ASSERT( offsetof(struct open_dcomp_surface_dirty_region_reply, present_count) == 8 );
+C_ASSERT( sizeof(struct open_dcomp_surface_dirty_region_reply) == 16 );
+C_ASSERT( offsetof(struct report_inertia_request, id) == 16 );
+C_ASSERT( offsetof(struct report_inertia_request, flags) == 24 );
+C_ASSERT( offsetof(struct report_inertia_request, window) == 28 );
+C_ASSERT( sizeof(struct report_inertia_request) == 32 );

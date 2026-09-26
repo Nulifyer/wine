@@ -165,6 +165,7 @@ static bool winstation_init( struct object *obj, const void *init_data )
     winstation->adapter_fingerprint = 0;
     winstation->monitor_fingerprint = 0;
     winstation->composited = 0;
+    winstation->inertia = NULL;
     list_init( &winstation->desktops );
     list_add_tail( &winstation_list, &winstation->entry );
     return true;
@@ -290,6 +291,7 @@ static void winstation_destroy( struct object *obj )
     free( winstation->desktop_names );
     free( winstation->monitors );
     free( winstation->user_api_hook_data );
+    free_inertia_info( winstation, NULL );
 }
 
 /* retrieve the process window station, checking the handle access rights */
@@ -586,6 +588,7 @@ static void remove_desktop_user( struct desktop *desktop, struct thread *thread 
 /* remove a thread from the list of threads attached to a desktop */
 static void remove_desktop_thread( struct desktop *desktop, struct thread *thread )
 {
+    free_inertia_info( desktop->winstation, thread );
     add_desktop_hook_count( desktop, thread, -1 );
     list_remove( &thread->desktop_entry );
 

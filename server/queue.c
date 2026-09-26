@@ -95,6 +95,34 @@ struct message
     struct message_result *result;    /* result in sender queue */
 };
 
+/* Windows keeps a single CInertiaManager record in USER session state.  Keep
+ * the same ownership boundary here instead of making ReportInertia a
+ * process-local success shim.  Floating-point members are copied as protocol
+ * data; the server never retains client pointers. */
+struct inertia_request_data
+{
+    float velocity_x;
+    float velocity_y;
+    unsigned int source;
+    unsigned int has_region;
+    int region[4];
+    float transform[6];
+    unsigned int has_routing;
+    unsigned char routing[48];
+};
+
+struct inertia_info
+{
+    unsigned __int64 id;
+    thread_id_t owner_tid;
+    process_id_t owner_pid;
+    user_handle_t window;
+    unsigned int flags;
+    unsigned int timestamp;
+    double speed_squared;
+    struct inertia_request_data data;
+};
+
 struct timer
 {
     struct list     entry;     /* entry in timer list */
@@ -3096,6 +3124,20 @@ void free_pointers( struct desktop *desktop )
     }
 }
 
+/* Drop the session inertia record either unconditionally or when its owning
+ * thread leaves the window station. */
+void free_inertia_info( struct winstation *winstation, struct thread *thread )
+{
+    struct inertia_info *inertia = winstation->inertia;
+
+    if (!inertia) return;
+    if (thread && (inertia->owner_tid != get_thread_id( thread ) ||
+                   inertia->owner_pid != thread->process->id)) return;
+
+    free( inertia );
+    winstation->inertia = NULL;
+}
+
 /* free all hotkeys on a desktop, optionally filtering by window */
 void free_hotkeys( struct desktop *desktop, user_handle_t window )
 {
@@ -3863,6 +3905,134 @@ DECL_HANDLER(get_thread_input)
     }
 
     if (input && input->shared) reply->locator = get_shared_object_locator( input->shared );
+}
+
+
+/* Start or stop the one active inertia record owned by this USER session.
+ * The validation and replacement order follows the native CInertiaManager
+ * path recovered from win32kbase: one of start/stop, four source classes,
+ * non-zero finite velocity, an invertible optional affine transform, and a
+ * 100 ms stronger-motion replacement window for the same thread. */
+DECL_HANDLER(report_inertia)
+{
+    const struct inertia_request_data *data = get_req_data();
+    struct inertia_info *inertia, *previous;
+    struct winstation *winstation;
+    struct thread *owner = NULL;
+    unsigned int now = get_tick_count();
+    double speed_squared, determinant;
+    int start = !!(req->flags & 1);
+
+    if (!req->id || (req->flags & ~0xf) || !((req->flags & 3) == 1 || (req->flags & 3) == 2))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+
+    if (req->flags & 4)
+    {
+        if (req->window)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
+        if (is_native_machine() && !current->process->native_dwm_owner)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            return;
+        }
+    }
+
+    if (!(winstation = get_process_winstation( current->process, 0 ))) return;
+
+    if (!start)
+    {
+        previous = winstation->inertia;
+        if (!previous || previous->id != req->id || previous->owner_tid != current->id ||
+            previous->owner_pid != current->process->id)
+            set_error( STATUS_ACCESS_DENIED );
+        else
+            free_inertia_info( winstation, current );
+        release_object( winstation );
+        return;
+    }
+
+    if (get_req_data_size() != sizeof(*data) || !data->source || data->source > 8 ||
+        !(data->source == 1 || data->source == 2 || data->source == 4 || data->source == 8) ||
+        data->has_region > 1 || data->has_routing > 1)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+
+    speed_squared = (double)data->velocity_x * data->velocity_x +
+                    (double)data->velocity_y * data->velocity_y;
+    if (!(speed_squared > 0.0) || !__builtin_isfinite( speed_squared ))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+
+    if (data->has_region)
+    {
+        determinant = (double)data->transform[0] * data->transform[3] -
+                      (double)data->transform[1] * data->transform[2];
+        if (determinant == 0.0 || !__builtin_isfinite( determinant ))
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            goto done;
+        }
+    }
+    else if (req->flags & 4)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto done;
+    }
+
+    if (!(req->flags & 4))
+    {
+        if (!req->window || !(owner = get_window_thread( req->window )))
+        {
+            set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
+            goto done;
+        }
+        if (owner != current)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto done;
+        }
+        if (now - last_input_time >= 2001)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto done;
+        }
+    }
+
+    previous = winstation->inertia;
+    if (previous && previous->owner_tid == current->id && previous->owner_pid == current->process->id &&
+        now - previous->timestamp <= 100 && !(req->flags & 8) &&
+        speed_squared <= previous->speed_squared)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto done;
+    }
+
+    if (!(inertia = mem_alloc( sizeof(*inertia) ))) goto done;
+    inertia->id = req->id;
+    inertia->owner_tid = current->id;
+    inertia->owner_pid = current->process->id;
+    inertia->window = req->window;
+    inertia->flags = req->flags;
+    inertia->timestamp = now;
+    inertia->speed_squared = speed_squared;
+    inertia->data = *data;
+
+    free( previous );
+    winstation->inertia = inertia;
+
+done:
+    if (owner) release_object( owner );
+    release_object( winstation );
 }
 
 

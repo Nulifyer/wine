@@ -7433,6 +7433,18 @@ struct set_dcomp_channel_connection_reply
 };
 
 
+struct set_dcomp_channel_application_id_request
+{
+    struct request_header __header;
+    unsigned int channel;
+    /* VARARG(application_id,bytes); */
+};
+struct set_dcomp_channel_application_id_reply
+{
+    struct reply_header __header;
+};
+
+
 struct create_dcomp_shared_section_request
 {
     struct request_header __header;
@@ -7484,6 +7496,8 @@ struct publish_dcomp_resource_request
     unsigned int channel;
     unsigned int resource;
     unsigned int type;
+    int          source_ready;
+    char __pad_28[4];
 };
 struct publish_dcomp_resource_reply
 {
@@ -7527,6 +7541,7 @@ struct get_dcomp_connection_batch_request
 {
     struct request_header __header;
     obj_handle_t connection;
+    client_ptr_t synchronization_id;
 };
 struct get_dcomp_connection_batch_reply
 {
@@ -7534,7 +7549,7 @@ struct get_dcomp_connection_batch_reply
     unsigned int type;
     unsigned int channel;
     unsigned int value;
-    char __pad_20[4];
+    int more;
     client_ptr_t connection;
     client_ptr_t object;
     /* VARARG(data,bytes); */
@@ -7581,6 +7596,18 @@ struct get_dcomp_channel_batch_id_reply
     struct reply_header __header;
     unsigned int batch_id;
     char __pad_12[4];
+};
+
+
+struct synchronize_dcomp_channel_request
+{
+    struct request_header __header;
+    unsigned int channel;
+};
+struct synchronize_dcomp_channel_reply
+{
+    struct reply_header __header;
+    client_ptr_t synchronization_id;
 };
 
 
@@ -7723,7 +7750,10 @@ struct set_dcomp_surface_bound_request
     struct request_header __header;
     obj_handle_t handle;
     int          bound;
-    char __pad_20[4];
+    unsigned int flags;
+    int          shared;
+    /* VARARG(info,bytes); */
+    char __pad_28[4];
 };
 struct set_dcomp_surface_bound_reply
 {
@@ -7994,6 +8024,86 @@ struct dirty_window_logical_surface_request
     char __pad_20[4];
 };
 struct dirty_window_logical_surface_reply
+{
+    struct reply_header __header;
+};
+
+
+struct duplicate_dcomp_surface_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    int          consumer;
+    char __pad_20[4];
+};
+struct duplicate_dcomp_surface_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+    unsigned __int64 binding_id;
+};
+
+
+struct set_dcomp_surface_ink_cookie_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int cookie;
+    char __pad_20[4];
+};
+struct set_dcomp_surface_ink_cookie_reply
+{
+    struct reply_header __header;
+};
+
+
+struct get_dcomp_surface_state_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    int include_info;
+    char __pad_20[4];
+};
+struct get_dcomp_surface_state_reply
+{
+    struct reply_header __header;
+    unsigned __int64 binding_id;
+    unsigned int ink_cookie;
+    unsigned int present_count;
+    int bound;
+    obj_handle_t realization;
+    /* VARARG(info,bytes); */
+};
+
+
+struct open_dcomp_surface_dirty_region_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned __int64 binding_id;
+    unsigned int realization;
+    char __pad_28[4];
+};
+struct open_dcomp_surface_dirty_region_reply
+{
+    struct reply_header __header;
+    unsigned int present_count;
+    /* VARARG(region,bytes); */
+    char __pad_12[4];
+};
+
+
+struct report_inertia_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 id;
+    unsigned int     flags;
+    user_handle_t    window;
+    /* VARARG(data,bytes); */
+};
+struct report_inertia_reply
 {
     struct reply_header __header;
 };
@@ -8384,6 +8494,7 @@ enum request
     REQ_create_dcomp_channel,
     REQ_destroy_dcomp_channel,
     REQ_set_dcomp_channel_connection,
+    REQ_set_dcomp_channel_application_id,
     REQ_create_dcomp_shared_section,
     REQ_get_dcomp_shared_section_update,
     REQ_release_dcomp_shared_section,
@@ -8394,6 +8505,7 @@ enum request
     REQ_release_all_dcomp_resources,
     REQ_get_deleted_dcomp_resources,
     REQ_get_dcomp_channel_batch_id,
+    REQ_synchronize_dcomp_channel,
     REQ_commit_dcomp_channel,
     REQ_get_d3dkmt_process_scheduling_priority_class,
     REQ_set_d3dkmt_process_scheduling_priority_class,
@@ -8424,6 +8536,11 @@ enum request
     REQ_set_window_logical_surface_metadata,
     REQ_signal_window_logical_surface,
     REQ_dirty_window_logical_surface,
+    REQ_duplicate_dcomp_surface,
+    REQ_set_dcomp_surface_ink_cookie,
+    REQ_get_dcomp_surface_state,
+    REQ_open_dcomp_surface_dirty_region,
+    REQ_report_inertia,
     REQ_NB_REQUESTS
 };
 
@@ -8814,6 +8931,7 @@ union generic_request
     struct create_dcomp_channel_request create_dcomp_channel_request;
     struct destroy_dcomp_channel_request destroy_dcomp_channel_request;
     struct set_dcomp_channel_connection_request set_dcomp_channel_connection_request;
+    struct set_dcomp_channel_application_id_request set_dcomp_channel_application_id_request;
     struct create_dcomp_shared_section_request create_dcomp_shared_section_request;
     struct get_dcomp_shared_section_update_request get_dcomp_shared_section_update_request;
     struct release_dcomp_shared_section_request release_dcomp_shared_section_request;
@@ -8824,6 +8942,7 @@ union generic_request
     struct release_all_dcomp_resources_request release_all_dcomp_resources_request;
     struct get_deleted_dcomp_resources_request get_deleted_dcomp_resources_request;
     struct get_dcomp_channel_batch_id_request get_dcomp_channel_batch_id_request;
+    struct synchronize_dcomp_channel_request synchronize_dcomp_channel_request;
     struct commit_dcomp_channel_request commit_dcomp_channel_request;
     struct get_d3dkmt_process_scheduling_priority_class_request get_d3dkmt_process_scheduling_priority_class_request;
     struct set_d3dkmt_process_scheduling_priority_class_request set_d3dkmt_process_scheduling_priority_class_request;
@@ -8854,6 +8973,11 @@ union generic_request
     struct set_window_logical_surface_metadata_request set_window_logical_surface_metadata_request;
     struct signal_window_logical_surface_request signal_window_logical_surface_request;
     struct dirty_window_logical_surface_request dirty_window_logical_surface_request;
+    struct duplicate_dcomp_surface_request duplicate_dcomp_surface_request;
+    struct set_dcomp_surface_ink_cookie_request set_dcomp_surface_ink_cookie_request;
+    struct get_dcomp_surface_state_request get_dcomp_surface_state_request;
+    struct open_dcomp_surface_dirty_region_request open_dcomp_surface_dirty_region_request;
+    struct report_inertia_request report_inertia_request;
 };
 union generic_reply
 {
@@ -9242,6 +9366,7 @@ union generic_reply
     struct create_dcomp_channel_reply create_dcomp_channel_reply;
     struct destroy_dcomp_channel_reply destroy_dcomp_channel_reply;
     struct set_dcomp_channel_connection_reply set_dcomp_channel_connection_reply;
+    struct set_dcomp_channel_application_id_reply set_dcomp_channel_application_id_reply;
     struct create_dcomp_shared_section_reply create_dcomp_shared_section_reply;
     struct get_dcomp_shared_section_update_reply get_dcomp_shared_section_update_reply;
     struct release_dcomp_shared_section_reply release_dcomp_shared_section_reply;
@@ -9252,6 +9377,7 @@ union generic_reply
     struct release_all_dcomp_resources_reply release_all_dcomp_resources_reply;
     struct get_deleted_dcomp_resources_reply get_deleted_dcomp_resources_reply;
     struct get_dcomp_channel_batch_id_reply get_dcomp_channel_batch_id_reply;
+    struct synchronize_dcomp_channel_reply synchronize_dcomp_channel_reply;
     struct commit_dcomp_channel_reply commit_dcomp_channel_reply;
     struct get_d3dkmt_process_scheduling_priority_class_reply get_d3dkmt_process_scheduling_priority_class_reply;
     struct set_d3dkmt_process_scheduling_priority_class_reply set_d3dkmt_process_scheduling_priority_class_reply;
@@ -9282,8 +9408,13 @@ union generic_reply
     struct set_window_logical_surface_metadata_reply set_window_logical_surface_metadata_reply;
     struct signal_window_logical_surface_reply signal_window_logical_surface_reply;
     struct dirty_window_logical_surface_reply dirty_window_logical_surface_reply;
+    struct duplicate_dcomp_surface_reply duplicate_dcomp_surface_reply;
+    struct set_dcomp_surface_ink_cookie_reply set_dcomp_surface_ink_cookie_reply;
+    struct get_dcomp_surface_state_reply get_dcomp_surface_state_reply;
+    struct open_dcomp_surface_dirty_region_reply open_dcomp_surface_dirty_region_reply;
+    struct report_inertia_reply report_inertia_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1050
+#define SERVER_PROTOCOL_VERSION 1065
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -94,8 +94,14 @@ struct dcomp_test_protocol_list
     } block;
 };
 
+static void check_dcomp_batch_payload( const struct dcomposition_connection_batch *record,
+                                       UINT channel, const UINT *expected, UINT expected_size,
+                                       const char *context );
+
 static void init_dcomp_test_protocol_list( struct dcomp_test_protocol_list *list )
 {
+    static const UINT command[] = {8, 0x24};
+
     memset( list, 0, sizeof(*list) );
     list->head.next = &list->block;
     list->head.previous = &list->block;
@@ -103,14 +109,7 @@ static void init_dcomp_test_protocol_list( struct dcomp_test_protocol_list *list
     list->block.previous = &list->head;
     list->block.type = 0x200;
     list->block.size = sizeof(list->block.data);
-    list->block.data[0] = 0x12;
-    list->block.data[1] = 0x34;
-    list->block.data[2] = 0x56;
-    list->block.data[3] = 0x78;
-    list->block.data[4] = 0x9a;
-    list->block.data[5] = 0xbc;
-    list->block.data[6] = 0xde;
-    list->block.data[7] = 0xf0;
+    memcpy( list->block.data, command, sizeof(command) ); /* Valid no-handle MIL command. */
 }
 
 static DWORD WINAPI token_thread( void *arg )
@@ -517,7 +516,7 @@ static void test_connection_lifetime(void)
 {
     struct dcomposition_connection_batch *record = (void *)0xdeadbeef;
     HANDLE event, connection = (HANDLE)0xdeadbeef;
-    UINT64 cookie = 0x1122334455667788;
+    UINT64 cookie = 0;
     NTSTATUS status;
 
     event = CreateEventW( NULL, FALSE, FALSE, NULL );
@@ -709,14 +708,241 @@ static void test_channel_lifetime(void)
     if (internal_event) CloseHandle( internal_event );
 }
 
+static void test_channel_synchronization(void)
+{
+    BYTE *buffer = NULL, *second_buffer = NULL;
+    UINT size = 0x1000, second_size = 0x1000;
+    UINT channel = 0, second_channel = 0, batch;
+    UINT64 first = 0, second = 0, other = 0;
+    BYTE state;
+    NTSTATUS status;
+
+    status = NtDCompositionSynchronize( 0xdeadbeef, &first );
+    ok( status == STATUS_ACCESS_DENIED, "got invalid-channel status %#lx\n", status );
+    ok( !first, "invalid-channel ID changed to %s\n", wine_dbgstr_longlong(first) );
+
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got channel creation status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &second_channel, &second_size,
+                                          (void **)&second_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got second channel creation status %#lx\n", status );
+    if (!channel || !second_channel) goto done;
+
+    status = NtDCompositionSynchronize( channel, &first );
+    ok( status == STATUS_SUCCESS, "got first synchronization status %#lx\n", status );
+    ok( first != 0, "got zero first synchronization ID\n" );
+
+    second = 0xccccccccccccccccULL;
+    status = NtDCompositionSynchronize( channel, &second );
+    ok( status == STATUS_ACCESS_DENIED, "got repeated synchronization status %#lx\n", status );
+    ok( second == 0xccccccccccccccccULL, "repeated synchronization changed ID to %s\n",
+        wine_dbgstr_longlong(second) );
+
+    status = NtDCompositionSynchronize( second_channel, &other );
+    ok( status == STATUS_SUCCESS, "got other-channel synchronization status %#lx\n", status );
+    ok( other != 0 && other != first, "got other-channel synchronization ID %s after %s\n",
+        wine_dbgstr_longlong(other), wine_dbgstr_longlong(first) );
+
+    batch = 0xcccccccc;
+    state = 0xcc;
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got synchronized commit status %#lx\n", status );
+    status = NtDCompositionSynchronize( channel, &second );
+    ok( status == STATUS_SUCCESS, "got next-batch synchronization status %#lx\n", status );
+    ok( second != 0 && second != first && second != other,
+        "got next-batch synchronization ID %s\n", wine_dbgstr_longlong(second) );
+
+    state = 0xcc;
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got second synchronized commit status %#lx\n", status );
+    status = NtDCompositionSynchronize( channel, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null-output status %#lx\n", status );
+    second = 0xccccccccccccccccULL;
+    status = NtDCompositionSynchronize( channel, &second );
+    ok( status == STATUS_ACCESS_DENIED, "got post-null synchronization status %#lx\n", status );
+    ok( second == 0xccccccccccccccccULL, "post-null synchronization changed ID to %s\n",
+        wine_dbgstr_longlong(second) );
+
+done:
+    if (second_channel) NtDCompositionDestroyChannel( second_channel );
+    if (channel) NtDCompositionDestroyChannel( channel );
+}
+
+static void test_synchronized_connection_queue(void)
+{
+    struct dcomp_test_protocol_list first_protocol, second_protocol;
+    struct dcomposition_connection_batch *record = NULL;
+    struct dcomposition_frame_info frame_info = {0};
+    struct dcomposition_confirm_frame_info confirm_info = {0};
+    HANDLE event, connection = NULL;
+    BYTE *first_buffer = NULL, *second_buffer = NULL;
+    UINT first_channel = 0, second_channel = 0;
+    UINT first_size = 0x1000, second_size = 0x1000, batch, first_batch, second_batch, received;
+    UINT second_opcode = 0x2e;
+    UINT64 first_id = 0, second_id = 0, frame_id = 0, selector = 0;
+    BYTE state;
+    NTSTATUS status;
+
+    init_dcomp_test_protocol_list( &first_protocol );
+    init_dcomp_test_protocol_list( &second_protocol );
+    memcpy( second_protocol.block.data + 4, &second_opcode, sizeof(second_opcode) );
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create synchronized-queue event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got synchronized-queue connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &first_channel, &first_size,
+                                           (void **)&first_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got first synchronized channel status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &second_channel, &second_size,
+                                           (void **)&second_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got second synchronized channel status %#lx\n", status );
+    if (!connection || !first_channel || !second_channel) goto done;
+
+    status = NtDCompositionSetChannelConnectionId( first_channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got first synchronized bind status %#lx\n", status );
+    status = NtDCompositionSetChannelConnectionId( second_channel, 0, 2 );
+    ok( status == STATUS_SUCCESS, "got second synchronized bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && record && record->next,
+        "got synchronized create records status %#lx record %p\n", status, record );
+
+    status = NtDCompositionSynchronize( first_channel, &first_id );
+    ok( status == STATUS_SUCCESS && first_id,
+        "got first queue synchronization status %#lx ID %s\n",
+        status, wine_dbgstr_longlong(first_id) );
+    status = NtDCompositionCommitChannel( first_channel, &batch, &state, 0, NULL,
+                                           &first_protocol.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got first synchronized commit status %#lx\n", status );
+
+    status = NtDCompositionSynchronize( second_channel, &second_id );
+    ok( status == STATUS_SUCCESS && second_id && second_id != first_id,
+        "got second queue synchronization status %#lx ID %s\n",
+        status, wine_dbgstr_longlong(second_id) );
+    status = NtDCompositionCommitChannel( second_channel, &batch, &state, 0, NULL,
+                                           &second_protocol.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got second synchronized commit status %#lx\n", status );
+
+    status = NtDCompositionBeginFrame( connection, &frame_info, &frame_id );
+    ok( status == STATUS_SUCCESS && frame_id && frame_id != first_id && frame_id != second_id,
+        "got queue frame status %#lx ID %s\n", status, wine_dbgstr_longlong(frame_id) );
+    selector = frame_id;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS, "got frame batch set status %#lx\n", status );
+    ok( record && record->next && !record->next->next,
+        "got unexpected frame batch list %p\n", record );
+    if (record && record->next)
+    {
+        ok( record->type == 7 && record->u.batch.channel == first_channel &&
+            record->u.batch.size == sizeof(first_protocol.block.data) &&
+            !memcmp( record->u.batch.data, first_protocol.block.data,
+                     sizeof(first_protocol.block.data) ),
+            "got unexpected first frame batch\n" );
+        record = record->next;
+        ok( record->type == 7 && record->u.batch.channel == second_channel &&
+            record->u.batch.size == sizeof(second_protocol.block.data) &&
+            !memcmp( record->u.batch.data, second_protocol.block.data,
+                     sizeof(second_protocol.block.data) ),
+            "got unexpected second frame batch\n" );
+    }
+    confirm_info.frame_id = frame_id;
+    status = NtDCompositionConfirmFrame( connection, &confirm_info );
+    ok( status == STATUS_SUCCESS, "got queue frame confirmation status %#lx\n", status );
+
+    status = NtDCompositionSynchronize( first_channel, &first_id );
+    ok( status == STATUS_SUCCESS, "got repeated first synchronization status %#lx\n", status );
+    status = NtDCompositionCommitChannel( first_channel, &batch, &state, 0, NULL,
+                                           &first_protocol.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got repeated first commit status %#lx\n", status );
+    status = NtDCompositionSynchronize( second_channel, &second_id );
+    ok( status == STATUS_SUCCESS, "got repeated second synchronization status %#lx\n", status );
+    status = NtDCompositionCommitChannel( second_channel, &batch, &state, 0, NULL,
+                                           &second_protocol.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got repeated second commit status %#lx\n", status );
+
+    selector = second_id;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS, "got exact second batch status %#lx\n", status );
+    ok( record && !record->next && record->type == 7 &&
+        record->u.batch.channel == second_channel &&
+        record->u.batch.size == sizeof(second_protocol.block.data) &&
+        !memcmp( record->u.batch.data, second_protocol.block.data,
+                 sizeof(second_protocol.block.data) ),
+        "got unexpected exact second batch %p\n", record );
+
+    selector = first_id;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS, "got exact first batch status %#lx\n", status );
+    ok( record && !record->next && record->type == 7 &&
+        record->u.batch.channel == first_channel &&
+        record->u.batch.size == sizeof(first_protocol.block.data) &&
+        !memcmp( record->u.batch.data, first_protocol.block.data,
+                 sizeof(first_protocol.block.data) ),
+        "got unexpected exact first batch %p\n", record );
+
+    selector = second_id;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_NOT_FOUND, "got consumed synchronization status %#lx\n", status );
+    ok( !record, "consumed synchronization returned %p\n", record );
+
+    selector = 0;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS, "got final synchronized queue status %#lx\n", status );
+    ok( !record, "final synchronized queue returned %p\n", record );
+
+    status = NtDCompositionSynchronize( first_channel, &first_id );
+    ok( status == STATUS_SUCCESS, "got same-channel first synchronization status %#lx\n", status );
+    status = NtDCompositionCommitChannel( first_channel, &first_batch, &state, 0, NULL,
+                                           &first_protocol.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got same-channel first commit status %#lx\n", status );
+    status = NtDCompositionSynchronize( first_channel, &second_id );
+    ok( status == STATUS_SUCCESS, "got same-channel second synchronization status %#lx\n", status );
+    status = NtDCompositionCommitChannel( first_channel, &second_batch, &state, 0, NULL,
+                                           &second_protocol.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got same-channel second commit status %#lx\n", status );
+
+    received = 0xcccccccc;
+    status = NtDCompositionGetBatchId( first_channel, 1, &received );
+    ok( status == STATUS_SUCCESS, "got pre-receipt batch status %#lx\n", status );
+    ok( received == first_batch - 1, "got pre-receipt batch %u, expected %u\n",
+        received, first_batch - 1 );
+
+    selector = second_id;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && record && !record->next,
+        "got same-channel second batch status %#lx record %p\n", status, record );
+    received = 0xcccccccc;
+    status = NtDCompositionGetBatchId( first_channel, 1, &received );
+    ok( status == STATUS_SUCCESS, "got gapped receipt batch status %#lx\n", status );
+    ok( received == first_batch - 1, "gapped receipt advanced to %u, expected %u\n",
+        received, first_batch - 1 );
+
+    selector = first_id;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && record && !record->next,
+        "got same-channel first batch status %#lx record %p\n", status, record );
+    received = 0xcccccccc;
+    status = NtDCompositionGetBatchId( first_channel, 1, &received );
+    ok( status == STATUS_SUCCESS, "got contiguous receipt batch status %#lx\n", status );
+    ok( received == second_batch, "got contiguous receipt batch %u, expected %u\n",
+        received, second_batch );
+
+done:
+    if (second_channel) NtDCompositionDestroyChannel( second_channel );
+    if (first_channel) NtDCompositionDestroyChannel( first_channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_connection_queue(void)
 {
     static const BYTE expected_resource_batch[] = {
         0x10, 0, 0, 0, 0x28, 0, 0, 0, 1, 0, 0, 0, 13, 0, 0, 0,
-        0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+        8, 0, 0, 0, 0x24, 0, 0, 0,
     };
     static const BYTE expected_release_batch[] = {
-        0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+        8, 0, 0, 0, 0x24, 0, 0, 0,
         0x0c, 0, 0, 0, 0x29, 0, 0, 0, 1, 0, 0, 0,
     };
     struct dcomp_test_protocol_list protocol_list;
@@ -724,7 +950,7 @@ static void test_connection_queue(void)
     HANDLE event, connection = NULL, completion_event = NULL, completion_wait = NULL;
     BYTE *buffer = (BYTE *)0xdeadbeef;
     UINT channel = 0xcccccccc, size = 0x1000, batch = 0xcccccccc;
-    UINT64 cookie = 0x1122334455667788;
+    UINT64 cookie = 0;
     ULONG processed;
     BYTE released, state = 0xcc;
     NTSTATUS status;
@@ -777,7 +1003,7 @@ static void test_connection_queue(void)
     ok( status == STATUS_INVALID_PARAMETER, "got repeated bind status %#lx\n", status );
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
     ok( status == STATUS_SUCCESS, "got create record status %#lx\n", status );
-    ok( cookie == 0x1122334455667788, "cookie changed to %s\n", wine_dbgstr_longlong(cookie) );
+    ok( !cookie, "batch selector changed to %s\n", wine_dbgstr_longlong(cookie) );
     ok( !!record, "create record is null\n" );
     if (record)
     {
@@ -810,10 +1036,24 @@ static void test_connection_queue(void)
                                            &protocol_list.head, NULL, 0 );
     ok( status == STATUS_SUCCESS, "got commit status %#lx\n", status );
     ok( !state, "got commit state %#x\n", state );
+    {
+        UINT received = 0xcccccccc;
+
+        status = NtDCompositionGetBatchId( channel, 1, &received );
+        ok( status == STATUS_SUCCESS, "got pre-dequeue receipt status %#lx\n", status );
+        ok( !received, "receipt advanced before dequeue to %u\n", received );
+    }
     ok( WaitForSingleObject( completion_wait, 0 ) == WAIT_TIMEOUT,
         "completion event signaled before consumer dequeue\n" );
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
     ok( status == STATUS_SUCCESS, "got batch record status %#lx\n", status );
+    {
+        UINT received = 0xcccccccc;
+
+        status = NtDCompositionGetBatchId( channel, 1, &received );
+        ok( status == STATUS_SUCCESS, "got post-dequeue receipt status %#lx\n", status );
+        ok( received == batch, "got post-dequeue receipt %u, expected %u\n", received, batch );
+    }
     ok( WaitForSingleObject( completion_wait, 0 ) == WAIT_OBJECT_0,
         "completion event was not signaled after consumer dequeue\n" );
     ok( !!record, "batch record is null\n" );
@@ -945,6 +1185,124 @@ done:
     CloseHandle( event );
 }
 
+static void test_referenced_resource_id_reuse(void)
+{
+    static const UINT expected_recreate[] = {16, 0x28, 3, 0x16};
+    UINT expected_begin[] = {16, 0x26, 3, 0};
+    static const UINT expected_complete[] = {12, 0x27, 2};
+    static const UINT expected_replace[] = {
+        16, 0x16e, 1, 3,
+        12, 0x29, 2,
+    };
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL, shared = NULL;
+    BYTE *buffer = NULL, *reader_buffer = NULL, released, state;
+    UINT channel = 0, reader_channel = 0, size = 0x1000, reader_size = 0x1000;
+    UINT batch, command[12];
+    UINT64 cookie = 0;
+    ULONG processed;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create resource-id event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got resource-id connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got resource-id channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got resource-id bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got resource-id create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    command[0] = 2; command[1] = 1; command[2] = 0xa6; command[3] = 0;
+    command[4] = 2; command[5] = 2; command[6] = 0x16; command[7] = 0;
+    command[8] = 16; command[9] = 1; command[10] = 0x34; command[11] = 2;
+    memcpy( buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(command),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS && processed == 3,
+        "got initial resource-id process status %#lx count %lu\n", status, processed );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got initial resource-id commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record, "got initial resource-id batch status %#lx record %p\n",
+        status, record );
+
+    command[0] = 4; command[1] = 2;
+    command[2] = 2; command[3] = 2; command[4] = 0x16; command[5] = 1;
+    command[6] = 9; command[7] = 2; command[8] = 0; command[9] = 0;
+    memcpy( buffer, command, 40 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 40, &processed, &released );
+    memcpy( &shared, buffer + 32, sizeof(shared) );
+    ok( status == STATUS_SUCCESS && processed == 3,
+        "got retained resource-id reuse status %#lx count %lu\n", status, processed );
+    ok( released == 1, "got retained resource-id release flag %#x\n", released );
+    ok( !!shared, "got null retained resource-id shared handle\n" );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got reused resource-id commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got reused resource-id batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_recreate, sizeof(expected_recreate),
+                               "retained resource-id recreate" );
+
+    status = NtDCompositionCreateChannel( &reader_channel, &reader_size,
+                                           (void **)&reader_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got retained resource-id reader channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( reader_channel, 0, 2 );
+    ok( status == STATUS_SUCCESS, "got retained resource-id reader bind status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got retained resource-id reader create status %#lx record %p\n", status, record );
+
+    command[0] = 3; command[1] = 2;
+    memcpy( command + 2, &shared, sizeof(shared) );
+    command[4] = 0x16; command[5] = 0;
+    memcpy( reader_buffer, command, 24 );
+    status = NtDCompositionProcessChannelBatchBuffer( reader_channel, 24,
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got retained resource-id shared open status %#lx\n", status );
+    status = NtDCompositionCommitChannel( reader_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got retained resource-id reader commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->next,
+        "got retained resource-id duplicate records status %#lx record %p\n", status, record );
+    expected_begin[3] = reader_channel;
+    check_dcomp_batch_payload( record, channel, expected_begin, sizeof(expected_begin),
+                               "retained resource-id begin duplicate" );
+    check_dcomp_batch_payload( record ? record->next : NULL, reader_channel,
+                               expected_complete, sizeof(expected_complete),
+                               "retained resource-id complete duplicate" );
+
+    command[0] = 16; command[1] = 1; command[2] = 0x34; command[3] = 2;
+    memcpy( buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got replacement root status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got replacement root commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got replacement root batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_replace, sizeof(expected_replace),
+                               "retained resource-id replacement" );
+
+done:
+    if (shared) CloseHandle( shared );
+    if (reader_channel) NtDCompositionDestroyChannel( reader_channel );
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_shared_section_lifecycle(void)
 {
     struct dcomp_test_protocol_list protocol_list;
@@ -952,7 +1310,7 @@ static void test_shared_section_lifecycle(void)
     HANDLE event, connection = NULL, section = (HANDLE)0xdeadbeef, consumer_section = NULL;
     BYTE *buffer = (BYTE *)0xdeadbeef;
     UINT channel = 0xcccccccc, channel_size = 0x1000, batch;
-    UINT64 cookie = 0x1122334455667788, consumer_value;
+    UINT64 cookie = 0, consumer_value;
     SIZE_T view_size;
     ULONG processed;
     BYTE released, state;
@@ -1109,16 +1467,767 @@ static void check_dcomp_batch_payload( const struct dcomposition_connection_batc
         "%s got unexpected batch payload\n", context );
 }
 
-static void test_created_shared_resource_duplication(void)
+static void test_channel_application_id(void)
 {
-    static const UINT expected_source[] = {16, 0x28, 1, 0x82};
+    static const WCHAR first_id[] = L"LockApp";
+    static const WCHAR second_id[] = L"LogonUI";
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = NULL, state;
+    UINT expected[(12 + sizeof(second_id) + 3) / 4] = {0};
+    UINT expected_size = (12 + sizeof(second_id) + 3) & ~3;
+    UINT channel = 0, size = 0x1000, batch;
+    UINT64 selector = 0;
+    NTSTATUS status;
+
+    status = NtDCompositionTelemetrySetApplicationId( 0xdeadbeef, 0, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null application-id status %#lx\n", status );
+    status = NtDCompositionTelemetrySetApplicationId( 0xdeadbeef, 1, first_id );
+    ok( status == STATUS_INVALID_PARAMETER, "got odd application-id status %#lx\n", status );
+    status = NtDCompositionTelemetrySetApplicationId( 0xdeadbeef, 302, first_id );
+    ok( status == STATUS_INVALID_PARAMETER, "got oversized application-id status %#lx\n", status );
+    status = NtDCompositionTelemetrySetApplicationId( 0xdeadbeef, sizeof(first_id), first_id );
+    ok( status == STATUS_ACCESS_DENIED, "got unknown-channel application-id status %#lx\n", status );
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create application-id event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got application-id connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got application-id channel status %#lx\n", status );
+    if (!connection || !channel) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got application-id bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got application-id create status %#lx record %p\n", status, record );
+
+    status = NtDCompositionTelemetrySetApplicationId( channel, sizeof(first_id), first_id );
+    ok( status == STATUS_SUCCESS, "got first application-id status %#lx\n", status );
+    status = NtDCompositionTelemetrySetApplicationId( channel, sizeof(second_id), second_id );
+    ok( status == STATUS_SUCCESS, "got replacement application-id status %#lx\n", status );
+
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got application-id commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS, "got application-id batch status %#lx\n", status );
+    expected[0] = expected_size;
+    expected[1] = 0x2b;
+    expected[2] = sizeof(second_id);
+    memcpy( expected + 3, second_id, sizeof(second_id) );
+    check_dcomp_batch_payload( record, channel, expected, expected_size, "application id" );
+
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got clean application-id commit status %#lx\n", status );
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 7,
+        "got clean application-id batch status %#lx record %p\n", status, record );
+    if (record)
+        ok( !record->u.batch.size, "clean application-id batch has size %u\n",
+            record->u.batch.size );
+
+done:
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
+enum published_shared_resource_case
+{
+    CLOSE_BEFORE_DESTINATION_COMMIT,
+    CLOSE_AFTER_DESTINATION_COMMIT,
+    DESTROY_DESTINATION_BEFORE_SOURCE_COMMIT,
+    DESTROY_SOURCE_BEFORE_SOURCE_COMMIT,
+};
+
+static void test_published_shared_resource_ordering_case(
+        enum published_shared_resource_case test_case)
+{
+    static const UINT expected_owner[] =
+    {
+        16, 0x28, 1, 0x6a,
+        60, 0xf4, 1, 0, 0, 0, 0, 0, 0, 0x3f800000, 0x3f800000, 0x3f800000, 0, 0, 0,
+        16, 0xf5, 1, 0,
+    };
     UINT expected_begin[] = {16, 0x26, 1, 0};
     static const UINT expected_complete[] = {12, 0x27, 2};
     struct dcomposition_connection_batch *record = NULL;
-    HANDLE event, connection = NULL, shared = NULL, duplicate = NULL;
+    HANDLE event, connection = NULL, shared = NULL;
+    BYTE *owner_buffer = NULL, *reader_buffer = NULL, state, released;
+    UINT owner_channel = 0, reader_channel = 0;
+    UINT owner_size = 0x1000, reader_size = 0x1000;
+    UINT create[] = {2, 1, 0x6a, 1};
+    UINT publish[] = {9, 1, 0, 0};
+    UINT open[] = {3, 2, 0, 0, 0x6a, 0};
+    UINT batch;
+    UINT64 cookie = 0;
+    ULONG processed;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create published-order event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got published-order connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &owner_channel, &owner_size,
+                                           (void **)&owner_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got published-order owner channel status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &reader_channel, &reader_size,
+                                           (void **)&reader_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got published-order reader channel status %#lx\n", status );
+    if (!owner_buffer || !reader_buffer) goto done;
+    status = NtDCompositionSetChannelConnectionId( reader_channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got published-order reader bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && !record->next,
+        "got published-order reader create status %#lx record %p\n", status, record );
+
+    memcpy( owner_buffer, create, sizeof(create) );
+    status = NtDCompositionProcessChannelBatchBuffer( owner_channel, sizeof(create),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got published-order create status %#lx\n", status );
+    memcpy( owner_buffer, publish, sizeof(publish) );
+    status = NtDCompositionProcessChannelBatchBuffer( owner_channel, sizeof(publish),
+                                                       &processed, &released );
+    memcpy( &shared, owner_buffer + 8, sizeof(shared) );
+    ok( status == STATUS_SUCCESS, "got published-order publish status %#lx\n", status );
+    ok( !!shared, "got null published-order handle\n" );
+
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && !record->next,
+        "got published-order owner create status %#lx record %p\n", status, record );
+    if (record) ok( record->u.create.channel == owner_channel,
+                    "got published-order owner channel %#x\n", record->u.create.channel );
+
+    memcpy( open + 2, &shared, sizeof(shared) );
+    memcpy( reader_buffer, open, sizeof(open) );
+    status = NtDCompositionProcessChannelBatchBuffer( reader_channel, sizeof(open),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got published-order open status %#lx\n", status );
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && !record,
+        "published-order begin escaped before source commit, status %#lx record %p\n",
+        status, record );
+
+    if (test_case != CLOSE_AFTER_DESTINATION_COMMIT)
+    {
+        CloseHandle( shared );
+        shared = NULL;
+    }
+
+    if (test_case == DESTROY_DESTINATION_BEFORE_SOURCE_COMMIT)
+    {
+        NtDCompositionDestroyChannel( reader_channel );
+        status = NtDCompositionCommitChannel( owner_channel, &batch, &state, 0,
+                                               NULL, NULL, NULL, 0 );
+        ok( status == STATUS_SUCCESS, "got post-destroy owner commit status %#lx\n", status );
+        record = NULL;
+        status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+        ok( status == STATUS_SUCCESS && record && record->type == 6 &&
+            record->u.close.channel == reader_channel && record->next && !record->next->next,
+            "got post-destroy owner record status %#lx record %p\n", status, record );
+        check_dcomp_batch_payload( record ? record->next : NULL, owner_channel, expected_owner,
+                                   sizeof(expected_owner), "post-destroy published owner" );
+        reader_channel = 0;
+        goto done;
+    }
+
+    status = NtDCompositionCommitChannel( reader_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got published-order reader commit status %#lx\n", status );
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && !record,
+        "published-order destination escaped before source, status %#lx record %p\n",
+        status, record );
+
+    if (test_case == CLOSE_AFTER_DESTINATION_COMMIT)
+    {
+        CloseHandle( shared );
+        shared = NULL;
+    }
+
+    if (test_case == DESTROY_SOURCE_BEFORE_SOURCE_COMMIT)
+    {
+        NtDCompositionDestroyChannel( owner_channel );
+        owner_channel = 0;
+        record = NULL;
+        status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+        ok( status == STATUS_SUCCESS && record && record->type == 6 && !record->next,
+            "source destruction released an unmatched complete, status %#lx record %p\n",
+            status, record );
+        goto done;
+    }
+
+    status = NtDCompositionCommitChannel( owner_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got published-order owner commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->next && record->next->next,
+        "got published-order records status %#lx record %p\n", status, record );
+    check_dcomp_batch_payload( record, owner_channel, expected_owner,
+                               sizeof(expected_owner), "published owner" );
+    expected_begin[3] = reader_channel;
+    check_dcomp_batch_payload( record ? record->next : NULL, owner_channel, expected_begin,
+                               sizeof(expected_begin), "published begin" );
+    check_dcomp_batch_payload( record && record->next ? record->next->next : NULL,
+                               reader_channel, expected_complete,
+                               sizeof(expected_complete), "published complete" );
+
+done:
+    if (shared) CloseHandle( shared );
+    if (reader_channel) NtDCompositionDestroyChannel( reader_channel );
+    if (owner_channel) NtDCompositionDestroyChannel( owner_channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
+static void test_published_shared_resource_ordering(void)
+{
+    test_published_shared_resource_ordering_case( CLOSE_BEFORE_DESTINATION_COMMIT );
+    test_published_shared_resource_ordering_case( CLOSE_AFTER_DESTINATION_COMMIT );
+    test_published_shared_resource_ordering_case( DESTROY_DESTINATION_BEFORE_SOURCE_COMMIT );
+    test_published_shared_resource_ordering_case( DESTROY_SOURCE_BEFORE_SOURCE_COMMIT );
+}
+
+static void test_published_shared_resource_target_fifo(void)
+{
+    static const UINT expected_interaction[] = {16, 0x28, 1, 0x59};
+    static const UINT expected_manipulation[] =
+    {
+        16, 0x28, 1, 0x6a,
+        60, 0xf4, 1, 0, 0, 0, 0, 0, 0, 0x3f800000, 0x3f800000, 0x3f800000, 0, 0, 0,
+        16, 0xf5, 1, 0,
+    };
+    UINT expected_interaction_begin[4] = {16, 0x26, 1, 0};
+    UINT expected_manipulation_begin[4] = {16, 0x26, 1, 0};
+    static const UINT expected_target[] =
+    {
+        12, 0x27, 0x10,
+        12, 0x27, 0x11,
+        12, 0x27, 0x12,
+        12, 0x29, 0x10,
+    };
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL, interaction = NULL, manipulation = NULL;
+    BYTE *interaction_buffer = NULL, *manipulation_buffer = NULL, *reader_buffer = NULL;
+    BYTE state, released;
+    UINT interaction_channel = 0, manipulation_channel = 0, reader_channel = 0;
+    UINT interaction_size = 0x1000, manipulation_size = 0x1000, reader_size = 0x1000;
+    UINT create[4] = {2, 1, 0, 1};
+    UINT publish[4] = {9, 1, 0, 0};
+    UINT open[6] = {3, 0, 0, 0, 0, 0};
+    UINT release[2] = {4, 0x10};
+    UINT batch;
+    UINT64 cookie = 0;
+    ULONG processed;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create target-fifo event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got target-fifo connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &interaction_channel, &interaction_size,
+                                           (void **)&interaction_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got interaction source status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &manipulation_channel, &manipulation_size,
+                                           (void **)&manipulation_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got manipulation source status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &reader_channel, &reader_size,
+                                           (void **)&reader_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got target-fifo reader status %#lx\n", status );
+    if (!interaction_buffer || !manipulation_buffer || !reader_buffer) goto done;
+
+    status = NtDCompositionSetChannelConnectionId( reader_channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got target-fifo reader bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && !record->next,
+        "got target-fifo reader create status %#lx record %p\n", status, record );
+
+    create[2] = 0x59;
+    memcpy( interaction_buffer, create, sizeof(create) );
+    status = NtDCompositionProcessChannelBatchBuffer( interaction_channel, sizeof(create),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got interaction create status %#lx\n", status );
+    memcpy( interaction_buffer, publish, sizeof(publish) );
+    status = NtDCompositionProcessChannelBatchBuffer( interaction_channel, sizeof(publish),
+                                                       &processed, &released );
+    memcpy( &interaction, interaction_buffer + 8, sizeof(interaction) );
+    ok( status == STATUS_SUCCESS && interaction,
+        "got interaction publish status %#lx handle %p\n", status, interaction );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && !record->next,
+        "got interaction channel create status %#lx record %p\n", status, record );
+
+    create[2] = 0x6a;
+    memcpy( manipulation_buffer, create, sizeof(create) );
+    status = NtDCompositionProcessChannelBatchBuffer( manipulation_channel, sizeof(create),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got manipulation create status %#lx\n", status );
+    memcpy( manipulation_buffer, publish, sizeof(publish) );
+    status = NtDCompositionProcessChannelBatchBuffer( manipulation_channel, sizeof(publish),
+                                                       &processed, &released );
+    memcpy( &manipulation, manipulation_buffer + 8, sizeof(manipulation) );
+    ok( status == STATUS_SUCCESS && manipulation,
+        "got manipulation publish status %#lx handle %p\n", status, manipulation );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && !record->next,
+        "got manipulation channel create status %#lx record %p\n", status, record );
+
+    open[1] = 0x10;
+    memcpy( open + 2, &interaction, sizeof(interaction) );
+    open[4] = 0x59;
+    memcpy( reader_buffer, open, sizeof(open) );
+    status = NtDCompositionProcessChannelBatchBuffer( reader_channel, sizeof(open),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got first interaction open status %#lx\n", status );
+    memcpy( reader_buffer, release, sizeof(release) );
+    status = NtDCompositionProcessChannelBatchBuffer( reader_channel, sizeof(release),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got first interaction release status %#lx\n", status );
+    open[1] = 0x11;
+    memcpy( open + 2, &manipulation, sizeof(manipulation) );
+    open[4] = 0x6a;
+    memcpy( reader_buffer, open, sizeof(open) );
+    status = NtDCompositionProcessChannelBatchBuffer( reader_channel, sizeof(open),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got manipulation open status %#lx\n", status );
+    open[1] = 0x12;
+    memcpy( open + 2, &interaction, sizeof(interaction) );
+    open[4] = 0x59;
+    memcpy( reader_buffer, open, sizeof(open) );
+    status = NtDCompositionProcessChannelBatchBuffer( reader_channel, sizeof(open),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got second interaction open status %#lx\n", status );
+
+    status = NtDCompositionCommitChannel( reader_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got target-fifo reader commit status %#lx\n", status );
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && !record,
+        "target-fifo reader escaped before sources, status %#lx record %p\n", status, record );
+
+    status = NtDCompositionCommitChannel( interaction_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got interaction source commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->next && !record->next->next,
+        "got interaction source records status %#lx record %p\n", status, record );
+    check_dcomp_batch_payload( record, interaction_channel, expected_interaction,
+                               sizeof(expected_interaction), "target-fifo interaction source" );
+    expected_interaction_begin[3] = reader_channel;
+    check_dcomp_batch_payload( record ? record->next : NULL, interaction_channel,
+                               expected_interaction_begin, sizeof(expected_interaction_begin),
+                               "target-fifo first interaction begin" );
+
+    status = NtDCompositionCommitChannel( manipulation_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got manipulation source commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->next && record->next->next &&
+        record->next->next->next && !record->next->next->next->next,
+        "got manipulation completion records status %#lx record %p\n", status, record );
+    check_dcomp_batch_payload( record, manipulation_channel, expected_manipulation,
+                               sizeof(expected_manipulation), "target-fifo manipulation source" );
+    expected_manipulation_begin[3] = reader_channel;
+    check_dcomp_batch_payload( record ? record->next : NULL, manipulation_channel,
+                               expected_manipulation_begin, sizeof(expected_manipulation_begin),
+                               "target-fifo manipulation begin" );
+    check_dcomp_batch_payload( record && record->next ? record->next->next : NULL,
+                               interaction_channel, expected_interaction_begin,
+                               sizeof(expected_interaction_begin),
+                               "target-fifo second interaction begin" );
+    check_dcomp_batch_payload( record && record->next && record->next->next ?
+                               record->next->next->next : NULL, reader_channel,
+                               expected_target, sizeof(expected_target),
+                               "target-fifo completes and release" );
+
+done:
+    if (manipulation) CloseHandle( manipulation );
+    if (interaction) CloseHandle( interaction );
+    if (reader_channel) NtDCompositionDestroyChannel( reader_channel );
+    if (manipulation_channel) NtDCompositionDestroyChannel( manipulation_channel );
+    if (interaction_channel) NtDCompositionDestroyChannel( interaction_channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
+static void test_duplicate_prerequisite_selection(void)
+{
+    static const UINT expected_source[] = {16, 0x28, 1, 0x59};
+    static const UINT expected_system[] = {16, 0x28, 1, 0x82};
+    UINT expected_source_begin[4] = {16, 0x26, 1, 0};
+    UINT expected_system_begin[4] = {16, 0x26, 1, 0};
+    static const UINT expected_synchronized_complete[] =
+    {
+        12, 0x27, 0x10,
+        12, 0x27, 0x11,
+    };
+    static const UINT expected_framed_complete[] =
+    {
+        12, 0x27, 0x12,
+        12, 0x27, 0x13,
+    };
+    struct dcomposition_confirm_frame_info confirm_info = {0};
+    struct dcomposition_connection_batch *record = NULL;
+    struct dcomposition_frame_info frame_info = {0};
+    HANDLE event, connection = NULL, shared = NULL, system = NULL;
+    BYTE *source_buffer = NULL, *target_buffer = NULL, state, released;
+    UINT source_channel = 0, target_channel = 0, system_channel = 0;
+    UINT source_size = 0x1000, target_size = 0x1000;
+    UINT create[4] = {2, 1, 0x59, 1};
+    UINT publish[4] = {9, 1, 0, 0};
+    UINT open[6] = {3, 0, 0, 0, 0, 0};
+    UINT64 selector = 0, synchronization_id = 0, frame_id = 0;
+    UINT batch;
+    ULONG processed;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create prerequisite-selection event, error %lu\n",
+        GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got prerequisite-selection connection status %#lx\n",
+        status );
+    status = NtDCompositionCreateChannel( &source_channel, &source_size,
+                                           (void **)&source_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got prerequisite source status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &target_channel, &target_size,
+                                           (void **)&target_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got prerequisite target status %#lx\n", status );
+    if (!connection || !source_buffer || !target_buffer) goto done;
+
+    status = NtDCompositionSetChannelConnectionId( target_channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got prerequisite target bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && !record->next,
+        "got prerequisite target create status %#lx record %p\n", status, record );
+
+    memcpy( source_buffer, create, sizeof(create) );
+    status = NtDCompositionProcessChannelBatchBuffer( source_channel, sizeof(create),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got prerequisite source create status %#lx\n", status );
+    memcpy( source_buffer, publish, sizeof(publish) );
+    status = NtDCompositionProcessChannelBatchBuffer( source_channel, sizeof(publish),
+                                                       &processed, &released );
+    memcpy( &shared, source_buffer + 8, sizeof(shared) );
+    ok( status == STATUS_SUCCESS && shared,
+        "got prerequisite publish status %#lx handle %p\n", status, shared );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && !record->next,
+        "got prerequisite source channel status %#lx record %p\n", status, record );
+    status = NtDCompositionCommitChannel( source_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got prerequisite source commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS, "got prerequisite source batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, source_channel, expected_source,
+                               sizeof(expected_source), "prerequisite source" );
+
+    status = NtDCompositionCreateSharedResourceHandle( 0x82, &system );
+    ok( status == STATUS_SUCCESS && system,
+        "got prerequisite system resource status %#lx handle %p\n", status, system );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && record->next &&
+        !record->next->next,
+        "got prerequisite system records status %#lx record %p\n", status, record );
+    if (record && record->type == 5) system_channel = record->u.create.channel;
+    check_dcomp_batch_payload( record ? record->next : NULL, system_channel,
+                               expected_system, sizeof(expected_system),
+                               "prerequisite system create" );
+
+    status = NtDCompositionSynchronize( target_channel, &synchronization_id );
+    ok( status == STATUS_SUCCESS && synchronization_id,
+        "got prerequisite synchronization status %#lx ID %s\n",
+        status, wine_dbgstr_longlong(synchronization_id) );
+    open[1] = 0x10;
+    memcpy( open + 2, &shared, sizeof(shared) );
+    open[4] = 0x59;
+    memcpy( target_buffer, open, sizeof(open) );
+    status = NtDCompositionProcessChannelBatchBuffer( target_channel, sizeof(open),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got synchronized source open status %#lx\n", status );
+    open[1] = 0x11;
+    memcpy( open + 2, &system, sizeof(system) );
+    open[4] = 0x82;
+    memcpy( target_buffer, open, sizeof(open) );
+    status = NtDCompositionProcessChannelBatchBuffer( target_channel, sizeof(open),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got synchronized system open status %#lx\n", status );
+    status = NtDCompositionCommitChannel( target_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got synchronized prerequisite commit status %#lx\n", status );
+
+    selector = synchronization_id;
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && record && record->next && record->next->next &&
+        !record->next->next->next,
+        "got synchronized prerequisite records status %#lx record %p\n", status, record );
+    expected_source_begin[3] = target_channel;
+    expected_system_begin[3] = target_channel;
+    check_dcomp_batch_payload( record, source_channel, expected_source_begin,
+                               sizeof(expected_source_begin), "synchronized source begin" );
+    check_dcomp_batch_payload( record ? record->next : NULL, system_channel,
+                               expected_system_begin, sizeof(expected_system_begin),
+                               "synchronized system begin" );
+    check_dcomp_batch_payload( record && record->next ? record->next->next : NULL,
+                               target_channel, expected_synchronized_complete,
+                               sizeof(expected_synchronized_complete),
+                               "synchronized completes" );
+    selector = 0;
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && !record,
+        "synchronized prerequisites leaked to default selector, status %#lx record %p\n",
+        status, record );
+
+    open[1] = 0x12;
+    memcpy( open + 2, &shared, sizeof(shared) );
+    open[4] = 0x59;
+    memcpy( target_buffer, open, sizeof(open) );
+    status = NtDCompositionProcessChannelBatchBuffer( target_channel, sizeof(open),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got framed source open status %#lx\n", status );
+    open[1] = 0x13;
+    memcpy( open + 2, &system, sizeof(system) );
+    open[4] = 0x82;
+    memcpy( target_buffer, open, sizeof(open) );
+    status = NtDCompositionProcessChannelBatchBuffer( target_channel, sizeof(open),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got framed system open status %#lx\n", status );
+    status = NtDCompositionBeginFrame( connection, &frame_info, &frame_id );
+    ok( status == STATUS_SUCCESS && frame_id,
+        "got prerequisite frame status %#lx ID %s\n",
+        status, wine_dbgstr_longlong(frame_id) );
+    status = NtDCompositionCommitChannel( target_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got framed prerequisite commit status %#lx\n", status );
+    selector = frame_id;
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && !record,
+        "frame split duplicate prerequisites, status %#lx record %p\n", status, record );
+    confirm_info.frame_id = frame_id;
+    status = NtDCompositionConfirmFrame( connection, &confirm_info );
+    ok( status == STATUS_SUCCESS, "got prerequisite frame confirmation status %#lx\n", status );
+
+    selector = 0;
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &selector, &record );
+    ok( status == STATUS_SUCCESS && record && record->next && record->next->next &&
+        !record->next->next->next,
+        "got post-frame prerequisite records status %#lx record %p\n", status, record );
+    check_dcomp_batch_payload( record, source_channel, expected_source_begin,
+                               sizeof(expected_source_begin), "post-frame source begin" );
+    check_dcomp_batch_payload( record ? record->next : NULL, system_channel,
+                               expected_system_begin, sizeof(expected_system_begin),
+                               "post-frame system begin" );
+    check_dcomp_batch_payload( record && record->next ? record->next->next : NULL,
+                               target_channel, expected_framed_complete,
+                               sizeof(expected_framed_complete), "post-frame completes" );
+
+done:
+    if (system) CloseHandle( system );
+    if (shared) CloseHandle( shared );
+    if (target_channel) NtDCompositionDestroyChannel( target_channel );
+    if (source_channel) NtDCompositionDestroyChannel( source_channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
+static void test_held_release_wire_id_reuse(void)
+{
+    static const UINT expected_initial[] = {16, 0x28, 1, 0x59};
+    static const UINT expected_source[] =
+    {
+        16, 0x28, 1, 0x6a,
+        60, 0xf4, 1, 0, 0, 0, 0, 0, 0, 0x3f800000, 0x3f800000, 0x3f800000, 0, 0, 0,
+        16, 0xf5, 1, 0,
+    };
+    static const UINT expected_held[] =
+    {
+        12, 0x27, 2,
+        16, 0xb4, 1, 0x4321,
+        12, 0x29, 1,
+    };
+    static const UINT expected_recreate[] =
+    {
+        16, 0x28, 3, 0x6a,
+        60, 0xf4, 3, 0, 0, 0, 0, 0, 0, 0x3f800000, 0x3f800000, 0x3f800000, 0, 0, 0,
+        16, 0xf5, 3, 0,
+        16, 0xf5, 3, 0x1234,
+    };
+    struct
+    {
+        struct { void *next, *previous; } head;
+        struct
+        {
+            void *next, *previous;
+            UINT type, size;
+            UINT data[4];
+        } block;
+    } protocol_list;
+    UINT expected_begin[4] = {16, 0x26, 1, 0};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL, shared = NULL;
     BYTE *source_buffer = NULL, *target_buffer = NULL, state, released;
     UINT source_channel = 0, target_channel = 0;
     UINT source_size = 0x1000, target_size = 0x1000;
+    UINT command[6], batch;
+    UINT64 cookie = 0;
+    ULONG processed;
+    NTSTATUS status;
+
+    memset( &protocol_list, 0, sizeof(protocol_list) );
+    protocol_list.head.next = protocol_list.head.previous = &protocol_list.block;
+    protocol_list.block.next = protocol_list.block.previous = &protocol_list.head;
+    protocol_list.block.type = 0x200;
+    protocol_list.block.size = sizeof(protocol_list.block.data);
+    protocol_list.block.data[0] = sizeof(protocol_list.block.data);
+    protocol_list.block.data[1] = 0xb4;
+    protocol_list.block.data[2] = 1;
+    protocol_list.block.data[3] = 0x4321;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create held-release event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got held-release connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &source_channel, &source_size,
+                                           (void **)&source_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got held-release source channel status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &target_channel, &target_size,
+                                           (void **)&target_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got held-release target channel status %#lx\n", status );
+    if (!source_buffer || !target_buffer) goto done;
+    status = NtDCompositionSetChannelConnectionId( target_channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got held-release target bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && !record->next,
+        "got held-release target create status %#lx record %p\n", status, record );
+
+    command[0] = 2; command[1] = 1; command[2] = 0x59; command[3] = 0;
+    memcpy( target_buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( target_channel, 16,
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got held-release initial create status %#lx\n", status );
+    status = NtDCompositionCommitChannel( target_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got held-release initial commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got held-release initial batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, target_channel, expected_initial,
+                               sizeof(expected_initial), "held-release initial" );
+
+    command[0] = 2; command[1] = 1; command[2] = 0x6a; command[3] = 1;
+    memcpy( source_buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( source_channel, 16,
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got held-release source create status %#lx\n", status );
+    command[0] = 9; command[1] = 1; command[2] = command[3] = 0;
+    memcpy( source_buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( source_channel, 16,
+                                                       &processed, &released );
+    memcpy( &shared, source_buffer + 8, sizeof(shared) );
+    ok( status == STATUS_SUCCESS && shared,
+        "got held-release publish status %#lx handle %p\n", status, shared );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && !record->next,
+        "got held-release source create record status %#lx record %p\n", status, record );
+
+    command[0] = 3; command[1] = 2;
+    memcpy( command + 2, &shared, sizeof(shared) );
+    command[4] = 0x6a; command[5] = 0;
+    memcpy( target_buffer, command, 24 );
+    status = NtDCompositionProcessChannelBatchBuffer( target_channel, 24,
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got held-release open status %#lx\n", status );
+    command[0] = 4; command[1] = 1;
+    memcpy( target_buffer, command, 8 );
+    status = NtDCompositionProcessChannelBatchBuffer( target_channel, 8,
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got held-release release status %#lx\n", status );
+    status = NtDCompositionCommitChannel( target_channel, &batch, &state, 0,
+                                           NULL, &protocol_list.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got held-release blocked commit status %#lx\n", status );
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && !record,
+        "held-release batch escaped before source, status %#lx record %p\n", status, record );
+
+    command[0] = 2; command[1] = 1; command[2] = 0x6a; command[3] = 0;
+    memcpy( target_buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( target_channel, 16,
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got held-release recreation status %#lx\n", status );
+    protocol_list.block.data[1] = 0xf5;
+    protocol_list.block.data[3] = 0x1234;
+    status = NtDCompositionCommitChannel( target_channel, &batch, &state, 0,
+                                           NULL, &protocol_list.head, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got held-release recreation commit status %#lx\n", status );
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && !record,
+        "held-release recreation escaped before source, status %#lx record %p\n", status, record );
+
+    status = NtDCompositionCommitChannel( source_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got held-release source commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->next && record->next->next &&
+        record->next->next->next && !record->next->next->next->next,
+        "got held-release delivery status %#lx record %p\n", status, record );
+    check_dcomp_batch_payload( record, source_channel, expected_source,
+                               sizeof(expected_source), "held-release source" );
+    expected_begin[3] = target_channel;
+    check_dcomp_batch_payload( record ? record->next : NULL, source_channel,
+                               expected_begin, sizeof(expected_begin), "held-release begin" );
+    check_dcomp_batch_payload( record && record->next ? record->next->next : NULL,
+                               target_channel, expected_held, sizeof(expected_held),
+                               "held-release blocked batch" );
+    check_dcomp_batch_payload( record && record->next && record->next->next ?
+                               record->next->next->next : NULL, target_channel,
+                               expected_recreate, sizeof(expected_recreate),
+                               "held-release recreation batch" );
+
+done:
+    if (shared) CloseHandle( shared );
+    if (target_channel) NtDCompositionDestroyChannel( target_channel );
+    if (source_channel) NtDCompositionDestroyChannel( source_channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
+static void test_created_shared_resource_duplication(void)
+{
+    static const UINT expected_system_resource[] = {16, 0x28, 1, 0x82};
+    UINT expected_complete[] = {12, 0x27, 2};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL, shared = NULL, duplicate = NULL;
+    BYTE *first_buffer = NULL, *second_buffer = NULL, state, released;
+    UINT first_channel = 0, second_channel = 0, system_channel = 0;
+    UINT first_size = 0x1000, second_size = 0x1000;
+    UINT expected_begin[4] = {16, 0x26, 1, 0};
     UINT command[6], batch;
     UINT64 cookie = 0;
     ULONG processed;
@@ -1129,70 +2238,190 @@ static void test_created_shared_resource_duplication(void)
     if (!event) return;
     status = NtDCompositionCreateConnection( TRUE, event, &connection );
     ok( status == STATUS_SUCCESS, "got shared-resource connection status %#lx\n", status );
-    status = NtDCompositionCreateChannel( &source_channel, &source_size,
-                                           (void **)&source_buffer, 0 );
-    ok( status == STATUS_SUCCESS, "got shared-resource source status %#lx\n", status );
-    status = NtDCompositionCreateChannel( &target_channel, &target_size,
-                                           (void **)&target_buffer, 0 );
-    ok( status == STATUS_SUCCESS, "got shared-resource target status %#lx\n", status );
-    if (!source_buffer || !target_buffer) goto done;
-    status = NtDCompositionSetChannelConnectionId( source_channel, 0, 1 );
-    ok( status == STATUS_SUCCESS, "got shared-resource source bind status %#lx\n", status );
-    status = NtDCompositionSetChannelConnectionId( target_channel, 0, 2 );
-    ok( status == STATUS_SUCCESS, "got shared-resource target bind status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &first_channel, &first_size,
+                                           (void **)&first_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got first shared-resource channel status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &second_channel, &second_size,
+                                           (void **)&second_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got second shared-resource channel status %#lx\n", status );
+    if (!first_buffer || !second_buffer) goto done;
+    status = NtDCompositionSetChannelConnectionId( first_channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got first shared-resource bind status %#lx\n", status );
+    status = NtDCompositionSetChannelConnectionId( second_channel, 0, 2 );
+    ok( status == STATUS_SUCCESS, "got second shared-resource bind status %#lx\n", status );
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
-    ok( status == STATUS_SUCCESS, "got shared-resource create records status %#lx\n", status );
+    ok( status == STATUS_SUCCESS && record && record->next,
+        "got destination create records status %#lx record %p\n", status, record );
 
     status = NtDCompositionCreateSharedResourceHandle( 0x82, &shared );
     ok( status == STATUS_SUCCESS, "got shared-resource handle status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && record->next,
+        "got system-channel create status %#lx record %p\n", status, record );
+    if (record)
+    {
+        system_channel = record->u.create.channel;
+        check_dcomp_batch_payload( record->next, system_channel, expected_system_resource,
+                                   sizeof(expected_system_resource), "system shared resource" );
+    }
+
     command[0] = 3;
     command[1] = 1;
     memcpy( command + 2, &shared, sizeof(shared) );
     command[4] = 0x82;
     command[5] = 0;
-    memcpy( source_buffer, command, sizeof(command) );
-    status = NtDCompositionProcessChannelBatchBuffer( source_channel, sizeof(command),
+    memcpy( first_buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( first_channel, sizeof(command),
                                                        &processed, &released );
-    ok( status == STATUS_SUCCESS, "got canonical shared-resource open status %#lx\n", status );
+    ok( status == STATUS_SUCCESS, "got first shared-resource open status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    expected_begin[3] = first_channel;
+    check_dcomp_batch_payload( record, system_channel, expected_begin,
+                               sizeof(expected_begin), "first system begin" );
+
     status = NtDuplicateObject( NtCurrentProcess(), shared, NtCurrentProcess(), &duplicate,
                                 0, 0, DUPLICATE_SAME_ACCESS );
     ok( status == STATUS_SUCCESS, "got shared-resource duplicate status %#lx\n", status );
     command[1] = 2;
     memcpy( command + 2, &duplicate, sizeof(duplicate) );
-    memcpy( target_buffer, command, sizeof(command) );
-    status = NtDCompositionProcessChannelBatchBuffer( target_channel, sizeof(command),
+    memcpy( second_buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( second_channel, sizeof(command),
                                                        &processed, &released );
-    ok( status == STATUS_SUCCESS, "got duplicate shared-resource open status %#lx\n", status );
-    status = NtDCompositionCommitChannel( target_channel, &batch, &state, 0,
-                                           NULL, NULL, NULL, 0 );
-    ok( status == STATUS_SUCCESS, "got duplicate shared-resource commit status %#lx\n", status );
+    ok( status == STATUS_SUCCESS, "got second shared-resource open status %#lx\n", status );
+    record = NULL;
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
-    ok( status == STATUS_SUCCESS && !record,
-        "premature duplicate shared-resource batch status %#lx record %p\n", status, record );
+    expected_begin[3] = second_channel;
+    check_dcomp_batch_payload( record, system_channel, expected_begin,
+                               sizeof(expected_begin), "second system begin" );
 
-    status = NtDCompositionCommitChannel( source_channel, &batch, &state, 0,
+    status = NtDCompositionCommitChannel( second_channel, &batch, &state, 0,
                                            NULL, NULL, NULL, 0 );
-    ok( status == STATUS_SUCCESS, "got canonical shared-resource commit status %#lx\n", status );
+    ok( status == STATUS_SUCCESS, "got second shared-resource commit status %#lx\n", status );
+    record = NULL;
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
-    ok( status == STATUS_SUCCESS, "got ordered shared-resource batches status %#lx\n", status );
-    check_dcomp_batch_payload( record, source_channel, expected_source,
-                               sizeof(expected_source), "canonical shared-resource" );
-    expected_begin[3] = target_channel;
-    check_dcomp_batch_payload( record ? record->next : NULL, source_channel, expected_begin,
-                               sizeof(expected_begin), "shared-resource begin" );
-    check_dcomp_batch_payload( record && record->next ? record->next->next : NULL, target_channel,
-                               expected_complete, sizeof(expected_complete),
-                               "shared-resource complete" );
+    check_dcomp_batch_payload( record, second_channel, expected_complete,
+                               sizeof(expected_complete), "second shared-resource complete" );
+
+    expected_complete[2] = 1;
+    status = NtDCompositionCommitChannel( first_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got first shared-resource commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    check_dcomp_batch_payload( record, first_channel, expected_complete,
+                               sizeof(expected_complete),
+                               "first shared-resource complete" );
 
 done:
     if (duplicate) NtClose( duplicate );
     if (shared) NtClose( shared );
-    if (target_channel) NtDCompositionDestroyChannel( target_channel );
-    if (source_channel) NtDCompositionDestroyChannel( source_channel );
+    if (second_channel) NtDCompositionDestroyChannel( second_channel );
+    if (first_channel) NtDCompositionDestroyChannel( first_channel );
     if (connection) NtDCompositionDestroyConnection( connection );
     CloseHandle( event );
 }
 
+static void test_multi_source_shared_resource_duplication(void)
+{
+    static const UINT expected_first_resource[] = {16, 0x28, 1, 0x82};
+    static const UINT expected_second_resource[] = {16, 0x28, 2, 0x82};
+    static const UINT expected_complete[] = {12, 0x27, 5, 12, 0x27, 6, 12, 0x27, 7};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL, shared[2] = {NULL};
+    BYTE *buffer = NULL, state, released;
+    UINT channel = 0, system_channel = 0, size = 0x1000;
+    UINT expected_begin[4] = {16, 0x26, 0, 0};
+    UINT commands[18], batch;
+    static const UINT source_order[] = {0, 1, 0};
+    UINT64 cookie = 0;
+    ULONG processed;
+    NTSTATUS status;
+    unsigned int i;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create multi-resource event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got multi-resource connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got multi-resource channel status %#lx\n", status );
+    if (!buffer) goto done;
+
+    for (i = 0; i < ARRAY_SIZE(shared); ++i)
+    {
+        status = NtDCompositionCreateSharedResourceHandle( 0x82, &shared[i] );
+        ok( status == STATUS_SUCCESS, "got shared resource %u status %#lx\n", i, status );
+    }
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && record->next &&
+        record->next->next, "got system resource records status %#lx record %p\n",
+        status, record );
+    if (record)
+    {
+        system_channel = record->u.create.channel;
+        check_dcomp_batch_payload( record->next, system_channel, expected_first_resource,
+                                   sizeof(expected_first_resource), "first system resource" );
+        check_dcomp_batch_payload( record->next ? record->next->next : NULL,
+                                   system_channel, expected_second_resource,
+                                   sizeof(expected_second_resource), "second system resource" );
+    }
+
+    memset( commands, 0, sizeof(commands) );
+    for (i = 0; i < ARRAY_SIZE(source_order); ++i)
+    {
+        commands[i * 6] = 3;
+        commands[i * 6 + 1] = i + 5;
+        memcpy( commands + i * 6 + 2, &shared[source_order[i]], sizeof(shared[0]) );
+        commands[i * 6 + 4] = 0x82;
+    }
+    memcpy( buffer, commands, sizeof(commands) );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(commands),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got multi-resource opens status %#lx\n", status );
+    record = (void *)0xdeadbeef;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && !record,
+        "multi-resource begins escaped before destination bind, status %#lx record %p\n",
+        status, record );
+
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got multi-resource bind status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && record->next &&
+        record->next->next && record->next->next->next,
+        "got multi-resource begins status %#lx record %p\n", status, record );
+    expected_begin[2] = 1;
+    expected_begin[3] = channel;
+    check_dcomp_batch_payload( record ? record->next : NULL, system_channel, expected_begin,
+                               sizeof(expected_begin), "first system begin" );
+    expected_begin[2] = 2;
+    check_dcomp_batch_payload( record && record->next ? record->next->next : NULL,
+                               system_channel, expected_begin,
+                               sizeof(expected_begin), "second system begin" );
+    expected_begin[2] = 1;
+    check_dcomp_batch_payload( record && record->next && record->next->next ?
+                               record->next->next->next : NULL, system_channel, expected_begin,
+                               sizeof(expected_begin), "repeated first system begin" );
+
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got multi-resource commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    check_dcomp_batch_payload( record, channel, expected_complete,
+                               sizeof(expected_complete), "multi-resource complete" );
+
+done:
+    for (i = 0; i < ARRAY_SIZE(shared); ++i)
+        if (shared[i]) NtClose( shared[i] );
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
 static NTSTATUS process_dcomp_test_command( UINT channel, BYTE *buffer,
                                              const UINT *command, UINT size )
 {
@@ -1201,6 +2430,97 @@ static NTSTATUS process_dcomp_test_command( UINT channel, BYTE *buffer,
 
     memcpy( buffer, command, size );
     return NtDCompositionProcessChannelBatchBuffer( channel, size, &processed, &released );
+}
+
+static void test_region_clip_protocol(void)
+{
+    static const UINT create[] = {2, 1, 0x82, 0};
+    static const UINT expected_create[] = {16, 0x28, 1, 0x82};
+    static const UINT rectangles[] =
+    {
+        15, 1, 5, 32,
+        10, 20, 110, 220,
+        300, 400, 500, 600,
+    };
+    static const UINT expected_rectangles[] =
+    {
+        48, 0x234, 1, 32,
+        10, 20, 110, 220,
+        300, 400, 500, 600,
+    };
+    static const UINT replacement[] = {15, 1, 5, 16, 1, 2, 3, 4};
+    static const UINT expected_replacement[] = {32, 0x234, 1, 16, 1, 2, 3, 4};
+    static const UINT empty[] = {15, 1, 5, 0};
+    static const UINT expected_empty[] = {16, 0x234, 1, 0};
+    static const UINT bad_property[] = {15, 1, 4, 0};
+    static const UINT bad_size[] = {15, 1, 5, 4, 0};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = NULL, state;
+    UINT channel = 0, size = 0x1000, batch;
+    UINT64 cookie = 0;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create region-clip event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got region-clip connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got region-clip channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got region-clip bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got region-clip create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    status = process_dcomp_test_command( channel, buffer, create, sizeof(create) );
+    ok( status == STATUS_SUCCESS, "got region-clip create status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got region-clip create commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got region-clip create batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_create,
+                               sizeof(expected_create), "region-clip create" );
+
+    status = process_dcomp_test_command( channel, buffer, bad_property, sizeof(bad_property) );
+    ok( status == STATUS_INVALID_PARAMETER, "got region-clip bad property status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_size, sizeof(bad_size) );
+    ok( status == STATUS_INVALID_PARAMETER, "got region-clip bad size status %#lx\n", status );
+
+    status = process_dcomp_test_command( channel, buffer, rectangles, sizeof(rectangles) );
+    ok( status == STATUS_SUCCESS, "got region-clip rectangle status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got region-clip rectangle commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got region-clip rectangle batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_rectangles,
+                               sizeof(expected_rectangles), "region-clip rectangles" );
+
+    status = process_dcomp_test_command( channel, buffer, replacement, sizeof(replacement) );
+    ok( status == STATUS_SUCCESS, "got region-clip replacement status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got region-clip replacement commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got region-clip replacement batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_replacement,
+                               sizeof(expected_replacement), "region-clip replacement" );
+
+    status = process_dcomp_test_command( channel, buffer, empty, sizeof(empty) );
+    ok( status == STATUS_SUCCESS, "got region-clip empty status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got region-clip empty commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got region-clip empty batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_empty,
+                               sizeof(expected_empty), "region-clip empty" );
+
+done:
+    if (buffer) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
 }
 
 static void test_expression_graph(void)
@@ -1323,6 +2643,89 @@ static void test_expression_graph(void)
 
     status = process_dcomp_test_command( channel, buffer, sources, sizeof(sources) );
     ok( status == STATUS_ACCESS_DENIED, "got repeated expression sources status %#lx\n", status );
+
+done:
+    if (buffer) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
+static void test_expression_weak_reference_reuse(void)
+{
+    static const UINT expected_source[] = {16, 0x28, 1, 0x7c};
+    static const UINT expected_expression[] = {
+        16, 0x28, 2, 0x3c,
+        16, 0x28, 3, 0x28,
+        44, 0x11, 2, 0, 0, 0, 0, 0, 0, 0, 0,
+        16, 0x12, 2, 0,
+        24, 0x89, 2, 1, 1, 0,
+        12, 0x29, 1,
+    };
+    static const UINT create_source[] = {2, 1, 0x7c, 0};
+    static const UINT create_expression[] = {2, 2, 0x3c, 0};
+    static const UINT sources[] = {17, 2, 0x0d, 1, 1};
+    static const UINT property_reference[] = {16, 2, 2, 1};
+    static const UINT property_enabled[] = {11, 2, 1, 0, 1, 0};
+    static const UINT release_source[] = {4, 1};
+    static const UINT create_replacement[] = {2, 1, 0x28, 0};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = NULL, state;
+    UINT channel = 0, size = 0x1000, batch;
+    UINT64 cookie = 0;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create expression weak-reference event, error %lu\n",
+        GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got expression weak-reference connection status %#lx\n",
+        status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got expression weak-reference channel status %#lx\n",
+        status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got expression weak-reference bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got expression weak-reference create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    status = process_dcomp_test_command( channel, buffer, create_source, sizeof(create_source) );
+    ok( status == STATUS_SUCCESS, "got expression source create status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got expression source commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got expression source batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_source,
+                               sizeof(expected_source), "expression source" );
+
+    status = process_dcomp_test_command( channel, buffer, create_expression,
+                                         sizeof(create_expression) );
+    ok( status == STATUS_SUCCESS, "got expression reuse create status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, sources, sizeof(sources) );
+    ok( status == STATUS_SUCCESS, "got expression reuse sources status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, property_reference,
+                                         sizeof(property_reference) );
+    ok( status == STATUS_SUCCESS, "got expression reuse property reference status %#lx\n",
+        status );
+    status = process_dcomp_test_command( channel, buffer, property_enabled,
+                                         sizeof(property_enabled) );
+    ok( status == STATUS_SUCCESS, "got expression reuse property enabled status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, release_source,
+                                         sizeof(release_source) );
+    ok( status == STATUS_SUCCESS, "got expression source release status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, create_replacement,
+                                         sizeof(create_replacement) );
+    ok( status == STATUS_SUCCESS, "got expression source replacement status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got expression reuse commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got expression reuse batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_expression,
+                               sizeof(expected_expression), "expression weak-reference reuse" );
 
 done:
     if (buffer) NtDCompositionDestroyChannel( channel );
@@ -1526,16 +2929,18 @@ done:
 
 static void test_shared_host_visual_lifecycle(void)
 {
+    static const UINT expected_system_resource[] = {16, 0x28, 1, 0xb8};
     static const UINT expected[] =
     {
         16, 0x28, 1, 0xb8,
-        16, 0x28, 2, 0xb8,
+        12, 0x27, 2,
         24, 0x185, 1, 2, 0, 1,
     };
     struct dcomposition_connection_batch *record = NULL;
     HANDLE event, connection = NULL, target = NULL;
     BYTE *buffer = NULL, state, released;
-    UINT channel = 0, size = 0x1000, batch, command[10];
+    UINT channel = 0, system_channel = 0, size = 0x1000, batch, command[10];
+    UINT expected_begin[4] = {16, 0x26, 1, 0};
     UINT64 cookie = 0, shared;
     ULONG processed;
     NTSTATUS status;
@@ -1553,6 +2958,15 @@ static void test_shared_host_visual_lifecycle(void)
     ret = hwnd && NtUserCreateDCompositionHwndTarget( hwnd, 1, &target );
     ok( ret, "failed to create host-visual target, status %#lx\n", RtlGetLastNtStatus() );
     if (!ret) goto done;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && record->next,
+        "got host-visual system records status %#lx record %p\n", status, record );
+    if (record)
+    {
+        system_channel = record->u.create.channel;
+        check_dcomp_batch_payload( record->next, system_channel, expected_system_resource,
+                                   sizeof(expected_system_resource), "host-visual system resource" );
+    }
     status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
     ok( status == STATUS_SUCCESS, "got host-visual channel status %#lx\n", status );
     if (status) goto done;
@@ -1573,6 +2987,11 @@ static void test_shared_host_visual_lifecycle(void)
                                                        &processed, &released );
     ok( status == STATUS_SUCCESS, "got host-visual open status %#lx\n", status );
     ok( processed == 2, "got host-visual open process count %lu\n", processed );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    expected_begin[3] = channel;
+    check_dcomp_batch_payload( record, system_channel, expected_begin,
+                               sizeof(expected_begin), "host-visual system begin" );
 
     command[0] = 20; command[1] = 1; command[2] = 2; command[3] = 1; command[4] = 0;
     memcpy( buffer, command, 20 );
@@ -1595,13 +3014,14 @@ done:
 
 static void test_window_target_shared_identity(void)
 {
-    static const UINT expected_source[] = {16, 0x28, 1, 0xb8};
-    static const UINT expected_complete[] = {12, 0x27, 2};
+    static const UINT expected_system_resource[] = {16, 0x28, 1, 0xb8};
+    UINT expected_begin[4] = {16, 0x26, 1, 0};
+    UINT expected_complete[3] = {12, 0x27, 1};
     struct dcomposition_connection_batch *record = NULL;
     HANDLE event, connection = NULL, target = NULL;
-    BYTE *source_buffer = NULL, *target_buffer = NULL, state, released;
-    UINT source_channel = 0, target_channel = 0, source_size = 0x1000, target_size = 0x1000;
-    UINT expected_begin[] = {16, 0x26, 1, 0};
+    BYTE *first_buffer = NULL, *second_buffer = NULL, state, released;
+    UINT first_channel = 0, second_channel = 0, system_channel = 0;
+    UINT first_size = 0x1000, second_size = 0x1000;
     UINT command[6], batch;
     UINT64 cookie = 0, shared;
     ULONG processed;
@@ -1621,79 +3041,87 @@ static void test_window_target_shared_identity(void)
     ok( ret, "failed to create shared target, status %#lx\n", RtlGetLastNtStatus() );
     if (!ret) goto done;
 
-    status = NtDCompositionCreateChannel( &source_channel, &source_size,
-                                           (void **)&source_buffer, 0 );
-    ok( status == STATUS_SUCCESS, "got shared-target source channel status %#lx\n", status );
-    if (status) goto done;
-    status = NtDCompositionSetChannelConnectionId( source_channel, 0, 1 );
-    ok( status == STATUS_SUCCESS, "got shared-target source bind status %#lx\n", status );
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
-    ok( status == STATUS_SUCCESS && record && record->type == 5,
-        "got shared-target source create status %#lx record %p type %u\n",
-        status, record, record ? record->type : 0 );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && record->next,
+        "got shared-target system records status %#lx record %p\n", status, record );
+    if (record)
+    {
+        system_channel = record->u.create.channel;
+        check_dcomp_batch_payload( record->next, system_channel, expected_system_resource,
+                                   sizeof(expected_system_resource), "shared-target system resource" );
+    }
 
-    command[0] = 3; command[1] = 1;
+    status = NtDCompositionCreateChannel( &first_channel, &first_size,
+                                           (void **)&first_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got first shared-target channel status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &second_channel, &second_size,
+                                           (void **)&second_buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got second shared-target channel status %#lx\n", status );
+    if (!first_buffer || !second_buffer) goto done;
+    status = NtDCompositionSetChannelConnectionId( first_channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got first shared-target bind status %#lx\n", status );
+    status = NtDCompositionSetChannelConnectionId( second_channel, 0, 2 );
+    ok( status == STATUS_SUCCESS, "got second shared-target bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->next,
+        "got shared-target channel records status %#lx record %p\n", status, record );
+
+    command[0] = 3;
+    command[1] = 1;
     shared = (UINT_PTR)target;
     memcpy( command + 2, &shared, sizeof(shared) );
-    command[4] = 0xb8; command[5] = 0;
-    memcpy( source_buffer, command, sizeof(command) );
-    status = NtDCompositionProcessChannelBatchBuffer( source_channel, sizeof(command),
+    command[4] = 0xb8;
+    command[5] = 0;
+    memcpy( first_buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( first_channel, sizeof(command),
                                                        &processed, &released );
     ok( status == STATUS_SUCCESS && processed == 1,
-        "got shared-target source open status %#lx count %lu\n", status, processed );
-    status = NtDCompositionCreateChannel( &target_channel, &target_size,
-                                           (void **)&target_buffer, 0 );
-    ok( status == STATUS_SUCCESS, "got shared-target destination channel status %#lx\n", status );
-    if (status) goto done;
-    status = NtDCompositionSetChannelConnectionId( target_channel, 0, 2 );
-    ok( status == STATUS_SUCCESS, "got shared-target destination bind status %#lx\n", status );
+        "got first shared-target open status %#lx count %lu\n", status, processed );
     record = NULL;
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
-    ok( status == STATUS_SUCCESS && record && record->type == 5,
-        "got shared-target destination create status %#lx record %p type %u\n",
-        status, record, record ? record->type : 0 );
+    expected_begin[3] = first_channel;
+    check_dcomp_batch_payload( record, system_channel, expected_begin,
+                               sizeof(expected_begin), "first shared-target begin" );
 
     command[1] = 2;
     command[5] = 1;
-    memcpy( target_buffer, command, sizeof(command) );
-    status = NtDCompositionProcessChannelBatchBuffer( target_channel, sizeof(command),
+    memcpy( second_buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( second_channel, sizeof(command),
                                                        &processed, &released );
     ok( status == STATUS_SUCCESS && processed == 1,
-        "got shared-target duplicate open status %#lx count %lu\n", status, processed );
-    expected_begin[3] = target_channel;
-
-    status = NtDCompositionCommitChannel( target_channel, &batch, &state, 0,
-                                           NULL, NULL, NULL, 0 );
-    ok( status == STATUS_SUCCESS, "got shared-target destination commit status %#lx\n", status );
-
-    status = NtDCompositionCommitChannel( source_channel, &batch, &state, 0,
-                                           NULL, NULL, NULL, 0 );
-    ok( status == STATUS_SUCCESS, "got shared-target source commit status %#lx\n", status );
+        "got second shared-target open status %#lx count %lu\n", status, processed );
     record = NULL;
     status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
-    ok( status == STATUS_SUCCESS, "got shared-target source batch status %#lx\n", status );
-    check_dcomp_batch_payload( record, source_channel, expected_source,
-                               sizeof(expected_source), "shared-target source" );
-    record = record ? record->next : NULL;
-    if (!record) status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
-    ok( status == STATUS_SUCCESS, "got shared-target begin status %#lx\n", status );
-    check_dcomp_batch_payload( record, source_channel, expected_begin,
-                               sizeof(expected_begin), "shared-target begin" );
-    record = record ? record->next : NULL;
-    if (!record) status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
-    ok( status == STATUS_SUCCESS, "got shared-target complete status %#lx\n", status );
-    check_dcomp_batch_payload( record, target_channel, expected_complete,
-                               sizeof(expected_complete), "shared-target complete" );
+    expected_begin[3] = second_channel;
+    check_dcomp_batch_payload( record, system_channel, expected_begin,
+                               sizeof(expected_begin), "second shared-target begin" );
+
+    status = NtDCompositionCommitChannel( second_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got second shared-target commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    expected_complete[2] = 2;
+    check_dcomp_batch_payload( record, second_channel, expected_complete,
+                               sizeof(expected_complete), "second shared-target complete" );
+
+    status = NtDCompositionCommitChannel( first_channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got first shared-target commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    expected_complete[2] = 1;
+    check_dcomp_batch_payload( record, first_channel, expected_complete,
+                               sizeof(expected_complete), "first shared-target complete" );
 
 done:
-    if (target_channel) NtDCompositionDestroyChannel( target_channel );
-    if (source_channel) NtDCompositionDestroyChannel( source_channel );
+    if (second_channel) NtDCompositionDestroyChannel( second_channel );
+    if (first_channel) NtDCompositionDestroyChannel( first_channel );
     if (target) CloseHandle( target );
     if (connection) NtDCompositionDestroyConnection( connection );
     if (hwnd) DestroyWindow( hwnd );
     CloseHandle( event );
 }
-
 static void test_window_node_properties(void)
 {
     static const UINT commands[] =
@@ -1906,6 +3334,288 @@ done:
     CloseHandle( event );
 }
 
+static void test_composition_surface_brush_protocol(void)
+{
+    static const UINT create[] =
+    {
+        2, 1, 0xa9, 0,
+        2, 2, 0x2a, 0,
+        2, 3, 0x1d, 0,
+    };
+    static const UINT surface_flags[] =
+    {
+        11, 2, 1, 0, 1, 0,
+        11, 2, 2, 0, 0, 0,
+        11, 2, 3, 0, 0x1234, 0,
+    };
+    static const UINT brush_properties[] =
+    {
+        16, 1, 0, 2,
+        15, 1, 1, 16, 10, 20, 110, 220,
+        15, 1, 2, 16, 30, 40, 50, 60,
+        15, 1, 8, 1, 1,
+        15, 1, 9, 1, 1,
+        15, 1, 10, 1, 1,
+        12, 1, 3, 0x3e800000,
+        12, 1, 4, 0x3f400000,
+        11, 1, 5, 0, 3, 0,
+        11, 1, 6, 0, 4, 0,
+        16, 1, 7, 3,
+    };
+    static const UINT dirty_update[] = {15, 1, 2, 16, 30, 40, 50, 60};
+    static const UINT unchanged_brush[] =
+    {
+        16, 1, 7, 3,
+        11, 1, 5, 0, 3, 0,
+        11, 1, 6, 0, 4, 0,
+    };
+    static const UINT create_invalid_surface[] = {2, 4, 0x87, 0};
+    static const UINT set_invalid_surface[] = {16, 1, 0, 4};
+    static const UINT release_invalid_surface[] = {4, 4};
+    UINT expected[] =
+    {
+        16, 0x28, 1, 0xa9,
+        16, 0x28, 2, 0x2a,
+        16, 0x28, 3, 0x1d,
+        28, 0x70, 2, 0, 0, 1, 0,
+        52, 0x175, 1, 2, 10, 20, 110, 220, 10, 20, 110, 220, 1,
+        16, 0x176, 1, 3,
+        16, 0x170, 1, 0x3e800000,
+        16, 0x177, 1, 0x3f400000,
+        16, 0x173, 1, 3,
+        16, 0x171, 1, 4,
+        16, 0x172, 1, 1,
+        16, 0x174, 1, 1,
+    };
+    static const UINT expected_dirty[] =
+    {
+        52, 0x175, 1, 2, 10, 20, 110, 220, 40, 60, 60, 80, 1,
+    };
+    struct dcomposition_connection_batch *record = NULL;
+    BYTE buffer_info[0x520] = {0};
+    HANDLE event, connection = NULL, surface = NULL, ordinary = NULL, consumer_surface = NULL;
+    BYTE *buffer = NULL, state;
+    UINT channel = 0, size = 0x1000, batch, handle_command[6] = {13, 2, 0};
+    UINT64 binding_id, cookie = 0, handle_value;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create surface-brush event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got surface-brush connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got surface-brush channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got surface-brush bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got surface-brush create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    status = process_dcomp_test_command( channel, buffer, create, sizeof(create) );
+    ok( status == STATUS_SUCCESS, "got surface-brush resource status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, create_invalid_surface,
+                                         sizeof(create_invalid_surface) );
+    ok( status == STATUS_SUCCESS, "got invalid surface resource status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, set_invalid_surface,
+                                         sizeof(set_invalid_surface) );
+    ok( status == STATUS_INVALID_PARAMETER,
+        "got invalid surface-brush reference status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, release_invalid_surface,
+                                         sizeof(release_invalid_surface) );
+    ok( status == STATUS_SUCCESS, "got invalid surface release status %#lx\n", status );
+
+    ordinary = CreateEventW( NULL, FALSE, FALSE, NULL );
+    handle_value = (UINT_PTR)ordinary;
+    memcpy( handle_command + 4, &handle_value, sizeof(handle_value) );
+    status = process_dcomp_test_command( channel, buffer, handle_command,
+                                         sizeof(handle_command) );
+    ok( status == STATUS_OBJECT_TYPE_MISMATCH,
+        "got ordinary surface handle status %#lx\n", status );
+
+    status = NtCreateCompositionSurfaceHandle( NULL, 3, &surface );
+    ok( status == STATUS_SUCCESS, "got surface creation status %#lx\n", status );
+    if (status) goto done;
+    status = NtBindCompositionSurface( surface, TRUE, 0, FALSE, buffer_info, &binding_id );
+    ok( status == STATUS_SUCCESS, "got surface binding status %#lx\n", status );
+    if (status) goto done;
+    handle_value = (UINT_PTR)surface;
+    memcpy( handle_command + 4, &handle_value, sizeof(handle_value) );
+    status = process_dcomp_test_command( channel, buffer, handle_command,
+                                         sizeof(handle_command) );
+    ok( status == STATUS_SUCCESS, "got retained surface status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, surface_flags,
+                                         sizeof(surface_flags) );
+    ok( status == STATUS_SUCCESS, "got surface flags status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, brush_properties,
+                                         sizeof(brush_properties) );
+    ok( status == STATUS_SUCCESS, "got surface-brush properties status %#lx\n", status );
+
+    NtClose( surface );
+    surface = NULL;
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got surface-brush commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got surface-brush batch status %#lx\n", status );
+    if (record && record->u.batch.size >= 68)
+    {
+        memcpy( &handle_value, record->u.batch.data + 60, sizeof(handle_value) );
+        consumer_surface = (HANDLE)(UINT_PTR)handle_value;
+        memcpy( expected + 15, &handle_value, sizeof(handle_value) );
+    }
+    check_dcomp_batch_payload( record, channel, expected, sizeof(expected), "surface brush" );
+
+    status = process_dcomp_test_command( channel, buffer, dirty_update,
+                                         sizeof(dirty_update) );
+    ok( status == STATUS_SUCCESS, "got surface-brush dirty status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, surface_flags,
+                                         sizeof(surface_flags) );
+    ok( status == STATUS_SUCCESS, "got unchanged surface flags status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, unchanged_brush,
+                                         sizeof(unchanged_brush) );
+    ok( status == STATUS_SUCCESS, "got unchanged surface-brush status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got surface-brush dirty commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got surface-brush dirty batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_dirty,
+                               sizeof(expected_dirty), "surface brush dirty" );
+
+done:
+    if (consumer_surface) NtClose( consumer_surface );
+    if (surface) NtClose( surface );
+    if (ordinary) CloseHandle( ordinary );
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
+static void test_mask_brush_protocol(void)
+{
+    static const UINT create[] =
+    {
+        2, 1, 0x6b, 0,
+        2, 2, 0x16, 0,
+        2, 3, 0xa9, 0,
+        2, 4, 0x87, 0,
+        2, 5, 0x63, 0,
+        2, 6, 0x7e, 0,
+    };
+    static const UINT references[] =
+    {
+        16, 1, 0, 2,
+        16, 1, 1, 3,
+    };
+    static const UINT expected[] =
+    {
+        16, 0x28, 1, 0x6b,
+        16, 0x28, 2, 0x16,
+        16, 0x28, 3, 0xa9,
+        16, 0x28, 4, 0x87,
+        16, 0x28, 5, 0x63,
+        16, 0x28, 6, 0x7e,
+        16, 0xf7, 1, 2,
+        16, 0xf6, 1, 3,
+    };
+    static const UINT gradient_references[] =
+    {
+        16, 1, 0, 5,
+        16, 1, 1, 6,
+    };
+    static const UINT expected_gradient[] =
+    {
+        16, 0xf7, 1, 5,
+        16, 0xf6, 1, 6,
+    };
+    static const UINT clear[] =
+    {
+        16, 1, 0, 0,
+        16, 1, 1, 0,
+    };
+    static const UINT expected_clear[] =
+    {
+        16, 0xf7, 1, 0,
+        16, 0xf6, 1, 0,
+    };
+    static const UINT bad_property[] = {16, 1, 2, 2};
+    static const UINT bad_source[] = {16, 1, 0, 4};
+    static const UINT bad_mask[] = {16, 1, 1, 2};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = NULL, state;
+    UINT channel = 0, size = 0x1000, batch;
+    UINT64 cookie = 0;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create mask-brush event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got mask-brush connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got mask-brush channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got mask-brush bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got mask-brush create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    status = process_dcomp_test_command( channel, buffer, create, sizeof(create) );
+    ok( status == STATUS_SUCCESS, "got mask-brush resource status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_property, sizeof(bad_property) );
+    ok( status == STATUS_INVALID_PARAMETER, "got mask-brush bad property status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_source, sizeof(bad_source) );
+    ok( status == STATUS_INVALID_PARAMETER, "got mask-brush bad source status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_mask, sizeof(bad_mask) );
+    ok( status == STATUS_INVALID_PARAMETER, "got mask-brush bad mask status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, references, sizeof(references) );
+    ok( status == STATUS_SUCCESS, "got mask-brush references status %#lx\n", status );
+
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got mask-brush commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got mask-brush batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected, sizeof(expected), "mask brush" );
+
+    status = process_dcomp_test_command( channel, buffer, gradient_references,
+                                         sizeof(gradient_references) );
+    ok( status == STATUS_SUCCESS, "got mask-brush gradient references status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got mask-brush gradient commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got mask-brush gradient batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_gradient,
+                               sizeof(expected_gradient), "mask brush gradient" );
+
+    status = process_dcomp_test_command( channel, buffer, clear, sizeof(clear) );
+    ok( status == STATUS_SUCCESS, "got mask-brush clear status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0,
+                                           NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got mask-brush clear commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got mask-brush clear batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_clear,
+                               sizeof(expected_clear), "mask brush clear" );
+
+done:
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_legacy_render_target_protocol(void)
 {
     static const UINT commands[] =
@@ -2018,8 +3728,9 @@ done:
 
 static void test_visual_target_root_lifecycle(void)
 {
+    static const UINT expected_system_resource[] = {16, 0x28, 1, 0xb8};
     static const UINT expected_initial[] = {
-        16, 0x28, 1, 0xb8,
+        12, 0x27, 1,
         16, 0x28, 2, 0xb8,
         16, 0x28, 3, 0xb8,
         16, 0x28, 4, 13,
@@ -2089,7 +3800,8 @@ static void test_visual_target_root_lifecycle(void)
     struct dcomposition_connection_batch *record = NULL;
     HANDLE event, connection = NULL, target_handle = NULL;
     BYTE *buffer = NULL, state;
-    UINT channel = 0, size = 0x1000, batch, command[64];
+    UINT channel = 0, system_channel = 0, size = 0x1000, batch, command[64];
+    UINT expected_begin[4] = {16, 0x26, 1, 0};
     UINT64 cookie = 0, shared;
     ULONG processed;
     BYTE released;
@@ -2108,6 +3820,15 @@ static void test_visual_target_root_lifecycle(void)
     ret = hwnd && NtUserCreateDCompositionHwndTarget( hwnd, 0, &target_handle );
     ok( ret, "failed to create visual-root target, status %#lx\n", RtlGetLastNtStatus() );
     if (!ret) goto done;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5 && record->next,
+        "got visual-root system records status %#lx record %p\n", status, record );
+    if (record)
+    {
+        system_channel = record->u.create.channel;
+        check_dcomp_batch_payload( record->next, system_channel, expected_system_resource,
+                                   sizeof(expected_system_resource), "visual-root system resource" );
+    }
     status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
     ok( status == STATUS_SUCCESS, "got visual-root channel status %#lx\n", status );
     if (status) goto done;
@@ -2132,6 +3853,11 @@ static void test_visual_target_root_lifecycle(void)
     ok( status == STATUS_SUCCESS, "got initial visual-root process status %#lx\n", status );
     ok( processed == 5, "got initial visual-root process count %lu\n", processed );
     ok( !released, "got initial visual-root released flag %#x\n", released );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    expected_begin[3] = channel;
+    check_dcomp_batch_payload( record, system_channel, expected_begin,
+                               sizeof(expected_begin), "visual-root system begin" );
     status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
     ok( status == STATUS_SUCCESS, "got initial visual-root commit status %#lx\n", status );
     record = NULL;
@@ -2698,10 +4424,38 @@ static void test_composition_surface_lifecycle(void)
 {
     struct dcomposition_token_surface_update updates[2] = {0};
     OBJECT_ATTRIBUTES attributes = {0};
-    UINT64 connection = 1, device = 2, binding_id, second_binding_id;
+    UINT64 connection = 1, device = 2, binding_id = 0, second_binding_id;
     BYTE buffer_info[0x520] = {0};
-    HANDLE surface, token, second_token;
+    BYTE queried_info[0x520] = {0};
+    BYTE realization[0x178], zero_realization[0x178] = {0};
+    BYTE dirty_region[0xa4], dirty_region_sentinel[0xa4];
+    HANDLE surface, token, second_token, ordinary, mapping = NULL, queried_mapping = NULL;
+    void *mapping_view = NULL;
+    LUID luid;
     NTSTATUS status;
+
+    ordinary = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!ordinary, "failed to create ordinary surface-test handle, error %lu\n",
+        GetLastError() );
+    if (!ordinary) return;
+    luid.LowPart = 0xcccccccc;
+    luid.HighPart = 0xcccccccc;
+    status = NtValidateCompositionSurfaceHandle( ordinary, &luid );
+    ok( status == STATUS_OBJECT_TYPE_MISMATCH, "got ordinary validation status %#lx\n", status );
+    ok( luid.LowPart == 0xcccccccc && luid.HighPart == 0xcccccccc,
+        "ordinary validation changed luid %#lx:%#lx\n", luid.HighPart, luid.LowPart );
+    memset( realization, 0xcc, sizeof(realization) );
+    status = NtQueryCompositionSurfaceRenderingRealization( ordinary, realization );
+    ok( status == STATUS_OBJECT_TYPE_MISMATCH, "got ordinary realization status %#lx\n", status );
+    ok( !memcmp( realization, zero_realization, sizeof(realization) ),
+        "ordinary realization did not clear output\n" );
+    memset( dirty_region, 0xcc, sizeof(dirty_region) );
+    memcpy( dirty_region_sentinel, dirty_region, sizeof(dirty_region) );
+    status = NtOpenCompositionSurfaceDirtyRegion( ordinary, &binding_id,
+                                                   buffer_info + 0xa0, dirty_region );
+    ok( status == STATUS_OBJECT_TYPE_MISMATCH, "got ordinary dirty-region status %#lx\n", status );
+    ok( !memcmp( dirty_region, dirty_region_sentinel, sizeof(dirty_region) ),
+        "ordinary dirty-region query changed output\n" );
 
     status = NtCreateCompositionSurfaceHandle(NULL, 3, NULL);
     ok(status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status);
@@ -2715,14 +4469,97 @@ static void test_composition_surface_lifecycle(void)
     status = NtCreateCompositionSurfaceHandle(NULL, 3, &surface);
     ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
     ok(surface && surface != INVALID_HANDLE_VALUE, "got surface %p\n", surface);
-    if (status) return;
+    if (status)
+    {
+        CloseHandle( ordinary );
+        return;
+    }
 
+    status = NtValidateCompositionSurfaceHandle( surface, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null luid validation status %#lx\n", status );
+    luid.LowPart = 0;
+    luid.HighPart = 0;
+    status = NtValidateCompositionSurfaceHandle( surface, &luid );
+    ok( status == STATUS_SUCCESS, "got surface validation status %#lx\n", status );
+    ok( luid.LowPart || luid.HighPart, "got zero surface luid\n" );
+    memset( realization, 0xcc, sizeof(realization) );
+    status = NtQueryCompositionSurfaceRenderingRealization( surface, realization );
+    ok( status == STATUS_UNSUCCESSFUL, "got unbound realization status %#lx\n", status );
+    ok( !memcmp( realization, zero_realization, sizeof(realization) ),
+        "unbound realization did not clear output\n" );
+    status = NtQueryCompositionSurfaceRenderingRealization( surface, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null realization status %#lx\n", status );
+    status = NtOpenCompositionSurfaceDirtyRegion( surface, NULL,
+                                                   buffer_info + 0xa0, dirty_region );
+    ok( status == STATUS_INVALID_PARAMETER, "got null binding dirty-region status %#lx\n", status );
+    status = NtOpenCompositionSurfaceDirtyRegion( surface, &binding_id, NULL, dirty_region );
+    ok( status == STATUS_INVALID_PARAMETER, "got null info dirty-region status %#lx\n", status );
+    status = NtOpenCompositionSurfaceDirtyRegion( surface, &binding_id,
+                                                   buffer_info + 0xa0, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got null output dirty-region status %#lx\n", status );
+    status = NtOpenCompositionSurfaceDirtyRegion( surface, &binding_id,
+                                                   buffer_info + 0xa0, dirty_region );
+    ok( status == STATUS_NOT_FOUND, "got unbound dirty-region status %#lx\n", status );
+
+    mapping = CreateFileMappingW( INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 0x1000, NULL );
+    ok( !!mapping, "failed to create composition realization, error %lu\n", GetLastError() );
+    *(UINT *)(buffer_info + 0x00) = 1;
+    *(UINT *)(buffer_info + 0x54) = 1;
+    *(UINT *)(buffer_info + 0x98) = 2;
+    *(UINT *)(buffer_info + 0x9c) = 1;
+    *(UINT *)(buffer_info + 0xa0) = 2;
+    *(HANDLE *)(buffer_info + 0xa8) = mapping;
+    buffer_info[0x120] = 0x5a;
     binding_id = 0xdeadbeef;
     status = NtBindCompositionSurface(surface, TRUE, 0, FALSE, NULL, &binding_id);
     ok(status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status);
     status = NtBindCompositionSurface(surface, TRUE, 0, FALSE, buffer_info, &binding_id);
     ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
     ok(binding_id != 0, "got binding id %I64u\n", binding_id);
+    ok( binding_id == (((UINT64)(UINT)luid.HighPart << 32) | luid.LowPart),
+        "got binding id %I64u, luid %#lx:%#lx\n", binding_id, luid.HighPart, luid.LowPart );
+    CloseHandle( mapping );
+    mapping = NULL;
+
+    memset( dirty_region, 0xcc, sizeof(dirty_region) );
+    status = NtOpenCompositionSurfaceDirtyRegion( surface, &binding_id,
+                                                   buffer_info + 0xa0, dirty_region );
+    ok( status == STATUS_SUCCESS, "got bound dirty-region status %#lx\n", status );
+    ok( !*(UINT *)(dirty_region + 0xa0), "got bound dirty-region count %u\n",
+        *(UINT *)(dirty_region + 0xa0) );
+    second_binding_id = binding_id + 1;
+    memset( dirty_region, 0xcc, sizeof(dirty_region) );
+    memcpy( dirty_region_sentinel, dirty_region, sizeof(dirty_region) );
+    status = NtOpenCompositionSurfaceDirtyRegion( surface, &second_binding_id,
+                                                   buffer_info + 0xa0, dirty_region );
+    ok( status == STATUS_NOT_FOUND, "got mismatched dirty-region binding status %#lx\n", status );
+    ok( !memcmp( dirty_region, dirty_region_sentinel, sizeof(dirty_region) ),
+        "mismatched dirty-region query changed output\n" );
+    *(UINT *)(buffer_info + 0xa4) = 1;
+    status = NtOpenCompositionSurfaceDirtyRegion( surface, &binding_id,
+                                                   buffer_info + 0xa0, dirty_region );
+    ok( status == STATUS_NOT_FOUND, "got mismatched realization status %#lx\n", status );
+    *(UINT *)(buffer_info + 0xa4) = 0;
+
+    status = NtQueryCompositionSurfaceBinding( surface, &binding_id, queried_info );
+    ok( status == STATUS_SUCCESS, "got binding query status %#lx\n", status );
+    queried_mapping = *(HANDLE *)(queried_info + 0xa8);
+    ok( !!queried_mapping, "got null queried realization\n" );
+    *(HANDLE *)(buffer_info + 0xa8) = NULL;
+    *(HANDLE *)(queried_info + 0xa8) = NULL;
+    ok( !memcmp( queried_info, buffer_info, sizeof(buffer_info) ),
+        "queried binding information differs from bound information\n" );
+    if (queried_mapping)
+    {
+        mapping_view = MapViewOfFile( queried_mapping, FILE_MAP_READ, 0, 0, 0x1000 );
+        ok( !!mapping_view, "failed to map queried realization, error %lu\n", GetLastError() );
+        if (mapping_view) UnmapViewOfFile( mapping_view );
+        CloseHandle( queried_mapping );
+        queried_mapping = NULL;
+    }
+    second_binding_id = binding_id + 1;
+    status = NtQueryCompositionSurfaceBinding( surface, &second_binding_id, queried_info );
+    ok( status == STATUS_NOT_FOUND, "got mismatched binding query status %#lx\n", status );
 
     updates[0].surface = surface;
     updates[0].right = 16;
@@ -2743,6 +4580,8 @@ static void test_composition_surface_lifecycle(void)
 
     status = NtUnBindCompositionSurface(surface, TRUE, FALSE);
     ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
+    status = NtQueryCompositionSurfaceBinding( surface, &binding_id, queried_info );
+    ok( status == STATUS_NOT_FOUND, "got unbound binding query status %#lx\n", status );
     second_token = (HANDLE)0xdeadbeef;
     status = NtTokenManagerCreateCompositionTokenHandle(updates, 2, 1,
             &connection, &device, &second_token);
@@ -2755,7 +4594,10 @@ static void test_composition_surface_lifecycle(void)
             binding_id, second_binding_id);
 
     if (token && token != INVALID_HANDLE_VALUE) NtClose(token);
+    if (mapping) CloseHandle(mapping);
+    if (queried_mapping) CloseHandle(queried_mapping);
     NtClose(surface);
+    if (ordinary) CloseHandle(ordinary);
 }
 
 static void test_token_manager_lifetime(void)
@@ -3801,6 +5643,34 @@ static void test_dwm_session_message_delivery(void)
     {
         HWND message_window = NULL;
         UINT message_type = 0xcccccccc;
+        RECT region_rect = {0}, client_rect = {0};
+
+        memset( &received, 0, sizeof(received) );
+        size = sizeof(received);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                            &size, NULL, &timeout );
+        ok( !status, "target visible-region receive returned %#lx\n", status );
+        ok( !status && received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+            "got visible-region type %#x\n", received.header.Type );
+        ok( !status && received.header.DataLength == 44,
+            "got visible-region length %#x\n", received.header.DataLength );
+        ok( !status && received.data[0] == 0x40000096,
+            "got visible-region command %#lx\n", received.data[0] );
+        if (!status)
+        {
+            memcpy( &message_window, received.data + 1, sizeof(message_window) );
+            memcpy( &region_rect, received.data + 7, sizeof(region_rect) );
+        }
+        GetClientRect( target_window, &client_rect );
+        ok( message_window == target_window, "got visible-region window %p, expected %p\n",
+            message_window, target_window );
+        ok( received.data[3] == 0 && received.data[4] == 1 &&
+            received.data[5] == 1 && received.data[6] == 1,
+            "got visible-region chunk %lu/%lu type %lu count %lu\n",
+            received.data[3], received.data[4], received.data[5], received.data[6] );
+        ok( !IsRectEmpty( &region_rect ) && EqualRect( &region_rect, &client_rect ),
+            "got visible region %s, expected client %s\n", wine_dbgstr_rect( &region_rect ),
+            wine_dbgstr_rect( &client_rect ) );
 
         memset( &received, 0, sizeof(received) );
         size = sizeof(received);
@@ -3848,6 +5718,25 @@ static void test_dwm_session_message_delivery(void)
         ok( message_window == target_window, "got target destroy window %p, expected %p\n",
             message_window, target_window );
         ok( message_type == 0, "got target destroy type %u\n", message_type );
+
+        memset( &received, 0, sizeof(received) );
+        size = sizeof(received);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                            &size, NULL, &timeout );
+        ok( !status, "target visible-region clear receive returned %#lx\n", status );
+        ok( !status && received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+            "got visible-region clear type %#x\n", received.header.Type );
+        ok( !status && received.header.DataLength == 28,
+            "got visible-region clear length %#x\n", received.header.DataLength );
+        ok( !status && received.data[0] == 0x40000096,
+            "got visible-region clear command %#lx\n", received.data[0] );
+        if (!status) memcpy( &message_window, received.data + 1, sizeof(message_window) );
+        ok( message_window == target_window,
+            "got visible-region clear window %p, expected %p\n", message_window, target_window );
+        ok( received.data[3] == 0 && received.data[4] == 0 &&
+            received.data[5] == 1 && received.data[6] == 0,
+            "got visible-region clear chunk %lu/%lu type %lu count %lu\n",
+            received.data[3], received.data[4], received.data[5], received.data[6] );
     }
 
     if (target_window)
@@ -3925,17 +5814,30 @@ START_TEST(dcomp)
     test_kst();
     test_frame_statistics();
     test_channel_lifetime();
+    test_channel_application_id();
+    test_channel_synchronization();
+    test_synchronized_connection_queue();
     test_shared_resource_handle_lifecycle();
+    test_published_shared_resource_ordering();
+    test_published_shared_resource_target_fifo();
+    test_duplicate_prerequisite_selection();
+    test_held_release_wire_id_reuse();
     test_created_shared_resource_duplication();
+    test_multi_source_shared_resource_duplication();
     test_hwnd_target_lifecycle();
     test_connection_queue();
+    test_referenced_resource_id_reuse();
     test_visual_target_root_lifecycle();
     test_shared_host_visual_lifecycle();
     test_window_target_shared_identity();
     test_window_node_properties();
     test_gdi_sprite_bitmap_protocol();
+    test_composition_surface_brush_protocol();
+    test_mask_brush_protocol();
+    test_region_clip_protocol();
     test_legacy_render_target_protocol();
     test_expression_graph();
+    test_expression_weak_reference_reuse();
     test_shared_manipulation_transform();
     test_shared_section_lifecycle();
     test_frame_lifecycle();

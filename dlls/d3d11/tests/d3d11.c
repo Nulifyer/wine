@@ -2486,9 +2486,92 @@ static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
     ok(!refcount, "Device has %lu references left.\n", refcount);
 }
 
+static void test_offer_reclaim_resources(void)
+{
+    const UINT initial_value = 0x40302010;
+    D3D11_SUBRESOURCE_DATA initial_data = {&initial_value, sizeof(initial_value), sizeof(initial_value)};
+    D3D11_TEXTURE2D_DESC desc = {0};
+    ID3D11Texture2D *texture = NULL, *staging = NULL;
+    IDXGIResource *resource = NULL;
+    IDXGIDevice2 *dxgi_device = NULL;
+    ID3D11DeviceContext *context = NULL;
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    ID3D11Device *device;
+    BOOL discarded = TRUE;
+    HRESULT hr;
+
+    if (!(device = create_device(NULL)))
+    {
+        skip("Failed to create a D3D11 device.\n");
+        return;
+    }
+
+    desc.Width = 1;
+    desc.Height = 1;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    hr = ID3D11Device_CreateTexture2D(device, &desc, &initial_data, &texture);
+    ok(hr == S_OK, "Failed to create offered texture, hr %#lx.\n", hr);
+    if (FAILED(hr)) goto done;
+
+    hr = ID3D11Texture2D_QueryInterface(texture, &IID_IDXGIResource, (void **)&resource);
+    ok(hr == S_OK, "Failed to get IDXGIResource, hr %#lx.\n", hr);
+    hr = ID3D11Device_QueryInterface(device, &IID_IDXGIDevice2, (void **)&dxgi_device);
+    ok(hr == S_OK, "Failed to get IDXGIDevice2, hr %#lx.\n", hr);
+    if (!resource || !dxgi_device) goto done;
+
+    hr = IDXGIDevice2_OfferResources(dxgi_device, 1, NULL, DXGI_OFFER_RESOURCE_PRIORITY_NORMAL);
+    ok(hr == E_INVALIDARG, "Got unexpected null-resource offer hr %#lx.\n", hr);
+    hr = IDXGIDevice2_OfferResources(dxgi_device, 1, &resource, 0);
+    ok(hr == E_INVALIDARG, "Got unexpected invalid-priority offer hr %#lx.\n", hr);
+    hr = IDXGIDevice2_ReclaimResources(dxgi_device, 1, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected null-resource reclaim hr %#lx.\n", hr);
+
+    hr = IDXGIDevice2_OfferResources(dxgi_device, 1, &resource,
+            DXGI_OFFER_RESOURCE_PRIORITY_NORMAL);
+    ok(hr == S_OK, "Failed to offer resource, hr %#lx.\n", hr);
+    hr = IDXGIDevice2_ReclaimResources(dxgi_device, 1, &resource, &discarded);
+    ok(hr == S_OK, "Failed to reclaim resource, hr %#lx.\n", hr);
+    ok(!discarded, "Expected the resident resource contents to be preserved.\n");
+
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    hr = ID3D11Device_CreateTexture2D(device, &desc, NULL, &staging);
+    ok(hr == S_OK, "Failed to create readback texture, hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ID3D11Device_GetImmediateContext(device, &context);
+        ID3D11DeviceContext_CopyResource(context, (ID3D11Resource *)staging,
+                (ID3D11Resource *)texture);
+        hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)staging,
+                0, D3D11_MAP_READ, 0, &mapped);
+        ok(hr == S_OK, "Failed to map reclaimed texture, hr %#lx.\n", hr);
+        if (SUCCEEDED(hr))
+        {
+            ok(*(UINT *)mapped.pData == initial_value,
+                    "Got reclaimed value %#x, expected %#x.\n",
+                    *(UINT *)mapped.pData, initial_value);
+            ID3D11DeviceContext_Unmap(context, (ID3D11Resource *)staging, 0);
+        }
+    }
+
+done:
+    if (context) ID3D11DeviceContext_Release(context);
+    if (staging) ID3D11Texture2D_Release(staging);
+    if (dxgi_device) IDXGIDevice2_Release(dxgi_device);
+    if (resource) IDXGIResource_Release(resource);
+    if (texture) ID3D11Texture2D_Release(texture);
+    ID3D11Device_Release(device);
+}
+
 static void test_native_d2d_device_contracts(void)
 {
     struct dcomposition_token_surface_update updates[2];
+    struct dcomposition_frame_info frame_info = {0};
+    struct dcomposition_confirm_frame_info confirm_info = {0};
     ID3D11Multithread *device_multithread, *context_multithread;
     D3D11_TEXTURE2D_DESC composition_desc;
     D3D11_TEXTURE2D_DESC texture_desc = {0};
@@ -2497,14 +2580,33 @@ static void test_native_d2d_device_contracts(void)
     IUnknown *composition_resource, *composition_buffers[1];
     IUnknown *device_identity, *private_identity;
     ID3DDeviceContextState *context_state;
-    ID3D11Texture2D *composition_texture;
+    ID3D11Texture2D *composition_texture, *shared_texture = NULL, *readback_texture = NULL;
+    ID3D11RenderTargetView *composition_rtv = NULL;
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    BYTE binding_info[0x520];
+    BYTE surface_update[0x178];
+    BYTE dirty_region[0xa4];
+    const FLOAT clear_color[4] = {0.5f, 0.5f, 0.5f, 0.5f};
+    const FLOAT updated_color[4] = {0.25f, 0.25f, 0.25f, 0.25f};
     ID3D11Texture2D *texture;
     ID3D11DeviceContext *context;
+    DXGI_ADAPTER_DESC adapter_desc;
+    IDXGIDevice *dxgi_device;
+    IDXGIAdapter *adapter;
     D3D_FEATURE_LEVEL feature_level;
     ID3D11Device1 *device1;
     ID3D11Device *device;
     UINT64 composition_connection = 1, composition_device = 2;
-    HANDLE composition_surface, composition_token;
+    UINT64 composition_binding;
+    HANDLE composition_surface, composition_token, shared_handle = NULL;
+    HANDLE frame_event = NULL, frame_connection = NULL, token_section = NULL;
+    HANDLE token_event_a = NULL, token_event_b = NULL;
+    SIZE_T token_section_size = 0;
+    void *token_view = NULL;
+    UINT64 frame_id = 0;
+    UINT frame_update_count;
+    BOOL frame_has_more;
+    LUID composition_luid;
     RECT rect, returned_rect;
     UINT64 count, new_count;
     BOOL enabled, guarded;
@@ -2516,6 +2618,21 @@ static void test_native_d2d_device_contracts(void)
         skip("Failed to create device.\n");
         return;
     }
+
+    hr = ID3D11Device_QueryInterface(device, &IID_IDXGIDevice, (void **)&dxgi_device);
+    ok(hr == S_OK, "Failed to get DXGI device, hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto done;
+    hr = IDXGIDevice_GetAdapter(dxgi_device, &adapter);
+    IDXGIDevice_Release(dxgi_device);
+    ok(hr == S_OK, "Failed to get DXGI adapter, hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto done;
+    hr = IDXGIAdapter_GetDesc(adapter, &adapter_desc);
+    IDXGIAdapter_Release(adapter);
+    ok(hr == S_OK, "Failed to get DXGI adapter description, hr %#lx.\n", hr);
+    if (FAILED(hr))
+        goto done;
 
     hr = ID3D11Device_QueryInterface(device, &IID_ID3D11DeviceInternal, (void **)&device_internal);
     if (FAILED(hr))
@@ -2629,6 +2746,17 @@ static void test_native_d2d_device_contracts(void)
                 "Got format %u.\n", composition_desc.Format);
         ok(composition_desc.BindFlags == (D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET),
                 "Got bind flags %#x.\n", composition_desc.BindFlags);
+        hr = ID3D11Device_CreateRenderTargetView(device, (ID3D11Resource *)composition_texture,
+                NULL, &composition_rtv);
+        ok(hr == S_OK, "Failed to create composition render target view, hr %#lx.\n", hr);
+        if (SUCCEEDED(hr))
+        {
+            ID3D11Device_GetImmediateContext(device, &context);
+            ID3D11DeviceContext_ClearRenderTargetView(context, composition_rtv, clear_color);
+            ID3D11DeviceContext_Release(context);
+            ID3D11RenderTargetView_Release(composition_rtv);
+            composition_rtv = NULL;
+        }
 
         composition_buffers[0] = (IUnknown *)device;
         hr = device_internal->lpVtbl->PresentCompositionBuffers(device_internal,
@@ -2650,10 +2778,216 @@ static void test_native_d2d_device_contracts(void)
                 "Got unexpected token %p.\n", composition_token);
         if (!status)
         {
+            memset(&composition_luid, 0, sizeof(composition_luid));
+            status = NtValidateCompositionSurfaceHandle(composition_surface, &composition_luid);
+            ok(status == STATUS_SUCCESS, "Got composition validation status %#lx.\n", status);
+            composition_binding = ((UINT64)(UINT)composition_luid.HighPart << 32) |
+                    composition_luid.LowPart;
+            frame_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+            ok(!!frame_event, "Failed to create composition frame event, error %lu.\n",
+                    GetLastError());
+            if (frame_event)
+            {
+                status = NtDCompositionCreateConnection(TRUE, frame_event, &frame_connection);
+                ok(status == STATUS_SUCCESS, "Got frame connection status %#lx.\n", status);
+            }
+            if (frame_connection)
+            {
+                status = NtTokenManagerOpenSectionAndEvents(&token_section, &token_section_size,
+                        &token_event_a, &token_event_b);
+                ok(status == STATUS_SUCCESS, "Got token section status %#lx.\n", status);
+                ok(token_section_size == 0x1000, "Got token section size %Iu.\n",
+                        token_section_size);
+                if (!status)
+                {
+                    token_view = MapViewOfFile(token_section, FILE_MAP_READ, 0, 0,
+                            token_section_size);
+                    ok(!!token_view, "Failed to map token section, error %lu.\n", GetLastError());
+                }
+            }
             composition_buffers[0] = composition_resource;
             hr = device_internal->lpVtbl->PresentCompositionBuffers(device_internal,
                     composition_token, composition_buffers, 1);
             ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+            if (token_view)
+            {
+                status = NtDCompositionBeginFrame(frame_connection, &frame_info, &frame_id);
+                ok(status == STATUS_SUCCESS, "Got frame begin status %#lx.\n", status);
+                frame_update_count = 0xcccccccc;
+                frame_has_more = 0xcccccccc;
+                status = NtDCompositionGetFrameSurfaceUpdates(&frame_id, &frame_update_count,
+                        &frame_has_more);
+                ok(status == STATUS_SUCCESS, "Got frame surface-update status %#lx.\n", status);
+                ok(frame_update_count == 1, "Got frame surface-update count %u.\n",
+                        frame_update_count);
+                ok(!frame_has_more, "Got frame surface-update continuation %u.\n",
+                        frame_has_more);
+                ok(*(UINT *)token_view == 2, "Got frame realization type %u.\n",
+                        *(UINT *)token_view);
+                ok(!memcmp((BYTE *)token_view + 0x04, &composition_binding,
+                        sizeof(composition_binding)), "Got an unexpected frame realization LUID.\n");
+                ok(!memcmp((BYTE *)token_view + 0x10, &composition_binding,
+                        sizeof(composition_binding)), "Got an unexpected frame binding.\n");
+                ok(*(UINT *)((BYTE *)token_view + 0xc0) == 1,
+                        "Got frame dirty-region count %u.\n",
+                        *(UINT *)((BYTE *)token_view + 0xc0));
+                SetRect(&rect, 0, 0, 32, 32);
+                ok(EqualRect((RECT *)((BYTE *)token_view + 0x20), &rect),
+                        "Got frame dirty rect %s.\n",
+                        wine_dbgstr_rect((RECT *)((BYTE *)token_view + 0x20)));
+                frame_update_count = 0xcccccccc;
+                frame_has_more = 0xcccccccc;
+                status = NtDCompositionGetFrameSurfaceUpdates(&frame_id, &frame_update_count,
+                        &frame_has_more);
+                ok(status == STATUS_SUCCESS, "Got repeated frame surface-update status %#lx.\n",
+                        status);
+                ok(!frame_update_count, "Got repeated frame surface-update count %u.\n",
+                        frame_update_count);
+                ok(!frame_has_more, "Got repeated frame surface-update continuation %u.\n",
+                        frame_has_more);
+                confirm_info.frame_id = frame_id;
+                status = NtDCompositionConfirmFrame(frame_connection, &confirm_info);
+                ok(status == STATUS_SUCCESS, "Got frame confirm status %#lx.\n", status);
+            }
+            memset(binding_info, 0xcc, sizeof(binding_info));
+            status = NtQueryCompositionSurfaceBinding(composition_surface, &composition_binding,
+                    binding_info);
+            ok(status == STATUS_SUCCESS, "Got composition binding status %#lx.\n", status);
+            if (!status)
+            {
+                shared_handle = *(HANDLE *)(binding_info + 0xa8);
+                ok(!memcmp(binding_info + 0xb0, &adapter_desc.AdapterLuid,
+                        sizeof(adapter_desc.AdapterLuid)),
+                        "Got an unexpected composition adapter LUID.\n");
+            }
+            if (token_view)
+            {
+                ok(!memcmp((BYTE *)token_view + 0xe0, binding_info + 0x10, 0x90),
+                        "Frame realization attributes differ from binding attributes.\n");
+                ok(*(UINT *)((BYTE *)token_view + 0x174) ==
+                        *(UINT *)((BYTE *)token_view + 0x1c),
+                        "Got frame realization sequence %u, present count %u.\n",
+                        *(UINT *)((BYTE *)token_view + 0x174),
+                        *(UINT *)((BYTE *)token_view + 0x1c));
+            }
+            memset(surface_update, 0xcc, sizeof(surface_update));
+            status = NtQueryCompositionSurfaceRenderingRealization(composition_surface,
+                    surface_update);
+            ok(status == STATUS_SUCCESS, "Got composition realization status %#lx.\n", status);
+            ok(*(UINT *)(surface_update + 0x00) == 2,
+                    "Got composition realization type %u.\n", *(UINT *)(surface_update + 0x00));
+            ok(!memcmp(surface_update + 0x04, &composition_binding, sizeof(composition_binding)),
+                    "Got an unexpected realization LUID.\n");
+            ok(!memcmp(surface_update + 0x10, &composition_binding, sizeof(composition_binding)),
+                    "Got an unexpected realization binding.\n");
+            ok(!*(UINT *)(surface_update + 0x18), "Got realization index %u.\n",
+                    *(UINT *)(surface_update + 0x18));
+            ok(!!*(UINT *)(surface_update + 0x1c), "Got zero present count.\n");
+            ok(*(UINT *)(surface_update + 0xc0) == 1, "Got dirty-region count %u.\n",
+                    *(UINT *)(surface_update + 0xc0));
+            SetRect(&rect, 0, 0, 32, 32);
+            ok(EqualRect((RECT *)(surface_update + 0x20), &rect),
+                    "Got unexpected dirty rect %s.\n",
+                    wine_dbgstr_rect((RECT *)(surface_update + 0x20)));
+            ok(!memcmp(surface_update + 0xe0, binding_info + 0x10, 0x90),
+                    "Realization attributes differ from binding attributes.\n");
+            ok(*(UINT *)(surface_update + 0x174) == *(UINT *)(surface_update + 0x1c),
+                    "Got realization sequence %u, present count %u.\n",
+                    *(UINT *)(surface_update + 0x174), *(UINT *)(surface_update + 0x1c));
+            ok(!!shared_handle, "Got null composition realization handle.\n");
+            memset(dirty_region, 0xcc, sizeof(dirty_region));
+            status = NtOpenCompositionSurfaceDirtyRegion(composition_surface,
+                    &composition_binding, binding_info + 0xa0, dirty_region);
+            ok(status == STATUS_SUCCESS, "Got post-query dirty-region status %#lx.\n", status);
+            ok(!*(UINT *)(dirty_region + 0xa0), "Got post-query dirty-region count %u.\n",
+                    *(UINT *)(dirty_region + 0xa0));
+            if (shared_handle)
+            {
+                hr = ID3D11Device_OpenSharedResource(device, shared_handle,
+                        &IID_ID3D11Texture2D, (void **)&shared_texture);
+                ok(hr == S_OK, "Failed to open composition realization, hr %#lx.\n", hr);
+                CloseHandle(shared_handle);
+                shared_handle = NULL;
+            }
+            if (shared_texture)
+            {
+                ID3D11Texture2D_GetDesc(shared_texture, &texture_desc);
+                texture_desc.Usage = D3D11_USAGE_STAGING;
+                texture_desc.BindFlags = 0;
+                texture_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                texture_desc.MiscFlags = 0;
+                hr = ID3D11Device_CreateTexture2D(device, &texture_desc, NULL, &readback_texture);
+                ok(hr == S_OK, "Failed to create composition readback texture, hr %#lx.\n", hr);
+                if (SUCCEEDED(hr))
+                {
+                    ID3D11Device_GetImmediateContext(device, &context);
+                    ID3D11DeviceContext_CopyResource(context, (ID3D11Resource *)readback_texture,
+                            (ID3D11Resource *)shared_texture);
+                    hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)readback_texture,
+                            0, D3D11_MAP_READ, 0, &mapped);
+                    ok(hr == S_OK, "Failed to map composition readback texture, hr %#lx.\n", hr);
+                    if (SUCCEEDED(hr))
+                    {
+                        ok(abs((int)*(BYTE *)mapped.pData - 128) <= 1,
+                                "Got initial composition realization value %#x.\n",
+                                *(BYTE *)mapped.pData);
+                        ID3D11DeviceContext_Unmap(context,
+                                (ID3D11Resource *)readback_texture, 0);
+                    }
+                    ID3D11DeviceContext_Release(context);
+                }
+            }
+            hr = ID3D11Device_CreateRenderTargetView(device,
+                    (ID3D11Resource *)composition_texture, NULL, &composition_rtv);
+            ok(hr == S_OK, "Failed to recreate composition render target view, hr %#lx.\n", hr);
+            if (SUCCEEDED(hr))
+            {
+                ID3D11Device_GetImmediateContext(device, &context);
+                ID3D11DeviceContext_ClearRenderTargetView(context, composition_rtv, updated_color);
+                ID3D11DeviceContext_Release(context);
+                ID3D11RenderTargetView_Release(composition_rtv);
+                composition_rtv = NULL;
+            }
+            hr = device_internal->lpVtbl->PresentCompositionBuffers(device_internal,
+                    composition_token, composition_buffers, 1);
+            ok(hr == S_OK, "Got second composition present hr %#lx.\n", hr);
+            memset(dirty_region, 0xcc, sizeof(dirty_region));
+            status = NtOpenCompositionSurfaceDirtyRegion(composition_surface,
+                    &composition_binding, binding_info + 0xa0, dirty_region);
+            ok(status == STATUS_SUCCESS, "Got presented dirty-region status %#lx.\n", status);
+            ok(*(UINT *)(dirty_region + 0xa0) == 1, "Got presented dirty-region count %u.\n",
+                    *(UINT *)(dirty_region + 0xa0));
+            ok(EqualRect((RECT *)dirty_region, &rect), "Got presented dirty rect %s.\n",
+                    wine_dbgstr_rect((RECT *)dirty_region));
+            memset(dirty_region, 0xcc, sizeof(dirty_region));
+            status = NtOpenCompositionSurfaceDirtyRegion(composition_surface,
+                    &composition_binding, binding_info + 0xa0, dirty_region);
+            ok(status == STATUS_SUCCESS, "Got reset dirty-region status %#lx.\n", status);
+            ok(!*(UINT *)(dirty_region + 0xa0), "Got reset dirty-region count %u.\n",
+                    *(UINT *)(dirty_region + 0xa0));
+            if (shared_texture && readback_texture)
+            {
+                ID3D11Device_GetImmediateContext(device, &context);
+                ID3D11DeviceContext_CopyResource(context, (ID3D11Resource *)readback_texture,
+                        (ID3D11Resource *)shared_texture);
+                hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)readback_texture,
+                        0, D3D11_MAP_READ, 0, &mapped);
+                ok(hr == S_OK, "Failed to map updated composition readback texture, hr %#lx.\n", hr);
+                if (SUCCEEDED(hr))
+                {
+                    ok(abs((int)*(BYTE *)mapped.pData - 64) <= 1,
+                            "Got updated composition realization value %#x.\n",
+                            *(BYTE *)mapped.pData);
+                    ID3D11DeviceContext_Unmap(context,
+                            (ID3D11Resource *)readback_texture, 0);
+                }
+                ID3D11DeviceContext_Release(context);
+            }
+            if (readback_texture) ID3D11Texture2D_Release(readback_texture);
+            readback_texture = NULL;
+            if (shared_texture) ID3D11Texture2D_Release(shared_texture);
+            shared_texture = NULL;
             NtClose(composition_token);
         }
 
@@ -2661,6 +2995,12 @@ static void test_native_d2d_device_contracts(void)
         status = NtUnBindCompositionSurface(composition_surface, TRUE, FALSE);
         ok(status == STATUS_INVALID_HANDLE, "Got unexpected status %#lx.\n", status);
     }
+    if (token_view) UnmapViewOfFile(token_view);
+    if (token_section) CloseHandle(token_section);
+    if (token_event_a) CloseHandle(token_event_a);
+    if (token_event_b) CloseHandle(token_event_b);
+    if (frame_connection) NtDCompositionDestroyConnection(frame_connection);
+    if (frame_event) CloseHandle(frame_event);
     device_internal->lpVtbl->Release(device_internal);
 
     hr = ID3D11Device_QueryInterface(device, &IID_ID3D11Device1, (void **)&device1);
@@ -38381,6 +38721,7 @@ START_TEST(d3d11)
 
     queue_test(test_create_device);
     queue_for_each_feature_level(test_device_interfaces);
+    queue_test(test_offer_reclaim_resources);
     queue_test(test_native_d2d_device_contracts);
     queue_test(test_native_xaml_device_contract);
     queue_test(test_fence);

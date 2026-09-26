@@ -4297,6 +4297,12 @@ static void dump_set_dcomp_channel_connection_request( const struct set_dcomp_ch
     dump_uint64( ", connection=", &req->connection );
 }
 
+static void dump_set_dcomp_channel_application_id_request( const struct set_dcomp_channel_application_id_request *req )
+{
+    fprintf( stderr, " channel=%08x", req->channel );
+    dump_varargs_bytes( ", application_id=", cur_size );
+}
+
 static void dump_create_dcomp_shared_section_request( const struct create_dcomp_shared_section_request *req )
 {
     fprintf( stderr, " channel=%08x", req->channel );
@@ -4332,6 +4338,7 @@ static void dump_publish_dcomp_resource_request( const struct publish_dcomp_reso
     fprintf( stderr, " channel=%08x", req->channel );
     fprintf( stderr, ", resource=%08x", req->resource );
     fprintf( stderr, ", type=%08x", req->type );
+    fprintf( stderr, ", source_ready=%d", req->source_ready );
 }
 
 static void dump_publish_dcomp_resource_reply( const struct publish_dcomp_resource_reply *req )
@@ -4365,6 +4372,7 @@ static void dump_open_dcomp_shared_resource_reply( const struct open_dcomp_share
 static void dump_get_dcomp_connection_batch_request( const struct get_dcomp_connection_batch_request *req )
 {
     fprintf( stderr, " connection=%04x", req->connection );
+    dump_uint64( ", synchronization_id=", &req->synchronization_id );
 }
 
 static void dump_get_dcomp_connection_batch_reply( const struct get_dcomp_connection_batch_reply *req )
@@ -4372,6 +4380,7 @@ static void dump_get_dcomp_connection_batch_reply( const struct get_dcomp_connec
     fprintf( stderr, " type=%08x", req->type );
     fprintf( stderr, ", channel=%08x", req->channel );
     fprintf( stderr, ", value=%08x", req->value );
+    fprintf( stderr, ", more=%d", req->more );
     dump_uint64( ", connection=", &req->connection );
     dump_uint64( ", object=", &req->object );
     dump_varargs_bytes( ", data=", cur_size );
@@ -4407,6 +4416,16 @@ static void dump_get_dcomp_channel_batch_id_request( const struct get_dcomp_chan
 static void dump_get_dcomp_channel_batch_id_reply( const struct get_dcomp_channel_batch_id_reply *req )
 {
     fprintf( stderr, " batch_id=%08x", req->batch_id );
+}
+
+static void dump_synchronize_dcomp_channel_request( const struct synchronize_dcomp_channel_request *req )
+{
+    fprintf( stderr, " channel=%08x", req->channel );
+}
+
+static void dump_synchronize_dcomp_channel_reply( const struct synchronize_dcomp_channel_reply *req )
+{
+    dump_uint64( " synchronization_id=", &req->synchronization_id );
 }
 
 static void dump_commit_dcomp_channel_request( const struct commit_dcomp_channel_request *req )
@@ -4492,6 +4511,9 @@ static void dump_set_dcomp_surface_bound_request( const struct set_dcomp_surface
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", bound=%d", req->bound );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", shared=%d", req->shared );
+    dump_varargs_bytes( ", info=", cur_size );
 }
 
 static void dump_set_dcomp_surface_bound_reply( const struct set_dcomp_surface_bound_reply *req )
@@ -4670,6 +4692,61 @@ static void dump_dirty_window_logical_surface_request( const struct dirty_window
 {
     fprintf( stderr, " handle=%08x", req->handle );
     fprintf( stderr, ", serial=%08x", req->serial );
+}
+
+static void dump_duplicate_dcomp_surface_request( const struct duplicate_dcomp_surface_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", consumer=%d", req->consumer );
+}
+
+static void dump_duplicate_dcomp_surface_reply( const struct duplicate_dcomp_surface_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_uint64( ", binding_id=", &req->binding_id );
+}
+
+static void dump_set_dcomp_surface_ink_cookie_request( const struct set_dcomp_surface_ink_cookie_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", cookie=%08x", req->cookie );
+}
+
+static void dump_get_dcomp_surface_state_request( const struct get_dcomp_surface_state_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", include_info=%d", req->include_info );
+}
+
+static void dump_get_dcomp_surface_state_reply( const struct get_dcomp_surface_state_reply *req )
+{
+    dump_uint64( " binding_id=", &req->binding_id );
+    fprintf( stderr, ", ink_cookie=%08x", req->ink_cookie );
+    fprintf( stderr, ", present_count=%08x", req->present_count );
+    fprintf( stderr, ", bound=%d", req->bound );
+    fprintf( stderr, ", realization=%04x", req->realization );
+    dump_varargs_bytes( ", info=", cur_size );
+}
+
+static void dump_open_dcomp_surface_dirty_region_request( const struct open_dcomp_surface_dirty_region_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_uint64( ", binding_id=", &req->binding_id );
+    fprintf( stderr, ", realization=%08x", req->realization );
+}
+
+static void dump_open_dcomp_surface_dirty_region_reply( const struct open_dcomp_surface_dirty_region_reply *req )
+{
+    fprintf( stderr, " present_count=%08x", req->present_count );
+    dump_varargs_bytes( ", region=", cur_size );
+}
+
+static void dump_report_inertia_request( const struct report_inertia_request *req )
+{
+    dump_uint64( " id=", &req->id );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", window=%08x", req->window );
+    dump_varargs_bytes( ", data=", cur_size );
 }
 
 typedef void (*dump_func)( const void *req );
@@ -5059,6 +5136,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_channel_request,
     (dump_func)dump_destroy_dcomp_channel_request,
     (dump_func)dump_set_dcomp_channel_connection_request,
+    (dump_func)dump_set_dcomp_channel_application_id_request,
     (dump_func)dump_create_dcomp_shared_section_request,
     (dump_func)dump_get_dcomp_shared_section_update_request,
     (dump_func)dump_release_dcomp_shared_section_request,
@@ -5069,6 +5147,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_release_all_dcomp_resources_request,
     (dump_func)dump_get_deleted_dcomp_resources_request,
     (dump_func)dump_get_dcomp_channel_batch_id_request,
+    (dump_func)dump_synchronize_dcomp_channel_request,
     (dump_func)dump_commit_dcomp_channel_request,
     (dump_func)dump_get_d3dkmt_process_scheduling_priority_class_request,
     (dump_func)dump_set_d3dkmt_process_scheduling_priority_class_request,
@@ -5099,6 +5178,11 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_window_logical_surface_metadata_request,
     (dump_func)dump_signal_window_logical_surface_request,
     (dump_func)dump_dirty_window_logical_surface_request,
+    (dump_func)dump_duplicate_dcomp_surface_request,
+    (dump_func)dump_set_dcomp_surface_ink_cookie_request,
+    (dump_func)dump_get_dcomp_surface_state_request,
+    (dump_func)dump_open_dcomp_surface_dirty_region_request,
+    (dump_func)dump_report_inertia_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5486,6 +5570,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_channel_reply,
     NULL,
     NULL,
+    NULL,
     (dump_func)dump_create_dcomp_shared_section_reply,
     (dump_func)dump_get_dcomp_shared_section_update_reply,
     NULL,
@@ -5496,6 +5581,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_release_all_dcomp_resources_reply,
     (dump_func)dump_get_deleted_dcomp_resources_reply,
     (dump_func)dump_get_dcomp_channel_batch_id_reply,
+    (dump_func)dump_synchronize_dcomp_channel_reply,
     (dump_func)dump_commit_dcomp_channel_reply,
     (dump_func)dump_get_d3dkmt_process_scheduling_priority_class_reply,
     NULL,
@@ -5525,6 +5611,11 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_window_logical_surface_reply,
     NULL,
     NULL,
+    NULL,
+    (dump_func)dump_duplicate_dcomp_surface_reply,
+    NULL,
+    (dump_func)dump_get_dcomp_surface_state_reply,
+    (dump_func)dump_open_dcomp_surface_dirty_region_reply,
     NULL,
 };
 
@@ -5913,6 +6004,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "create_dcomp_channel",
     "destroy_dcomp_channel",
     "set_dcomp_channel_connection",
+    "set_dcomp_channel_application_id",
     "create_dcomp_shared_section",
     "get_dcomp_shared_section_update",
     "release_dcomp_shared_section",
@@ -5923,6 +6015,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "release_all_dcomp_resources",
     "get_deleted_dcomp_resources",
     "get_dcomp_channel_batch_id",
+    "synchronize_dcomp_channel",
     "commit_dcomp_channel",
     "get_d3dkmt_process_scheduling_priority_class",
     "set_d3dkmt_process_scheduling_priority_class",
@@ -5953,6 +6046,11 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_window_logical_surface_metadata",
     "signal_window_logical_surface",
     "dirty_window_logical_surface",
+    "duplicate_dcomp_surface",
+    "set_dcomp_surface_ink_cookie",
+    "get_dcomp_surface_state",
+    "open_dcomp_surface_dirty_region",
+    "report_inertia",
 };
 
 static const struct

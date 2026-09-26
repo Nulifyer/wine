@@ -823,6 +823,9 @@ W32KAPI NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UIN
 W32KAPI NTSTATUS WINAPI NtDCompositionGetDeletedResources( UINT channel, UINT capacity,
                                                             void **resources, UINT *count );
 W32KAPI NTSTATUS WINAPI NtDCompositionReleaseAllResources( UINT channel, BYTE *result );
+W32KAPI NTSTATUS WINAPI NtDCompositionSynchronize( UINT channel, UINT64 *synchronization_id );
+W32KAPI NTSTATUS WINAPI NtDCompositionTelemetrySetApplicationId( UINT channel, UINT64 size,
+                                                                  const void *application_id );
 W32KAPI NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *state,
                                                       ULONG flags, HANDLE sync_object,
                                                       const void *protocol_blocks, const UINT *resources,
@@ -881,6 +884,16 @@ W32KAPI NTSTATUS WINAPI NtBindCompositionSurface( HANDLE surface, BOOL enable, U
                                                    BOOL shared, const void *buffer_info,
                                                    UINT64 *binding_id );
 W32KAPI NTSTATUS WINAPI NtUnBindCompositionSurface( HANDLE surface, BOOL release, BOOL shared );
+W32KAPI NTSTATUS WINAPI NtValidateCompositionSurfaceHandle( HANDLE surface, LUID *luid );
+W32KAPI NTSTATUS WINAPI NtQueryCompositionSurfaceBinding( HANDLE surface,
+                                                           const UINT64 *binding_id,
+                                                           void *buffer_info );
+W32KAPI NTSTATUS WINAPI NtOpenCompositionSurfaceDirtyRegion( HANDLE surface,
+                                                              const UINT64 *binding_id,
+                                                              const void *realization_info,
+                                                              void *region );
+W32KAPI NTSTATUS WINAPI NtQueryCompositionSurfaceRenderingRealization( HANDLE surface,
+                                                                        void *update );
 W32KAPI NTSTATUS WINAPI NtTokenManagerCreateCompositionTokenHandle(
         const struct dcomposition_token_surface_update *updates, UINT update_count, UINT surface_count,
         const UINT64 *connection, const UINT64 *device, HANDLE *token );
@@ -1165,6 +1178,8 @@ W32KAPI BOOL    WINAPI NtUserRemoveClipboardFormatListener( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserRemoveMenu( HMENU menu, UINT id, UINT flags );
 W32KAPI HANDLE  WINAPI NtUserRemoveProp( HWND hwnd, const WCHAR *str );
 W32KAPI BOOL    WINAPI NtUserReplyMessage( LRESULT result );
+W32KAPI BOOL    WINAPI NtUserReportInertia( ULONG_PTR id, UINT flags, HWND hwnd, const void *routing,
+                                            const void *info, const void *region );
 W32KAPI INT     WINAPI NtUserScheduleDispatchNotification( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const RECT *clip,
                                        HRGN ret_update_rgn, RECT *update_rect );

@@ -5040,6 +5040,12 @@ struct alpc_message_info
     client_ptr_t connection;   /* private 64-bit connection value */
 @END
 
+/* Set the application identity emitted with the channel's next commit. */
+@REQ(set_dcomp_channel_application_id)
+    unsigned int channel;      /* owner channel ID */
+    VARARG(application_id,bytes); /* validated UTF-16 bytes, without server ownership */
+@END
+
 /* Create an owner-writable section retained by a DirectComposition resource. */
 @REQ(create_dcomp_shared_section)
     unsigned int channel;      /* owner channel ID */
@@ -5069,6 +5075,7 @@ struct alpc_message_info
     unsigned int channel;      /* owner channel ID */
     unsigned int resource;     /* owner-local resource ID */
     unsigned int type;         /* MIL resource type */
+    int          source_ready; /* source create was delivered by an earlier commit */
 @REPLY
     obj_handle_t handle;       /* shared-resource handle */
 @END
@@ -5093,10 +5100,12 @@ struct alpc_message_info
 /* Pop one record from a DWM connection's pending batch queue. */
 @REQ(get_dcomp_connection_batch)
     obj_handle_t connection;   /* DWM connection handle */
+    client_ptr_t synchronization_id; /* zero for ready batches, otherwise an exact synchronized batch */
 @REPLY
     unsigned int type;         /* create, close or command batch */
     unsigned int channel;      /* session-visible channel ID */
     unsigned int value;        /* create flags or batch byte count */
+    int more;                  /* another record exists for this selector */
     client_ptr_t connection;   /* private client connection value */
     client_ptr_t object;       /* private create-record object */
     VARARG(data,bytes);        /* stable command-batch bytes */
@@ -5123,6 +5132,13 @@ struct alpc_message_info
     unsigned int selector;     /* DCOMPOSITIONBATCHSELECTOR value */
 @REPLY
     unsigned int batch_id;
+@END
+
+/* Associate a session synchronization ID with the channel's current batch. */
+@REQ(synchronize_dcomp_channel)
+    unsigned int channel;      /* owner channel ID */
+@REPLY
+    client_ptr_t synchronization_id; /* nonzero session synchronization ID */
 @END
 
 /* Copy one validated DirectComposition protocol payload into the commit queue. */
@@ -5198,6 +5214,9 @@ struct alpc_message_info
 @REQ(set_dcomp_surface_bound)
     obj_handle_t handle;          /* composition surface handle */
     int          bound;           /* nonzero binds, zero unbinds */
+    unsigned int flags;           /* producer binding flags */
+    int          shared;          /* producer shared-binding mode */
+    VARARG(info,bytes);            /* CSM_BUFFER_INFO when binding */
 @REPLY
     unsigned __int64 binding_id;  /* stable surface binding identity */
 @END
@@ -5346,4 +5365,50 @@ struct alpc_message_info
 @REQ(dirty_window_logical_surface)
     user_handle_t  handle;        /* logical-surface window handle */
     unsigned int   serial;        /* publishing surface serial */
+@END
+
+/* Retain a composition surface in the caller or open it in session DWM. */
+@REQ(duplicate_dcomp_surface)
+    obj_handle_t handle;           /* caller-owned composition surface */
+    int          consumer;         /* zero retains locally, nonzero opens in DWM */
+@REPLY
+    obj_handle_t handle;           /* duplicated handle in the selected process */
+    unsigned __int64 binding_id;   /* stable identity of the bound surface */
+@END
+
+/* Update non-marshaled state attached to a composition surface. */
+@REQ(set_dcomp_surface_ink_cookie)
+    obj_handle_t handle;           /* caller-owned composition surface */
+    unsigned int cookie;           /* surface ink cookie */
+@END
+
+/* Query identity and host-owned state for a composition surface. */
+@REQ(get_dcomp_surface_state)
+    obj_handle_t handle;           /* composition surface in the caller */
+    int include_info;              /* return binding data and duplicate its realization */
+@REPLY
+    unsigned __int64 binding_id;   /* stable surface LUID */
+    unsigned int ink_cookie;       /* current surface ink cookie */
+    unsigned int present_count;    /* completed producer publications */
+    int bound;                     /* surface currently has a binding */
+    obj_handle_t realization;      /* caller-local single-buffer realization */
+    VARARG(info,bytes);             /* stable CSM_BUFFER_INFO snapshot */
+@END
+
+/* Read and reset one composition realization's accumulated dirty region. */
+@REQ(open_dcomp_surface_dirty_region)
+    obj_handle_t handle;           /* composition surface in the caller */
+    unsigned __int64 binding_id;   /* binding identity selected by DWM */
+    unsigned int realization;      /* zero-based realization index */
+@REPLY
+    unsigned int present_count;    /* completed producer publications */
+    VARARG(region,bytes);           /* ten RECT slots followed by the count */
+@END
+
+/* Start or stop the session-owned Direct Manipulation inertia record. */
+@REQ(report_inertia)
+    unsigned __int64 id;              /* caller-defined interaction identity */
+    unsigned int     flags;           /* start, stop, compositor and replacement flags */
+    user_handle_t    window;          /* regular input destination, or zero for DWM */
+    VARARG(data,bytes);                /* copied info, optional region and routing state */
 @END

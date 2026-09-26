@@ -33,6 +33,7 @@
 #include "win32u_private.h"
 #include "ntuser_private.h"
 #include "wine/server.h"
+#include "dcomp_protocol_schema.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dcomp);
 
@@ -54,6 +55,7 @@ struct dcomp_channel_view
 {
     struct list entry;
     struct list resources;
+    struct list retired_resources;
     UINT channel;
     void *address;
     SIZE_T size;
@@ -70,16 +72,35 @@ struct dcomp_property_value
     BOOL added;
 };
 
+struct dcomp_resource_view;
+static void free_dcomp_resource_view( struct dcomp_resource_view *resource );
+
+struct dcomp_weak_reference
+{
+    struct list entry;
+    struct dcomp_resource_view *target;
+};
+
 struct dcomp_resource_view
 {
     struct list entry;
+    /* The application-visible id is released independently from the
+     * connection protocol id.  A client may reuse id while the old marshaler
+     * remains alive through another resource reference. */
+    UINT client_id;
     UINT id;
+    UINT retired_batch_id;
     UINT type;
     UINT references;
+    struct list weak_references;
     struct dcomp_resource_view *root;
     struct dcomp_resource_view *visual_transform;
     struct dcomp_resource_view *visual_clip;
     struct dcomp_resource_view *sprite_content;
+    struct dcomp_resource_view *mask_brush_source;
+    struct dcomp_resource_view *mask_brush_mask;
+    struct dcomp_resource_view *surface_brush_surface;
+    struct dcomp_resource_view *surface_brush_transform;
     struct dcomp_resource_view *window_flip_surface_clip;
     struct dcomp_resource_view *window_sprite_bitmap;
     struct dcomp_resource_view *window_sprite_clip;
@@ -97,6 +118,16 @@ struct dcomp_resource_view
     BOOL visual_transform_dirty;
     BOOL visual_clip_dirty;
     BOOL sprite_content_dirty;
+    BOOL mask_brush_source_dirty;
+    BOOL mask_brush_mask_dirty;
+    BOOL surface_brush_surface_dirty;
+    BOOL surface_brush_transform_dirty;
+    BOOL surface_brush_horizontal_dirty;
+    BOOL surface_brush_vertical_dirty;
+    BOOL surface_brush_stretch_dirty;
+    BOOL surface_brush_interpolation_dirty;
+    BOOL surface_brush_snap_dirty;
+    BOOL surface_brush_downsample_dirty;
     BOOL root_dirty;
     BOOL children_clear_dirty;
     BOOL connection_announced;
@@ -122,6 +153,20 @@ struct dcomp_resource_view
     float visual_relative_offset[3];
     float visual_relative_size[2];
     float visual_size[2];
+    LONG surface_brush_source_rect[4];
+    LONG surface_brush_dirty_rect[4];
+    float surface_brush_horizontal;
+    float surface_brush_vertical;
+    UINT surface_brush_stretch;
+    UINT surface_brush_interpolation;
+    BYTE surface_brush_snap;
+    BYTE surface_brush_downsample;
+    BOOL surface_brush_swapchain;
+    BOOL surface_brush_emitted;
+    HANDLE composition_surface;
+    UINT64 composition_surface_binding_id;
+    BYTE composition_surface_flags[2];
+    BOOL composition_surface_dirty;
     UINT window_node_dirty;
     BYTE window_alpha_margins[16];
     BYTE window_content_relative_client_rect[16];
@@ -167,11 +212,14 @@ struct dcomp_resource_view
     BYTE rectangle_mode;
     BYTE rectangle_expression_mode;
     BYTE rectangle_flag;
+    BYTE *region_rectangles;
+    UINT region_rectangles_size;
+    BOOL region_rectangles_dirty;
     struct dcomp_property_value *properties;
     UINT property_count;
     UINT property_data_size;
-    UINT expression_property_resource_id;
-    UINT *expression_sources;
+    struct dcomp_weak_reference expression_property_resource;
+    struct dcomp_weak_reference *expression_sources;
     UINT expression_source_count;
     BYTE *expression_reference_info;
     UINT expression_reference_count;
@@ -506,8 +554,96 @@ static struct dcomp_resource_view *find_dcomp_resource_view( struct dcomp_channe
     struct dcomp_resource_view *resource;
 
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
-        if (resource->id == id && !resource->client_released) return resource;
+        if (resource->client_id == id && !resource->client_released) return resource;
     return NULL;
+}
+
+static BOOL dcomp_wire_id_in_use( struct dcomp_channel_view *view, UINT id )
+{
+    struct dcomp_resource_view *resource;
+
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+        if (resource->id == id) return TRUE;
+    LIST_FOR_EACH_ENTRY( resource, &view->retired_resources,
+                         struct dcomp_resource_view, entry )
+        if (resource->id == id) return TRUE;
+    return FALSE;
+}
+
+static UINT select_dcomp_wire_id( struct dcomp_channel_view *view, UINT preferred )
+{
+    UINT candidate;
+
+    if (!dcomp_wire_id_in_use( view, preferred )) return preferred;
+    candidate = preferred;
+    do
+    {
+        if (!++candidate) candidate = 1;
+        if (!dcomp_wire_id_in_use( view, candidate )) return candidate;
+    } while (candidate != preferred);
+    return 0;
+}
+
+static void reap_received_dcomp_resources( struct dcomp_channel_view *view )
+{
+    struct dcomp_resource_view *resource, *next;
+    UINT received = 0;
+    NTSTATUS status;
+
+    if (list_empty( &view->retired_resources )) return;
+    SERVER_START_REQ( get_dcomp_channel_batch_id )
+    {
+        req->channel = view->channel;
+        req->selector = 1;
+        status = wine_server_call( req );
+        if (!status) received = reply->batch_id;
+    }
+    SERVER_END_REQ;
+    if (status) return;
+
+    LIST_FOR_EACH_ENTRY_SAFE( resource, next, &view->retired_resources,
+                              struct dcomp_resource_view, entry )
+    {
+        /* Receipt is contiguous.  More than 2^31 simultaneously held commits
+         * would exhaust server memory before serial ordering became ambiguous. */
+        if ((INT)(received - resource->retired_batch_id) < 0) continue;
+        list_remove( &resource->entry );
+        free_dcomp_resource_view( resource );
+    }
+}
+
+static void set_dcomp_weak_reference( struct dcomp_weak_reference *reference,
+                                      struct dcomp_resource_view *target )
+{
+    if (reference->target == target) return;
+    if (reference->target) list_remove( &reference->entry );
+    reference->target = target;
+    if (target)
+        list_add_tail( &target->weak_references, &reference->entry );
+    else
+        list_init( &reference->entry );
+}
+
+static void invalidate_dcomp_weak_references( struct dcomp_resource_view *resource )
+{
+    struct dcomp_weak_reference *reference, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE( reference, next, &resource->weak_references,
+                              struct dcomp_weak_reference, entry )
+    {
+        list_remove( &reference->entry );
+        list_init( &reference->entry );
+        reference->target = NULL;
+    }
+}
+
+static void clear_dcomp_expression_weak_references( struct dcomp_resource_view *resource )
+{
+    UINT i;
+
+    set_dcomp_weak_reference( &resource->expression_property_resource, NULL );
+    for (i = 0; i < resource->expression_source_count; ++i)
+        set_dcomp_weak_reference( &resource->expression_sources[i], NULL );
 }
 
 static void release_dcomp_resource_reference( struct dcomp_resource_view *resource )
@@ -516,6 +652,9 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
     BOOL clear_children = FALSE;
 
     if (--resource->references) return;
+
+    invalidate_dcomp_weak_references( resource );
+    clear_dcomp_expression_weak_references( resource );
 
     if ((root = resource->root))
     {
@@ -536,6 +675,26 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
     if ((reference = resource->sprite_content))
     {
         resource->sprite_content = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->mask_brush_source))
+    {
+        resource->mask_brush_source = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->mask_brush_mask))
+    {
+        resource->mask_brush_mask = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->surface_brush_surface))
+    {
+        resource->surface_brush_surface = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->surface_brush_transform))
+    {
+        resource->surface_brush_transform = NULL;
         release_dcomp_resource_reference( reference );
     }
     if ((reference = resource->window_flip_surface_clip))
@@ -583,9 +742,11 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
 
 static void free_dcomp_resource_view( struct dcomp_resource_view *resource )
 {
+    if (resource->composition_surface) NtClose( resource->composition_surface );
     free( resource->properties );
     free( resource->expression_sources );
     free( resource->expression_reference_info );
+    free( resource->region_rectangles );
     free( resource );
 }
 
@@ -595,7 +756,7 @@ static void remove_unannounced_dcomp_resources( struct dcomp_channel_view *view 
 
     LIST_FOR_EACH_ENTRY_SAFE( resource, next, &view->resources, struct dcomp_resource_view, entry )
     {
-        if (!resource->announced && resource->released)
+        if (!resource->announced && resource->released && !resource->shared_duplicate)
         {
             list_remove( &resource->entry );
             free_dcomp_resource_view( resource );
@@ -702,28 +863,29 @@ static BOOL is_dcomp_derived_resource_type( UINT type, UINT base )
     {
         0xc2, 0x3d, 0x0a, 0x7b, 0x87, 0x7b, 0x3d, 0x2f,
         0x87, 0x11, 0x87, 0x72, 0x87, 0x55, 0x3d, 0x11,
-        0x3d, 0x87, 0x55, 0x87, 0x86, 0x11, 0x00, 0x87,
-        0x3d, 0x87, 0x00, 0x43, 0x72, 0x7b, 0xaf, 0x3d,
-        0x24, 0x00, 0x2f, 0xac, 0x87, 0x11, 0x87, 0x24,
+        0x3d, 0x87, 0x55, 0x87, 0x86, 0x11, 0x11, 0x87,
+        0x3d, 0x87, 0x87, 0x43, 0x72, 0x7b, 0xaf, 0x3d,
+        0x24, 0x24, 0x2f, 0xac, 0x87, 0x11, 0x87, 0x24,
         0x7b, 0x24, 0x2f, 0xac, 0x87, 0x0b, 0xb5, 0x87,
-        0x9e, 0x00, 0xb8, 0x87, 0x86, 0xa8, 0x87, 0x28,
+        0x9e, 0x9e, 0xb8, 0x87, 0x86, 0xa8, 0x87, 0x28,
         0x7b, 0x11, 0x38, 0x43, 0x0b, 0x38, 0x87, 0x3d,
-        0x00, 0x87, 0xa8, 0x7b, 0x87, 0x44, 0x43, 0x87,
-        0x2f, 0x11, 0x5f, 0x72, 0x00, 0x87, 0x00, 0x3d,
-        0x5f, 0x87, 0x86, 0x0b, 0x2f, 0x87, 0x72, 0x00,
-        0x0b, 0xb8, 0x87, 0x00, 0x86, 0x60, 0x87, 0x49,
-        0x4a, 0x3d, 0x43, 0x86, 0x00, 0x72, 0xae, 0x11,
-        0x87, 0xae, 0xaf, 0x44, 0x0b, 0x11, 0x87, 0x43,
-        0x87, 0x00, 0x2f, 0x00, 0x7b, 0x00, 0x72, 0x7b,
-        0x43, 0x49, 0x43, 0x87, 0xb8, 0x43, 0x86, 0x00,
-        0x2f, 0x87, 0xc2, 0xae, 0xaf, 0x3d, 0x0a, 0xae,
-        0xaf, 0x96, 0x87, 0x00, 0x96, 0x98, 0x97, 0x2c,
-        0x96, 0x87, 0x8f, 0x8e, 0x90, 0xb8, 0x3d, 0xb8,
-        0x9e, 0x87, 0x00, 0xae, 0x2f, 0x87, 0x5f, 0xb5,
-        0xb8, 0x00, 0x2f, 0x11, 0xa8, 0x3d, 0x87, 0xb8,
-        0xaf, 0x38, 0xaf, 0xae, 0x00, 0xaf, 0x3d, 0x87,
-        0x00, 0x14, 0x7b, 0x2f, 0x86, 0x87, 0x00, 0xbc,
-        0x87, 0x11, 0xb8, 0x2f,
+        0x3d, 0x87, 0xa8, 0x7b, 0x87, 0x44, 0x43, 0x87,
+        0x2f, 0x11, 0x5f, 0x72, 0x72, 0x87, 0x87, 0x87,
+        0x87, 0x87, 0x87, 0x3d, 0x5f, 0x87, 0x86, 0x0b,
+        0x2f, 0x87, 0x72, 0x72, 0x0b, 0xb8, 0x87, 0x87,
+        0x86, 0x60, 0x87, 0x49, 0x4a, 0x3d, 0x43, 0x86,
+        0x86, 0x72, 0xae, 0x11, 0x87, 0xae, 0xaf, 0x44,
+        0x0b, 0x11, 0x87, 0x43, 0x87, 0x87, 0x2f, 0x2f,
+        0x7b, 0x7b, 0x7b, 0x72, 0x7b, 0x43, 0x49, 0x43,
+        0x87, 0xb8, 0x43, 0x86, 0x86, 0x2f, 0x87, 0xc2,
+        0xae, 0xaf, 0x3d, 0x0a, 0xae, 0xaf, 0x96, 0x87,
+        0x87, 0x96, 0x98, 0x97, 0x2c, 0x96, 0x87, 0x8f,
+        0x8e, 0x90, 0xb8, 0x3d, 0xb8, 0x9e, 0x87, 0x87,
+        0x87, 0xae, 0x2f, 0x87, 0x5f, 0xb5, 0xb8, 0xb8,
+        0x2f, 0x11, 0xa8, 0x3d, 0x87, 0xb8, 0xaf, 0x38,
+        0xaf, 0xae, 0xae, 0xaf, 0x3d, 0x87, 0x87, 0x14,
+        0x7b, 0x2f, 0x86, 0x87, 0x87, 0xbc, 0x87, 0x11,
+        0xb8, 0x2f,
     };
     UINT count = 0;
 
@@ -736,13 +898,23 @@ static BOOL is_dcomp_derived_resource_type( UINT type, UINT base )
 }
 
 static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource,
-                                             UINT id, UINT type )
+                                             UINT id, UINT wire_id, UINT type )
 {
-    resource->id = id;
+    resource->client_id = id;
+    resource->id = wire_id;
     resource->type = type;
     resource->references = 1;
+    list_init( &resource->weak_references );
+    list_init( &resource->expression_property_resource.entry );
     resource->visual = is_dcomp_visual_resource_type( type );
     resource->visual_opacity = 1.0f;
+    if (type == 0xa9)
+    {
+        resource->surface_brush_horizontal = 0.5f;
+        resource->surface_brush_vertical = 0.5f;
+        resource->surface_brush_stretch = 2;
+        resource->surface_brush_interpolation = 1;
+    }
     if (type == 0x7f)
     {
         resource->rectangle[0] = resource->rectangle[1] = -2097152.0f;
@@ -762,6 +934,292 @@ static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource
         resource->manipulation_components_dirty = TRUE;
         resource->manipulation_cookie_dirty = TRUE;
     }
+}
+
+static void replace_dcomp_resource_reference( struct dcomp_resource_view **slot,
+                                               struct dcomp_resource_view *resource );
+
+static NTSTATUS duplicate_dcomp_surface( HANDLE surface, BOOL consumer,
+                                         HANDLE *duplicate, UINT64 *binding_id )
+{
+    NTSTATUS status;
+    HANDLE handle = NULL;
+    UINT64 id = 0;
+
+    SERVER_START_REQ( duplicate_dcomp_surface )
+    {
+        req->handle = wine_server_obj_handle( surface );
+        req->consumer = consumer;
+        status = wine_server_call( req );
+        if (!status)
+        {
+            handle = wine_server_ptr_handle( reply->handle );
+            id = reply->binding_id;
+        }
+    }
+    SERVER_END_REQ;
+    if (!status)
+    {
+        *duplicate = handle;
+        if (binding_id) *binding_id = id;
+    }
+    return status;
+}
+
+static NTSTATUS set_dcomp_composition_surface_handle_property(
+        struct dcomp_resource_view *resource, UINT property, HANDLE handle )
+{
+    HANDLE retained = NULL;
+    UINT64 binding_id = 0;
+    NTSTATUS status;
+
+    if (resource->type != 0x2a || property) return STATUS_NOT_SUPPORTED;
+    if (handle && (status = duplicate_dcomp_surface( handle, FALSE, &retained, &binding_id )))
+        return status;
+    if (binding_id == resource->composition_surface_binding_id)
+    {
+        if (retained) NtClose( retained );
+        return STATUS_SUCCESS;
+    }
+    if (resource->composition_surface) NtClose( resource->composition_surface );
+    resource->composition_surface = retained;
+    resource->composition_surface_binding_id = binding_id;
+    resource->composition_surface_dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_composition_surface_integer_property(
+        struct dcomp_resource_view *resource, UINT property, INT64 value )
+{
+    BYTE flag;
+    NTSTATUS status;
+
+    if (resource->type != 0x2a) return STATUS_NOT_SUPPORTED;
+    if (property == 3)
+    {
+        if (!resource->composition_surface) return STATUS_NOT_SUPPORTED;
+        SERVER_START_REQ( set_dcomp_surface_ink_cookie )
+        {
+            req->handle = wine_server_obj_handle( resource->composition_surface );
+            req->cookie = value;
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        return status;
+    }
+    if (property < 1 || property > 2) return STATUS_NOT_SUPPORTED;
+    flag = !!value;
+    if (resource->composition_surface_flags[property - 1] != flag)
+    {
+        resource->composition_surface_flags[property - 1] = flag;
+        resource->composition_surface_dirty = TRUE;
+    }
+    return STATUS_SUCCESS;
+}
+
+static BOOL dcomp_rect_is_empty( const LONG rect[4] )
+{
+    return rect[0] >= rect[2] || rect[1] >= rect[3];
+}
+
+static void union_dcomp_rect( LONG destination[4], const LONG source[4] )
+{
+    if (dcomp_rect_is_empty( destination )) memcpy( destination, source, 4 * sizeof(*source) );
+    else if (!dcomp_rect_is_empty( source ))
+    {
+        destination[0] = min( destination[0], source[0] );
+        destination[1] = min( destination[1], source[1] );
+        destination[2] = max( destination[2], source[2] );
+        destination[3] = max( destination[3], source[3] );
+    }
+}
+
+static BOOL is_dcomp_surface_brush_surface_type( UINT type )
+{
+    return is_dcomp_derived_resource_type( type, 0x87 ) &&
+           (is_dcomp_derived_resource_type( type, 0x2a ) ||
+            is_dcomp_derived_resource_type( type, 0xbe ) ||
+            is_dcomp_derived_resource_type( type, 0x76 ) ||
+            is_dcomp_derived_resource_type( type, 0x47 ));
+}
+
+static NTSTATUS set_dcomp_surface_brush_buffer_property(
+        struct dcomp_resource_view *resource, UINT property, const BYTE *data, UINT size )
+{
+    if (resource->type != 0xa9) return STATUS_NOT_SUPPORTED;
+    if (property == 1)
+    {
+        if (size != sizeof(resource->surface_brush_source_rect)) return STATUS_INVALID_PARAMETER;
+        memcpy( resource->surface_brush_source_rect, data, size );
+        resource->surface_brush_surface_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    if (property == 2)
+    {
+        if (size != sizeof(resource->surface_brush_dirty_rect)) return STATUS_INVALID_PARAMETER;
+        if (resource->surface_brush_emitted)
+        {
+            union_dcomp_rect( resource->surface_brush_dirty_rect, (const LONG *)data );
+            resource->surface_brush_surface_dirty = TRUE;
+        }
+        return STATUS_SUCCESS;
+    }
+    if (property == 8 || property == 9)
+    {
+        BYTE *value = property == 8 ? &resource->surface_brush_snap :
+                                      &resource->surface_brush_downsample;
+        BOOL *dirty = property == 8 ? &resource->surface_brush_snap_dirty :
+                                      &resource->surface_brush_downsample_dirty;
+
+        if (size != sizeof(*value)) return STATUS_INVALID_PARAMETER;
+        *value = *data;
+        *dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    if (property == 10)
+    {
+        if (size != 1) return STATUS_INVALID_PARAMETER;
+        if (*data && resource->surface_brush_surface &&
+            is_dcomp_derived_resource_type( resource->surface_brush_surface->type, 0x2a ))
+        {
+            resource->surface_brush_swapchain = TRUE;
+            return STATUS_SUCCESS;
+        }
+        return STATUS_NOT_SUPPORTED;
+    }
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS set_dcomp_surface_brush_float_property(
+        struct dcomp_resource_view *resource, UINT property, float value )
+{
+    float *target;
+    BOOL *dirty;
+
+    if (resource->type != 0xa9) return STATUS_NOT_SUPPORTED;
+    if (property == 3)
+    {
+        target = &resource->surface_brush_horizontal;
+        dirty = &resource->surface_brush_horizontal_dirty;
+    }
+    else if (property == 4)
+    {
+        target = &resource->surface_brush_vertical;
+        dirty = &resource->surface_brush_vertical_dirty;
+    }
+    else return STATUS_NOT_SUPPORTED;
+    *target = value;
+    *dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_surface_brush_integer_property(
+        struct dcomp_resource_view *resource, UINT property, INT64 value )
+{
+    UINT *target;
+    BOOL *dirty;
+
+    if (resource->type != 0xa9) return STATUS_NOT_SUPPORTED;
+    if (property == 5)
+    {
+        target = &resource->surface_brush_stretch;
+        dirty = &resource->surface_brush_stretch_dirty;
+    }
+    else if (property == 6)
+    {
+        target = &resource->surface_brush_interpolation;
+        dirty = &resource->surface_brush_interpolation_dirty;
+    }
+    else return STATUS_NOT_SUPPORTED;
+    if (*target != (UINT)value)
+    {
+        *target = value;
+        *dirty = TRUE;
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_surface_brush_reference_property(
+        struct dcomp_channel_view *view, struct dcomp_resource_view *resource,
+        UINT property, UINT reference_id )
+{
+    struct dcomp_resource_view *reference = NULL;
+
+    if (resource->type != 0xa9) return STATUS_NOT_SUPPORTED;
+    if (reference_id && !(reference = find_dcomp_resource_view( view, reference_id )))
+        return STATUS_ACCESS_DENIED;
+    if (property == 0)
+    {
+        if (reference && !is_dcomp_surface_brush_surface_type( reference->type ))
+            return STATUS_INVALID_PARAMETER;
+        replace_dcomp_resource_reference( &resource->surface_brush_surface, reference );
+        if (!reference)
+        {
+            resource->surface_brush_swapchain = FALSE;
+            resource->surface_brush_emitted = FALSE;
+            memset( resource->surface_brush_source_rect, 0,
+                    sizeof(resource->surface_brush_source_rect) );
+            memset( resource->surface_brush_dirty_rect, 0,
+                    sizeof(resource->surface_brush_dirty_rect) );
+        }
+        resource->surface_brush_surface_dirty = TRUE;
+    }
+    else if (property == 7)
+    {
+        if (reference && !is_dcomp_derived_resource_type( reference->type, 0x1d ))
+            return STATUS_INVALID_PARAMETER;
+        if (resource->surface_brush_transform == reference) return STATUS_SUCCESS;
+        replace_dcomp_resource_reference( &resource->surface_brush_transform, reference );
+        resource->surface_brush_transform_dirty = TRUE;
+    }
+    else return STATUS_NOT_SUPPORTED;
+    remove_unannounced_dcomp_resources( view );
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_mask_brush_reference_property(
+    struct dcomp_channel_view *view, struct dcomp_resource_view *resource,
+    UINT property, UINT reference_id )
+{
+    struct dcomp_resource_view *reference = NULL;
+    struct dcomp_resource_view **slot;
+    BOOL *dirty, valid;
+
+    if (reference_id && !(reference = find_dcomp_resource_view( view, reference_id )))
+        return STATUS_ACCESS_DENIED;
+
+    switch (property)
+    {
+    case 0:
+        valid = !reference ||
+                is_dcomp_derived_resource_type( reference->type, 0x16 ) ||
+                is_dcomp_derived_resource_type( reference->type, 0xa9 ) ||
+                is_dcomp_derived_resource_type( reference->type, 0x49 ) ||
+                is_dcomp_derived_resource_type( reference->type, 0x39 ) ||
+                is_dcomp_derived_resource_type( reference->type, 0x86 ) ||
+                is_dcomp_derived_resource_type( reference->type, 0x71 );
+        slot = &resource->mask_brush_source;
+        dirty = &resource->mask_brush_source_dirty;
+        break;
+    case 1:
+        valid = !reference ||
+                is_dcomp_derived_resource_type( reference->type, 0xa9 ) ||
+                is_dcomp_derived_resource_type( reference->type, 0x49 ) ||
+                is_dcomp_derived_resource_type( reference->type, 0x86 ) ||
+                is_dcomp_derived_resource_type( reference->type, 0x71 );
+        slot = &resource->mask_brush_mask;
+        dirty = &resource->mask_brush_mask_dirty;
+        break;
+    default:
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (!valid) return STATUS_INVALID_PARAMETER;
+    if (*slot == reference) return STATUS_SUCCESS;
+
+    replace_dcomp_resource_reference( slot, reference );
+    *dirty = TRUE;
+    remove_unannounced_dcomp_resources( view );
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS set_dcomp_manipulation_integer_property( struct dcomp_resource_view *resource,
@@ -1424,6 +1882,24 @@ static NTSTATUS set_dcomp_rectangle_buffer_property( struct dcomp_resource_view 
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS set_dcomp_region_buffer_property( struct dcomp_resource_view *resource,
+                                                   UINT property, const BYTE *data, UINT size )
+{
+    BYTE *rectangles = NULL;
+
+    if (property != 5 || (size & 15)) return STATUS_INVALID_PARAMETER;
+    if (size)
+    {
+        if (!(rectangles = malloc( size ))) return STATUS_NO_MEMORY;
+        memcpy( rectangles, data, size );
+    }
+    free( resource->region_rectangles );
+    resource->region_rectangles = rectangles;
+    resource->region_rectangles_size = size;
+    resource->region_rectangles_dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
 static UINT dcomp_property_value_size( UINT type )
 {
     switch (type)
@@ -1591,7 +2067,7 @@ static NTSTATUS set_dcomp_expression_reference_property( struct dcomp_channel_vi
     {
         if (reference && !is_dcomp_derived_resource_type( reference->type, 0x87 ))
             return STATUS_INVALID_PARAMETER;
-        resource->expression_property_resource_id = reference_id;
+        set_dcomp_weak_reference( &resource->expression_property_resource, reference );
         resource->expression_base_dirty = TRUE;
         return STATUS_SUCCESS;
     }
@@ -1613,21 +2089,24 @@ static NTSTATUS set_dcomp_expression_reference_array_property( struct dcomp_chan
                                                                 UINT count )
 {
     struct dcomp_resource_view *reference;
-    UINT *sources, i, id;
+    struct dcomp_weak_reference *sources;
+    UINT i, id;
 
     if (property != 0x0d || !data) return STATUS_INVALID_PARAMETER;
     if (resource->expression_sources) return STATUS_ACCESS_DENIED;
     if (count > UINT_MAX / sizeof(*sources)) return STATUS_NO_MEMORY;
-    if (count && !(sources = malloc( count * sizeof(*sources) ))) return STATUS_NO_MEMORY;
+    if (count && !(sources = calloc( count, sizeof(*sources) ))) return STATUS_NO_MEMORY;
     for (i = 0; i < count; ++i)
     {
+        list_init( &sources[i].entry );
         memcpy( &id, data + i * sizeof(id), sizeof(id) );
         if (!id || !(reference = find_dcomp_resource_view( view, id )))
         {
+            while (i) set_dcomp_weak_reference( &sources[--i], NULL );
             free( sources );
             return id ? STATUS_ACCESS_DENIED : STATUS_INVALID_PARAMETER;
         }
-        sources[i] = id;
+        set_dcomp_weak_reference( &sources[i], reference );
     }
     resource->expression_sources = count ? sources : NULL;
     resource->expression_source_count = count;
@@ -1655,16 +2134,6 @@ static NTSTATUS set_dcomp_visual_target_root( struct dcomp_channel_view *view,
     if (previous) release_dcomp_resource_reference( previous );
     remove_unannounced_dcomp_resources( view );
     return STATUS_SUCCESS;
-}
-
-static struct dcomp_resource_view *find_any_dcomp_resource_view( struct dcomp_channel_view *view,
-                                                                 UINT id )
-{
-    struct dcomp_resource_view *resource;
-
-    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
-        if (resource->id == id) return resource;
-    return NULL;
 }
 
 static NTSTATUS release_dcomp_shared_section( UINT channel, UINT resource )
@@ -1703,7 +2172,8 @@ static NTSTATUS get_dcomp_shared_section_update( UINT channel, UINT resource,
     return status;
 }
 
-static NTSTATUS publish_dcomp_resource( UINT channel, UINT resource, UINT type, HANDLE *handle )
+static NTSTATUS publish_dcomp_resource( UINT channel, UINT resource, UINT type,
+                                         BOOL source_ready, HANDLE *handle )
 {
     NTSTATUS status;
 
@@ -1713,6 +2183,7 @@ static NTSTATUS publish_dcomp_resource( UINT channel, UINT resource, UINT type, 
         req->channel = channel;
         req->resource = resource;
         req->type = type;
+        req->source_ready = source_ready;
         status = wine_server_call( req );
         if (!status) *handle = wine_server_ptr_handle( reply->handle );
     }
@@ -1757,7 +2228,16 @@ static void free_dcomp_resource_views( struct dcomp_channel_view *view )
 {
     struct dcomp_resource_view *resource, *next;
 
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+        invalidate_dcomp_weak_references( resource );
+
     LIST_FOR_EACH_ENTRY_SAFE( resource, next, &view->resources, struct dcomp_resource_view, entry )
+    {
+        list_remove( &resource->entry );
+        free_dcomp_resource_view( resource );
+    }
+    LIST_FOR_EACH_ENTRY_SAFE( resource, next, &view->retired_resources,
+                              struct dcomp_resource_view, entry )
     {
         list_remove( &resource->entry );
         free_dcomp_resource_view( resource );
@@ -1824,7 +2304,7 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                                         UINT length, BOOL allow_indirect, ULONG *processed )
 {
     struct dcomp_resource_view *resource;
-    UINT command_size, id, indirect_size, type;
+    UINT command_size, id, indirect_size, type, wire_id;
     BYTE *indirect;
     NTSTATUS status;
 
@@ -1856,9 +2336,18 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             memcpy( &type, buffer + 8, sizeof(type) );
             memcpy( &flags, buffer + 12, sizeof(flags) );
             if (!id || !type || type > 0xc1) return STATUS_INVALID_PARAMETER;
-            if (find_any_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
+            if (find_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
+            reap_received_dcomp_resources( view );
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
-            initialize_dcomp_resource_view( resource, id, type );
+            if (!(wire_id = select_dcomp_wire_id( view, id )))
+            {
+                free( resource );
+                return STATUS_NO_MEMORY;
+            }
+            if (wire_id != id)
+                TRACE( "channel %#x remapped created resource client %#x to wire %#x\n",
+                       view->channel, id, wire_id );
+            initialize_dcomp_resource_view( resource, id, wire_id, type );
             resource->shared_write = !!flags;
             list_add_tail( &view->resources, &resource->entry );
         }
@@ -1873,12 +2362,25 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             memcpy( &resource_type, buffer + 16, sizeof(resource_type) );
             memcpy( &mode, buffer + 20, sizeof(mode) );
             if (!id || !handle || !resource_type) return STATUS_INVALID_PARAMETER;
-            if (find_any_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
+            if (find_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
             if (resource_type != 0xb8 && mode) return STATUS_NOT_SUPPORTED;
-            if ((status = open_dcomp_shared_resource( handle, view->channel, id,
-                                                       resource_type, &open_role ))) return status;
+            reap_received_dcomp_resources( view );
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
-            initialize_dcomp_resource_view( resource, id, resource_type );
+            if (!(wire_id = select_dcomp_wire_id( view, id )))
+            {
+                free( resource );
+                return STATUS_NO_MEMORY;
+            }
+            if (wire_id != id)
+                TRACE( "channel %#x remapped opened resource client %#x to wire %#x\n",
+                       view->channel, id, wire_id );
+            if ((status = open_dcomp_shared_resource( handle, view->channel, wire_id,
+                                                       resource_type, &open_role )))
+            {
+                free( resource );
+                return status;
+            }
+            initialize_dcomp_resource_view( resource, id, wire_id, resource_type );
             resource->visual_target = resource_type == 0xb8 && !mode;
             resource->shared_duplicate = open_role == 1 ||
                                          (!open_role && (resource_type != 0xb8 || !!mode));
@@ -1896,7 +2398,7 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
             if (resource->shared_section_bound)
             {
-                status = release_dcomp_shared_section( view->channel, resource->id );
+                status = release_dcomp_shared_section( view->channel, resource->client_id );
                 if (status) return status;
                 resource->shared_section_bound = FALSE;
             }
@@ -1946,6 +2448,17 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                                                                          property, value )))
                     return status;
             }
+            else if (resource->type == 0xa9)
+            {
+                status = set_dcomp_surface_brush_integer_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+            else if (resource->type == 0x2a)
+            {
+                status = set_dcomp_composition_surface_integer_property( resource,
+                                                                          property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
         }
         else if (type == 12)
         {
@@ -1965,6 +2478,11 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                      (status = set_dcomp_legacy_target_float_property( resource,
                                                                         property, value )))
                 return status;
+            else if (resource->type == 0xa9)
+            {
+                status = set_dcomp_surface_brush_float_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
         }
         else if (type == 15)
         {
@@ -1989,6 +2507,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             {
                 if ((status = set_dcomp_rectangle_buffer_property( resource, property,
                                                                     buffer + 16, size )))
+                    return status;
+            }
+            else if (resource->type == 0x82)
+            {
+                if ((status = set_dcomp_region_buffer_property( resource, property,
+                                                                 buffer + 16, size )))
                     return status;
             }
             else if (resource->type == 0x7c)
@@ -2021,6 +2545,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                                                                        buffer + 16, size )))
                     return status;
             }
+            else if (resource->type == 0xa9)
+            {
+                status = set_dcomp_surface_brush_buffer_property( resource, property,
+                                                                   buffer + 16, size );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
         }
         else if (type == 13)
         {
@@ -2031,7 +2561,10 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             memcpy( &property, buffer + 8, sizeof(property) );
             memcpy( &handle, buffer + 16, sizeof(handle) );
             if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
-            status = set_dcomp_window_node_handle_property( resource, property, handle );
+            status = set_dcomp_composition_surface_handle_property( resource, property,
+                                                                     (HANDLE)(UINT_PTR)handle );
+            if (status == STATUS_NOT_SUPPORTED)
+                status = set_dcomp_window_node_handle_property( resource, property, handle );
             if (status != STATUS_NOT_SUPPORTED && status) return status;
         }
         else if (type == 9)
@@ -2042,7 +2575,8 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             if (!(resource = find_dcomp_resource_view( view, id ))) return STATUS_ACCESS_DENIED;
             if (!resource->shared_write) return STATUS_INVALID_PARAMETER;
             if ((status = publish_dcomp_resource( view->channel, resource->id,
-                                                   resource->type, &handle ))) return status;
+                                                   resource->type, resource->announced,
+                                                   &handle ))) return status;
             memcpy( buffer + 8, &handle, sizeof(handle) );
         }
         else if (type == 16)
@@ -2073,6 +2607,18 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             {
                 if ((status = set_dcomp_render_target_reference_property( view, resource,
                                                                            property, root_id )))
+                    return status;
+            }
+            else if (resource->type == 0xa9)
+            {
+                status = set_dcomp_surface_brush_reference_property( view, resource,
+                                                                      property, root_id );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+            else if (resource->type == 0x6b)
+            {
+                if ((status = set_dcomp_mask_brush_reference_property( view, resource,
+                                                                        property, root_id )))
                     return status;
             }
         }
@@ -2144,7 +2690,9 @@ static void free_dcomp_connection_batches( struct dcomposition_connection_batch 
 }
 
 static NTSTATUS copy_dcomp_protocol_blocks( const void *list, BYTE **data,
-                                             data_size_t *data_size )
+                                             data_size_t *data_size,
+                                             data_size_t **block_sizes,
+                                             UINT *block_count )
 {
     struct dcomp_protocol_block_header header;
     const void *next;
@@ -2155,7 +2703,12 @@ static NTSTATUS copy_dcomp_protocol_blocks( const void *list, BYTE **data,
 
     *data = NULL;
     *data_size = 0;
+    *block_sizes = NULL;
+    *block_count = 0;
     if (!list) return STATUS_SUCCESS;
+
+    if (!(*block_sizes = calloc( DCOMP_PROTOCOL_MAX_BLOCKS, sizeof(**block_sizes) )))
+        return STATUS_NO_MEMORY;
 
     __TRY
     {
@@ -2211,17 +2764,231 @@ static NTSTATUS copy_dcomp_protocol_blocks( const void *list, BYTE **data,
         __ENDTRY
         if (status) break;
         size += header.size;
+        (*block_sizes)[count - 1] = header.size;
         next = header.next;
     }
 
     if (status)
     {
         free( *data );
+        free( *block_sizes );
         *data = NULL;
+        *block_sizes = NULL;
         return status;
     }
     *data_size = size;
+    *block_count = count;
     return STATUS_SUCCESS;
+}
+
+static const struct dcomp_protocol_command_schema *find_dcomp_protocol_schema(
+        const struct dcomp_protocol_command_schema *schemas, UINT count, UINT opcode )
+{
+    UINT left = 0, right = count;
+
+    while (left < right)
+    {
+        UINT middle = left + (right - left) / 2;
+
+        if (schemas[middle].opcode < opcode) left = middle + 1;
+        else right = middle;
+    }
+    if (left == count || schemas[left].opcode != opcode) return NULL;
+    return &schemas[left];
+}
+
+static struct dcomp_resource_view *find_dcomp_protocol_resource(
+        struct dcomp_channel_view *view, UINT client_id )
+{
+    struct dcomp_resource_view *resource;
+
+    if ((resource = find_dcomp_resource_view( view, client_id ))) return resource;
+    /* A client-side release becomes a wire Release only at commit.  Native
+     * handle translation can therefore still resolve that marshaler while
+     * translating raw commands in the same commit.  Prefer the newest held
+     * generation when the application ID has been reused more than once.
+     * Once retired, however, native LookupResourceMarshaler no longer exposes
+     * the resource to a later commit. */
+    LIST_FOR_EACH_ENTRY_REV( resource, &view->resources,
+                             struct dcomp_resource_view, entry )
+        if (resource->client_id == client_id) return resource;
+    return NULL;
+}
+
+static NTSTATUS translate_dcomp_protocol_field( struct dcomp_channel_view *view,
+                                                 BYTE *command, UINT command_size,
+                                                 const struct dcomp_protocol_field_schema *field )
+{
+    struct dcomp_resource_view *resource;
+    UINT client_id;
+
+    if (field->offset > command_size - sizeof(client_id)) return STATUS_INVALID_PARAMETER;
+    memcpy( &client_id, command + field->offset, sizeof(client_id) );
+    if (!client_id && field->optional) return STATUS_SUCCESS;
+    if (!(resource = find_dcomp_protocol_resource( view, client_id )))
+        return STATUS_INVALID_PARAMETER;
+    if (field->family == 0xff)
+    {
+        if (!resource->visual) return STATUS_INVALID_PARAMETER;
+    }
+    else if (!is_dcomp_derived_resource_type( resource->type, field->family ))
+        return STATUS_INVALID_PARAMETER;
+    if (client_id != resource->id)
+        TRACE( "channel %#x translated native protocol resource %#x to wire %#x\n",
+               view->channel, client_id, resource->id );
+    memcpy( command + field->offset, &resource->id, sizeof(resource->id) );
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS translate_dcomp_render_data( struct dcomp_channel_view *view,
+                                              BYTE *data, data_size_t size )
+{
+    const struct dcomp_protocol_command_schema *schema;
+    const struct dcomp_protocol_field_schema *field;
+    UINT command_size, opcode, i;
+    NTSTATUS status;
+
+    while (size)
+    {
+        if (size < 8) return STATUS_INVALID_PARAMETER;
+        memcpy( &command_size, data, sizeof(command_size) );
+        memcpy( &opcode, data + 4, sizeof(opcode) );
+        if (command_size < 8 || command_size > size || (command_size & 3))
+            return STATUS_INVALID_PARAMETER;
+        if (!(schema = find_dcomp_protocol_schema( dcomp_render_data_commands,
+                                                    ARRAY_SIZE(dcomp_render_data_commands),
+                                                    opcode )) || command_size != schema->size)
+            return STATUS_INVALID_PARAMETER;
+        field = dcomp_render_data_fields + schema->first_field;
+        for (i = 0; i < schema->field_count; ++i)
+            if ((status = translate_dcomp_protocol_field( view, data, command_size, field + i )))
+                return status;
+        data += command_size;
+        size -= command_size;
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS translate_dcomp_protocol_command( struct dcomp_channel_view *view,
+                                                   BYTE *command, UINT command_size )
+{
+    const struct dcomp_protocol_command_schema *schema;
+    const struct dcomp_protocol_field_schema *field;
+    struct dcomp_protocol_field_schema dynamic_field;
+    UINT opcode, byte_count, count, i;
+    NTSTATUS status;
+
+    memcpy( &opcode, command + 4, sizeof(opcode) );
+    if (!(schema = find_dcomp_protocol_schema( dcomp_protocol_commands,
+                                               ARRAY_SIZE(dcomp_protocol_commands), opcode )))
+        return STATUS_INVALID_PARAMETER;
+    if ((schema->size_kind == 0 && command_size != schema->size) ||
+        (schema->size_kind != 0 && command_size < schema->size))
+        return STATUS_INVALID_PARAMETER;
+    field = dcomp_protocol_fields + schema->first_field;
+    for (i = 0; i < schema->field_count; ++i)
+        if ((status = translate_dcomp_protocol_field( view, command, command_size, field + i )))
+            return status;
+
+    if (!schema->dynamic_kind) return STATUS_SUCCESS;
+    if (schema->dynamic_kind == 3)
+        return translate_dcomp_render_data( view, command + schema->dynamic_data_offset,
+                                             command_size - schema->dynamic_data_offset );
+    if (schema->dynamic_count_offset > command_size - sizeof(byte_count) ||
+        schema->dynamic_data_offset > command_size)
+        return STATUS_INVALID_PARAMETER;
+    memcpy( &byte_count, command + schema->dynamic_count_offset, sizeof(byte_count) );
+    if (schema->dynamic_kind == 1)
+    {
+        if (byte_count > command_size - schema->dynamic_data_offset)
+            return STATUS_INVALID_PARAMETER;
+        count = byte_count / sizeof(UINT);
+    }
+    else
+    {
+        if (byte_count != command_size - schema->dynamic_data_offset)
+            return STATUS_INVALID_PARAMETER;
+        count = byte_count / sizeof(UINT);
+    }
+    dynamic_field.family = schema->dynamic_family;
+    dynamic_field.optional = schema->dynamic_optional;
+    for (i = 0; i < count; ++i)
+    {
+        dynamic_field.offset = schema->dynamic_data_offset + i * sizeof(UINT);
+        if ((status = translate_dcomp_protocol_field( view, command, command_size,
+                                                       &dynamic_field )))
+            return status;
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS translate_dcomp_protocol_blocks( struct dcomp_channel_view *view,
+                                                  BYTE *data, data_size_t size,
+                                                  const data_size_t *block_sizes,
+                                                  UINT block_count )
+{
+    UINT block, command_size;
+    data_size_t remaining;
+    NTSTATUS status;
+
+    for (block = 0; block < block_count; ++block)
+    {
+        if (block_sizes[block] > size) return STATUS_INVALID_PARAMETER;
+        remaining = block_sizes[block];
+        size -= remaining;
+        while (remaining)
+        {
+            if (remaining < 8) return STATUS_INVALID_PARAMETER;
+            memcpy( &command_size, data, sizeof(command_size) );
+            if (command_size < 8 || command_size > remaining || (command_size & 3))
+                return STATUS_INVALID_PARAMETER;
+            if ((status = translate_dcomp_protocol_command( view, data, command_size )))
+            {
+                UINT opcode;
+
+                memcpy( &opcode, data + 4, sizeof(opcode) );
+                TRACE( "channel %#x failed to translate native protocol command %#x "
+                       "size %u, status %#x\n", view->channel, opcode, command_size,
+                       (UINT)status );
+                return status;
+            }
+            data += command_size;
+            remaining -= command_size;
+        }
+    }
+    return size ? STATUS_INVALID_PARAMETER : STATUS_SUCCESS;
+}
+
+static void trace_dcomp_protocol_commands( UINT channel, const BYTE *data,
+                                           data_size_t size )
+{
+    while (size >= 8)
+    {
+        UINT command_size, opcode;
+
+        memcpy( &command_size, data, sizeof(command_size) );
+        memcpy( &opcode, data + 4, sizeof(opcode) );
+        if (command_size < 8 || command_size > size || (command_size & 3))
+        {
+            TRACE( "channel %#x malformed native protocol command %#x size %u remaining %u\n",
+                   channel, opcode, command_size, (UINT)size );
+            return;
+        }
+        TRACE( "channel %#x native protocol command %#x size %u bytes %s\n",
+               channel, opcode, command_size,
+               debugstr_an( (const char *)data, min( command_size, 64 ) ) );
+        if (opcode == 0x234 || opcode == 0x235)
+        {
+            UINT id = 0, data_size = 0;
+
+            if (command_size >= 12) memcpy( &id, data + 8, sizeof(id) );
+            if (command_size >= 16) memcpy( &data_size, data + 12, sizeof(data_size) );
+            TRACE( "channel %#x native region command %#x resource %#x payload %u command_size %u\n",
+                   channel, opcode, id, data_size, command_size );
+        }
+        data += command_size;
+        size -= command_size;
+    }
 }
 
 static data_size_t dcomp_rectangle_update_size( const struct dcomp_resource_view *resource )
@@ -2237,6 +3004,24 @@ static data_size_t dcomp_rectangle_update_size( const struct dcomp_resource_view
     return size;
 }
 
+static data_size_t dcomp_region_update_size( const struct dcomp_resource_view *resource )
+{
+    return resource->region_rectangles_dirty ? 16 + resource->region_rectangles_size : 0;
+}
+
+static BYTE *emit_dcomp_region_update( BYTE *cursor,
+                                       const struct dcomp_resource_view *resource )
+{
+    UINT command[4] = {16 + resource->region_rectangles_size, 0x234,
+                       resource->id, resource->region_rectangles_size};
+
+    if (!resource->region_rectangles_dirty) return cursor;
+    memcpy( cursor, command, sizeof(command) );
+    memcpy( cursor + sizeof(command), resource->region_rectangles,
+            resource->region_rectangles_size );
+    return cursor + sizeof(command) + resource->region_rectangles_size;
+}
+
 static BYTE *emit_dcomp_reference_update( BYTE *cursor, UINT opcode, UINT id,
                                            const struct dcomp_resource_view *reference )
 {
@@ -2244,6 +3029,95 @@ static BYTE *emit_dcomp_reference_update( BYTE *cursor, UINT opcode, UINT id,
 
     memcpy( cursor, command, sizeof(command) );
     return cursor + sizeof(command);
+}
+
+static data_size_t dcomp_surface_brush_update_size( const struct dcomp_resource_view *resource )
+{
+    data_size_t size = 0;
+
+    if (resource->surface_brush_surface_dirty) size += 52;
+    if (resource->surface_brush_transform_dirty) size += 16;
+    if (resource->surface_brush_horizontal_dirty) size += 16;
+    if (resource->surface_brush_vertical_dirty) size += 16;
+    if (resource->surface_brush_stretch_dirty) size += 16;
+    if (resource->surface_brush_interpolation_dirty) size += 16;
+    if (resource->surface_brush_snap_dirty) size += 16;
+    if (resource->surface_brush_downsample_dirty) size += 16;
+    return size;
+}
+
+static BYTE *emit_dcomp_surface_brush_value( BYTE *cursor, UINT opcode, UINT id,
+                                              const void *value, UINT size )
+{
+    UINT command[4] = {16, opcode, id, 0};
+
+    memcpy( command + 3, value, size );
+    memcpy( cursor, command, sizeof(command) );
+    return cursor + sizeof(command);
+}
+
+static BYTE *emit_dcomp_surface_brush_updates( BYTE *cursor,
+                                                struct dcomp_resource_view *resource )
+{
+    if (resource->surface_brush_surface_dirty)
+    {
+        UINT command[13] = {52, 0x175, resource->id};
+
+        command[3] = resource->surface_brush_surface ? resource->surface_brush_surface->id : 0;
+        memcpy( command + 4, resource->surface_brush_source_rect,
+                sizeof(resource->surface_brush_source_rect) );
+        if (resource->surface_brush_swapchain)
+        {
+            if (resource->surface_brush_emitted)
+            {
+                LONG dirty[4];
+
+                memcpy( dirty, resource->surface_brush_dirty_rect, sizeof(dirty) );
+                dirty[0] += resource->surface_brush_source_rect[0];
+                dirty[1] += resource->surface_brush_source_rect[1];
+                dirty[2] += resource->surface_brush_source_rect[0];
+                dirty[3] += resource->surface_brush_source_rect[1];
+                memcpy( command + 8, dirty, sizeof(dirty) );
+            }
+            else
+                memcpy( command + 8, resource->surface_brush_source_rect,
+                        sizeof(resource->surface_brush_source_rect) );
+            ((BYTE *)command)[48] = TRUE;
+            resource->surface_brush_emitted = TRUE;
+            memset( resource->surface_brush_dirty_rect, 0,
+                    sizeof(resource->surface_brush_dirty_rect) );
+        }
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    if (resource->surface_brush_transform_dirty)
+        cursor = emit_dcomp_reference_update( cursor, 0x176, resource->id,
+                                               resource->surface_brush_transform );
+    if (resource->surface_brush_horizontal_dirty)
+        cursor = emit_dcomp_surface_brush_value( cursor, 0x170, resource->id,
+                                                  &resource->surface_brush_horizontal,
+                                                  sizeof(resource->surface_brush_horizontal) );
+    if (resource->surface_brush_vertical_dirty)
+        cursor = emit_dcomp_surface_brush_value( cursor, 0x177, resource->id,
+                                                  &resource->surface_brush_vertical,
+                                                  sizeof(resource->surface_brush_vertical) );
+    if (resource->surface_brush_stretch_dirty)
+        cursor = emit_dcomp_surface_brush_value( cursor, 0x173, resource->id,
+                                                  &resource->surface_brush_stretch,
+                                                  sizeof(resource->surface_brush_stretch) );
+    if (resource->surface_brush_interpolation_dirty)
+        cursor = emit_dcomp_surface_brush_value( cursor, 0x171, resource->id,
+                                                  &resource->surface_brush_interpolation,
+                                                  sizeof(resource->surface_brush_interpolation) );
+    if (resource->surface_brush_snap_dirty)
+        cursor = emit_dcomp_surface_brush_value( cursor, 0x172, resource->id,
+                                                  &resource->surface_brush_snap,
+                                                  sizeof(resource->surface_brush_snap) );
+    if (resource->surface_brush_downsample_dirty)
+        cursor = emit_dcomp_surface_brush_value( cursor, 0x174, resource->id,
+                                                  &resource->surface_brush_downsample,
+                                                  sizeof(resource->surface_brush_downsample) );
+    return cursor;
 }
 
 static data_size_t dcomp_gdi_sprite_update_size( const struct dcomp_resource_view *resource )
@@ -2652,7 +3526,7 @@ static data_size_t dcomp_expression_update_size( const struct dcomp_resource_vie
     return size;
 }
 
-static BYTE *emit_dcomp_expression_updates( struct dcomp_channel_view *view, BYTE *cursor,
+static BYTE *emit_dcomp_expression_updates( BYTE *cursor,
                                              const struct dcomp_resource_view *resource )
 {
     struct dcomp_resource_view *reference;
@@ -2666,8 +3540,7 @@ static BYTE *emit_dcomp_expression_updates( struct dcomp_channel_view *view, BYT
         command[1] = 0x11;
         command[2] = resource->id;
         if (resource->expression_property_enabled &&
-            (reference = find_dcomp_resource_view( view,
-                                                    resource->expression_property_resource_id )))
+            (reference = resource->expression_property_resource.target))
         {
             command[3] = reference->type;
             command[4] = reference->id;
@@ -2710,8 +3583,7 @@ static BYTE *emit_dcomp_expression_updates( struct dcomp_channel_view *view, BYT
         {
             UINT id = 0;
 
-            if ((reference = find_dcomp_resource_view( view,
-                                                        resource->expression_sources[i] )))
+            if ((reference = resource->expression_sources[i].target))
                 id = reference->id;
             memcpy( cursor, &id, sizeof(id) );
             cursor += sizeof(id);
@@ -2751,6 +3623,59 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
     data_size_t resource_size = 0;
     BYTE *new_data, *cursor;
     NTSTATUS status;
+    BOOL graph_dirty;
+
+    /* Keep the semantic resource graph visible alongside the raw command
+     * trace.  The raw property protocol is useful for wire compatibility,
+     * but it obscures the retained visual -> brush -> surface relationship
+     * that the consumer actually receives. */
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        if (resource->released ||
+            (!resource->visual && resource->type != 0x6b && resource->type != 0x7f &&
+             resource->type != 0xa9 && resource->type != 0x2a))
+            continue;
+
+        graph_dirty = !resource->announced || resource->root_dirty || resource->remove_dirty ||
+                      resource->children_clear_dirty || resource->visual_transform_dirty ||
+                      resource->visual_clip_dirty || resource->sprite_content_dirty ||
+                      resource->visual_modes_dirty || resource->visual_flags_dirty ||
+                      resource->visual_offset_dirty || resource->visual_opacity_dirty ||
+                      resource->visual_relative_offset_dirty || resource->visual_relative_size_dirty ||
+                      resource->visual_size_dirty || resource->mask_brush_source_dirty ||
+                      resource->mask_brush_mask_dirty || resource->surface_brush_surface_dirty ||
+                      resource->composition_surface_dirty || resource->rectangle_dirty;
+        for (child = resource->first_child; child && !graph_dirty; child = child->next_sibling)
+            if (!child->connection_announced) graph_dirty = TRUE;
+        if (!graph_dirty) continue;
+        TRACE( "graph channel %#x resource %#x/%#x type %#x visual %u parent %#x root %#x "
+               "content %#x transform %#x clip %#x offset [%g,%g,%g] relative_offset [%g,%g,%g] "
+               "size [%g,%g] relative_size [%g,%g] opacity %g modes [%d,%d,%d,%d,%d,%d] flags %#x/%#x "
+               "mask_source %#x mask %#x brush_surface %#x surface %p binding %#llx source [%d,%d,%d,%d] "
+               "rectangle [%g,%g,%g,%g] rectangle_mode %u/%u/%u\n",
+               view->channel, resource->client_id, resource->id, resource->type, resource->visual,
+               resource->parent ? resource->parent->id : 0,
+               resource->root ? resource->root->id : 0,
+               resource->sprite_content ? resource->sprite_content->id : 0,
+               resource->visual_transform ? resource->visual_transform->id : 0,
+               resource->visual_clip ? resource->visual_clip->id : 0,
+               resource->visual_offset[0], resource->visual_offset[1], resource->visual_offset[2],
+               resource->visual_relative_offset[0], resource->visual_relative_offset[1],
+               resource->visual_relative_offset[2], resource->visual_size[0], resource->visual_size[1],
+               resource->visual_relative_size[0], resource->visual_relative_size[1],
+               resource->visual_opacity, resource->visual_mode_8, resource->visual_mode_9,
+               resource->visual_mode_10, resource->visual_mode_14, resource->visual_mode_15,
+               resource->visual_mode_16, resource->visual_flags_134, resource->visual_flags_135,
+               resource->mask_brush_source ? resource->mask_brush_source->id : 0,
+               resource->mask_brush_mask ? resource->mask_brush_mask->id : 0,
+               resource->surface_brush_surface ? resource->surface_brush_surface->id : 0,
+               resource->composition_surface,
+               (unsigned long long)resource->composition_surface_binding_id,
+               resource->surface_brush_source_rect[0], resource->surface_brush_source_rect[1],
+               resource->surface_brush_source_rect[2], resource->surface_brush_source_rect[3],
+               resource->rectangle[0], resource->rectangle[1], resource->rectangle[2], resource->rectangle[3],
+               resource->rectangle_mode, resource->rectangle_expression_mode, resource->rectangle_flag );
+    }
 
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
     {
@@ -2780,6 +3705,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         if (!resource->released && resource->color_dirty) resource_size += 28;
         if (!resource->released && resource->type == 0x7f)
             resource_size += dcomp_rectangle_update_size( resource );
+        if (!resource->released && resource->type == 0x82)
+            resource_size += dcomp_region_update_size( resource );
         if (!resource->released && resource->type == 0x1e && !resource->announced)
             resource_size += 236;
         if (!resource->released && resource->type == 0x7c)
@@ -2788,6 +3715,15 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             resource_size += dcomp_expression_update_size( resource );
         if (!resource->released && resource->type == 0x6a)
             resource_size += dcomp_manipulation_update_size( resource );
+        if (!resource->released && resource->type == 0x2a &&
+            resource->composition_surface_dirty) resource_size += 28;
+        if (!resource->released && resource->type == 0xa9)
+            resource_size += dcomp_surface_brush_update_size( resource );
+        if (!resource->released && resource->type == 0x6b)
+        {
+            if (resource->mask_brush_source_dirty) resource_size += 16;
+            if (resource->mask_brush_mask_dirty) resource_size += 16;
+        }
         if (!resource->released && resource->visual_transform_dirty) resource_size += 16;
         if (!resource->released && resource->visual_clip_dirty) resource_size += 16;
         if (!resource->released && resource->sprite_content_dirty) resource_size += 16;
@@ -2802,7 +3738,7 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
     {
         UINT command[4];
 
-        if (resource->announced || resource->released) continue;
+        if (resource->announced || (resource->released && !resource->shared_duplicate)) continue;
         if (resource->shared_duplicate)
         {
             command[0] = 12;
@@ -2844,7 +3780,7 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
 
         if (!resource->shared_section_bound || resource->shared_section_announced ||
             resource->released) continue;
-        if ((status = get_dcomp_shared_section_update( view->channel, resource->id,
+        if ((status = get_dcomp_shared_section_update( view->channel, resource->client_id,
                                                         &section, &section_size )))
         {
             free( new_data );
@@ -3001,14 +3937,52 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         }
         if (resource->type == 0x7f)
             cursor = emit_dcomp_rectangle_updates( cursor, resource );
+        if (resource->type == 0x82)
+            cursor = emit_dcomp_region_update( cursor, resource );
         if (resource->type == 0x1e && !resource->announced)
             cursor = emit_dcomp_component_transform3d_defaults( cursor, resource->id );
         if (resource->type == 0x7c)
             cursor = emit_dcomp_property_set_updates( cursor, resource );
         if (resource->type == 0x3c)
-            cursor = emit_dcomp_expression_updates( view, cursor, resource );
+            cursor = emit_dcomp_expression_updates( cursor, resource );
         if (resource->type == 0x6a)
             cursor = emit_dcomp_manipulation_updates( cursor, resource );
+    }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        HANDLE consumer_handle = NULL;
+        UINT size = 28, opcode = 0x70;
+        UINT64 consumer_value;
+
+        if (resource->released || resource->type != 0x2a ||
+            !resource->composition_surface_dirty) continue;
+        if (resource->composition_surface)
+            duplicate_dcomp_surface( resource->composition_surface, TRUE,
+                                     &consumer_handle, NULL );
+        memset( cursor, 0, 28 );
+        consumer_value = (UINT_PTR)consumer_handle;
+        memcpy( cursor + 0, &size, sizeof(size) );
+        memcpy( cursor + 4, &opcode, sizeof(opcode) );
+        memcpy( cursor + 8, &resource->id, sizeof(resource->id) );
+        memcpy( cursor + 12, &consumer_value, sizeof(consumer_value) );
+        cursor[20] = resource->composition_surface_flags[0];
+        cursor[21] = resource->composition_surface_flags[1];
+        cursor += 28;
+    }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        if (!resource->released && resource->type == 0xa9)
+            cursor = emit_dcomp_surface_brush_updates( cursor, resource );
+    }
+    LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
+    {
+        if (resource->released || resource->type != 0x6b) continue;
+        if (resource->mask_brush_source_dirty)
+            cursor = emit_dcomp_reference_update( cursor, 0xf7, resource->id,
+                                                   resource->mask_brush_source );
+        if (resource->mask_brush_mask_dirty)
+            cursor = emit_dcomp_reference_update( cursor, 0xf6, resource->id,
+                                                   resource->mask_brush_mask );
     }
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
     {
@@ -3029,7 +4003,7 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
     {
         UINT command[3];
 
-        if (!resource->announced || !resource->released) continue;
+        if ((!resource->announced && !resource->shared_duplicate) || !resource->released) continue;
         command[0] = sizeof(command);
         command[1] = 0x29; /* MILCMD_CHANNEL_RELEASERESOURCE */
         command[2] = resource->id;
@@ -3042,7 +4016,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
     return STATUS_SUCCESS;
 }
 
-static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
+static void commit_dcomp_resource_views( struct dcomp_channel_view *view,
+                                         UINT committed_batch_id )
 {
     struct dcomp_resource_view *resource, *next;
 
@@ -3054,7 +4029,8 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
         if (resource->released)
         {
             list_remove( &resource->entry );
-            free_dcomp_resource_view( resource );
+            resource->retired_batch_id = committed_batch_id;
+            list_add_tail( &view->retired_resources, &resource->entry );
         }
         else
         {
@@ -3080,9 +4056,21 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view )
             resource->desktop_tree_root_dirty = FALSE;
             resource->color_dirty = FALSE;
             resource->rectangle_dirty = 0;
+            resource->region_rectangles_dirty = FALSE;
             resource->visual_transform_dirty = FALSE;
             resource->visual_clip_dirty = FALSE;
             resource->sprite_content_dirty = FALSE;
+            resource->mask_brush_source_dirty = FALSE;
+            resource->mask_brush_mask_dirty = FALSE;
+            resource->composition_surface_dirty = FALSE;
+            resource->surface_brush_surface_dirty = FALSE;
+            resource->surface_brush_transform_dirty = FALSE;
+            resource->surface_brush_horizontal_dirty = FALSE;
+            resource->surface_brush_vertical_dirty = FALSE;
+            resource->surface_brush_stretch_dirty = FALSE;
+            resource->surface_brush_interpolation_dirty = FALSE;
+            resource->surface_brush_snap_dirty = FALSE;
+            resource->surface_brush_downsample_dirty = FALSE;
             if (resource->type == 0x7c)
             {
                 UINT i;
@@ -3629,7 +4617,7 @@ NTSTATUS WINAPI NtBindCompositionSurface( HANDLE surface, BOOL enable, UINT flag
                                            BOOL shared, const void *buffer_info,
                                            UINT64 *binding_id )
 {
-    volatile const BYTE *info = buffer_info;
+    BYTE info[0x520];
     UINT64 id = 0;
     NTSTATUS status = STATUS_INVALID_PARAMETER;
 
@@ -3639,8 +4627,7 @@ NTSTATUS WINAPI NtBindCompositionSurface( HANDLE surface, BOOL enable, UINT flag
     if (!buffer_info || !binding_id) return STATUS_INVALID_PARAMETER;
     __TRY
     {
-        (void)info[0];
-        (void)info[0x51f];
+        memcpy( info, buffer_info, sizeof(info) );
         *binding_id = 0;
         status = STATUS_SUCCESS;
     }
@@ -3655,6 +4642,9 @@ NTSTATUS WINAPI NtBindCompositionSurface( HANDLE surface, BOOL enable, UINT flag
     {
         req->handle = wine_server_obj_handle( surface );
         req->bound = TRUE;
+        req->flags = flags;
+        req->shared = shared;
+        wine_server_add_data( req, info, sizeof(info) );
         status = wine_server_call( req );
         if (!status) id = reply->binding_id;
     }
@@ -3683,9 +4673,223 @@ NTSTATUS WINAPI NtUnBindCompositionSurface( HANDLE surface, BOOL release, BOOL s
     {
         req->handle = wine_server_obj_handle( surface );
         req->bound = FALSE;
+        req->flags = release;
+        req->shared = shared;
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS get_dcomp_surface_state( HANDLE surface, UINT64 *binding_id,
+                                         UINT *ink_cookie, BOOL *bound,
+                                         BYTE *buffer_info, HANDLE *realization,
+                                         UINT *present_count )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( get_dcomp_surface_state )
+    {
+        req->handle = wine_server_obj_handle( surface );
+        req->include_info = !!buffer_info;
+        if (buffer_info) wine_server_set_reply( req, buffer_info, 0x520 );
+        status = wine_server_call( req );
+        if (!status)
+        {
+            if (binding_id) *binding_id = reply->binding_id;
+            if (ink_cookie) *ink_cookie = reply->ink_cookie;
+            if (present_count) *present_count = reply->present_count;
+            if (bound) *bound = reply->bound;
+            if (realization) *realization = wine_server_ptr_handle( reply->realization );
+            if (buffer_info && wine_server_reply_size( reply ) != 0x520)
+                status = STATUS_UNSUCCESSFUL;
+        }
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS consume_dcomp_surface_dirty_region( HANDLE surface, UINT64 binding_id,
+                                                     UINT realization, BYTE *region,
+                                                     UINT *present_count )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( open_dcomp_surface_dirty_region )
+    {
+        req->handle = wine_server_obj_handle( surface );
+        req->binding_id = binding_id;
+        req->realization = realization;
+        wine_server_set_reply( req, region, 0xa4 );
+        status = wine_server_call( req );
+        if (!status)
+        {
+            if (wine_server_reply_size( reply ) != 0xa4) status = STATUS_UNSUCCESSFUL;
+            else if (present_count) *present_count = reply->present_count;
+        }
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtValidateCompositionSurfaceHandle( HANDLE surface, LUID *luid )
+{
+    UINT64 binding_id = 0;
+    NTSTATUS status;
+
+    TRACE( "surface %p, luid %p\n", surface, luid );
+
+    status = get_dcomp_surface_state( surface, &binding_id, NULL, NULL, NULL, NULL, NULL );
+    if (status) return status;
+    if (!luid) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        memcpy( luid, &binding_id, sizeof(*luid) );
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
+NTSTATUS WINAPI NtQueryCompositionSurfaceRenderingRealization( HANDLE surface, void *update )
+{
+    BYTE buffer_info[0x520], surface_update[0x178] = {0};
+    UINT64 binding_id = 0;
+    HANDLE realization = NULL;
+    UINT present_count = 0;
+    BOOL bound = FALSE;
+    NTSTATUS status;
+
+    TRACE( "surface %p, update %p\n", surface, update );
+
+    if (!update) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        memset( update, 0, 0x178 );
+    }
+    __EXCEPT
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    status = get_dcomp_surface_state( surface, &binding_id, NULL, &bound,
+                                      NULL, NULL, &present_count );
+    if (status) return status;
+    if (!bound || !present_count) return STATUS_UNSUCCESSFUL;
+    status = get_dcomp_surface_state( surface, NULL, NULL, NULL,
+                                      buffer_info, &realization, NULL );
+    if (status) return status;
+    if (!realization) return STATUS_UNSUCCESSFUL;
+    status = consume_dcomp_surface_dirty_region( surface, binding_id, 0,
+                                                 surface_update + 0x20, NULL );
+    if (status)
+    {
+        NtClose( realization );
+        return status;
+    }
+
+    *(UINT *)(surface_update + 0x00) = 2; /* single-buffer realization */
+    memcpy( surface_update + 0x04, &binding_id, sizeof(binding_id) );
+    memcpy( surface_update + 0x10, &binding_id, sizeof(binding_id) );
+    *(UINT *)(surface_update + 0x18) = 0; /* realization index */
+    *(UINT *)(surface_update + 0x1c) = present_count;
+    memcpy( surface_update + 0xe0, buffer_info + 0x10, 0x90 );
+    *(UINT *)(surface_update + 0x174) = present_count;
+    NtClose( realization );
+    __TRY
+    {
+        memcpy( update, surface_update, sizeof(surface_update) );
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
+NTSTATUS WINAPI NtOpenCompositionSurfaceDirtyRegion( HANDLE surface, const UINT64 *binding_id,
+                                                       const void *realization_info, void *region )
+{
+    BYTE info[0x28], data[0xa4];
+    UINT64 binding;
+    NTSTATUS status;
+
+    TRACE( "surface %p, binding_id %p, realization_info %p, region %p\n",
+           surface, binding_id, realization_info, region );
+
+    if (!binding_id || !realization_info || !region) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        binding = *binding_id;
+        memcpy( info, realization_info, sizeof(info) );
+    }
+    __EXCEPT
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+
+    status = consume_dcomp_surface_dirty_region( surface, binding, *(UINT *)(info + 4),
+                                                 data, NULL );
+    if (status) return status;
+    __TRY
+    {
+        memcpy( region, data, sizeof(data) );
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
+NTSTATUS WINAPI NtQueryCompositionSurfaceBinding( HANDLE surface, const UINT64 *binding_id,
+                                                   void *buffer_info )
+{
+    BYTE info[0x520];
+    UINT64 requested = 0, current = 0;
+    HANDLE realization = NULL;
+    NTSTATUS status;
+
+    TRACE( "surface %p, binding_id %p, info %p\n", surface, binding_id, buffer_info );
+
+    __TRY
+    {
+        if (binding_id) requested = *binding_id;
+    }
+    __EXCEPT
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+
+    status = get_dcomp_surface_state( surface, &current, NULL, NULL, info, &realization, NULL );
+    if (status) return status;
+    if (requested && requested != current)
+    {
+        if (realization) NtClose( realization );
+        return STATUS_NOT_FOUND;
+    }
+    if (!buffer_info)
+    {
+        if (realization) NtClose( realization );
+        return STATUS_INVALID_PARAMETER;
+    }
+    __TRY
+    {
+        memcpy( buffer_info, info, sizeof(info) );
+    }
+    __EXCEPT
+    {
+        if (realization) NtClose( realization );
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
     return status;
 }
 
@@ -3808,6 +5012,7 @@ NTSTATUS WINAPI NtDCompositionCreateChannel( UINT *channel, UINT *section_size,
     view->address = address;
     view->size = view_size;
     list_init( &view->resources );
+    list_init( &view->retired_resources );
     pthread_mutex_lock( &dcomp_channel_lock );
     list_add_tail( &dcomp_channel_views, &view->entry );
     pthread_mutex_unlock( &dcomp_channel_lock );
@@ -4015,6 +5220,8 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
     BYTE *data;
     data_size_t size = 0;
     UINT count = 0;
+    UINT64 synchronization_id;
+    BOOL more = FALSE;
     NTSTATUS status;
     const data_size_t capacity = 0x10000;
 
@@ -4022,6 +5229,15 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
 
     if (!batch_id || !batch) return STATUS_INVALID_PARAMETER;
     *batch = NULL;
+    __TRY
+    {
+        synchronization_id = *batch_id;
+    }
+    __EXCEPT
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
     if (!(data = malloc( capacity ))) return STATUS_NO_MEMORY;
 
     pthread_mutex_lock( &dcomp_channel_lock );
@@ -4037,8 +5253,10 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
         SERVER_START_REQ( get_dcomp_connection_batch )
         {
             req->connection = wine_server_obj_handle( connection );
+            req->synchronization_id = synchronization_id;
             wine_server_set_reply( req, data, capacity );
             status = wine_server_call( req );
+            if (!status) more = reply->more;
             if (!status && reply->type)
             {
                 size = wine_server_reply_size( reply );
@@ -4078,7 +5296,7 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
             next = &record->next;
             count++;
         }
-    } while (!status && record && count < DCOMP_PROTOCOL_MAX_BLOCKS);
+    } while (!status && record && more && count < DCOMP_PROTOCOL_MAX_BLOCKS);
     free( data );
 
     if (status)
@@ -4151,6 +5369,67 @@ NTSTATUS WINAPI NtDCompositionGetDeletedResources( UINT channel, UINT capacity,
     return status;
 }
 
+NTSTATUS WINAPI NtDCompositionSynchronize( UINT channel, UINT64 *synchronization_id )
+{
+    UINT64 id = 0;
+    NTSTATUS status;
+
+    TRACE( "channel %#x, synchronization_id %p\n", channel, synchronization_id );
+
+    SERVER_START_REQ( synchronize_dcomp_channel )
+    {
+        req->channel = channel;
+        status = wine_server_call( req );
+        if (!status) id = reply->synchronization_id;
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
+    __TRY
+    {
+        *synchronization_id = id;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
+NTSTATUS WINAPI NtDCompositionTelemetrySetApplicationId( UINT channel, UINT64 size,
+                                                           const void *application_id )
+{
+    BYTE buffer[300];
+    NTSTATUS status;
+
+    TRACE( "channel %#x, size %s, application_id %p\n", channel,
+           wine_dbgstr_longlong(size), application_id );
+
+    if (!application_id || !size || (size & 1) || size > sizeof(buffer))
+        return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        memcpy( buffer, application_id, size );
+        status = STATUS_SUCCESS;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (status) return status;
+
+    SERVER_START_REQ( set_dcomp_channel_application_id )
+    {
+        req->channel = channel;
+        wine_server_add_data( req, buffer, size );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE *state,
                                               ULONG flags, HANDLE sync_object,
                                               const void *protocol_blocks, const UINT *resources,
@@ -4158,7 +5437,9 @@ NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE 
 {
     struct dcomp_channel_view *view;
     data_size_t protocol_size = 0;
+    data_size_t *protocol_block_sizes = NULL;
     BYTE *protocol_data = NULL;
+    UINT protocol_block_count = 0;
     UINT committed_batch_id = 0;
     BYTE committed_state = 0;
     NTSTATUS status;
@@ -4169,17 +5450,30 @@ NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE 
 
     if (!state) return STATUS_INVALID_PARAMETER;
     if (sync_object || resources || resource_count) return STATUS_NOT_SUPPORTED;
-    if ((status = copy_dcomp_protocol_blocks( protocol_blocks, &protocol_data, &protocol_size )))
+    if ((status = copy_dcomp_protocol_blocks( protocol_blocks, &protocol_data, &protocol_size,
+                                               &protocol_block_sizes, &protocol_block_count )))
         return status;
+    trace_dcomp_protocol_commands( channel, protocol_data, protocol_size );
 
     pthread_mutex_lock( &dcomp_channel_lock );
     view = find_dcomp_channel_view( channel );
     if (!view)
     {
         pthread_mutex_unlock( &dcomp_channel_lock );
+        free( protocol_block_sizes );
         free( protocol_data );
         return STATUS_ACCESS_DENIED;
     }
+    if ((status = translate_dcomp_protocol_blocks( view, protocol_data, protocol_size,
+                                                    protocol_block_sizes,
+                                                    protocol_block_count )))
+    {
+        pthread_mutex_unlock( &dcomp_channel_lock );
+        free( protocol_block_sizes );
+        free( protocol_data );
+        return status;
+    }
+    free( protocol_block_sizes );
     if ((status = build_dcomp_commit_payload( view, &protocol_data, &protocol_size )))
     {
         pthread_mutex_unlock( &dcomp_channel_lock );
@@ -4198,7 +5492,7 @@ NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE 
         {
             committed_batch_id = reply->batch_id;
             committed_state = reply->state;
-            commit_dcomp_resource_views( view );
+            commit_dcomp_resource_views( view, committed_batch_id );
         }
     }
     SERVER_END_REQ;

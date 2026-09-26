@@ -89,6 +89,9 @@ struct window
     unsigned int     dwm_context_id;  /* DWM composition generation containing this HWND */
     unsigned int     dwm_sprite_id;   /* DWM composition generation containing its sprite */
     unsigned int     dwm_link_id;     /* DWM composition generation containing its tree link */
+    unsigned int     dwm_vis_rgn_mask;/* native-style visible-region tracker owners */
+    unsigned int     dwm_target_count[2]; /* HWND target owners for tracker bits 4 and 8 */
+    struct region   *dwm_vis_rgn[3];  /* last regions published to DwmRedir */
     struct logical_surface *logical_surface; /* independently-lived redirected GDI surface */
     unsigned int     logical_surface_serial;
     unsigned __int64 composition_flags; /* boolean private composition attributes */
@@ -208,6 +211,9 @@ struct user_handle_array
 
 static const struct rectangle empty_rect;
 
+static void sync_dwm_visible_region( struct window *win, unsigned int type );
+static void sync_dwm_visible_regions( struct desktop *desktop );
+
 /* magic HWND_TOP etc. pointers */
 #define WINPTR_TOP       ((struct window *)1L)
 #define WINPTR_BOTTOM    ((struct window *)2L)
@@ -224,6 +230,7 @@ static void window_dump( struct object *obj, int verbose )
 static void window_destroy( struct object *obj )
 {
     struct window *win = (struct window *)obj;
+    unsigned int i;
 
     assert( !win->handle );
 
@@ -235,6 +242,8 @@ static void window_destroy( struct object *obj )
 
     if (win->win_region) free_region( win->win_region );
     if (win->update_region) free_region( win->update_region );
+    for (i = 0; i < ARRAY_SIZE(win->dwm_vis_rgn); ++i)
+        if (win->dwm_vis_rgn[i]) free_region( win->dwm_vis_rgn[i] );
     if (win->class) release_class( win->class );
     if (win->input_delegate) release_object( win->input_delegate );
     detach_logical_surface( win );
@@ -853,6 +862,9 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->dwm_context_id = 0;
     win->dwm_sprite_id  = 0;
     win->dwm_link_id    = 0;
+    win->dwm_vis_rgn_mask = 0;
+    memset( win->dwm_target_count, 0, sizeof(win->dwm_target_count) );
+    memset( win->dwm_vis_rgn, 0, sizeof(win->dwm_vis_rgn) );
     win->logical_surface = NULL;
     win->logical_surface_serial = 0;
     win->composition_flags = 0;
@@ -1336,6 +1348,13 @@ static unsigned int sync_dwm_window_context( struct window *win, int admit_no_re
                                                      process_id, sequence );
     if (old_context_id != win->dwm_context_id)
     {
+        unsigned int i;
+
+        for (i = 0; i < ARRAY_SIZE(win->dwm_vis_rgn); ++i)
+        {
+            if (win->dwm_vis_rgn[i]) free_region( win->dwm_vis_rgn[i] );
+            win->dwm_vis_rgn[i] = NULL;
+        }
         win->dwm_sprite_id = 0;
         win->dwm_link_id = 0;
     }
@@ -1351,6 +1370,8 @@ static unsigned int sync_dwm_window_context( struct window *win, int admit_no_re
                                                win->logical_surface ? win->logical_surface->height : 0 ))
             return 0;
         win->dwm_sprite_id = win->dwm_context_id;
+        win->dwm_vis_rgn_mask |= 1;
+        sync_dwm_visible_region( win, 2 );
     }
     return win->dwm_context_id;
 }
@@ -1652,6 +1673,103 @@ error:
     if (tmp) free_region( tmp );
     free_region( region );
     return NULL;
+}
+
+static struct region *get_dwm_visible_region( struct window *win, unsigned int type )
+{
+    struct region *region;
+
+    if (type != 2) return get_visible_region( win, 0 );
+    if (!win->win_region || is_region_empty( win->win_region )) return NULL;
+    if (!(region = create_empty_region())) return NULL;
+    if (!copy_region( region, win->win_region ))
+    {
+        free_region( region );
+        return NULL;
+    }
+    return region;
+}
+
+static int has_dwm_visible_region_tracker( const struct window *win, unsigned int type )
+{
+    if (type == 0) return !!(win->dwm_vis_rgn_mask & 8);
+    if (type == 1) return !!(win->dwm_vis_rgn_mask & 6);
+    return !!(win->dwm_vis_rgn_mask & 0x0f);
+}
+
+static void sync_dwm_visible_region( struct window *win, unsigned int type )
+{
+    struct region *region = NULL;
+
+    if (!win->dwm_context_id || type >= ARRAY_SIZE(win->dwm_vis_rgn)) return;
+    if (has_dwm_visible_region_tracker( win, type ))
+    {
+        region = get_dwm_visible_region( win, type );
+        /* An absent explicit window region is not the same as an empty
+         * calculated visible region.  Native win32k leaves class 2 unset. */
+        if (type == 2 && !region && !win->dwm_vis_rgn[type]) return;
+    }
+    if ((!region && !win->dwm_vis_rgn[type]) ||
+        (region && win->dwm_vis_rgn[type] &&
+         is_region_equal( region, win->dwm_vis_rgn[type] )))
+    {
+        if (region) free_region( region );
+        return;
+    }
+    if (!notify_dwm_window_visible_region( win->desktop, win->dwm_context_id,
+                                            win->handle, type, region ))
+    {
+        if (region) free_region( region );
+        return;
+    }
+    if (win->dwm_vis_rgn[type]) free_region( win->dwm_vis_rgn[type] );
+    win->dwm_vis_rgn[type] = region;
+}
+
+static void sync_dwm_visible_region_tree( struct window *win )
+{
+    struct window *child;
+    unsigned int type;
+
+    for (type = 0; type < ARRAY_SIZE(win->dwm_vis_rgn); ++type)
+        sync_dwm_visible_region( win, type );
+    LIST_FOR_EACH_ENTRY( child, &win->children, struct window, entry )
+        sync_dwm_visible_region_tree( child );
+    LIST_FOR_EACH_ENTRY( child, &win->unlinked, struct window, entry )
+        sync_dwm_visible_region_tree( child );
+}
+
+static void sync_dwm_visible_regions( struct desktop *desktop )
+{
+    if (desktop->top_window) sync_dwm_visible_region_tree( desktop->top_window );
+}
+
+void add_dwm_window_target( user_handle_t handle, unsigned int type )
+{
+    struct window *win = get_user_object( handle, NTUSER_OBJ_WINDOW );
+
+    if (!win || type >= ARRAY_SIZE(win->dwm_target_count)) return;
+    if (!win->dwm_target_count[type]++)
+        win->dwm_vis_rgn_mask |= type ? 8 : 4;
+    sync_dwm_visible_region( win, type ? 0 : 1 );
+}
+
+void sync_dwm_window_target( user_handle_t handle, unsigned int type )
+{
+    struct window *win = get_user_object( handle, NTUSER_OBJ_WINDOW );
+
+    if (win && type < ARRAY_SIZE(win->dwm_target_count))
+        sync_dwm_visible_region( win, type ? 0 : 1 );
+}
+
+void remove_dwm_window_target( user_handle_t handle, unsigned int type )
+{
+    struct window *win = get_user_object( handle, NTUSER_OBJ_WINDOW );
+
+    if (!win || type >= ARRAY_SIZE(win->dwm_target_count) || !win->dwm_target_count[type]) return;
+    if (!--win->dwm_target_count[type])
+        win->dwm_vis_rgn_mask &= ~(type ? 8 : 4);
+    sync_dwm_visible_region( win, type ? 0 : 1 );
 }
 
 
@@ -3112,6 +3230,8 @@ DECL_HANDLER(set_window_info)
     if (win->dwm_context_id && old_ex_style != win->ex_style)
         notify_dwm_window_style_changed( win->desktop, win->dwm_context_id, win->handle,
                                          GWL_EXSTYLE, win->ex_style );
+    if (old_style != win->style || old_ex_style != win->ex_style)
+        sync_dwm_visible_regions( win->desktop );
 }
 
 
@@ -3365,6 +3485,7 @@ DECL_HANDLER(set_window_pos)
     set_window_pos( win, previous, flags, &window_rect, &client_rect,
                     &visible_rect, &surface_rect, &valid_rect );
     sync_dwm_window_link( win, 0 );
+    sync_dwm_visible_regions( win->desktop );
     if ((win->style & old_style & WS_VISIBLE) && (memcmp( &old_client, &win->client_rect, sizeof(old_client) )
         || memcmp( &old_window, &win->window_rect, sizeof(old_window) )))
         update_cursor_pos( win->desktop );
@@ -3773,6 +3894,7 @@ DECL_HANDLER(set_window_region)
         if (win->ex_style & WS_EX_LAYOUTRTL) mirror_region( &win->window_rect, region );
     }
     set_window_region( win, region, req->redraw );
+    sync_dwm_visible_regions( win->desktop );
 }
 
 

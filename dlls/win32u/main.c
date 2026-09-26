@@ -2312,6 +2312,12 @@ BOOL SYSCALL_API NtUserReplyMessage( LRESULT result )
     SYSCALL_FUNC( NtUserReplyMessage );
 }
 
+BOOL SYSCALL_API NtUserReportInertia( ULONG_PTR id, UINT flags, HWND hwnd, const void *routing,
+                                      const void *info, const void *region )
+{
+    SYSCALL_FUNC( NtUserReportInertia );
+}
+
 INT SYSCALL_API NtUserScheduleDispatchNotification( HWND hwnd )
 {
     SYSCALL_FUNC( NtUserScheduleDispatchNotification );
