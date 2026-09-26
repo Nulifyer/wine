@@ -764,7 +764,7 @@ static ULONG all_nodes_memory_size(MIDL_STUB_MESSAGE *stub_msg, PFORMAT_STRING f
 {
     struct all_nodes_size_state state = {stub_msg, *stub_msg, NULL};
     NDR_MEMORYSIZE sizer = NdrMemorySizer[*format & NDR_TABLE_MASK];
-    ULONG fixed_size = 0, size = 0;
+    ULONG size = 0;
 
     if (!sizer) RpcRaiseException(RPC_X_BAD_STUB_DATA);
 
@@ -775,19 +775,8 @@ static ULONG all_nodes_memory_size(MIDL_STUB_MESSAGE *stub_msg, PFORMAT_STRING f
 
     __TRY
     {
-        if ((*format == FC_BOGUS_STRUCT || *format == FC_BOGUS_ARRAY) &&
-            !stub_msg->PointerBufferMark)
-        {
-            stub_msg->IgnoreEmbeddedPointers = TRUE;
-            fixed_size = sizer(stub_msg, format);
-            stub_msg->PointerBufferMark = stub_msg->Buffer;
-            stub_msg->Buffer = state.saved.Buffer;
-            stub_msg->MemorySize = *format == FC_BOGUS_STRUCT ? fixed_size : 0;
-            stub_msg->IgnoreEmbeddedPointers = FALSE;
-        }
         size = sizer(stub_msg, format);
-        if (*format == FC_BOGUS_STRUCT || *format == FC_BOGUS_ARRAY ||
-            size < stub_msg->MemorySize)
+        if (size < stub_msg->MemorySize)
             size = stub_msg->MemorySize;
     }
     __FINALLY_CTX(restore_all_nodes_size_state, &state)
@@ -1063,6 +1052,49 @@ static inline ULONG safe_multiply(ULONG a, ULONG b)
         RpcRaiseException(RPC_S_INVALID_BOUND);
         return 0;
     }
+    return ret;
+}
+
+static inline void check_conformance_bound(ULONG count, unsigned int type)
+{
+    static const ULONG invalid_bits[] =
+    {
+        0x80000000, 0xffffff00, 0xffffff00, 0xffffff80, 0xffffff00,
+        0xffff0000, 0xffff8000, 0xffff0000, 0x80000000, 0x80000000,
+    };
+
+    if (type >= ARRAY_SIZE(invalid_bits)) RpcRaiseException(RPC_S_INTERNAL_ERROR);
+    if (count & invalid_bits[type]) RpcRaiseException(RPC_S_INVALID_BOUND);
+}
+
+static inline void check_conformance_range(const MIDL_STUB_MESSAGE *stub_msg, ULONG count,
+                                           const unsigned char *array_format)
+{
+    const unsigned char *correlation = array_format + 4;
+    unsigned short flags;
+
+    if (!stub_msg->pCorrInfo || stub_msg->CorrDespIncrement != 12) return;
+
+    flags = *(const WORD *)(correlation + 4);
+    if ((flags & 0x0008) || !(flags & 0x0010)) return;
+
+    if ((correlation[0] & 0x0f) == FC_ULONG)
+    {
+        if (count < *(const ULONG *)(correlation + 8) ||
+            count > *(const ULONG *)(correlation + 12))
+            RpcRaiseException(RPC_S_INVALID_BOUND);
+    }
+    else if ((LONG)count < *(const LONG *)(correlation + 8) ||
+             (LONG)count > *(const LONG *)(correlation + 12))
+        RpcRaiseException(RPC_S_INVALID_BOUND);
+}
+
+static inline ULONG ndr32_multiply(ULONG a, ULONG b)
+{
+    ULONGLONG ret = (ULONGLONG)a * b;
+
+    if (a >= 0x80000000 || b >= 0x80000000 || ret >= 0x80000000)
+        RpcRaiseException(RPC_S_INVALID_BOUND);
     return ret;
 }
 
@@ -1454,6 +1486,35 @@ static void PointerBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
   else FIXME("no buffersizer for data type=%02x\n", *desc);
 }
 
+struct deferred_memory_size_state
+{
+    unsigned char *buffer;
+    ULONG memory_size;
+};
+
+static BOOL switch_to_deferred_memory_size(MIDL_STUB_MESSAGE *stub_msg,
+                                           struct deferred_memory_size_state *state)
+{
+    if (!stub_msg->PointerBufferMark) return FALSE;
+
+    state->buffer = stub_msg->Buffer;
+    state->memory_size = stub_msg->MemorySize;
+    stub_msg->Buffer = stub_msg->PointerBufferMark;
+    stub_msg->MemorySize = stub_msg->PointerLength;
+    stub_msg->PointerBufferMark = NULL;
+    stub_msg->PointerLength = 0;
+    return TRUE;
+}
+
+static void restore_inline_memory_size(MIDL_STUB_MESSAGE *stub_msg,
+                                       const struct deferred_memory_size_state *state)
+{
+    stub_msg->PointerBufferMark = stub_msg->Buffer;
+    stub_msg->PointerLength = stub_msg->MemorySize;
+    stub_msg->Buffer = state->buffer;
+    stub_msg->MemorySize = state->memory_size;
+}
+
 /***********************************************************************
  *           PointerMemorySize [internal]
  */
@@ -1827,22 +1888,17 @@ static ULONG EmbeddedPointerMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
                                        PFORMAT_STRING pFormat)
 {
   unsigned char *Mark = pStubMsg->BufferMark;
+  struct deferred_memory_size_state deferred_state;
   unsigned rep, count, stride;
   unsigned i;
-  unsigned char *saved_buffer = NULL;
+  BOOL deferred;
 
   TRACE("(%p,%p)\n", pStubMsg, pFormat);
 
   if (pStubMsg->IgnoreEmbeddedPointers) return 0;
-
-  if (pStubMsg->PointerBufferMark)
-  {
-    saved_buffer = pStubMsg->Buffer;
-    pStubMsg->Buffer = pStubMsg->PointerBufferMark;
-    pStubMsg->PointerBufferMark = NULL;
-  }
-
   if (*pFormat != FC_PP) return 0;
+
+  deferred = switch_to_deferred_memory_size(pStubMsg, &deferred_state);
   pFormat += 2;
 
   while (pFormat[0] != FC_END) {
@@ -1881,11 +1937,7 @@ static ULONG EmbeddedPointerMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
     pFormat += 8 * count;
   }
 
-  if (saved_buffer)
-  {
-    pStubMsg->PointerBufferMark = pStubMsg->Buffer;
-    pStubMsg->Buffer = saved_buffer;
-  }
+  if (deferred) restore_inline_memory_size(pStubMsg, &deferred_state);
 
   return 0;
 }
@@ -3866,32 +3918,21 @@ static ULONG ComplexStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
     case FC_FP:
     case FC_POINTER:
     {
+      struct deferred_memory_size_state deferred_state;
       unsigned char *saved_buffer;
-      BOOL pointer_buffer_mark_set = FALSE;
+      BOOL deferred;
       if (*pFormat != FC_POINTER)
         pPointer = pFormat;
       if (*pPointer != FC_RP)
         align_pointer(&pStubMsg->Buffer, 4);
       saved_buffer = pStubMsg->Buffer;
-      if (pStubMsg->PointerBufferMark)
-      {
-        pStubMsg->Buffer = pStubMsg->PointerBufferMark;
-        pStubMsg->PointerBufferMark = NULL;
-        pointer_buffer_mark_set = TRUE;
-      }
-      else if (*pPointer != FC_RP)
+      if (*pPointer != FC_RP)
         safe_buffer_increment(pStubMsg, 4); /* for pointer ID */
 
+      deferred = switch_to_deferred_memory_size(pStubMsg, &deferred_state);
       if (!pStubMsg->IgnoreEmbeddedPointers)
         PointerMemorySize(pStubMsg, saved_buffer, pPointer);
-      if (pointer_buffer_mark_set)
-      {
-        STD_OVERFLOW_CHECK(pStubMsg);
-        pStubMsg->PointerBufferMark = pStubMsg->Buffer;
-        pStubMsg->Buffer = saved_buffer;
-        if (*pPointer != FC_RP)
-          safe_buffer_increment(pStubMsg, 4); /* for pointer ID */
-      }
+      if (deferred) restore_inline_memory_size(pStubMsg, &deferred_state);
       if (*pFormat == FC_POINTER)
         pPointer += 4;
       else
@@ -4273,13 +4314,32 @@ ULONG WINAPI NdrComplexStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
                                         PFORMAT_STRING pFormat)
 {
   unsigned size = *(const WORD*)(pFormat+2);
+  unsigned char *saved_buffer = NULL;
+  ULONG saved_memory_size = 0;
   PFORMAT_STRING conf_array = NULL;
   PFORMAT_STRING pointer_desc = NULL;
   ULONG count = 0;
   ULONG max_count = 0;
   ULONG offset = 0;
+  BOOL owns_deferred_state = FALSE;
 
   TRACE("(%p,%p)\n", pStubMsg, pFormat);
+
+  if (!pStubMsg->IgnoreEmbeddedPointers && !pStubMsg->PointerBufferMark)
+  {
+    saved_buffer = pStubMsg->Buffer;
+    saved_memory_size = pStubMsg->MemorySize;
+    pStubMsg->IgnoreEmbeddedPointers = TRUE;
+    NdrComplexStructMemorySize(pStubMsg, pFormat);
+    pStubMsg->PointerBufferMark = pStubMsg->Buffer;
+    if (pStubMsg->MemorySize > ~0u - size)
+      RpcRaiseException(RPC_S_INVALID_BOUND);
+    pStubMsg->PointerLength = pStubMsg->MemorySize + size;
+    pStubMsg->Buffer = saved_buffer;
+    pStubMsg->MemorySize = saved_memory_size;
+    pStubMsg->IgnoreEmbeddedPointers = FALSE;
+    owns_deferred_state = TRUE;
+  }
 
   align_pointer(&pStubMsg->Buffer, pFormat[1] + 1);
 
@@ -4309,6 +4369,15 @@ ULONG WINAPI NdrComplexStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
     pStubMsg->Offset = offset;
     array_memory_size(conf_array[0], pStubMsg, conf_array,
                       TRUE /* fHasPointers */);
+  }
+
+  if (owns_deferred_state)
+  {
+    pStubMsg->Buffer = pStubMsg->PointerBufferMark;
+    pStubMsg->MemorySize = pStubMsg->PointerLength;
+    pStubMsg->PointerBufferMark = NULL;
+    pStubMsg->PointerLength = 0;
+    return pStubMsg->MemorySize;
   }
 
   return size;
@@ -4742,6 +4811,11 @@ void WINAPI NdrComplexArrayBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
 ULONG WINAPI NdrComplexArrayMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
                                        PFORMAT_STRING pFormat)
 {
+  unsigned char *saved_buffer = NULL, *saved_buffer_mark = NULL;
+  ULONG saved_memory_size = 0, saved_offset = 0, saved_actual_count = 0;
+  ULONG_PTR saved_max_count = 0;
+  BOOL owns_deferred_state = FALSE;
+
   TRACE("(%p,%p)\n", pStubMsg, pFormat);
 
   if (pFormat[0] != FC_BOGUS_ARRAY)
@@ -4751,8 +4825,38 @@ ULONG WINAPI NdrComplexArrayMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
       return 0;
   }
 
+  if (!pStubMsg->IgnoreEmbeddedPointers && !pStubMsg->PointerBufferMark)
+  {
+    saved_buffer = pStubMsg->Buffer;
+    saved_buffer_mark = pStubMsg->BufferMark;
+    saved_memory_size = pStubMsg->MemorySize;
+    saved_max_count = pStubMsg->MaxCount;
+    saved_offset = pStubMsg->Offset;
+    saved_actual_count = pStubMsg->ActualCount;
+    pStubMsg->IgnoreEmbeddedPointers = TRUE;
+    NdrComplexArrayMemorySize(pStubMsg, pFormat);
+    pStubMsg->PointerBufferMark = pStubMsg->Buffer;
+    pStubMsg->PointerLength = pStubMsg->MemorySize;
+    pStubMsg->Buffer = saved_buffer;
+    pStubMsg->BufferMark = saved_buffer_mark;
+    pStubMsg->MemorySize = saved_memory_size;
+    pStubMsg->MaxCount = saved_max_count;
+    pStubMsg->Offset = saved_offset;
+    pStubMsg->ActualCount = saved_actual_count;
+    pStubMsg->IgnoreEmbeddedPointers = FALSE;
+    owns_deferred_state = TRUE;
+  }
+
   array_read_conformance(FC_BOGUS_ARRAY, pStubMsg, pFormat);
   array_memory_size(FC_BOGUS_ARRAY, pStubMsg, pFormat, TRUE /* fHasPointers */);
+
+  if (owns_deferred_state)
+  {
+    pStubMsg->Buffer = pStubMsg->PointerBufferMark;
+    pStubMsg->MemorySize = pStubMsg->PointerLength;
+    pStubMsg->PointerBufferMark = NULL;
+    pStubMsg->PointerLength = 0;
+  }
   return pStubMsg->MemorySize;
 }
 
@@ -5289,8 +5393,63 @@ void WINAPI NdrConformantStructBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
 ULONG WINAPI NdrConformantStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
                                 PFORMAT_STRING pFormat)
 {
-    FIXME("stub\n");
-    return 0;
+    const NDR_CSTRUCT_FORMAT *cstruct = (const NDR_CSTRUCT_FORMAT *)pFormat;
+    PFORMAT_STRING array_format;
+    unsigned char *body;
+    ULONG count, array_size, wire_size, aligned_size;
+    BOOL reuse_conformance = pStubMsg->uFlags & 1;
+
+    TRACE("(%p, %p)\n", pStubMsg, pFormat);
+
+    if (cstruct->type != FC_CSTRUCT && cstruct->type != FC_CPSTRUCT)
+    {
+        ERR("invalid format type %x\n", cstruct->type);
+        RpcRaiseException(RPC_S_INTERNAL_ERROR);
+    }
+
+    array_format = (const unsigned char *)&cstruct->offset_to_array_description +
+        cstruct->offset_to_array_description;
+    if (*array_format != FC_CARRAY)
+    {
+        ERR("invalid array format type %x\n", *array_format);
+        RpcRaiseException(RPC_S_INTERNAL_ERROR);
+    }
+
+    if (reuse_conformance)
+        count = NDR_LOCAL_UINT32_READ(pStubMsg->BufferMark);
+    else
+    {
+        ReadConformance(pStubMsg, array_format + 4);
+        count = pStubMsg->MaxCount;
+    }
+    pStubMsg->MaxCount = (LONG)count;
+
+    check_conformance_bound(count, array_format[4] & 0x0f);
+    check_conformance_range(pStubMsg, count, array_format);
+    array_size = ndr32_multiply(count, *(const WORD *)(array_format + 2));
+    wire_size = cstruct->memory_size + array_size;
+
+    align_pointer(&pStubMsg->Buffer, cstruct->alignment + 1);
+    if (pStubMsg->MemorySize + cstruct->alignment < pStubMsg->MemorySize)
+        RpcRaiseException(RPC_S_INVALID_BOUND);
+    aligned_size = (pStubMsg->MemorySize + cstruct->alignment) & ~cstruct->alignment;
+
+    body = pStubMsg->Buffer;
+    validate_size(pStubMsg, pStubMsg->BufferEnd, wire_size);
+    pStubMsg->Buffer += wire_size;
+
+    if ((ULONGLONG)aligned_size + wire_size >= 0x80000000)
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    pStubMsg->MemorySize = aligned_size + wire_size;
+
+    if (pFormat[sizeof(*cstruct)] == FC_PP)
+    {
+        pStubMsg->BufferMark = body;
+        EmbeddedPointerMemorySize(pStubMsg, pFormat + sizeof(*cstruct));
+    }
+
+    if (reuse_conformance) pStubMsg->uFlags |= 8;
+    return pStubMsg->MemorySize;
 }
 
 /***********************************************************************
@@ -6343,7 +6502,7 @@ static ULONG union_arm_memory_size(PMIDL_STUB_MESSAGE pStubMsg,
     unsigned short type, size;
 
     size = *(const unsigned short*)pFormat;
-    pStubMsg->Memory += size;
+    safe_memory_size_increment(pStubMsg, size);
     pFormat += 2;
 
     pFormat = get_arm_offset_from_union_arm_selector(pStubMsg, discriminant, pFormat);
@@ -6368,14 +6527,21 @@ static ULONG union_arm_memory_size(PMIDL_STUB_MESSAGE pStubMsg,
             case FC_UP:
             case FC_OP:
             case FC_FP:
-                align_pointer(&pStubMsg->Buffer, 4);
+            {
+                struct deferred_memory_size_state deferred_state;
+                BOOL deferred;
+
+                if (*desc != FC_RP) align_pointer(&pStubMsg->Buffer, 4);
                 saved_buffer = pStubMsg->Buffer;
-                safe_buffer_increment(pStubMsg, 4);
+                if (*desc != FC_RP) safe_buffer_increment(pStubMsg, 4);
                 align_length(&pStubMsg->MemorySize, sizeof(void *));
-                pStubMsg->MemorySize += sizeof(void *);
+                safe_memory_size_increment(pStubMsg, sizeof(void *));
+                deferred = switch_to_deferred_memory_size(pStubMsg, &deferred_state);
                 if (!pStubMsg->IgnoreEmbeddedPointers)
-                    PointerMemorySize(pStubMsg, saved_buffer, pFormat);
+                    PointerMemorySize(pStubMsg, saved_buffer, desc);
+                if (deferred) restore_inline_memory_size(pStubMsg, &deferred_state);
                 break;
+            }
             default:
                 return m(pStubMsg, desc);
             }

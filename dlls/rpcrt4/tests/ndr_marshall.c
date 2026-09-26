@@ -2475,9 +2475,10 @@ static void test_allocate_all_nodes_samr_graph(void)
     ok(!msg.pMemoryList, "SAMR-shaped memory list was not cleared\n");
 
     format[6] = 1;
+    memmove(wire + 12, wire + 20, 20);
     msg.Buffer = wire;
-    msg.BufferEnd = wire + 40;
-    msg.BufferLength = 40;
+    msg.BufferEnd = wire + 32;
+    msg.BufferLength = 32;
     entries = NULL;
     my_alloc_called = my_free_called = 0;
     NdrPointerUnmarshall(&msg, (unsigned char **)&entries, format, FALSE);
@@ -2486,7 +2487,7 @@ static void test_allocate_all_nodes_samr_graph(void)
        "got one-entry value %#lx\n", entries ? entries[0].inner.value : 0);
     ok(entries && entries[0].inner.name && !wcscmp(entries[0].inner.name, L"one"),
        "got one-entry name %s\n", entries ? wine_dbgstr_w(entries[0].inner.name) : "(null)");
-    ok(msg.Buffer == wire + 40, "one-entry buffer %p\n", msg.Buffer);
+    ok(msg.Buffer == wire + 32, "one-entry buffer %p\n", msg.Buffer);
     NdrPointerFree(&msg, (unsigned char *)entries, format);
     ok(my_free_called == 1, "one-entry free called %d times\n", my_free_called);
 
@@ -2549,6 +2550,210 @@ static void test_allocate_all_nodes_cleanup(void)
     ok(my_free_called == 1, "free called %d times\n", my_free_called);
     ok(!msg.pAllocAllNodesContext, "allocation context was not cleared\n");
     ok(!msg.pMemoryList, "exception memory list was not cleared\n");
+}
+
+static DWORD conformant_struct_memory_size_exception(MIDL_STUB_MESSAGE *msg,
+                                                      const unsigned char *format)
+{
+    DWORD exception = 0;
+
+    RpcTryExcept
+    {
+        NdrConformantStructMemorySize(msg, format);
+    }
+    RpcExcept(TRUE)
+    {
+        exception = RpcExceptionCode();
+    }
+    RpcEndExcept
+    return exception;
+}
+
+static void init_conformant_struct_message(RPC_MESSAGE *rpc_msg, MIDL_STUB_MESSAGE *msg,
+                                           unsigned char *wire, ULONG buffer_length,
+                                           ULONG end_offset)
+{
+    NdrClientInitializeNew(rpc_msg, msg, &Object_StubDesc, 0);
+    rpc_msg->Buffer = msg->BufferStart = msg->Buffer = wire;
+    rpc_msg->BufferLength = msg->BufferLength = buffer_length;
+    msg->BufferEnd = wire + end_offset;
+    msg->MemorySize = 0;
+}
+
+static void test_conformant_struct_memory_size(void)
+{
+    RPC_MESSAGE rpc_msg;
+    MIDL_STUB_MESSAGE msg;
+    DWORD exception;
+    ULONG size, count;
+    union
+    {
+        ULONGLONG align;
+        unsigned char bytes[64];
+    } wire;
+    static const unsigned char cstruct_format[] =
+    {
+        FC_CSTRUCT, 3, NdrFcShort(4), NdrFcShort(2),
+        FC_CARRAY, 3, NdrFcShort(4),
+        FC_TOP_LEVEL_CONFORMANCE | FC_ULONG, 0, NdrFcShort(0),
+        FC_LONG, FC_END,
+    };
+    static const unsigned char cpstruct_format[] =
+    {
+        FC_CPSTRUCT, 3, NdrFcShort(4), NdrFcShort(6),
+        FC_PP, FC_PAD, FC_END, FC_PAD,
+        FC_CARRAY, 0, NdrFcShort(1),
+        FC_TOP_LEVEL_CONFORMANCE | FC_ULONG, 0, NdrFcShort(0),
+        FC_BYTE, FC_END,
+    };
+    static const unsigned char ranged_format[] =
+    {
+        FC_CSTRUCT, 0, NdrFcShort(0), NdrFcShort(2),
+        FC_CARRAY, 0, NdrFcShort(1),
+        FC_TOP_LEVEL_CONFORMANCE | FC_ULONG, 0, NdrFcShort(0),
+        NdrFcShort(0x0010), NdrFcShort(0),
+        NdrFcLong(2), NdrFcLong(4),
+        FC_BYTE, FC_END,
+    };
+    static const unsigned char union_format[] =
+    {
+        FC_NON_ENCAPSULATED_UNION,
+        FC_ENUM16,
+        FC_TOP_LEVEL_CONFORMANCE | FC_ULONG, 0, NdrFcShort(0),
+        NdrFcShort(2),
+        NdrFcShort(72),
+        NdrFcShort(1),
+        NdrFcLong(5),
+        NdrFcShort(0),
+    };
+    unsigned char narrow_format[sizeof(cstruct_format)];
+#ifndef _WIN64
+    static const unsigned char cpstruct_pointer_format[] =
+    {
+        FC_CPSTRUCT, 7, NdrFcShort(8), NdrFcShort(16),
+        FC_PP, FC_PAD,
+        FC_NO_REPEAT, FC_PAD,
+        NdrFcShort(0), NdrFcShort(0),
+        FC_UP, FC_SIMPLE_POINTER, FC_LONG, FC_PAD,
+        FC_END, FC_PAD,
+        FC_CARRAY, 0, NdrFcShort(1),
+        FC_TOP_LEVEL_CONFORMANCE | FC_ULONG, 0, NdrFcShort(0),
+        FC_BYTE, FC_END,
+    };
+#endif
+
+    memset(&wire, 0, sizeof(wire));
+    *(DWORD *)(wire.bytes + 0) = 3;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, 20, 20);
+    size = NdrConformantStructMemorySize(&msg, cstruct_format);
+    ok(size == 16, "got memory size %lu\n", size);
+    ok(msg.MemorySize == 16, "got message memory size %lu\n", msg.MemorySize);
+    ok(msg.MaxCount == 3, "got max count %Iu\n", msg.MaxCount);
+    ok(msg.Buffer == wire.bytes + 20, "got buffer %p\n", msg.Buffer);
+
+    *(DWORD *)(wire.bytes + 4) = 3;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, 24, 24);
+    msg.Buffer = wire.bytes + 1;
+    msg.MemorySize = 1;
+    size = NdrConformantStructMemorySize(&msg, cstruct_format);
+    ok(size == 20, "got aligned memory size %lu\n", size);
+    ok(msg.Buffer == wire.bytes + 24, "got aligned buffer %p\n", msg.Buffer);
+
+    *(DWORD *)(wire.bytes + 0) = 0;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), 7);
+    exception = conformant_struct_memory_size_exception(&msg, cstruct_format);
+    ok(exception == RPC_X_BAD_STUB_DATA, "got short-body exception %lu\n", exception);
+
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), 3);
+    exception = conformant_struct_memory_size_exception(&msg, cstruct_format);
+    ok(exception == RPC_X_BAD_STUB_DATA, "got short-count exception %lu\n", exception);
+
+    *(DWORD *)(wire.bytes + 0) = 0x80000000;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), sizeof(wire.bytes));
+    exception = conformant_struct_memory_size_exception(&msg, cstruct_format);
+    ok(exception == RPC_S_INVALID_BOUND, "got count-bound exception %lu\n", exception);
+
+    memcpy(narrow_format, cstruct_format, sizeof(narrow_format));
+    narrow_format[10] = FC_TOP_LEVEL_CONFORMANCE | FC_USMALL;
+    *(DWORD *)(wire.bytes + 0) = 0x100;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), sizeof(wire.bytes));
+    exception = conformant_struct_memory_size_exception(&msg, narrow_format);
+    ok(exception == RPC_S_INVALID_BOUND, "got narrow-count exception %lu\n", exception);
+
+    *(DWORD *)(wire.bytes + 0) = 0x40000000;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), sizeof(wire.bytes));
+    exception = conformant_struct_memory_size_exception(&msg, cstruct_format);
+    ok(exception == RPC_S_INVALID_BOUND, "got multiply-bound exception %lu\n", exception);
+
+    *(DWORD *)(wire.bytes + 0) = 1;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), sizeof(wire.bytes));
+    msg.CorrDespIncrement = 12;
+    msg.pCorrInfo = (PNDR_CORRELATION_INFO)&msg;
+    exception = conformant_struct_memory_size_exception(&msg, ranged_format);
+    ok(exception == RPC_S_INVALID_BOUND, "got range exception %lu\n", exception);
+
+    *(DWORD *)(wire.bytes + 0) = 3;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), sizeof(wire.bytes));
+    msg.CorrDespIncrement = 12;
+    msg.pCorrInfo = (PNDR_CORRELATION_INFO)&msg;
+    size = NdrConformantStructMemorySize(&msg, ranged_format);
+    ok(size == 3, "got ranged memory size %lu\n", size);
+    ok(msg.Buffer == wire.bytes + 7, "got ranged buffer %p\n", msg.Buffer);
+
+    *(DWORD *)(wire.bytes + 0) = 0;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), sizeof(wire.bytes));
+    msg.MemorySize = ~0u;
+    exception = conformant_struct_memory_size_exception(&msg, cstruct_format);
+    ok(exception == RPC_S_INVALID_BOUND, "got alignment-overflow exception %lu\n", exception);
+
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), sizeof(wire.bytes));
+    msg.MemorySize = 0x7ffffffb;
+    exception = conformant_struct_memory_size_exception(&msg, cstruct_format);
+    ok(exception == RPC_X_BAD_STUB_DATA, "got total-size exception %lu\n", exception);
+
+    count = 0;
+    memset(wire.bytes, 0, sizeof(wire.bytes));
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), sizeof(wire.bytes));
+    msg.BufferMark = (unsigned char *)&count;
+    msg.uFlags = 1;
+    size = NdrConformantStructMemorySize(&msg, cstruct_format);
+    ok(size == 4, "got reused-conformance memory size %lu\n", size);
+    ok(msg.Buffer == wire.bytes + 4, "got reused-conformance buffer %p\n", msg.Buffer);
+    ok(msg.uFlags == 9, "got reused-conformance flags %#x\n", msg.uFlags);
+
+    *(DWORD *)(wire.bytes + 0) = 2;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), 10);
+    size = NdrConformantStructMemorySize(&msg, cpstruct_format);
+    ok(size == 6, "got pointer-layout memory size %lu\n", size);
+    ok(msg.Buffer == wire.bytes + 10, "got pointer-layout buffer %p\n", msg.Buffer);
+    ok(msg.BufferMark == wire.bytes + 4, "got pointer-layout buffer mark %p\n", msg.BufferMark);
+
+#ifndef _WIN64
+    memset(wire.bytes, 0, sizeof(wire.bytes));
+    *(DWORD *)(wire.bytes + 0) = 2;
+    *(DWORD *)(wire.bytes + 8) = 0x20000;
+    *(DWORD *)(wire.bytes + 20) = 0x12345678;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), 24);
+    size = NdrConformantStructMemorySize(&msg, cpstruct_pointer_format);
+    ok(size == 20, "got embedded-pointer memory size %lu\n", size);
+    ok(msg.Buffer == wire.bytes + 24, "got embedded-pointer buffer %p\n", msg.Buffer);
+    ok(msg.BufferMark == wire.bytes + 8, "got embedded-pointer buffer mark %p\n", msg.BufferMark);
+
+    *(DWORD *)(wire.bytes + 8) = 0;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(wire.bytes), 18);
+    size = NdrConformantStructMemorySize(&msg, cpstruct_pointer_format);
+    ok(size == 10, "got null-pointer memory size %lu\n", size);
+    ok(msg.Buffer == wire.bytes + 18, "got null-pointer buffer %p\n", msg.Buffer);
+#endif
+
+    memset(wire.bytes, 0, sizeof(wire.bytes));
+    *(USHORT *)wire.bytes = 5;
+    init_conformant_struct_message(&rpc_msg, &msg, wire.bytes, sizeof(USHORT), sizeof(USHORT));
+    msg.MemorySize = 3;
+    size = NdrNonEncapsulatedUnionMemorySize(&msg, union_format);
+    ok(size == 72, "got union memory size %lu\n", size);
+    ok(msg.MemorySize == 75, "got message memory size %lu\n", msg.MemorySize);
+    ok(msg.Buffer == wire.bytes + sizeof(USHORT), "got union buffer %p\n", msg.Buffer);
 }
 
 static void test_conformant_array(void)
@@ -3696,6 +3901,7 @@ START_TEST( ndr_marshall )
     test_server_init();
     test_ndr_allocate();
     test_byte_count_pointer();
+    test_conformant_struct_memory_size();
     test_conformant_array();
     test_conformant_string();
     test_nonconformant_string();
