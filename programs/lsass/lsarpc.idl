@@ -135,7 +135,10 @@ interface lsarpc
     NTSTATUS lsarpc_unused_4(void);
     NTSTATUS lsarpc_unused_5(void);
     NTSTATUS lsarpc_unused_6(void);
-    NTSTATUS lsarpc_unused_7(void);
+    NTSTATUS lsarpc_query_information_policy(
+        [in] LSARPC_HANDLE handle,
+        [in] LSARPC_POLICY_INFORMATION_CLASS info_class,
+        [out, switch_is(info_class)] LSARPC_POLICY_INFORMATION **info);
     NTSTATUS lsarpc_unused_8(void);
     NTSTATUS lsarpc_unused_9(void);
     NTSTATUS lsarpc_unused_10(void);

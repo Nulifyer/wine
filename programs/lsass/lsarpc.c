@@ -75,7 +75,6 @@ DEFINE_UNUSED_OPNUM(3)
 DEFINE_UNUSED_OPNUM(4)
 DEFINE_UNUSED_OPNUM(5)
 DEFINE_UNUSED_OPNUM(6)
-DEFINE_UNUSED_OPNUM(7)
 DEFINE_UNUSED_OPNUM(8)
 DEFINE_UNUSED_OPNUM(9)
 DEFINE_UNUSED_OPNUM(10)
@@ -187,9 +186,9 @@ static void free_policy_information( LSARPC_POLICY_INFORMATION *info,
     MIDL_user_free( info );
 }
 
-NTSTATUS lsarpc_query_information_policy2( LSARPC_HANDLE handle,
-                                           LSARPC_POLICY_INFORMATION_CLASS info_class,
-                                           LSARPC_POLICY_INFORMATION **info )
+static NTSTATUS query_information_policy( LSARPC_HANDLE handle,
+                                          LSARPC_POLICY_INFORMATION_CLASS info_class,
+                                          LSARPC_POLICY_INFORMATION **info )
 {
     struct lsarpc_context *context = handle;
     LSARPC_POLICY_INFORMATION *rpc_info;
@@ -241,6 +240,20 @@ NTSTATUS lsarpc_query_information_policy2( LSARPC_HANDLE handle,
     if (!status) *info = rpc_info;
     else free_policy_information( rpc_info, info_class );
     return status;
+}
+
+NTSTATUS lsarpc_query_information_policy( LSARPC_HANDLE handle,
+                                          LSARPC_POLICY_INFORMATION_CLASS info_class,
+                                          LSARPC_POLICY_INFORMATION **info )
+{
+    return query_information_policy( handle, info_class, info );
+}
+
+NTSTATUS lsarpc_query_information_policy2( LSARPC_HANDLE handle,
+                                           LSARPC_POLICY_INFORMATION_CLASS info_class,
+                                           LSARPC_POLICY_INFORMATION **info )
+{
+    return query_information_policy( handle, info_class, info );
 }
 
 DEFINE_UNUSED_OPNUM(47)
