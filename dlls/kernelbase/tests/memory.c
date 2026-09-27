@@ -33,6 +33,14 @@ static BOOL WINAPI (*pGetOsSafeBootMode)(DWORD *flags);
 static HLOCAL (WINAPI *pLocalAlloc)(UINT flags, SIZE_T size);
 static HLOCAL (WINAPI *pLocalFree)(HLOCAL handle);
 static SIZE_T (WINAPI *pLocalSize)(HLOCAL handle);
+static HGLOBAL (WINAPI *pGlobalAlloc)(UINT flags, SIZE_T size);
+static UINT (WINAPI *pGlobalFlags)(HGLOBAL handle);
+static HGLOBAL (WINAPI *pGlobalFree)(HGLOBAL handle);
+static HGLOBAL (WINAPI *pGlobalHandle)(const void *ptr);
+static void *(WINAPI *pGlobalLock)(HGLOBAL handle);
+static HGLOBAL (WINAPI *pGlobalReAlloc)(HGLOBAL handle, SIZE_T size, UINT flags);
+static SIZE_T (WINAPI *pGlobalSize)(HGLOBAL handle);
+static BOOL (WINAPI *pGlobalUnlock)(HGLOBAL handle);
 
 static void test_enum_system_firmware_tables(void)
 {
@@ -119,6 +127,44 @@ static void test_local_size(void)
     ok(!pLocalFree(mem), "LocalFree failed, error %lu.\n", GetLastError());
 }
 
+static void test_global_memory(void)
+{
+    static const SIZE_T allocation_size = 123, reallocation_size = 321;
+    HGLOBAL mem, resized;
+    void *ptr;
+    UINT flags;
+
+    if (!pGlobalAlloc || !pGlobalFlags || !pGlobalFree || !pGlobalHandle || !pGlobalLock ||
+        !pGlobalReAlloc || !pGlobalSize || !pGlobalUnlock)
+    {
+        win_skip("KernelBase global-memory functions are not available.\n");
+        return;
+    }
+
+    mem = pGlobalAlloc(GMEM_MOVEABLE | GMEM_DISCARDABLE, allocation_size);
+    ok(!!mem, "GlobalAlloc failed, error %lu.\n", GetLastError());
+    if (!mem) return;
+
+    ok(pGlobalSize(mem) >= allocation_size, "GlobalSize returned %Iu.\n", pGlobalSize(mem));
+    flags = pGlobalFlags(mem);
+    ok((flags & GMEM_DISCARDABLE) == GMEM_DISCARDABLE, "GlobalFlags returned %#x.\n", flags);
+
+    ptr = pGlobalLock(mem);
+    ok(!!ptr, "GlobalLock failed, error %lu.\n", GetLastError());
+    if (ptr)
+    {
+        ok(pGlobalHandle(ptr) == mem, "GlobalHandle returned %p, expected %p.\n",
+           pGlobalHandle(ptr), mem);
+        pGlobalUnlock(mem);
+    }
+
+    resized = pGlobalReAlloc(mem, reallocation_size, GMEM_MOVEABLE);
+    ok(!!resized, "GlobalReAlloc failed, error %lu.\n", GetLastError());
+    if (resized) mem = resized;
+    ok(pGlobalSize(mem) >= reallocation_size, "GlobalSize returned %Iu.\n", pGlobalSize(mem));
+    ok(!pGlobalFree(mem), "GlobalFree failed, error %lu.\n", GetLastError());
+}
+
 START_TEST(memory)
 {
     HMODULE hmod;
@@ -130,9 +176,18 @@ START_TEST(memory)
     pLocalAlloc = (void *)GetProcAddress(hmod, "LocalAlloc");
     pLocalFree = (void *)GetProcAddress(hmod, "LocalFree");
     pLocalSize = (void *)GetProcAddress(hmod, "LocalSize");
+    pGlobalAlloc = (void *)GetProcAddress(hmod, "GlobalAlloc");
+    pGlobalFlags = (void *)GetProcAddress(hmod, "GlobalFlags");
+    pGlobalFree = (void *)GetProcAddress(hmod, "GlobalFree");
+    pGlobalHandle = (void *)GetProcAddress(hmod, "GlobalHandle");
+    pGlobalLock = (void *)GetProcAddress(hmod, "GlobalLock");
+    pGlobalReAlloc = (void *)GetProcAddress(hmod, "GlobalReAlloc");
+    pGlobalSize = (void *)GetProcAddress(hmod, "GlobalSize");
+    pGlobalUnlock = (void *)GetProcAddress(hmod, "GlobalUnlock");
 
     test_enum_system_firmware_tables();
     test_os_manufacturing_mode();
     test_os_safe_boot_mode();
     test_local_size();
+    test_global_memory();
 }

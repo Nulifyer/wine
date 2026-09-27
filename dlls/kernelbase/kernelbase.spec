@@ -816,8 +816,14 @@
 @ stdcall GetWsChangesEx(long ptr ptr)
 @ stdcall -arch=i386,x86_64 GetXStateFeaturesMask(ptr ptr)
 @ stdcall GlobalAlloc(long long)
+@ stdcall GlobalFlags(long)
 @ stdcall GlobalFree(long)
+@ stdcall GlobalHandle(ptr)
+@ stdcall GlobalLock(long)
 @ stdcall GlobalMemoryStatusEx(ptr)
+@ stdcall GlobalReAlloc(long long long)
+@ stdcall GlobalSize(long)
+@ stdcall GlobalUnlock(long)
 # @ stub GuardCheckLongJumpTarget
 @ stdcall HasPolicyForegroundProcessingCompletedInternal() gpapi.HasPolicyForegroundProcessingCompletedInternalWorker
 @ stdcall HashData(ptr long ptr long)

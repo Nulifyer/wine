@@ -1128,6 +1128,124 @@ HGLOBAL WINAPI DECLSPEC_HOTPATCH GlobalFree( HLOCAL handle )
 
 
 /***********************************************************************
+ *           GlobalFlags   (kernelbase.@)
+ */
+UINT WINAPI DECLSPEC_HOTPATCH GlobalFlags( HGLOBAL handle )
+{
+    HANDLE heap = GetProcessHeap();
+    struct mem_entry *mem;
+    UINT flags;
+
+    if (unsafe_ptr_from_HLOCAL( handle )) return 0;
+
+    RtlLockHeap( heap );
+    if ((mem = unsafe_mem_from_HLOCAL( handle )))
+    {
+        flags = mem->lock;
+        if (mem->flags & MEM_FLAG_DISCARDABLE) flags |= GMEM_DISCARDABLE;
+        if (mem->flags & MEM_FLAG_DISCARDED) flags |= GMEM_DISCARDED;
+        if (mem->flags & MEM_FLAG_DDESHARE) flags |= GMEM_DDESHARE;
+    }
+    else
+    {
+        WARN_(globalmem)( "invalid handle %p\n", handle );
+        SetLastError( ERROR_INVALID_HANDLE );
+        flags = GMEM_INVALID_HANDLE;
+    }
+    RtlUnlockHeap( heap );
+
+    return flags;
+}
+
+
+/***********************************************************************
+ *           GlobalHandle   (kernelbase.@)
+ */
+HGLOBAL WINAPI DECLSPEC_HOTPATCH GlobalHandle( const void *ptr )
+{
+    HANDLE heap = GetProcessHeap();
+    HGLOBAL handle = (HGLOBAL)ptr;
+    ULONG flags;
+
+    TRACE_(globalmem)( "ptr %p\n", ptr );
+
+    if (!ptr)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    RtlLockHeap( heap );
+    if (!HeapValidate( heap, HEAP_NO_SERIALIZE, ptr ) ||
+        !RtlGetUserInfoHeap( heap, HEAP_NO_SERIALIZE, (void *)ptr, &handle, &flags ))
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        handle = 0;
+    }
+    RtlUnlockHeap( heap );
+
+    return handle;
+}
+
+
+/***********************************************************************
+ *           GlobalLock   (kernelbase.@)
+ */
+void *WINAPI DECLSPEC_HOTPATCH GlobalLock( HGLOBAL handle )
+{
+    return LocalLock( handle );
+}
+
+
+/***********************************************************************
+ *           GlobalReAlloc   (kernelbase.@)
+ */
+HGLOBAL WINAPI DECLSPEC_HOTPATCH GlobalReAlloc( HGLOBAL handle, SIZE_T size, UINT flags )
+{
+    struct mem_entry *mem;
+    void *ptr;
+
+    if (!(flags & GMEM_MODIFY) && (mem = unsafe_mem_from_HLOCAL( handle )) &&
+        mem->lock && (!size || (flags & GMEM_DISCARDABLE)))
+        return 0;
+
+    if (!(handle = LocalReAlloc( handle, size, flags ))) return 0;
+
+    /* GlobalReAlloc allows changing GMEM_FIXED to GMEM_MOVEABLE with GMEM_MODIFY. */
+    if ((flags & (GMEM_MOVEABLE | GMEM_MODIFY)) == (GMEM_MOVEABLE | GMEM_MODIFY) &&
+        (ptr = unsafe_ptr_from_HLOCAL( handle )))
+    {
+        if (!(handle = LocalAlloc( flags, 0 ))) return 0;
+        RtlSetUserValueHeap( GetProcessHeap(), 0, ptr, handle );
+        mem = unsafe_mem_from_HLOCAL( handle );
+        mem->flags &= ~MEM_FLAG_DISCARDED;
+        mem->ptr = ptr;
+    }
+
+    return handle;
+}
+
+
+/***********************************************************************
+ *           GlobalSize   (kernelbase.@)
+ */
+SIZE_T WINAPI DECLSPEC_HOTPATCH GlobalSize( HGLOBAL handle )
+{
+    return LocalSize( handle );
+}
+
+
+/***********************************************************************
+ *           GlobalUnlock   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH GlobalUnlock( HGLOBAL handle )
+{
+    if (unsafe_ptr_from_HLOCAL( handle )) return TRUE;
+    return LocalUnlock( handle );
+}
+
+
+/***********************************************************************
  *           LocalAlloc   (kernelbase.@)
  */
 HLOCAL WINAPI DECLSPEC_HOTPATCH LocalAlloc( UINT flags, SIZE_T size )
