@@ -102,6 +102,7 @@
 @ stub WNetPasswordChangeNotify
 @ stub WNetPropertyDialogA
 @ stdcall WNetRemoveCachedPassword(ptr long long)
+@ stdcall WNetRestoreAllConnectionsW(long long ptr)
 @ stub WNetRestoreConnection
 @ stdcall WNetRestoreConnectionA(long str)
 @ stdcall WNetRestoreConnectionW(long wstr)

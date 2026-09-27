@@ -2304,6 +2304,17 @@ DWORD WINAPI WNetRestoreConnectionW( HWND hwndOwner, LPCWSTR lpszDevice )
     return WN_NO_NETWORK;
 }
 
+/*****************************************************************
+ *  WNetRestoreAllConnectionsW [MPR.@]
+ */
+DWORD WINAPI WNetRestoreAllConnectionsW( HWND hwndOwner, DWORD flags, BOOL *failed )
+{
+    FIXME( "(%p, %#lx, %p), stub\n", hwndOwner, flags, failed );
+
+    if (failed) *failed = FALSE;
+    return WN_SUCCESS;
+}
+
 /**************************************************************************
  * WNetGetConnectionA [MPR.@]
  *

@@ -165,6 +165,7 @@ static DWORD (WINAPI *pWNetGetCachedPassword)( LPSTR, WORD, LPSTR, LPWORD, BYTE 
 static UINT (WINAPI *pWNetEnumCachedPasswords)( LPSTR, WORD, BYTE, ENUMPASSWORDPROC, DWORD);
 static UINT (WINAPI *pWNetRemoveCachedPassword)( LPSTR, WORD, BYTE );
 static DWORD (WINAPI *pWNetUseConnectionA)( HWND, LPNETRESOURCEA, LPCSTR, LPCSTR, DWORD, LPSTR, LPDWORD, LPDWORD );
+static DWORD (WINAPI *pWNetRestoreAllConnectionsW)( HWND, DWORD, BOOL * );
 
 #define MPR_GET_PROC(func) \
     p ## func = (void*)GetProcAddress(hmpr, #func)
@@ -178,6 +179,7 @@ static void InitFunctionPtrs(void)
     MPR_GET_PROC(WNetEnumCachedPasswords);
     MPR_GET_PROC(WNetRemoveCachedPassword);
     MPR_GET_PROC(WNetUseConnectionA);
+    MPR_GET_PROC(WNetRestoreAllConnectionsW);
 }
 
 static const char* m_resource = "wine-test-resource";
@@ -334,6 +336,22 @@ static void test_WNetLogonNotify(void)
     ok( !scripts, "WNetLogonNotify returned scripts %p\n", scripts );
 }
 
+static void test_WNetRestoreAllConnections(void)
+{
+    BOOL failed = TRUE;
+    DWORD ret;
+
+    ok( !!pWNetRestoreAllConnectionsW, "WNetRestoreAllConnectionsW is unavailable\n" );
+    if (!pWNetRestoreAllConnectionsW) return;
+
+    ret = pWNetRestoreAllConnectionsW( NULL, 0, &failed );
+    ok( ret == WN_SUCCESS, "WNetRestoreAllConnectionsW returned %lu\n", ret );
+    ok( !failed, "expected no failed connections\n" );
+
+    ret = pWNetRestoreAllConnectionsW( NULL, 0, NULL );
+    ok( ret == WN_SUCCESS, "WNetRestoreAllConnectionsW returned %lu\n", ret );
+}
+
 START_TEST(mpr)
 {
     test_WNetGetUniversalName();
@@ -341,4 +359,5 @@ START_TEST(mpr)
     test_WNetCachePassword();
     test_WNetUseConnection();
     test_WNetLogonNotify();
+    test_WNetRestoreAllConnections();
 }
