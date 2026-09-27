@@ -60,6 +60,7 @@ SecureProvider *SECUR32_addProvider(const SecurityFunctionTableA *fnTableA,
  */
 void SECUR32_addPackages(SecureProvider *provider, ULONG toAdd,
  const SecPkgInfoA *infoA, const SecPkgInfoW *infoW);
+void SECUR32_initializeProviders(void);
 
 /* Tries to find the package named packageName.  If it finds it, implicitly
  * loads the package if it isn't already loaded.

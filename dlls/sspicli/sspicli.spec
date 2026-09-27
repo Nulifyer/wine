@@ -70,10 +70,10 @@
 @ stdcall SealMessage(ptr long ptr long) secur32.SealMessage
 @ stub SecCacheSspiPackages
 @ stub SecDeleteUserModeContext
-@ stub SeciAllocateAndSetCallFlags
-@ stub SeciAllocateAndSetIPAddress
-@ stub SeciFreeCallContext
-@ stub SeciIsProtectedUser
+@ stdcall SeciAllocateAndSetCallFlags(long ptr)
+@ stdcall SeciAllocateAndSetIPAddress(ptr long ptr)
+@ stdcall SeciFreeCallContext()
+@ stdcall SeciIsProtectedUser(ptr)
 @ stub SecInitUserModeContext
 @ stdcall SetContextAttributesA(ptr long ptr long) secur32.SetContextAttributesA
 @ stdcall SetContextAttributesW(ptr long ptr long) secur32.SetContextAttributesW

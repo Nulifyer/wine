@@ -151,8 +151,8 @@ static NTSTATUS copy_auth_string( const BYTE *auth_buf, const void *client_base,
         *result = copy;
         return STATUS_SUCCESS;
     }
-    if (!source->Buffer || address < base) return STATUS_INVALID_PARAMETER;
-    offset = address - base;
+    if (!source->Buffer) return STATUS_INVALID_PARAMETER;
+    offset = address < base ? address : address - base;
     if (offset > auth_len || source->Length > auth_len - offset) return STATUS_INVALID_PARAMETER;
     if (!(copy = malloc( source->Length + sizeof(WCHAR) ))) return STATUS_NO_MEMORY;
     memcpy( copy, auth_buf + offset, source->Length );
@@ -202,6 +202,7 @@ static NTSTATUS initialize_sid( SID *sid, const SID_IDENTIFIER_AUTHORITY *author
 
 static NTSTATUS create_local_token( const struct lsa_local_account *account, DWORD client_process_id,
                                     const BYTE source_name[8], const LUID *source_id,
+                                    const LSASS_TOKEN_GROUP *extra_groups, ULONG extra_count,
                                     LUID *logon_id, HANDLE *token )
 {
     static const SID_IDENTIFIER_AUTHORITY world_authority = { SECURITY_WORLD_SID_AUTHORITY };
@@ -215,11 +216,8 @@ static NTSTATUS create_local_token( const struct lsa_local_account *account, DWO
     static const DWORD interactive_subauth[] = { SECURITY_INTERACTIVE_RID };
     union sid_buffer world, local, authenticated, users, admins, interactive, logon;
     DWORD logon_subauth[3];
-    struct
-    {
-        DWORD GroupCount;
-        SID_AND_ATTRIBUTES Groups[7];
-    } groups;
+    TOKEN_GROUPS *groups = NULL;
+    SID_AND_ATTRIBUTES *group_entries;
     struct
     {
         DWORD PrivilegeCount;
@@ -234,11 +232,42 @@ static NTSTATUS create_local_token( const struct lsa_local_account *account, DWO
     LARGE_INTEGER expiration;
     SID *user_sid;
     DWORD session_id;
+    ULONG group_count, i;
+    BOOL have_logon_id = FALSE;
     NTSTATUS status;
 
     *token = NULL;
     if (!(user_sid = lsa_allocate_local_account_sid( account->rid ))) return STATUS_NO_MEMORY;
-    if ((status = NtAllocateLocallyUniqueId( logon_id ))) goto done;
+    if (extra_count > 1024)
+    {
+        status = STATUS_INVALID_PARAMETER;
+        goto done;
+    }
+    for (i = 0; i < extra_count; ++i)
+    {
+        const SID *sid = (const SID *)extra_groups[i].Sid;
+
+        TRACE( "supplemental group %lu: revision %u authority %u count %u first %#lx length %lu attributes %#lx\n",
+               i, sid->Revision, sid->IdentifierAuthority.Value[5], sid->SubAuthorityCount,
+               sid->SubAuthorityCount ? sid->SubAuthority[0] : 0,
+               extra_groups[i].SidLength, extra_groups[i].Attributes );
+
+        if (!extra_groups[i].SidLength || extra_groups[i].SidLength > sizeof(extra_groups[i].Sid) ||
+            !RtlValidSid( (SID *)sid ) || RtlLengthSid( (SID *)sid ) != extra_groups[i].SidLength)
+        {
+            status = STATUS_INVALID_SID;
+            goto done;
+        }
+        if ((extra_groups[i].Attributes & SE_GROUP_LOGON_ID) && sid->SubAuthorityCount == 3 &&
+            !memcmp( &sid->IdentifierAuthority, &nt_authority, sizeof(nt_authority) ) &&
+            sid->SubAuthority[0] == SECURITY_LOGON_IDS_RID)
+        {
+            logon_id->HighPart = sid->SubAuthority[1];
+            logon_id->LowPart = sid->SubAuthority[2];
+            have_logon_id = TRUE;
+        }
+    }
+    if (!have_logon_id && (status = NtAllocateLocallyUniqueId( logon_id ))) goto done;
     logon_subauth[0] = SECURITY_LOGON_IDS_RID;
     logon_subauth[1] = logon_id->HighPart;
     logon_subauth[2] = logon_id->LowPart;
@@ -251,18 +280,32 @@ static NTSTATUS create_local_token( const struct lsa_local_account *account, DWO
         (status = initialize_sid( &logon.sid, &nt_authority, 3, logon_subauth )))
         goto done;
 
-    groups.GroupCount = ARRAY_SIZE(groups.Groups);
+    group_count = 6 + extra_count + !have_logon_id;
+    if (!(groups = malloc( FIELD_OFFSET(TOKEN_GROUPS, Groups[group_count]) )))
+    {
+        status = STATUS_NO_MEMORY;
+        goto done;
+    }
+    groups->GroupCount = group_count;
+    group_entries = groups->Groups;
 #define SET_GROUP(index, sid_value, attrs) \
-    do { groups.Groups[index].Sid = &(sid_value).sid; groups.Groups[index].Attributes = (attrs); } while (0)
+    do { group_entries[index].Sid = &(sid_value).sid; group_entries[index].Attributes = (attrs); } while (0)
     SET_GROUP( 0, world, SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED );
     SET_GROUP( 1, local, SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED );
     SET_GROUP( 2, authenticated, SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED );
     SET_GROUP( 3, users, SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED );
     SET_GROUP( 4, admins, SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED );
     SET_GROUP( 5, interactive, SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED );
-    SET_GROUP( 6, logon, SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT |
-                         SE_GROUP_ENABLED | SE_GROUP_LOGON_ID );
+    if (!have_logon_id)
+        SET_GROUP( 6, logon, SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT |
+                             SE_GROUP_ENABLED | SE_GROUP_LOGON_ID );
 #undef SET_GROUP
+    for (i = 0; i < extra_count; ++i)
+    {
+        ULONG index = 6 + !have_logon_id + i;
+        group_entries[index].Sid = (SID *)extra_groups[i].Sid;
+        group_entries[index].Attributes = extra_groups[i].Attributes;
+    }
 
     privileges.PrivilegeCount = 1;
     privileges.Privileges[0].Luid.LowPart = SE_CHANGE_NOTIFY_PRIVILEGE;
@@ -277,9 +320,10 @@ static NTSTATUS create_local_token( const struct lsa_local_account *account, DWO
     expiration.QuadPart = 0x7fffffffffffffff;
     InitializeObjectAttributes( &attributes, NULL, 0, NULL, NULL );
     status = NtCreateToken( token, TOKEN_ALL_ACCESS, &attributes, TokenPrimary, logon_id,
-                            &expiration, &user, (TOKEN_GROUPS *)&groups,
+                            &expiration, &user, groups,
                             (TOKEN_PRIVILEGES *)&privileges, &owner, &primary_group,
                             &default_dacl, &source );
+    TRACE( "NtCreateToken returned %#lx for %lu groups\n", status, group_count );
     if (status) goto done;
     if (!ProcessIdToSessionId( client_process_id, &session_id ))
         status = STATUS_UNSUCCESSFUL;
@@ -292,13 +336,52 @@ static NTSTATUS create_local_token( const struct lsa_local_account *account, DWO
     }
 
 done:
+    free( groups );
     MIDL_user_free( user_sid );
     return status;
+}
+
+static void unprotect_interactive_password( WCHAR **password, USHORT password_length )
+{
+    typedef BOOL (WINAPI *cred_is_protected_fn)(WCHAR *, DWORD *);
+    typedef BOOL (WINAPI *cred_unprotect_fn)(BOOL, WCHAR *, DWORD, WCHAR *, DWORD *);
+    cred_is_protected_fn cred_is_protected;
+    cred_unprotect_fn cred_unprotect;
+    LDR_DATA_TABLE_ENTRY *entry;
+    DWORD protection, clear_chars = 0;
+    HMODULE module;
+    WCHAR *clear;
+
+    if (!password || !*password || password_length < 16) return;
+    if (!(module = GetModuleHandleW( L"sechost.dll" )) ||
+        LdrFindEntryForAddress( module, &entry ) || (entry->Flags & LDR_WINE_INTERNAL))
+        return;
+    if (!(cred_is_protected = (void *)GetProcAddress( module, "CredIsProtectedW" )) ||
+        !(cred_unprotect = (void *)GetProcAddress( module, "CredUnprotectW" )) ||
+        !cred_is_protected( *password, &protection ) || !protection)
+        return;
+
+    cred_unprotect( FALSE, *password, password_length / sizeof(WCHAR), NULL, &clear_chars );
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || !clear_chars ||
+        !(clear = calloc( clear_chars, sizeof(WCHAR) )))
+        return;
+    if (!cred_unprotect( FALSE, *password, password_length / sizeof(WCHAR), clear, &clear_chars ))
+    {
+        SecureZeroMemory( clear, clear_chars * sizeof(WCHAR) );
+        free( clear );
+        return;
+    }
+
+    SecureZeroMemory( *password, (password_length / sizeof(WCHAR) + 1) * sizeof(WCHAR) );
+    free( *password );
+    *password = clear;
+    TRACE( "unprotected an interactive credential of type %lu\n", protection );
 }
 
 NTSTATUS __cdecl logon_user( handle_t binding, DWORD thread_id, LSASS_LOGON_HANDLE handle,
                              BYTE *origin, ULONG origin_len, ULONG logon_type, ULONG package_id,
                              BYTE *auth_buf, void *client_auth_base, ULONG auth_len,
+                             LSASS_TOKEN_GROUP *local_groups, ULONG local_group_count,
                              BYTE source_name[8], LUID source_id,
                              LSASS_INTERACTIVE_PROFILE *profile, LUID *logon_id,
                              ULONG64 *token, LSASS_QUOTA_LIMITS *quotas, NTSTATUS *substatus )
@@ -311,6 +394,9 @@ NTSTATUS __cdecl logon_user( handle_t binding, DWORD thread_id, LSASS_LOGON_HAND
     DWORD process_id;
     NTSTATUS status;
 
+    TRACE( "handle %p, type %lu, package %lu, auth length %lu, local groups %lu\n",
+           handle, logon_type, package_id, auth_len, local_group_count );
+
     if (!profile || !logon_id || !token || !quotas || !substatus) return STATUS_INVALID_PARAMETER;
     memset( profile, 0, sizeof(*profile) );
     memset( logon_id, 0, sizeof(*logon_id) );
@@ -318,7 +404,8 @@ NTSTATUS __cdecl logon_user( handle_t binding, DWORD thread_id, LSASS_LOGON_HAND
     memset( quotas, 0, sizeof(*quotas) );
     *substatus = STATUS_SUCCESS;
     if (!context || context->magic != LSASS_LOGON_CONTEXT_MAGIC) return STATUS_INVALID_HANDLE;
-    if ((!origin && origin_len) || origin_len > 127 || !auth_buf || !client_auth_base)
+    if ((!origin && origin_len) || origin_len > 127 || !auth_buf || !client_auth_base ||
+        (!local_groups && local_group_count))
         return STATUS_INVALID_PARAMETER;
     if (I_RpcBindingInqLocalClientPID( binding, &process_id ) != RPC_S_OK ||
         process_id != context->process_id)
@@ -334,17 +421,29 @@ NTSTATUS __cdecl logon_user( handle_t binding, DWORD thread_id, LSASS_LOGON_HAND
     if (logon->message_type == KERB_WORKSTATION_UNLOCK_LOGON_MESSAGE &&
         auth_len < sizeof(struct kerb_interactive_unlock_logon))
         return STATUS_INVALID_PARAMETER;
+    TRACE( "auth base %p domain {%u,%u,%p} user {%u,%u,%p} password {%u,%u,%p}\n",
+           client_auth_base, logon->domain.Length, logon->domain.MaximumLength, logon->domain.Buffer,
+           logon->user.Length, logon->user.MaximumLength, logon->user.Buffer,
+           logon->password.Length, logon->password.MaximumLength, logon->password.Buffer );
     if ((status = copy_auth_string( auth_buf, client_auth_base, auth_len, &logon->domain, &domain )) ||
         (status = copy_auth_string( auth_buf, client_auth_base, auth_len, &logon->user, &user )) ||
         (status = copy_auth_string( auth_buf, client_auth_base, auth_len, &logon->password, &password )))
         goto done;
 
+    TRACE( "interactive credentials domain %s user %s\n", debugstr_w(domain), debugstr_w(user) );
+    unprotect_interactive_password( &password, logon->password.Length );
     status = lsa_validate_local_credentials( domain, user, password, &account, substatus );
+    TRACE( "credential validation returned %#lx, substatus %#lx, local account %s\n",
+           status, *substatus, debugstr_w(account.name) );
     if (status) goto done;
     if ((status = create_profile( account.name, profile ))) goto done;
     if ((status = create_local_token( &account, process_id, source_name, &source_id,
+                                      local_groups, local_group_count,
                                       logon_id, &local_token )))
+    {
+        TRACE( "local token creation returned %#lx\n", status );
         goto done;
+    }
     status = lsa_ksec_transfer_handle( local_token, context->process, package_id, &remote_token );
     if (!status)
     {

@@ -42,6 +42,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
 
 static const LSA_SECPKG_FUNCTION_TABLE *lsa_secpkg_table;
 
+#define MSV1_0_SET_PROCESS_OPTION 12
+
+struct msv1_0_set_process_option_request
+{
+    ULONG message_type;
+    ULONG process_options;
+    BOOLEAN disable_options;
+};
+
 enum message_type
 {
     NTLM_NEGOTIATE      = 1,
@@ -505,6 +514,29 @@ static NTSTATUS NTAPI ntlm_LsaApInitializePackage( ULONG package_id, LSA_DISPATC
     RtlInitString( str, ptr );
 
     *package_name = str;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS NTAPI ntlm_LsaApCallPackageUntrusted( PLSA_CLIENT_REQUEST request, void *in_buffer,
+                                                       void *client_buffer_base, ULONG in_buffer_length,
+                                                       void **out_buffer, ULONG *out_buffer_length,
+                                                       NTSTATUS *protocol_status )
+{
+    const struct msv1_0_set_process_option_request *options = in_buffer;
+
+    TRACE( "%p, %p, %p, %lu, %p, %p, %p\n", request, in_buffer, client_buffer_base,
+           in_buffer_length, out_buffer, out_buffer_length, protocol_status );
+
+    if (!in_buffer || in_buffer_length < sizeof(*options) || !out_buffer ||
+        !out_buffer_length || !protocol_status)
+        return STATUS_INVALID_PARAMETER;
+
+    if (options->message_type != MSV1_0_SET_PROCESS_OPTION)
+        return SEC_E_UNSUPPORTED_FUNCTION;
+
+    *out_buffer = NULL;
+    *out_buffer_length = 0;
+    *protocol_status = STATUS_SUCCESS;
     return STATUS_SUCCESS;
 }
 
@@ -2209,7 +2241,7 @@ static SECPKG_FUNCTION_TABLE ntlm_table =
     NULL, /* LsaLogonUser */
     NULL, /* CallPackage */
     NULL, /* LogonTerminated */
-    NULL, /* CallPackageUntrusted */
+    ntlm_LsaApCallPackageUntrusted,
     NULL, /* CallPackagePassthrough */
     NULL, /* LogonUserEx */
     NULL, /* LogonUserEx2 */

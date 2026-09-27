@@ -35,6 +35,49 @@ WINE_DEFAULT_DEBUG_CHANNEL(sspicli);
 #define SECURITY_WINDOW_MANAGER_BASE_RID 90
 #endif
 
+/***********************************************************************
+ *              SeciAllocateAndSetCallFlags  (SSPICLI.@)
+ */
+SECURITY_STATUS SEC_ENTRY SeciAllocateAndSetCallFlags( ULONG flags, BOOL *free_call_context )
+{
+    TRACE( "%#lx, %p\n", flags, free_call_context );
+
+    if (free_call_context) *free_call_context = FALSE;
+    return SEC_E_OK;
+}
+
+/***********************************************************************
+ *              SeciAllocateAndSetIPAddress  (SSPICLI.@)
+ */
+SECURITY_STATUS SEC_ENTRY SeciAllocateAndSetIPAddress( BYTE *address, ULONG length,
+                                                       BOOL *free_call_context )
+{
+    TRACE( "%p, %lu, %p\n", address, length, free_call_context );
+
+    if (free_call_context) *free_call_context = FALSE;
+    return SEC_E_OK;
+}
+
+/***********************************************************************
+ *              SeciFreeCallContext  (SSPICLI.@)
+ */
+void SEC_ENTRY SeciFreeCallContext(void)
+{
+    TRACE( "\n" );
+}
+
+/***********************************************************************
+ *              SeciIsProtectedUser  (SSPICLI.@)
+ */
+NTSTATUS SEC_ENTRY SeciIsProtectedUser( BOOLEAN *protected_user )
+{
+    TRACE( "%p\n", protected_user );
+
+    if (!protected_user) return STATUS_INVALID_PARAMETER;
+    *protected_user = FALSE;
+    return STATUS_SUCCESS;
+}
+
 static void *query_token_info( HANDLE token, TOKEN_INFORMATION_CLASS class )
 {
     void *buffer;

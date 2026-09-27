@@ -33,6 +33,13 @@ interface lsass
     typedef [wire_marshal(ULONG64)] void* CLIENT_PTR;
     typedef [context_handle] void *LSASS_LOGON_HANDLE;
 
+    typedef struct
+    {
+        ULONG Attributes;
+        ULONG SidLength;
+        BYTE Sid[68];
+    } LSASS_TOKEN_GROUP;
+
     cpp_quote("#if 0")
     typedef LONG NTSTATUS;
 
@@ -218,6 +225,8 @@ interface lsass
         [in, size_is(auth_len)] BYTE *auth_buf,
         [in] CLIENT_PTR client_auth_base,
         [in] ULONG auth_len,
+        [in, size_is(local_group_count), unique] LSASS_TOKEN_GROUP *local_groups,
+        [in] ULONG local_group_count,
         [in] BYTE source_name[8],
         [in] LUID source_id,
         [out] LSASS_INTERACTIVE_PROFILE *profile,

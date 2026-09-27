@@ -37,6 +37,8 @@ static BOOL (WINAPI *pCredReadDomainCredentialsA)(PCREDENTIAL_TARGET_INFORMATION
 static BOOL (WINAPI *pCredMarshalCredentialA)(CRED_MARSHAL_TYPE,PVOID,LPSTR *);
 static BOOL (WINAPI *pCredUnmarshalCredentialA)(LPCSTR,PCRED_MARSHAL_TYPE,PVOID);
 static BOOL (WINAPI *pCredIsMarshaledCredentialA)(LPCSTR);
+static BOOL (WINAPI *pCredIsProtectedW)(LPWSTR,DWORD *);
+static BOOL (WINAPI *pCredUnprotectW)(BOOL,LPWSTR,DWORD,LPWSTR,DWORD *);
 
 #define TEST_TARGET_NAME  "credtest.winehq.org"
 #define TEST_TARGET_NAME2 "credtest2.winehq.org"
@@ -771,6 +773,10 @@ START_TEST(cred)
     pCredMarshalCredentialA = (void *)GetProcAddress(mod, "CredMarshalCredentialA");
     pCredUnmarshalCredentialA = (void *)GetProcAddress(mod, "CredUnmarshalCredentialA");
     pCredIsMarshaledCredentialA = (void *)GetProcAddress(mod, "CredIsMarshaledCredentialA");
+    pCredIsProtectedW = (void *)GetProcAddress(mod, "CredIsProtectedW");
+    pCredUnprotectW = (void *)GetProcAddress(mod, "CredUnprotectW");
+    ok( !!pCredIsProtectedW, "CredIsProtectedW is unavailable\n" );
+    ok( !!pCredUnprotectW, "CredUnprotectW is unavailable\n" );
 
     if (!pCredEnumerateA || !pCredFree || !pCredWriteA || !pCredDeleteA || !pCredReadA)
     {

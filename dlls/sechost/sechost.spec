@@ -55,7 +55,7 @@
 @ stub CredGetTargetInfoW
 @ stdcall CredIsMarshaledCredentialW(wstr) advapi32.CredIsMarshaledCredentialW
 @ stub CredIsProtectedA
-@ stub CredIsProtectedW
+@ stdcall CredIsProtectedW(wstr ptr) advapi32.CredIsProtectedW
 @ stdcall CredMarshalCredentialA(long ptr ptr) advapi32.CredMarshalCredentialA
 @ stdcall CredMarshalCredentialW(long ptr ptr) advapi32.CredMarshalCredentialW
 @ stub CredParseUserNameWithType
@@ -73,7 +73,7 @@
 @ stdcall CredUnmarshalCredentialA(str ptr ptr) advapi32.CredUnmarshalCredentialA
 @ stdcall CredUnmarshalCredentialW(wstr ptr ptr) advapi32.CredUnmarshalCredentialW
 @ stub CredUnprotectA
-@ stub CredUnprotectW
+@ stdcall CredUnprotectW(long wstr long ptr ptr) advapi32.CredUnprotectW
 @ stdcall CredWriteA(ptr long) advapi32.CredWriteA
 @ stub CredWriteDomainCredentialsA
 @ stub CredWriteDomainCredentialsW

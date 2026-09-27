@@ -27,6 +27,23 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mpr);
 
+/*****************************************************************
+ *  WNetLogonNotify [MPR.@]
+ */
+DWORD WINAPI WNetLogonNotify( LPCWSTR primary_authenticator, LUID *logon_id,
+                              LPCWSTR auth_info_type, void *auth_info,
+                              LPCWSTR previous_auth_info_type, void *previous_auth_info,
+                              LPWSTR station_name, void *station_handle, LPWSTR *logon_scripts )
+{
+    TRACE( "(%s, %p, %s, %p, %s, %p, %s, %p, %p)\n",
+           debugstr_w(primary_authenticator), logon_id, debugstr_w(auth_info_type), auth_info,
+           debugstr_w(previous_auth_info_type), previous_auth_info, debugstr_w(station_name),
+           station_handle, logon_scripts );
+
+    if (logon_scripts) *logon_scripts = NULL;
+    return WN_SUCCESS;
+}
+
 
 /*****************************************************************
  *  WNetLogoffA [MPR.@]

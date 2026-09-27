@@ -411,6 +411,7 @@ NTSTATUS WINAPI LsaLogonUser(HANDLE LsaHandle, PLSA_STRING OriginName,
 {
     struct lsa_handle *lsa_conn = LsaHandle;
     LSASS_INTERACTIVE_PROFILE wire_profile;
+    LSASS_TOKEN_GROUP *wire_groups = NULL;
     struct msv1_0_interactive_profile *profile = NULL;
     LSASS_QUOTA_LIMITS wire_quotas;
     LSASS_LOGON_HANDLE rpc_handle;
@@ -419,7 +420,7 @@ NTSTATUS WINAPI LsaLogonUser(HANDLE LsaHandle, PLSA_STRING OriginName,
     const WCHAR *strings[6];
     UNICODE_STRING *dest_strings[6];
     NTSTATUS status;
-    ULONG i;
+    ULONG i, local_group_count = LocalGroups ? LocalGroups->GroupCount : 0;
 
     TRACE("%p %s %d %ld %p %ld %p %p %p %p %p %p %p %p\n", LsaHandle,
           debugstr_as(OriginName), LogonType, AuthenticationPackage,
@@ -440,7 +441,31 @@ NTSTATUS WINAPI LsaLogonUser(HANDLE LsaHandle, PLSA_STRING OriginName,
         !AuthenticationInformation || !AuthenticationInformationLength || !SourceContext ||
         !ProfileBuffer || !ProfileBufferLength || !LogonId || !Token || !Quotas || !SubStatus)
         return STATUS_INVALID_PARAMETER;
-    if (LocalGroups) return STATUS_NOT_SUPPORTED;
+    if (local_group_count > 1024) return STATUS_INVALID_PARAMETER;
+    if (local_group_count)
+    {
+        if (!(wire_groups = calloc( local_group_count, sizeof(*wire_groups) )))
+            return STATUS_NO_MEMORY;
+        for (i = 0; i < local_group_count; ++i)
+        {
+            SID *sid = LocalGroups->Groups[i].Sid;
+            ULONG length;
+
+            if (!sid || !RtlValidSid( sid ) ||
+                (length = RtlLengthSid( sid )) > sizeof(wire_groups[i].Sid))
+            {
+                free( wire_groups );
+                return STATUS_INVALID_SID;
+            }
+            wire_groups[i].Attributes = LocalGroups->Groups[i].Attributes;
+            wire_groups[i].SidLength = length;
+            memcpy( wire_groups[i].Sid, sid, length );
+            TRACE( "local group %lu: revision %u authority %u count %u first %#lx attributes %#lx\n",
+                   i, sid->Revision, sid->IdentifierAuthority.Value[5], sid->SubAuthorityCount,
+                   sid->SubAuthorityCount ? sid->SubAuthority[0] : 0,
+                   LocalGroups->Groups[i].Attributes );
+        }
+    }
 
     rpc_handle = (LSASS_LOGON_HANDLE)(ULONG_PTR)lsa_conn->handle;
     LSASS_CALL_START
@@ -448,6 +473,7 @@ NTSTATUS WINAPI LsaLogonUser(HANDLE LsaHandle, PLSA_STRING OriginName,
                          (BYTE *)OriginName->Buffer, OriginName->Length, LogonType,
                          AuthenticationPackage, AuthenticationInformation,
                          AuthenticationInformation, AuthenticationInformationLength,
+                         wire_groups, local_group_count,
                          (BYTE *)SourceContext->SourceName, SourceContext->SourceIdentifier,
                          &wire_profile, LogonId, &wire_token, &wire_quotas, SubStatus );
     LSASS_CALL_END
@@ -538,6 +564,7 @@ NTSTATUS WINAPI LsaLogonUser(HANDLE LsaHandle, PLSA_STRING OriginName,
     wire_token = 0;
 
 done:
+    free( wire_groups );
     if (profile) VirtualFree( profile, 0, MEM_RELEASE );
     if (wire_token) NtClose( (HANDLE)(ULONG_PTR)wire_token );
     return status;
@@ -1267,6 +1294,8 @@ NTSTATUS WINAPI LsaLookupAuthenticationPackage(HANDLE lsa_handle,
     ULONG i;
 
     TRACE("%p %s %p\n", lsa_handle, debugstr_as(package_name), package_id);
+
+    SECUR32_initializeProviders();
 
     if (RtlAnsiStringToUnicodeString(&package_name_us, package_name, TRUE))
         return STATUS_NO_MEMORY;

@@ -42,6 +42,49 @@ WINE_DEFAULT_DEBUG_CHANNEL(cred);
 /* the size of the ARC4 key used to encrypt the password data */
 #define KEY_SIZE 8
 
+static FARPROC get_native_sechost_proc( const char *name )
+{
+    LDR_DATA_TABLE_ENTRY *entry;
+    HMODULE module;
+
+    if (!(module = GetModuleHandleW( L"sechost.dll" )) ||
+        LdrFindEntryForAddress( module, &entry ) || (entry->Flags & LDR_WINE_INTERNAL))
+        return NULL;
+    return GetProcAddress( module, name );
+}
+
+/******************************************************************************
+ * CredIsProtectedW [ADVAPI32.@]
+ */
+BOOL WINAPI CredIsProtectedW( LPWSTR credentials, DWORD *protection_type )
+{
+    BOOL (WINAPI *func)(LPWSTR, DWORD *);
+
+    TRACE( "%s, %p\n", debugstr_w(credentials), protection_type );
+
+    if ((func = (void *)get_native_sechost_proc( "CredIsProtectedW" )))
+        return func( credentials, protection_type );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/******************************************************************************
+ * CredUnprotectW [ADVAPI32.@]
+ */
+BOOL WINAPI CredUnprotectW( BOOL as_self, LPWSTR protected_credentials,
+                            DWORD protected_chars, LPWSTR credentials, DWORD *max_chars )
+{
+    BOOL (WINAPI *func)(BOOL, LPWSTR, DWORD, LPWSTR, DWORD *);
+
+    TRACE( "%u, %p, %lu, %p, %p\n", as_self, protected_credentials, protected_chars,
+           credentials, max_chars );
+
+    if ((func = (void *)get_native_sechost_proc( "CredUnprotectW" )))
+        return func( as_self, protected_credentials, protected_chars, credentials, max_chars );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
 static DWORD read_credential_blob(HKEY hkey, const BYTE key_data[KEY_SIZE],
                                   LPBYTE credential_blob,
                                   DWORD *credential_blob_size)

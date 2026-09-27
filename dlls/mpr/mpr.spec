@@ -95,7 +95,7 @@
 @ stdcall WNetLogoffA(str long)
 @ stdcall WNetLogoffW(wstr long)
 @ stdcall WNetLogonA(str long)
-@ stub WNetLogonNotify
+@ stdcall WNetLogonNotify(wstr ptr wstr ptr wstr ptr wstr ptr ptr)
 @ stdcall WNetLogonW(wstr long)
 @ stdcall WNetOpenEnumA(long long long ptr ptr)
 @ stdcall WNetOpenEnumW(long long long ptr ptr)

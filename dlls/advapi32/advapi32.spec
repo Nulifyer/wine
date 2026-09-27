@@ -162,7 +162,7 @@
 @ stdcall CredIsMarshaledCredentialA(str)
 @ stdcall CredIsMarshaledCredentialW(wstr)
 # @ stub CredIsProtectedA
-# @ stub CredIsProtectedW
+@ stdcall CredIsProtectedW(wstr ptr)
 @ stdcall CredMarshalCredentialA(long ptr ptr)
 @ stdcall CredMarshalCredentialW(long ptr ptr)
 @ stub CredProfileLoaded
@@ -181,7 +181,7 @@
 @ stdcall CredUnmarshalCredentialA(str ptr ptr)
 @ stdcall CredUnmarshalCredentialW(wstr ptr ptr)
 # @ stub CredUnprotectA
-# @ stub CredUnprotectW
+@ stdcall CredUnprotectW(long wstr long ptr ptr)
 @ stdcall CredWriteA(ptr long)
 # @ stub CredWriteDomainCredentialsA
 # @ stub CredWriteDomainCredentialsW

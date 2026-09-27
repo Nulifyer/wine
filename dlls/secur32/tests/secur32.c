@@ -778,10 +778,17 @@ static ULONG init_test_logon( struct test_auth_buffer *buffer,
 
 static void test_local_interactive_logon(void)
 {
+    struct
+    {
+        ULONG message_type;
+        ULONG process_options;
+        BOOLEAN disable_options;
+    } process_options = {12, 0x23, FALSE};
     struct test_msv1_0_interactive_profile *profile;
     struct test_auth_buffer auth;
     TOKEN_SOURCE source = {{'W','i','n','l','o','g','o','n'}};
     TOKEN_STATISTICS statistics;
+    TOKEN_GROUPS *token_groups;
     TOKEN_USER *token_user;
     LSA_OPERATIONAL_MODE mode;
     LSA_STRING name, package_name;
@@ -789,7 +796,15 @@ static void test_local_interactive_logon(void)
     QUOTA_LIMITS quotas;
     WCHAR username[UNLEN + 1], wrong_user[] = L"not-the-local-user", wrong_password[] = L"wrong";
     WCHAR empty[] = L"";
-    ULONG username_len = ARRAY_SIZE(username), package, profile_len, size, auth_len;
+    ULONG username_len = ARRAY_SIZE(username), package, profile_len, size, auth_len, output_len, i;
+    BYTE dialup_sid[SECURITY_MAX_SID_SIZE];
+    DWORD dialup_sid_size = sizeof(dialup_sid);
+    struct
+    {
+        DWORD GroupCount;
+        SID_AND_ATTRIBUTES Groups[1];
+    } local_groups;
+    void *output;
     HANDLE untrusted, trusted, token;
     LUID logon_id;
     NTSTATUS status, substatus;
@@ -833,14 +848,29 @@ static void test_local_interactive_logon(void)
         return;
     }
 
+    output = (void *)0xdeadbeef;
+    output_len = 0xdeadbeef;
+    substatus = 0xdeadbeef;
+    status = LsaCallAuthenticationPackage( trusted, package, &process_options,
+                                           sizeof(process_options), &output, &output_len, &substatus );
+    ok( status == STATUS_SUCCESS, "MSV1_0 process options returned %#lx.\n", status );
+    ok( substatus == STATUS_SUCCESS, "MSV1_0 process options substatus %#lx.\n", substatus );
+    ok( !output && !output_len, "got process options output %p length %lu.\n", output, output_len );
+
     status = NtAllocateLocallyUniqueId( &source.SourceIdentifier );
     ok( status == STATUS_SUCCESS, "NtAllocateLocallyUniqueId returned %#lx.\n", status );
+    ok( CreateWellKnownSid( WinDialupSid, NULL, dialup_sid, &dialup_sid_size ),
+        "CreateWellKnownSid failed: %lu.\n", GetLastError() );
+    local_groups.GroupCount = 1;
+    local_groups.Groups[0].Sid = (SID *)dialup_sid;
+    local_groups.Groups[0].Attributes = SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT |
+                                       SE_GROUP_ENABLED;
     profile = NULL;
     profile_len = 0;
     token = NULL;
     substatus = 0xdeadbeef;
     status = LsaLogonUser( trusted, &name, Interactive, package, &auth, auth_len,
-                           NULL, &source, (void **)&profile, &profile_len, &logon_id,
+                           (TOKEN_GROUPS *)&local_groups, &source, (void **)&profile, &profile_len, &logon_id,
                            &token, &quotas, &substatus );
     ok( status == STATUS_SUCCESS, "blank local logon returned %#lx, substatus %#lx.\n", status, substatus );
     ok( substatus == STATUS_SUCCESS, "got substatus %#lx.\n", substatus );
@@ -875,8 +905,35 @@ static void test_local_interactive_logon(void)
                                 *GetSidSubAuthorityCount(token_user->User.Sid) - 1 ) == 1000,
             "got unexpected local-account RID.\n" );
         free( token_user );
+        size = 0;
+        status = NtQueryInformationToken( token, TokenGroups, NULL, 0, &size );
+        ok( status == STATUS_BUFFER_TOO_SMALL, "TokenGroups size returned %#lx.\n", status );
+        token_groups = malloc( size );
+        status = NtQueryInformationToken( token, TokenGroups, token_groups, size, &size );
+        ok( status == STATUS_SUCCESS, "TokenGroups returned %#lx.\n", status );
+        for (i = 0; i < token_groups->GroupCount; ++i)
+            if (EqualSid( token_groups->Groups[i].Sid, dialup_sid )) break;
+        ok( i < token_groups->GroupCount, "supplemental group is missing from token.\n" );
+        free( token_groups );
         NtClose( token );
     }
+
+    auth.logon.domain.Buffer = (WCHAR *)((BYTE *)auth.logon.domain.Buffer - (BYTE *)&auth);
+    auth.logon.user.Buffer = (WCHAR *)((BYTE *)auth.logon.user.Buffer - (BYTE *)&auth);
+    auth.logon.password.Buffer = (WCHAR *)((BYTE *)auth.logon.password.Buffer - (BYTE *)&auth);
+    profile = NULL;
+    profile_len = 0;
+    token = NULL;
+    substatus = 0xdeadbeef;
+    status = LsaLogonUser( trusted, &name, Interactive, package, &auth, auth_len,
+                           NULL, &source, (void **)&profile, &profile_len, &logon_id,
+                           &token, &quotas, &substatus );
+    ok( status == STATUS_SUCCESS, "relative-offset logon returned %#lx, substatus %#lx.\n",
+        status, substatus );
+    ok( !!profile && !!token, "relative-offset logon returned profile %p token %p.\n",
+        profile, token );
+    if (profile) LsaFreeReturnBuffer( profile );
+    if (token) NtClose( token );
 
     auth_len = init_test_logon( &auth, empty, username, wrong_password );
     profile = (void *)0xdeadbeef;
@@ -904,8 +961,70 @@ static void test_local_interactive_logon(void)
     RtlAdjustPrivilege( SE_TCB_PRIVILEGE, previous_tcb, FALSE, &ignored );
 }
 
+static void test_call_context_helpers(void)
+{
+    SECURITY_STATUS (SEC_ENTRY *allocate_flags)(ULONG, BOOL *);
+    SECURITY_STATUS (SEC_ENTRY *allocate_address)(BYTE *, ULONG, BOOL *);
+    NTSTATUS (SEC_ENTRY *is_protected_user)(BOOLEAN *);
+    void (SEC_ENTRY *free_context)(void);
+    struct sockaddr address = {0};
+    SECURITY_STATUS status;
+    HMODULE module;
+    BOOL needs_free;
+    BOOLEAN protected_user;
+
+    if (!winetest_platform_is_wine)
+    {
+        win_skip( "Wine uses a null call-context fallback.\n" );
+        return;
+    }
+
+    module = LoadLibraryA( "sspicli.dll" );
+    ok( !!module, "failed to load sspicli.dll, error %lu.\n", GetLastError() );
+    if (!module) return;
+
+    allocate_flags = (void *)GetProcAddress( module, "SeciAllocateAndSetCallFlags" );
+    allocate_address = (void *)GetProcAddress( module, "SeciAllocateAndSetIPAddress" );
+    free_context = (void *)GetProcAddress( module, "SeciFreeCallContext" );
+    is_protected_user = (void *)GetProcAddress( module, "SeciIsProtectedUser" );
+    ok( !!allocate_flags, "SeciAllocateAndSetCallFlags is unavailable.\n" );
+    ok( !!allocate_address, "SeciAllocateAndSetIPAddress is unavailable.\n" );
+    ok( !!free_context, "SeciFreeCallContext is unavailable.\n" );
+    ok( !!is_protected_user, "SeciIsProtectedUser is unavailable.\n" );
+
+    needs_free = TRUE;
+    status = allocate_flags( 0x1000, &needs_free );
+    ok( status == SEC_E_OK, "SeciAllocateAndSetCallFlags returned %#lx.\n", status );
+    ok( !needs_free, "expected no allocated call context.\n" );
+
+    needs_free = TRUE;
+    status = allocate_address( (BYTE *)&address, sizeof(address), &needs_free );
+    ok( status == SEC_E_OK, "SeciAllocateAndSetIPAddress returned %#lx.\n", status );
+    ok( !needs_free, "expected no allocated IP call context.\n" );
+
+    protected_user = TRUE;
+    status = is_protected_user( &protected_user );
+    ok( status == STATUS_SUCCESS, "SeciIsProtectedUser returned %#lx.\n", status );
+    ok( !protected_user, "expected the local account not to be protected.\n" );
+
+    free_context();
+    FreeLibrary( module );
+}
+
 START_TEST(secur32)
 {
+    HANDLE lsa;
+    LSA_STRING package_name;
+    ULONG package;
+    NTSTATUS status;
+
+    status = LsaConnectUntrusted( &lsa );
+    ok( status == STATUS_SUCCESS, "LsaConnectUntrusted returned %#lx.\n", status );
+    RtlInitAnsiString( &package_name, "Negotiate" );
+    status = LsaLookupAuthenticationPackage( lsa, &package_name, &package );
+    ok( status == STATUS_SUCCESS, "initial Negotiate lookup returned %#lx.\n", status );
+    LsaDeregisterLogonProcess( lsa );
+
     secdll = LoadLibraryA("secur32.dll");
 
     if (!secdll)
@@ -958,5 +1077,6 @@ START_TEST(secur32)
 
     test_kerberos();
     test_ticket_cache();
+    test_call_context_helpers();
     test_local_interactive_logon();
 }

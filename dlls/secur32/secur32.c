@@ -74,7 +74,7 @@ static void _tryLoadProvider(PWSTR moduleName);
  * DeleteSecurityPackage(A/W), seem suspiciously like they'd register or
  * unregister a dll, but I'm not sure.
  */
-static void SECUR32_initializeProviders(void);
+void SECUR32_initializeProviders(void);
 
 /* Frees all loaded packages and providers */
 static void SECUR32_freeProviders(void);
@@ -549,7 +549,7 @@ static BOOL CALLBACK SECUR32_initializeProviders_once(INIT_ONCE *once, void *par
     return TRUE;
 }
 
-static void SECUR32_initializeProviders(void)
+void SECUR32_initializeProviders(void)
 {
     /* A provider may query an already registered package while its own package
      * table is being enumerated. Avoid recursively entering InitOnce on the

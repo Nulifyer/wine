@@ -315,10 +315,30 @@ end:
     HeapFree(GetProcessHeap(), 0, netRes);
 }
 
+static void test_WNetLogonNotify(void)
+{
+    DWORD (WINAPI *logon_notify)(LPCWSTR, LUID *, LPCWSTR, void *, LPCWSTR, void *,
+                                 LPWSTR, void *, LPWSTR *);
+    LPWSTR scripts = (LPWSTR)0xdeadbeef;
+    HMODULE module;
+    DWORD ret;
+
+    if (!winetest_platform_is_wine) return;
+    module = GetModuleHandleW( L"mpr.dll" );
+    logon_notify = (void *)GetProcAddress( module, "WNetLogonNotify" );
+    ok( !!logon_notify, "WNetLogonNotify is unavailable\n" );
+    if (!logon_notify) return;
+
+    ret = logon_notify( NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &scripts );
+    ok( ret == WN_SUCCESS, "WNetLogonNotify returned %lu\n", ret );
+    ok( !scripts, "WNetLogonNotify returned scripts %p\n", scripts );
+}
+
 START_TEST(mpr)
 {
     test_WNetGetUniversalName();
     test_WNetGetRemoteName();
     test_WNetCachePassword();
     test_WNetUseConnection();
+    test_WNetLogonNotify();
 }
