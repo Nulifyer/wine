@@ -151,6 +151,7 @@ static int (__cdecl *sum_bogus)(bogus_t *b);
 static void (__cdecl *check_null)(int *null);
 static int (__cdecl *str_struct_len)(str_struct_t *s);
 static int (__cdecl *wstr_struct_len)(wstr_struct_t *s);
+static void (__cdecl *get_fixed_wstr)(WCHAR value[16]);
 static int (__cdecl *sum_doub_carr)(doub_carr_t *dc);
 static void (__cdecl *make_pyramid_doub_carr)(unsigned char n, doub_carr_t **dc);
 static unsigned (__cdecl *hash_bstr)(bstr_t s);
@@ -261,6 +262,7 @@ static void (__cdecl *test_client_disconnect)(void);
     X(check_null) \
     X(str_struct_len) \
     X(wstr_struct_len) \
+    X(get_fixed_wstr) \
     X(sum_doub_carr) \
     X(make_pyramid_doub_carr) \
     X(hash_bstr) \
@@ -900,6 +902,11 @@ int __cdecl s_str_struct_len(str_struct_t *s)
 int __cdecl s_wstr_struct_len(wstr_struct_t *s)
 {
   return lstrlenW(s->s);
+}
+
+void __cdecl s_get_fixed_wstr(WCHAR value[16])
+{
+    lstrcpyW(value, L"fixed output");
 }
 
 int __cdecl s_sum_doub_carr(doub_carr_t *dc)
@@ -1595,6 +1602,7 @@ basic_tests(void)
 {
   char string[] = "I am a string";
   WCHAR wstring[] = L"I am a wstring";
+  WCHAR fixed_wstring[16];
   int f[5] = {1, 3, 0, -2, -4};
   vector_t a = {1, 3, 7};
   vector_t vec1 = {4, -2, 1}, vec2 = {-5, 2, 3}, *pvec2 = &vec2;
@@ -1690,6 +1698,9 @@ basic_tests(void)
 
   ok(str_struct_len(&ss) == lstrlenA(string), "RPC str_struct_len\n");
   ok(wstr_struct_len(&ws) == lstrlenW(wstring), "RPC str_struct_len\n");
+  memset(fixed_wstring, 0xcc, sizeof(fixed_wstring));
+  get_fixed_wstr(fixed_wstring);
+  ok(!lstrcmpW(fixed_wstring, L"fixed output"), "got %s\n", wine_dbgstr_w(fixed_wstring));
 
   v = 0.0;
   u = square_half(3.0, &v);

@@ -399,6 +399,7 @@ cpp_quote("#endif")
 
   int str_struct_len(str_struct_t *s);
   int wstr_struct_len(wstr_struct_t *s);
+  void get_fixed_wstr([out, string] WCHAR value[16]);
 
 cpp_quote("#ifndef SKIP_TYPE_DECLS")
   typedef struct
