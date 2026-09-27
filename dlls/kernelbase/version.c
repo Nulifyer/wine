@@ -1844,6 +1844,42 @@ LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *
 }
 
 /***********************************************************************
+ *         PackageFamilyNameFromFullName   (kernelbase.@)
+ */
+LONG WINAPI PackageFamilyNameFromFullName(const WCHAR *full_name, UINT32 *length, WCHAR *buffer)
+{
+    BYTE id_buffer[sizeof(PACKAGE_ID) +
+            (PACKAGE_NAME_MAX_LENGTH + PACKAGE_RESOURCEID_MAX_LENGTH + PACKAGE_PUBLISHERID_MAX_LENGTH + 3) *
+            sizeof(WCHAR)];
+    PACKAGE_ID *id = (PACKAGE_ID *)id_buffer;
+    UINT32 id_buffer_length = sizeof(id_buffer);
+    UINT32 required;
+    LONG ret;
+
+    TRACE("full_name %s, length %p, buffer %p.\n", debugstr_w(full_name), length, buffer);
+
+    if (!full_name)
+        return ERROR_INVALID_PARAMETER;
+
+    if ((ret = PackageIdFromFullName(full_name, 0, &id_buffer_length, id_buffer)))
+        return ret;
+
+    if (!length || (*length && !buffer))
+        return ERROR_INVALID_PARAMETER;
+
+    required = wcslen(id->name) + 1 + wcslen(id->publisherId) + 1;
+    if (*length < required)
+    {
+        *length = required;
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
+
+    swprintf(buffer, *length, L"%s_%s", id->name, id->publisherId);
+    *length = required;
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
  *         PackageFullNameFromId   (kernelbase.@)
  */
 LONG WINAPI PackageFullNameFromId(const PACKAGE_ID *id, UINT32 *length, WCHAR *buffer)

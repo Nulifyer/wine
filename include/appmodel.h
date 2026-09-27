@@ -144,6 +144,7 @@ LONG WINAPI AppPolicyGetWindowingModel(HANDLE processToken, AppPolicyWindowingMo
 LONG WINAPI GetApplicationUserModelIdFromToken(HANDLE token, UINT32 *length, WCHAR *id);
 LONG WINAPI GetPackageFamilyNameFromToken(HANDLE token, UINT32 *length, WCHAR *name);
 LONG WINAPI GetPackageFullNameFromToken(HANDLE token, UINT32 *length, WCHAR *name);
+LONG WINAPI PackageFamilyNameFromFullName(const WCHAR *full_name, UINT32 *name_length, WCHAR *name);
 LONG WINAPI PackageFullNameFromId(const PACKAGE_ID *id, UINT32 *name_length, WCHAR *name);
 LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *buffer_length, BYTE *buffer);
 
