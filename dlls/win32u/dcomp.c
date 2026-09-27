@@ -1803,6 +1803,13 @@ static NTSTATUS set_dcomp_visual_buffer_property( struct dcomp_resource_view *re
             return STATUS_SUCCESS;
         }
     }
+    if (property == 0x1c && size == sizeof(resource->visual_offset))
+    {
+        if (!memcmp( resource->visual_offset, data, size )) return STATUS_SUCCESS;
+        memcpy( resource->visual_offset, data, size );
+        resource->visual_offset_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
     if (property == 0x1d && size == sizeof(resource->visual_size))
     {
         if (!memcmp( resource->visual_size, data, size )) return STATUS_SUCCESS;

@@ -3755,6 +3755,9 @@ static void test_visual_target_root_lifecycle(void)
         20, 0x19b, 2, 0x3f000000, 0x3f800000,
         20, 0x19e, 2, 0x40800000, 0x40a00000,
     };
+    static const UINT expected_visual_offset[] = {
+        24, 0x195, 2, 0x40c00000, 0x40e00000, 0x41000000,
+    };
     static const UINT expected_visual_content[] = {
         16, 0x28, 5, 0xa6,
         16, 0x28, 6, 0x16,
@@ -3914,6 +3917,19 @@ static void test_visual_target_root_lifecycle(void)
     ok( status == STATUS_SUCCESS, "got visual geometry batch status %#lx\n", status );
     check_dcomp_batch_payload( record, channel, expected_visual_geometry,
                                sizeof(expected_visual_geometry), "visual geometry" );
+
+    command[0] = 15; command[1] = 2; command[2] = 0x1c; command[3] = 12;
+    command[4] = 0x40c00000; command[5] = 0x40e00000; command[6] = 0x41000000;
+    memcpy( buffer, command, 28 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 28, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got packed visual offset process status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got packed visual offset commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got packed visual offset batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_visual_offset,
+                               sizeof(expected_visual_offset), "packed visual offset" );
 
     command[0] = 2; command[1] = 5; command[2] = 0xa6; command[3] = 0;
     command[4] = 2; command[5] = 6; command[6] = 0x16; command[7] = 0;
