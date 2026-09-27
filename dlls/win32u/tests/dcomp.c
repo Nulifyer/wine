@@ -3791,6 +3791,13 @@ static void test_visual_target_root_lifecycle(void)
         16, 0x194, 3, 0,
         12, 0x29, 9,
     };
+    static const UINT expected_transform_matrix[] = {
+        76, 0x44, 8,
+            0x3f800000, 0, 0, 0,
+            0, 0x3f800000, 0, 0,
+            0, 0, 0x3f800000, 0,
+            0x41200000, 0x41a00000, 0, 0x3f800000,
+    };
     static const UINT expected_visual_clear[] = {12, 0x187, 3};
     static const UINT expected_clear[] = {
         12, 0x187, 1,
@@ -3959,6 +3966,21 @@ static void test_visual_target_root_lifecycle(void)
     ok( status == STATUS_SUCCESS, "got visual content batch status %#lx\n", status );
     check_dcomp_batch_payload( record, channel, expected_visual_content,
                                sizeof(expected_visual_content), "visual content" );
+
+    command[0] = 15; command[1] = 8; command[2] = 9; command[3] = 64;
+    memset( command + 4, 0, 64 );
+    command[4] = command[9] = command[14] = command[19] = 0x3f800000;
+    command[16] = 0x41200000; command[17] = 0x41a00000;
+    memcpy( buffer, command, 80 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 80, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got transform-matrix process status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got transform-matrix commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got transform-matrix batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_transform_matrix,
+                               sizeof(expected_transform_matrix), "transform matrix" );
 
     command[0] = 16; command[1] = 5; command[2] = 0x34; command[3] = 8;
     memcpy( buffer, command, 16 );
