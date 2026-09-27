@@ -43,27 +43,65 @@ DEFINE_OLEGUID( CLSID_DfMarshal, 0x0000030b, 0, 0 );
 /* this is what is stored in TEB->ReservedForOle */
 struct oletls
 {
-    struct apartment *apt;
-    IErrorInfo       *errorinfo;     /* see errorinfo.c */
-    DWORD             thread_seqid;  /* returned with CoGetCurrentProcess */
-    DWORD             flags;         /* tlsdata_flags (+0Ch on x86) */
-    void             *unknown0;
-    DWORD             inits;         /* number of times CoInitializeEx called */
-    DWORD             ole_inits;     /* number of times OleInitialize called */
-    GUID              causality_id;  /* unique identifier for each COM call */
+    struct apartment *apt;            /* native pvThreadBase */
+    IErrorInfo       *errorinfo;      /* native pSmAllocator; see errorinfo.c */
+    DWORD             thread_seqid;   /* native dwApartmentID; returned with CoGetCurrentProcess */
+    DWORD             flags;          /* native dwFlags; tlsdata_flags (+0Ch on x86) */
+    DWORD             tls_map_index;
+#ifdef _WIN64
+    DWORD             native_alignment;
+#endif
+    void            **tls_slot;
+    DWORD             inits;          /* native cComInits; number of times CoInitializeEx called */
+    DWORD             ole_inits;      /* native cOleInits; number of times OleInitialize called */
+#ifdef _WIN64
+    BYTE              native_to_context_token[0x38];
+#else
+    BYTE              native_to_context_token[0x1c];
+#endif
+    IObjContext      *context_token;  /* native pCurrentContext */
+#ifdef _WIN64
+    BYTE              native_to_call_state[0x18];
+#else
+    BYTE              native_to_call_state[0x14];
+#endif
+    IUnknown         *call_state;     /* native pCallContext; current call context */
+#ifdef _WIN64
+    BYTE              native_to_causality_id[0x40];
+#else
+    BYTE              native_to_causality_id[0x24];
+#endif
+    GUID              causality_id;   /* native LogicalThreadId; unique identifier for each COM call */
+#ifdef _WIN64
+    BYTE              native_to_state[0x50];
+#else
+    BYTE              native_to_state[0x2c];
+#endif
+    IUnknown         *state;          /* native punkState; see CoSetState */
+    DWORD             cancelcount;    /* native cCallCancellation */
+#ifdef _WIN64
+    BYTE              native_tail[0x10c];
+#else
+    BYTE              native_tail[0xb0];
+#endif
+
+    /* Wine-private state follows the native tagSOleTlsData ABI region. */
     LONG              pending_call_count_client; /* number of client calls pending */
     LONG              pending_call_count_server; /* number of server calls pending */
-    DWORD             unknown;
-    IObjContext      *context_token; /* (+38h on x86) */
-    IUnknown         *call_state;    /* current call context (+3Ch on x86) */
-    DWORD             unknown2[46];
-    IUnknown         *cancel_object; /* cancel object set by CoSetCancelObject (+F8h on x86) */
-    IUnknown         *state;         /* see CoSetState */
+    IUnknown         *cancel_object; /* cancel object set by CoSetCancelObject */
     struct list       spies;         /* Spies installed with CoRegisterInitializeSpy */
     DWORD             spies_lock;
-    DWORD             cancelcount;
     CO_MTA_USAGE_COOKIE implicit_mta_cookie; /* mta referenced by roapi from sta thread */
 };
+
+C_ASSERT(offsetof(struct oletls, inits) == (sizeof(void *) == 8 ? 0x28 : 0x18));
+C_ASSERT(offsetof(struct oletls, ole_inits) == (sizeof(void *) == 8 ? 0x2c : 0x1c));
+C_ASSERT(offsetof(struct oletls, context_token) == (sizeof(void *) == 8 ? 0x68 : 0x3c));
+C_ASSERT(offsetof(struct oletls, call_state) == (sizeof(void *) == 8 ? 0x88 : 0x54));
+C_ASSERT(offsetof(struct oletls, causality_id) == (sizeof(void *) == 8 ? 0xd0 : 0x7c));
+C_ASSERT(offsetof(struct oletls, state) == (sizeof(void *) == 8 ? 0x130 : 0xb8));
+C_ASSERT(offsetof(struct oletls, cancelcount) == (sizeof(void *) == 8 ? 0x138 : 0xbc));
+C_ASSERT(offsetof(struct oletls, pending_call_count_client) == (sizeof(void *) == 8 ? 0x248 : 0x170));
 
 HRESULT COM_OpenKeyForCLSID(REFCLSID clsid, LPCWSTR keyname, REGSAM access, HKEY *key);
 HRESULT MARSHAL_GetStandardMarshalCF(LPVOID *ppv);
