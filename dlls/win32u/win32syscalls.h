@@ -1174,7 +1174,7 @@
     SYSCALL_ENTRY( 0x1492, NtUserIsNonClientDpiScalingEnabled, 0 ) \
     SYSCALL_ENTRY( 0x1493, NtUserIsQueueAttached, 0 ) \
     SYSCALL_ENTRY( 0x1494, NtUserIsResizeLayoutSynchronizationEnabled, 0 ) \
-    SYSCALL_ENTRY( 0x1495, NtUserIsTopLevelWindow, 0 ) \
+    SYSCALL_ENTRY( 0x1495, NtUserIsTopLevelWindow, 4 ) \
     SYSCALL_ENTRY( 0x1496, NtUserIsTouchWindow, 0 ) \
     SYSCALL_ENTRY( 0x1497, NtUserIsWindowBroadcastingDpiToChildren, 0 ) \
     SYSCALL_ENTRY( 0x1498, NtUserIsWindowDisplayChangeSuppressed, 0 ) \
@@ -2716,7 +2716,7 @@
     SYSCALL_ENTRY( 0x1492, NtUserIsNonClientDpiScalingEnabled, 0 ) \
     SYSCALL_ENTRY( 0x1493, NtUserIsQueueAttached, 0 ) \
     SYSCALL_ENTRY( 0x1494, NtUserIsResizeLayoutSynchronizationEnabled, 0 ) \
-    SYSCALL_ENTRY( 0x1495, NtUserIsTopLevelWindow, 0 ) \
+    SYSCALL_ENTRY( 0x1495, NtUserIsTopLevelWindow, 8 ) \
     SYSCALL_ENTRY( 0x1496, NtUserIsTouchWindow, 0 ) \
     SYSCALL_ENTRY( 0x1497, NtUserIsWindowBroadcastingDpiToChildren, 0 ) \
     SYSCALL_ENTRY( 0x1498, NtUserIsWindowDisplayChangeSuppressed, 0 ) \
@@ -3819,7 +3819,6 @@
     SYSCALL_STUB( NtUserIsNonClientDpiScalingEnabled ) \
     SYSCALL_STUB( NtUserIsQueueAttached ) \
     SYSCALL_STUB( NtUserIsResizeLayoutSynchronizationEnabled ) \
-    SYSCALL_STUB( NtUserIsTopLevelWindow ) \
     SYSCALL_STUB( NtUserIsTouchWindow ) \
     SYSCALL_STUB( NtUserIsWindowBroadcastingDpiToChildren ) \
     SYSCALL_STUB( NtUserIsWindowDisplayChangeSuppressed ) \

@@ -9161,6 +9161,67 @@ static void test_hwnd_message(void)
     DestroyWindow(hwnd);
 }
 
+static void test_IsTopLevelWindow(void)
+{
+    BOOL (WINAPI *pIsTopLevelWindow)(HWND);
+    HWND desktop = GetDesktopWindow(), top, child, owned, message;
+    BOOL ret;
+
+    pIsTopLevelWindow = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "IsTopLevelWindow" );
+    if (!pIsTopLevelWindow)
+    {
+        win_skip( "IsTopLevelWindow is not available\n" );
+        return;
+    }
+
+    top = CreateWindowA( "static", "top", WS_OVERLAPPED, 0, 0, 100, 100,
+                         NULL, NULL, GetModuleHandleA(NULL), NULL );
+    child = CreateWindowA( "static", "child", WS_CHILD, 0, 0, 20, 20,
+                           top, NULL, GetModuleHandleA(NULL), NULL );
+    owned = CreateWindowA( "static", "owned", WS_POPUP, 0, 0, 20, 20,
+                           top, NULL, GetModuleHandleA(NULL), NULL );
+    message = CreateWindowA( "static", "message", 0, 0, 0, 0, 0,
+                             HWND_MESSAGE, NULL, GetModuleHandleA(NULL), NULL );
+    ok( !!top && !!child && !!owned && !!message,
+        "failed to create test windows: top %p child %p owned %p message %p\n",
+        top, child, owned, message );
+
+    SetLastError( 0xdeadbeef );
+    ret = pIsTopLevelWindow( NULL );
+    ok( !ret, "NULL is a top-level window\n" );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "got error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = pIsTopLevelWindow( (HWND)(ULONG_PTR)0x1234 );
+    ok( !ret, "invalid handle is a top-level window\n" );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "got error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ok( !pIsTopLevelWindow( desktop ), "desktop is a top-level window\n" );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ok( pIsTopLevelWindow( top ), "top-level window is not recognized\n" );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ok( !pIsTopLevelWindow( child ), "child is a top-level window\n" );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ok( pIsTopLevelWindow( owned ), "owned popup is not a top-level window\n" );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ok( !pIsTopLevelWindow( message ), "message-only window is a top-level window\n" );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
+
+    DestroyWindow( message );
+    DestroyWindow( owned );
+    DestroyWindow( child );
+    DestroyWindow( top );
+}
+
 static HWND message_window_topmost_hwnd_msg = NULL;
 static BOOL message_window_topmost_received_killfocus;
 
@@ -14679,6 +14740,7 @@ START_TEST(win)
     test_thick_child_size(hwndMain);
     test_fullscreen();
     test_hwnd_message();
+    test_IsTopLevelWindow();
     test_message_window_topmost();
     test_nonclient_area(hwndMain);
     test_params();

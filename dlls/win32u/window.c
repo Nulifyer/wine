@@ -1042,6 +1042,14 @@ HWND WINAPI NtUserGetAncestor( HWND hwnd, UINT type )
     return ret;
 }
 
+/***********************************************************************
+ *           NtUserIsTopLevelWindow (win32u.@)
+ */
+BOOL WINAPI NtUserIsTopLevelWindow( HWND hwnd )
+{
+    return NtUserGetAncestor( hwnd, GA_PARENT ) == get_desktop_window();
+}
+
 /* see IsChild */
 BOOL is_child( HWND parent, HWND child )
 {

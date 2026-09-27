@@ -802,7 +802,7 @@
 # @ stub IsServerSideWindow
 @ stdcall IsThreadDesktopComposited()
 # @ stub IsThreadTSFEventAware
-# @ stub IsTopLevelWindow
+@ stdcall IsTopLevelWindow(long) NtUserIsTopLevelWindow
 @ stdcall IsTouchWindow(long ptr)
 @ stdcall IsValidDpiAwarenessContext(long)
 @ stdcall IsWinEventHookInstalled(long)
