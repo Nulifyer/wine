@@ -1540,10 +1540,27 @@ BOOL WINAPI AccessCheckAndAuditAlarmW( LPCWSTR subsystem, LPVOID id, LPWSTR type
                                        PGENERIC_MAPPING mapping, BOOL creation,
                                        LPDWORD granted, LPBOOL status, LPBOOL on_close )
 {
-    FIXME( "stub (%s,%p,%s,%s,%p,%08lx,%p,%x,%p,%p,%p)\n", debugstr_w(subsystem),
+    UNICODE_STRING subsystem_string, type_string, name_string;
+    NTSTATUS access_status;
+    BOOLEAN audit_on_close;
+    BOOL ret;
+
+    TRACE( "(%s,%p,%s,%s,%p,%08lx,%p,%x,%p,%p,%p)\n", debugstr_w(subsystem),
            id, debugstr_w(type_name), debugstr_w(name), descr, access, mapping,
            creation, granted, status, on_close );
-    return TRUE;
+
+    RtlInitUnicodeString( &subsystem_string, subsystem );
+    RtlInitUnicodeString( &type_string, type_name );
+    RtlInitUnicodeString( &name_string, name );
+    ret = set_ntstatus( NtAccessCheckAndAuditAlarm( &subsystem_string, id, &type_string,
+                         &name_string, descr, access, mapping, creation, granted,
+                         &access_status, &audit_on_close ));
+    if (ret)
+    {
+        *status = set_ntstatus( access_status );
+        *on_close = audit_on_close;
+    }
+    return ret;
 }
 
 /******************************************************************************

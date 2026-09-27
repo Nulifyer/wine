@@ -27,6 +27,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 
 #define SAMR_CONTEXT_MAGIC 0x53414d52
 #define SAMR_SERVER_ALL_ACCESS 0x000f003f
+#define SAMR_SERVER_ENUMERATE_DOMAINS 0x00000010
 #define SAMR_SERVER_LOOKUP_DOMAIN 0x00000020
 #define SAMR_DOMAIN_ALL_ACCESS 0x000f07ff
 #define SAMR_DOMAIN_LIST_ACCOUNTS 0x00000100
@@ -171,13 +172,125 @@ NTSTATUS samr_open_domain( SAMR_HANDLE server_handle, ULONG desired_access,
 
 static void free_enumeration_buffer( SAMR_ENUMERATION_BUFFER *buffer )
 {
+    ULONG i;
+
     if (!buffer) return;
     if (buffer->Buffer)
     {
-        MIDL_user_free( buffer->Buffer[0].Name.Buffer );
+        for (i = 0; i < buffer->EntriesRead; ++i)
+            MIDL_user_free( buffer->Buffer[i].Name.Buffer );
         MIDL_user_free( buffer->Buffer );
     }
     MIDL_user_free( buffer );
+}
+
+static BOOL unicode_string_equal( const SAMR_UNICODE_STRING *string, const WCHAR *value )
+{
+    SIZE_T value_len;
+
+    if (!string || !value || string->Length % sizeof(WCHAR) ||
+        string->MaximumLength < string->Length || (string->Length && !string->Buffer))
+        return FALSE;
+    value_len = wcslen( value );
+    return string->Length == value_len * sizeof(WCHAR) &&
+           !wcsnicmp( string->Buffer, value, value_len );
+}
+
+static SID *allocate_builtin_domain_sid(void)
+{
+    static const SID_IDENTIFIER_AUTHORITY authority = { SECURITY_NT_AUTHORITY };
+    SID *sid;
+
+    if (!(sid = MIDL_user_allocate( offsetof(SID, SubAuthority[1]) ))) return NULL;
+    sid->Revision = SID_REVISION;
+    sid->SubAuthorityCount = 1;
+    sid->IdentifierAuthority = authority;
+    sid->SubAuthority[0] = SECURITY_BUILTIN_DOMAIN_RID;
+    return sid;
+}
+
+NTSTATUS samr_lookup_domain_in_server( SAMR_HANDLE server_handle, SAMR_UNICODE_STRING *name,
+                                       SID **domain_sid )
+{
+    struct samr_context *server = get_context( server_handle, SAMR_CONTEXT_SERVER );
+    WCHAR computer[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD computer_len = ARRAY_SIZE(computer);
+
+    TRACE( "server %p, name %s, sid %p\n", server_handle,
+           name ? debugstr_wn(name->Buffer, name->Length / sizeof(WCHAR)) : "(null)", domain_sid );
+
+    if (!server) return STATUS_INVALID_HANDLE;
+    if (!(server->access & SAMR_SERVER_LOOKUP_DOMAIN)) return STATUS_ACCESS_DENIED;
+    if (!name || !domain_sid) return STATUS_INVALID_PARAMETER;
+    *domain_sid = NULL;
+    if (unicode_string_equal( name, L"BUILTIN" ))
+        *domain_sid = allocate_builtin_domain_sid();
+    else if (GetComputerNameW( computer, &computer_len ) && unicode_string_equal( name, computer ))
+        *domain_sid = lsa_allocate_computer_sid();
+    else
+        return STATUS_NO_SUCH_DOMAIN;
+    return *domain_sid ? STATUS_SUCCESS : STATUS_NO_MEMORY;
+}
+
+NTSTATUS samr_enumerate_domains_in_server( SAMR_HANDLE server_handle,
+                                            ULONG *enumeration_context,
+                                            SAMR_ENUMERATION_BUFFER **buffer,
+                                            ULONG preferred_maximum_length,
+                                            ULONG *count_returned )
+{
+    struct samr_context *server = get_context( server_handle, SAMR_CONTEXT_SERVER );
+    WCHAR computer[MAX_COMPUTERNAME_LENGTH + 1];
+    const WCHAR *names[2] = {L"BUILTIN", computer};
+    SAMR_ENUMERATION_BUFFER *result = NULL;
+    DWORD computer_len = ARRAY_SIZE(computer);
+    ULONG start, count = 0, i;
+    SIZE_T required = sizeof(*result);
+
+    TRACE( "server %p, context %p, buffer %p, maximum %lu, count %p\n",
+           server_handle, enumeration_context, buffer, preferred_maximum_length, count_returned );
+
+    if (!server) return STATUS_INVALID_HANDLE;
+    if (!(server->access & SAMR_SERVER_ENUMERATE_DOMAINS)) return STATUS_ACCESS_DENIED;
+    if (!enumeration_context || !buffer || !count_returned) return STATUS_INVALID_PARAMETER;
+    *buffer = NULL;
+    *count_returned = 0;
+    if (!GetComputerNameW( computer, &computer_len )) return STATUS_UNSUCCESSFUL;
+    start = *enumeration_context;
+    if (start > ARRAY_SIZE(names)) return STATUS_INVALID_PARAMETER;
+    if (start == ARRAY_SIZE(names)) return STATUS_SUCCESS;
+
+    for (i = start; i < ARRAY_SIZE(names); ++i)
+    {
+        SIZE_T entry_size = sizeof(result->Buffer[0]) +
+                            (wcslen(names[i]) + 1) * sizeof(WCHAR);
+        if (count && preferred_maximum_length && required + entry_size > preferred_maximum_length)
+            break;
+        required += entry_size;
+        ++count;
+    }
+    if (!(result = MIDL_user_allocate( sizeof(*result) ))) return STATUS_NO_MEMORY;
+    memset( result, 0, sizeof(*result) );
+    if (!(result->Buffer = MIDL_user_allocate( count * sizeof(*result->Buffer) ))) goto no_memory;
+    memset( result->Buffer, 0, count * sizeof(*result->Buffer) );
+    result->EntriesRead = count;
+    for (i = 0; i < count; ++i)
+    {
+        SIZE_T name_bytes = wcslen(names[start + i]) * sizeof(WCHAR);
+
+        if (!(result->Buffer[i].Name.Buffer = MIDL_user_allocate( name_bytes + sizeof(WCHAR) )))
+            goto no_memory;
+        memcpy( result->Buffer[i].Name.Buffer, names[start + i], name_bytes + sizeof(WCHAR) );
+        result->Buffer[i].Name.Length = name_bytes;
+        result->Buffer[i].Name.MaximumLength = name_bytes + sizeof(WCHAR);
+    }
+    *enumeration_context = start + count;
+    *count_returned = count;
+    *buffer = result;
+    return *enumeration_context < ARRAY_SIZE(names) ? STATUS_MORE_ENTRIES : STATUS_SUCCESS;
+
+no_memory:
+    free_enumeration_buffer( result );
+    return STATUS_NO_MEMORY;
 }
 
 static NTSTATUS enumerate_users_in_domain( SAMR_HANDLE domain_handle, ULONG *enumeration_context,
@@ -597,8 +710,6 @@ DEFINE_UNUSED_OPNUM(0)
 DEFINE_UNUSED_OPNUM(2)
 DEFINE_UNUSED_OPNUM(3)
 DEFINE_UNUSED_OPNUM(4)
-DEFINE_UNUSED_OPNUM(5)
-DEFINE_UNUSED_OPNUM(6)
 DEFINE_UNUSED_OPNUM(8)
 DEFINE_UNUSED_OPNUM(9)
 DEFINE_UNUSED_OPNUM(10)

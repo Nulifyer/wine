@@ -25,6 +25,7 @@
 #include "wine/test.h"
 
 #define SAMR_SERVER_CONNECT 0x00000001
+#define SAMR_SERVER_ENUMERATE_DOMAINS 0x00000010
 #define SAMR_SERVER_LOOKUP_DOMAIN 0x00000020
 #define SAMR_DOMAIN_LIST_ACCOUNTS 0x00000100
 #define SAMR_DOMAIN_OPEN_ACCOUNT 0x00000200
@@ -67,10 +68,13 @@ static BOOL create_sid( SID *sid, BYTE count, DWORD first, DWORD second,
 
 static void free_enumeration_buffer( SAMR_ENUMERATION_BUFFER *buffer )
 {
+    ULONG i;
+
     if (!buffer) return;
     if (buffer->Buffer)
     {
-        MIDL_user_free( buffer->Buffer[0].Name.Buffer );
+        for (i = 0; i < buffer->EntriesRead; ++i)
+            MIDL_user_free( buffer->Buffer[i].Name.Buffer );
         MIDL_user_free( buffer->Buffer );
     }
     MIDL_user_free( buffer );
@@ -140,7 +144,7 @@ static void test_user_information( SAMR_HANDLE domain, const WCHAR *user_name )
     NTSTATUS status;
     ULONG i;
 
-    info = (void *)0xdeadbeef;
+    info = NULL;
     status = samr_query_information_user( domain, SamrUserAllInformation, &info );
     ok( status == STATUS_INVALID_HANDLE, "domain query returned %#lx\n", status );
     ok( !info, "domain query returned buffer %p\n", info );
@@ -157,7 +161,7 @@ static void test_user_information( SAMR_HANDLE domain, const WCHAR *user_name )
                              SAMR_LOCAL_USER_RID, &user );
     ok( status == STATUS_SUCCESS && user, "user open returned %#lx, %p\n", status, user );
 
-    info = (void *)0xdeadbeef;
+    info = NULL;
     status = samr_query_information_user( user, SamrUserAllInformation, &info );
     ok( status == STATUS_SUCCESS && info, "all-information query returned %#lx, %p\n",
         status, info );
@@ -190,7 +194,7 @@ static void test_user_information( SAMR_HANDLE domain, const WCHAR *user_name )
     }
     free_user_info( info, SamrUserAllInformation );
 
-    info = (void *)0xdeadbeef;
+    info = NULL;
     status = samr_query_information_user( user, SamrUserExtendedInformation, &info );
     ok( status == STATUS_SUCCESS && info, "extended query returned %#lx, %p\n", status, info );
     if (info)
@@ -206,7 +210,7 @@ static void test_user_information( SAMR_HANDLE domain, const WCHAR *user_name )
     }
     free_user_info( info, SamrUserExtendedInformation );
 
-    info = (void *)0xdeadbeef;
+    info = NULL;
     status = samr_query_information_user( user, SamrUserLogonUIInformation, &info );
     ok( status == STATUS_SUCCESS && info, "LogonUI query returned %#lx, %p\n", status, info );
     if (info)
@@ -216,7 +220,7 @@ static void test_user_information( SAMR_HANDLE domain, const WCHAR *user_name )
     }
     free_user_info( info, SamrUserLogonUIInformation );
 
-    info = (void *)0xdeadbeef;
+    info = NULL;
     status = samr_query_information_user( user, SamrUserAuthInformation, &info );
     ok( status == STATUS_ACCESS_DENIED, "auth query without force access returned %#lx\n", status );
     ok( !info, "denied auth query returned buffer %p\n", info );
@@ -224,7 +228,7 @@ static void test_user_information( SAMR_HANDLE domain, const WCHAR *user_name )
     status = samr_open_user( domain, MAXIMUM_ALLOWED, SAMR_LOCAL_USER_RID, &maximum_user );
     ok( status == STATUS_SUCCESS && maximum_user,
         "maximum-access user open returned %#lx, %p\n", status, maximum_user );
-    info = (void *)0xdeadbeef;
+    info = NULL;
     status = samr_query_information_user( maximum_user, SamrUserAuthInformation, &info );
     ok( status == STATUS_NOT_SUPPORTED, "auth query returned %#lx\n", status );
     ok( !info, "unsupported auth query returned buffer %p\n", info );
@@ -232,7 +236,7 @@ static void test_user_information( SAMR_HANDLE domain, const WCHAR *user_name )
     status = samr_open_user( domain, 0, SAMR_LOCAL_USER_RID, &empty_user );
     ok( status == STATUS_SUCCESS && empty_user,
         "zero-access user open returned %#lx, %p\n", status, empty_user );
-    info = (void *)0xdeadbeef;
+    info = NULL;
     status = samr_query_information_user( empty_user, SamrUserAllInformation, &info );
     ok( status == STATUS_SUCCESS && info, "zero-access query returned %#lx, %p\n", status, info );
     if (info) ok( !info->All.WhichFields, "zero-access fields are %#lx\n", info->All.WhichFields );
@@ -271,6 +275,7 @@ static void test_account_enumeration(void)
 
     out_version = 0;
     status = samr_connect5( NULL, READ_CONTROL | SAMR_SERVER_CONNECT |
+                            SAMR_SERVER_ENUMERATE_DOMAINS |
                             SAMR_SERVER_LOOKUP_DOMAIN, 1, &in_revision,
                             &out_version, &out_revision, &server );
     ok( status == STATUS_SUCCESS, "samr_connect5 returned %#lx\n", status );
@@ -279,6 +284,41 @@ static void test_account_enumeration(void)
     ok( out_revision.V1.Revision == 3, "revision is %lu\n", out_revision.V1.Revision );
     ok( out_revision.V1.SupportedFeatures == 0, "features are %#lx\n",
         out_revision.V1.SupportedFeatures );
+
+    enumeration_context = count = 0;
+    buffer = NULL;
+    status = samr_enumerate_domains_in_server( server, &enumeration_context, &buffer,
+                                               ~0u, &count );
+    ok( status == STATUS_SUCCESS, "domain enumeration returned %#lx\n", status );
+    ok( enumeration_context == 2 && count == 2 && buffer && buffer->EntriesRead == 2,
+        "domain enumeration returned context %lu, count %lu, buffer %p\n",
+        enumeration_context, count, buffer );
+    if (buffer && buffer->EntriesRead == 2)
+    {
+        WCHAR computer[MAX_COMPUTERNAME_LENGTH + 1];
+        DWORD computer_len = ARRAY_SIZE(computer);
+        SID *domain_sid = NULL;
+
+        ok( !wcsicmp(buffer->Buffer[0].Name.Buffer, L"BUILTIN"), "first domain is %s\n",
+            wine_dbgstr_w(buffer->Buffer[0].Name.Buffer) );
+        ok( GetComputerNameW( computer, &computer_len ), "GetComputerNameW failed: %lu\n",
+            GetLastError() );
+        ok( !wcsicmp(buffer->Buffer[1].Name.Buffer, computer), "account domain is %s\n",
+            wine_dbgstr_w(buffer->Buffer[1].Name.Buffer) );
+        status = samr_lookup_domain_in_server( server, &buffer->Buffer[0].Name, &domain_sid );
+        ok( status == STATUS_SUCCESS && domain_sid &&
+            *GetSidSubAuthorityCount(domain_sid) == 1 &&
+            *GetSidSubAuthority(domain_sid, 0) == SECURITY_BUILTIN_DOMAIN_RID,
+            "builtin lookup returned %#lx, sid %p\n", status, domain_sid );
+        MIDL_user_free( domain_sid );
+        domain_sid = NULL;
+        status = samr_lookup_domain_in_server( server, &buffer->Buffer[1].Name, &domain_sid );
+        ok( status == STATUS_SUCCESS && domain_sid &&
+            *GetSidSubAuthorityCount(domain_sid) == 4,
+            "account lookup returned %#lx, sid %p\n", status, domain_sid );
+        MIDL_user_free( domain_sid );
+    }
+    free_enumeration_buffer( buffer );
 
     status = samr_open_domain( server, READ_CONTROL | SAMR_DOMAIN_LIST_ACCOUNTS,
                                &unknown_sid.sid, &domain );
@@ -292,7 +332,7 @@ static void test_account_enumeration(void)
     ok( domain != NULL, "account domain returned a null handle\n" );
 
     enumeration_context = count = 0;
-    buffer = (void *)0xdeadbeef;
+    buffer = NULL;
     status = samr_enumerate_users_in_domain( domain, &enumeration_context, 0,
                                              &buffer, 1, &count );
     ok( status == STATUS_MORE_ENTRIES, "short enumeration returned %#lx\n", status );
@@ -322,7 +362,7 @@ static void test_account_enumeration(void)
     free_enumeration_buffer( buffer );
 
     enumeration_context = count = 0;
-    buffer = (void *)0xdeadbeef;
+    buffer = NULL;
     status = samr_enumerate_users_in_domain2( domain, &enumeration_context, 0, 1,
                                               &buffer, ~0u, &count );
     ok( status == STATUS_SUCCESS, "private local enumeration returned %#lx\n", status );
@@ -336,7 +376,7 @@ static void test_account_enumeration(void)
     free_enumeration_buffer( buffer );
 
     enumeration_context = count = 0;
-    buffer = (void *)0xdeadbeef;
+    buffer = NULL;
     status = samr_enumerate_users_in_domain2( domain, &enumeration_context, 0, 2,
                                               &buffer, ~0u, &count );
     ok( status == STATUS_SUCCESS, "private connected enumeration returned %#lx\n", status );
@@ -404,7 +444,7 @@ static void test_account_enumeration(void)
 
     test_user_information( domain, user_name );
 
-    buffer = (void *)0xdeadbeef;
+    buffer = NULL;
     count = 7;
     status = samr_enumerate_users_in_domain( domain, &enumeration_context, 0,
                                              &buffer, ~0u, &count );
@@ -420,7 +460,7 @@ static void test_account_enumeration(void)
                                &builtin_sid, &domain );
     ok( status == STATUS_SUCCESS, "builtin domain returned %#lx\n", status );
     enumeration_context = count = 0;
-    buffer = (void *)0xdeadbeef;
+    buffer = NULL;
     status = samr_enumerate_users_in_domain( domain, &enumeration_context, 0,
                                              &buffer, ~0u, &count );
     ok( status == STATUS_SUCCESS && !count && !buffer,

@@ -199,8 +199,16 @@ interface samr
     NTSTATUS samr_unused_2(void);
     NTSTATUS samr_unused_3(void);
     NTSTATUS samr_unused_4(void);
-    NTSTATUS samr_unused_5(void);
-    NTSTATUS samr_unused_6(void);
+    NTSTATUS samr_lookup_domain_in_server(
+        [in] SAMR_HANDLE server_handle,
+        [in] SAMR_UNICODE_STRING *name,
+        [out] SID **domain_sid);
+    NTSTATUS samr_enumerate_domains_in_server(
+        [in] SAMR_HANDLE server_handle,
+        [in, out] ULONG *enumeration_context,
+        [out] SAMR_ENUMERATION_BUFFER **buffer,
+        [in] ULONG preferred_maximum_length,
+        [out] ULONG *count_returned);
     NTSTATUS samr_open_domain(
         [in] SAMR_HANDLE server_handle,
         [in] ULONG desired_access,

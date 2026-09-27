@@ -598,7 +598,30 @@ NTSTATUS policy_lookup_get_domain_info( LSA_POLICY_LOOKUP_HANDLE handle,
     return status;
 }
 
-NTSTATUS policy_lookup_user_account_type( void )
+NTSTATUS policy_lookup_user_account_type( LSA_POLICY_LOOKUP_SERVER_NAME server_name, SID *sid,
+                                          LSA_POLICY_LOOKUP_USER_ACCOUNT_TYPE *account_type )
 {
-    return STATUS_NOT_IMPLEMENTED;
+    static const SID_IDENTIFIER_AUTHORITY nt_authority = { SECURITY_NT_AUTHORITY };
+    static const SID_IDENTIFIER_AUTHORITY internet_authority = {{0, 0, 0, 0, 0, 11}};
+    static const SID_IDENTIFIER_AUTHORITY microsoft_account_authority = {{0, 0, 0, 0, 0, 12}};
+
+    TRACE( "server %s, sid %p, account_type %p\n", debugstr_w(server_name), sid, account_type );
+
+    if (!sid || !account_type) return STATUS_INVALID_PARAMETER;
+    if (!IsValidSid( sid )) return STATUS_INVALID_SID;
+
+    *account_type = LsaPolicyLookupUnknownUserAccountType;
+    if (!memcmp( GetSidIdentifierAuthority(sid), &nt_authority, sizeof(nt_authority) ) &&
+        *GetSidSubAuthorityCount(sid) >= 4 &&
+        *GetSidSubAuthority( sid, 0 ) == SECURITY_NT_NON_UNIQUE)
+        *account_type = LsaPolicyLookupLocalUserAccountType;
+    else if (!memcmp( GetSidIdentifierAuthority(sid), &microsoft_account_authority,
+                       sizeof(microsoft_account_authority) ) &&
+             *GetSidSubAuthorityCount(sid) && *GetSidSubAuthority( sid, 0 ) == 1)
+        *account_type = LsaPolicyLookupAadUserAccountType;
+    else if (!memcmp( GetSidIdentifierAuthority(sid), &internet_authority,
+                       sizeof(internet_authority) ))
+        *account_type = LsaPolicyLookupInternetUserAccountType;
+
+    return STATUS_SUCCESS;
 }

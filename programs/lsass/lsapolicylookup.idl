@@ -85,6 +85,18 @@ interface lsapolicylookup
         LsaPolicyLookupSidTypeLabel
     } LSA_POLICY_LOOKUP_SID_NAME_USE;
 
+    typedef enum
+    {
+        LsaPolicyLookupUnknownUserAccountType,
+        LsaPolicyLookupLocalUserAccountType,
+        LsaPolicyLookupPrimaryDomainUserAccountType,
+        LsaPolicyLookupExternalDomainUserAccountType,
+        LsaPolicyLookupLocalConnectedUserAccountType,
+        LsaPolicyLookupAadUserAccountType,
+        LsaPolicyLookupInternetUserAccountType,
+        LsaPolicyLookupMsaUserAccountType
+    } LSA_POLICY_LOOKUP_USER_ACCOUNT_TYPE;
+
     typedef struct
     {
         LSA_POLICY_LOOKUP_UNICODE_STRING Name;
@@ -245,5 +257,8 @@ interface lsapolicylookup
         [in] LSA_POLICY_LOOKUP_DOMAIN_INFO_CLASS info_class,
         [out, switch_is(info_class)] LSA_POLICY_LOOKUP_DOMAIN_INFO **domain_info);
 
-    NTSTATUS policy_lookup_user_account_type(void);
+    NTSTATUS policy_lookup_user_account_type(
+        [in, unique] LSA_POLICY_LOOKUP_SERVER_NAME server_name,
+        [in, unique] SID *sid,
+        [out] LSA_POLICY_LOOKUP_USER_ACCOUNT_TYPE *account_type);
 }
