@@ -1287,6 +1287,93 @@ static void test_query_startup_system_information(void)
     ok(!memcmp(buffer, (BYTE[8]){0}, 8), "Expected zero write-constraint record\n");
 }
 
+static void test_query_policy_information(void)
+{
+    static const BYTE query_policy_cipher[160] =
+    {
+        0xc9, 0x98, 0xe5, 0x1b, 0xa3, 0xa9, 0x63, 0x2e,
+        0x56, 0xe1, 0xe2, 0x53, 0xe0, 0x65, 0x77, 0x7c,
+        0x3e, 0x26, 0x3d, 0x34, 0x5f, 0xb9, 0x87, 0xce,
+        0x86, 0xa9, 0xe7, 0xf2, 0x98, 0x08, 0x83, 0x14,
+        0x85, 0x1e, 0x83, 0x91, 0x9d, 0xbd, 0x3c, 0xc3,
+        0x22, 0x0c, 0x21, 0xbe, 0x4a, 0x78, 0x05, 0xb2,
+        0xce, 0x2d, 0x0e, 0x0b,
+        [128] = 0x1d, 0x0e, 0x0f, 0x09, 0x1b, 0x01, 0x1a, 0x18,
+        0x1e, 0x05, 0x0b, 0x19, 0x02, 0x1f, 0x1f, 0x1f,
+        0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f,
+        0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f,
+    };
+    static const BYTE query_policy_key[8] = {0x58, 0x4a, 0xb5, 0xb1, 0x17, 0xcb, 0x1e, 0xc8};
+    struct system_policy_information
+    {
+        const void *input;
+        void *output;
+        ULONG input_size;
+        ULONG output_size;
+        ULONG version;
+        NTSTATUS status;
+    } policy, before;
+    BYTE input[540], output[252];
+    ULONG value, offset;
+    NTSTATUS status;
+
+    status = pNtQuerySystemInformation( SystemPolicyInformation, NULL, 0, NULL );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "got %#lx\n", status );
+    status = pNtQuerySystemInformation( SystemPolicyInformation, NULL, sizeof(policy), NULL );
+    ok( status == STATUS_ACCESS_VIOLATION, "got %#lx\n", status );
+
+    memset( &policy, 0, sizeof(policy) );
+    policy.status = 0xcccccccc;
+    before = policy;
+    status = pNtQuerySystemInformation( SystemPolicyInformation, &policy, sizeof(policy), NULL );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "got %#lx\n", status );
+    ok( !memcmp( &policy, &before, sizeof(policy) ), "policy structure changed\n" );
+
+    memset( input, 0, sizeof(input) );
+    memset( output, 0xcc, sizeof(output) );
+    policy.input = input;
+    policy.output = output;
+    policy.input_size = 4;
+    policy.output_size = 4;
+    before = policy;
+    status = pNtQuerySystemInformation( SystemPolicyInformation, &policy, sizeof(policy), NULL );
+    ok( status == STATUS_DATA_ERROR, "got %#lx\n", status );
+    ok( !memcmp( &policy, &before, sizeof(policy) ), "policy structure changed\n" );
+    ok( output[0] == 0xcc, "output changed to %#x\n", output[0] );
+
+    policy.input_size = 492;
+    policy.output_size = sizeof(output);
+    before = policy;
+    status = pNtQuerySystemInformation( SystemPolicyInformation, &policy, sizeof(policy), NULL );
+    ok( status == STATUS_DATA_ERROR, "got %#lx\n", status );
+    ok( !memcmp( &policy, &before, sizeof(policy) ), "policy structure changed\n" );
+    ok( output[0] == 0xcc, "output changed to %#x\n", output[0] );
+
+    memset( input, 0, sizeof(input) );
+    value = 360;
+    memcpy( input, &value, sizeof(value) );
+    offset = sizeof(value) + value;
+    value = sizeof(query_policy_cipher);
+    memcpy( input + offset, &value, sizeof(value) );
+    offset += sizeof(value);
+    memcpy( input + offset, query_policy_cipher, sizeof(query_policy_cipher) );
+    offset += sizeof(query_policy_cipher);
+    value = sizeof(query_policy_key);
+    memcpy( input + offset, &value, sizeof(value) );
+    offset += sizeof(value);
+    memcpy( input + offset, query_policy_key, sizeof(query_policy_key) );
+    policy.input_size = sizeof(input);
+    policy.output_size = sizeof(output);
+    before = policy;
+    status = pNtQuerySystemInformation( SystemPolicyInformation, &policy, sizeof(policy), NULL );
+    ok( status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#lx\n", status );
+    ok( !memcmp( &policy, &before, sizeof(policy) ), "policy structure changed\n" );
+    ok( output[0] == 0xcc, "output changed to %#x\n", output[0] );
+
+    status = pNtQuerySystemInformation( SystemPolicyInformation, &policy, sizeof(policy) + 8, NULL );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "got %#lx\n", status );
+}
+
 static void test_query_logicalproc(void)
 {
     NTSTATUS status;
@@ -4893,6 +4980,7 @@ START_TEST(info)
     test_query_kerndebug();
     test_query_regquota();
     test_query_startup_system_information();
+    test_query_policy_information();
     test_query_logicalproc();
     test_query_logicalprocex();
     test_query_cpusetinfo();

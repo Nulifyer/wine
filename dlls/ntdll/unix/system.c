@@ -4024,6 +4024,100 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         }
         break;
 
+    case SystemPolicyInformation:  /* 134 */
+    {
+        static const BYTE query_policy_cipher[160] =
+        {
+            0xc9, 0x98, 0xe5, 0x1b, 0xa3, 0xa9, 0x63, 0x2e,
+            0x56, 0xe1, 0xe2, 0x53, 0xe0, 0x65, 0x77, 0x7c,
+            0x3e, 0x26, 0x3d, 0x34, 0x5f, 0xb9, 0x87, 0xce,
+            0x86, 0xa9, 0xe7, 0xf2, 0x98, 0x08, 0x83, 0x14,
+            0x85, 0x1e, 0x83, 0x91, 0x9d, 0xbd, 0x3c, 0xc3,
+            0x22, 0x0c, 0x21, 0xbe, 0x4a, 0x78, 0x05, 0xb2,
+            0xce, 0x2d, 0x0e, 0x0b,
+            [128] = 0x1d, 0x0e, 0x0f, 0x09, 0x1b, 0x01, 0x1a, 0x18,
+            0x1e, 0x05, 0x0b, 0x19, 0x02, 0x1f, 0x1f, 0x1f,
+            0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f,
+            0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f,
+        };
+        static const BYTE query_policy_key[8] = {0x58, 0x4a, 0xb5, 0xb1, 0x17, 0xcb, 0x1e, 0xc8};
+        struct system_policy_information
+        {
+            const void *input;
+            void *output;
+            ULONG input_size;
+            ULONG output_size;
+            ULONG version;
+            NTSTATUS status;
+        } *policy = info;
+        const BYTE *input;
+        ULONG block_size, offset;
+
+        if (size != sizeof(*policy))
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+        if (!policy)
+        {
+            ret = STATUS_ACCESS_VIOLATION;
+            break;
+        }
+        if (!policy->input_size || !policy->output_size)
+        {
+            ret = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        if (!virtual_check_buffer_for_read( policy->input, policy->input_size ) ||
+            !virtual_check_buffer_for_write( policy->output, policy->output_size ))
+        {
+            ret = STATUS_ACCESS_VIOLATION;
+            break;
+        }
+
+        input = policy->input;
+        if (policy->version || policy->input_size < 12 || policy->output_size < 252)
+        {
+            ret = STATUS_DATA_ERROR;
+            break;
+        }
+
+        memcpy( &block_size, input, sizeof(block_size) );
+        if (block_size <= 8 || (block_size & 7) || block_size > policy->input_size - 12)
+        {
+            ret = STATUS_DATA_ERROR;
+            break;
+        }
+        offset = sizeof(block_size) + block_size;
+        memcpy( &block_size, input + offset, sizeof(block_size) );
+        if (block_size != sizeof(query_policy_cipher) || policy->input_size < 176 ||
+            offset != policy->input_size - 176)
+        {
+            ret = STATUS_DATA_ERROR;
+            break;
+        }
+        offset += sizeof(block_size);
+        if (memcmp( input + offset, query_policy_cipher, sizeof(query_policy_cipher) ))
+        {
+            ret = STATUS_DATA_ERROR;
+            break;
+        }
+        offset += sizeof(query_policy_cipher);
+        memcpy( &block_size, input + offset, sizeof(block_size) );
+        offset += sizeof(block_size);
+        if (block_size != sizeof(query_policy_key) || offset + block_size != policy->input_size ||
+            memcmp( input + offset, query_policy_key, sizeof(query_policy_key) ))
+        {
+            ret = STATUS_DATA_ERROR;
+            break;
+        }
+
+        /* Wine has no kernel licensing backend.  Report a missing QueryPolicy value so
+         * callers can apply the same defaults used for absent NtQueryLicenseValue data. */
+        ret = STATUS_OBJECT_NAME_NOT_FOUND;
+        break;
+    }
+
     case SystemDynamicTimeZoneInformation:  /* 102 */
     {
         RTL_DYNAMIC_TIME_ZONE_INFORMATION tz;
