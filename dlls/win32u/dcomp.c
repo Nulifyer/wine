@@ -105,6 +105,7 @@ struct dcomp_resource_view
     struct dcomp_resource_view *window_flip_surface_clip;
     struct dcomp_resource_view *window_sprite_bitmap;
     struct dcomp_resource_view *window_sprite_clip;
+    struct dcomp_resource_view *animation_shared_section;
     struct dcomp_resource_view *expression_shared_section;
     struct dcomp_resource_view *keyframe_value;
     struct dcomp_resource_view *keyframe_animation;
@@ -243,6 +244,16 @@ struct dcomp_resource_view
     BOOL expression_sources_dirty;
     BOOL expression_reference_info_dirty;
     BOOL expression_nodes_dirty;
+    UINT64 animation_primitive_offset;
+    UINT64 animation_primitive_size;
+    UINT64 animation_seek;
+    UINT64 animation_seek_aux;
+    BYTE animation_paused;
+    BOOL animation_instance;
+    BOOL animation_primitives_dirty;
+    BOOL animation_paused_dirty;
+    BOOL animation_seek_dirty;
+    BOOL animation_instance_dirty;
     UINT keyframe_expression_type;
     UINT64 keyframe_duration;
     UINT64 keyframe_iteration_count;
@@ -748,6 +759,11 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
     if ((reference = resource->window_sprite_clip))
     {
         resource->window_sprite_clip = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->animation_shared_section))
+    {
+        resource->animation_shared_section = NULL;
         release_dcomp_resource_reference( reference );
     }
     if ((reference = resource->expression_shared_section))
@@ -2205,6 +2221,73 @@ static NTSTATUS set_dcomp_expression_reference_array_property( struct dcomp_chan
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS set_dcomp_animation_integer_property( struct dcomp_resource_view *resource,
+                                                       UINT property, INT64 value )
+{
+    if (property == 1)
+    {
+        if (resource->animation_primitive_offset == value) return STATUS_SUCCESS;
+        resource->animation_primitive_offset = value;
+        resource->animation_primitives_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    if (property == 2)
+    {
+        if (resource->animation_primitive_size == value) return STATUS_SUCCESS;
+        resource->animation_primitive_size = value;
+        resource->animation_primitives_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    if (property == 8)
+        return (UINT64)value <= 2 ? STATUS_SUCCESS : STATUS_INVALID_PARAMETER;
+    if (property == 10)
+    {
+        if (resource->animation_instance || !value) return STATUS_INVALID_PARAMETER;
+        resource->animation_instance = TRUE;
+        resource->animation_instance_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS set_dcomp_animation_buffer_property( struct dcomp_resource_view *resource,
+                                                      UINT property, const BYTE *data, UINT size )
+{
+    if (!resource->animation_instance) return STATUS_NOT_SUPPORTED;
+    if (property == 0x0b)
+    {
+        if (size != sizeof(resource->animation_paused)) return STATUS_INVALID_PARAMETER;
+        resource->animation_paused = *data;
+        resource->animation_paused_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    if (property == 0x0c)
+    {
+        if (size != sizeof(resource->animation_seek)) return STATUS_INVALID_PARAMETER;
+        memcpy( &resource->animation_seek, data, sizeof(resource->animation_seek) );
+        resource->animation_seek_aux = 0;
+        resource->animation_seek_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS set_dcomp_animation_reference_property( struct dcomp_channel_view *view,
+                                                         struct dcomp_resource_view *resource,
+                                                         UINT property, UINT reference_id )
+{
+    struct dcomp_resource_view *reference = NULL;
+
+    if (property != 0) return STATUS_NOT_SUPPORTED;
+    if (reference_id && !(reference = find_dcomp_resource_view( view, reference_id )))
+        return STATUS_ACCESS_DENIED;
+    if (reference && reference->type != 0x9d) return STATUS_INVALID_PARAMETER;
+    replace_dcomp_resource_reference( &resource->animation_shared_section, reference );
+    resource->animation_primitives_dirty = TRUE;
+    remove_unannounced_dcomp_resources( view );
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS set_dcomp_keyframe_integer_property( struct dcomp_resource_view *resource,
                                                       UINT property, INT64 value )
 {
@@ -2684,6 +2767,11 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                 status = set_dcomp_visual_integer_property( resource, property, value );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 2)
+            {
+                status = set_dcomp_animation_integer_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
             else if (resource->type == 0x7f)
             {
                 status = set_dcomp_rectangle_integer_property( resource, property, value );
@@ -2768,6 +2856,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             if (resource->visual)
             {
                 status = set_dcomp_visual_buffer_property( resource, property, buffer + 16, size );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+            else if (resource->type == 2)
+            {
+                status = set_dcomp_animation_buffer_property( resource, property,
+                                                               buffer + 16, size );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
             else if (resource->type == 0x16)
@@ -2880,6 +2974,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             else if (resource->visual)
             {
                 status = set_dcomp_visual_reference_property( view, resource, property, root_id );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+            else if (resource->type == 2)
+            {
+                status = set_dcomp_animation_reference_property( view, resource,
+                                                                  property, root_id );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
             else if (resource->type == 0x5c)
@@ -3812,6 +3912,59 @@ static BYTE *emit_dcomp_manipulation_updates( BYTE *cursor,
     return cursor;
 }
 
+static data_size_t dcomp_animation_update_size( const struct dcomp_resource_view *resource )
+{
+    data_size_t size = 0;
+
+    if (resource->animation_primitives_dirty && resource->animation_shared_section &&
+        resource->animation_primitive_size) size += 24;
+    if (resource->animation_paused_dirty) size += 16;
+    if (resource->animation_seek_dirty) size += 28;
+    if (resource->animation_instance_dirty) size += 12;
+    return size;
+}
+
+static BYTE *emit_dcomp_animation_updates( BYTE *cursor,
+                                            const struct dcomp_resource_view *resource )
+{
+    if (resource->animation_primitives_dirty && resource->animation_shared_section &&
+        resource->animation_primitive_size)
+    {
+        UINT command[6] = {24, 9, resource->id, resource->animation_shared_section->id,
+                           (UINT)resource->animation_primitive_offset,
+                           (UINT)resource->animation_primitive_size};
+
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    if (resource->animation_paused_dirty)
+    {
+        UINT command[4] = {16, 8, resource->id};
+
+        ((BYTE *)command)[12] = resource->animation_paused;
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    if (resource->animation_seek_dirty)
+    {
+        UINT command[7] = {28, 10, resource->id};
+
+        memcpy( command + 3, &resource->animation_seek, sizeof(resource->animation_seek) );
+        memcpy( command + 5, &resource->animation_seek_aux,
+                sizeof(resource->animation_seek_aux) );
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    if (resource->animation_instance_dirty)
+    {
+        UINT command[3] = {12, 6, resource->id};
+
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    return cursor;
+}
+
 static data_size_t dcomp_expression_update_size( const struct dcomp_resource_view *resource )
 {
     data_size_t size = 0;
@@ -4120,6 +4273,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             resource_size += 76;
         if (!resource->released && resource->type == 0x7c)
             resource_size += dcomp_property_set_update_size( resource );
+        if (!resource->released && resource->type == 2)
+            resource_size += dcomp_animation_update_size( resource );
         if (!resource->released && resource->type == 0x3c)
             resource_size += dcomp_expression_update_size( resource );
         if (!resource->released && resource->type == 0x5c)
@@ -4357,6 +4512,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             cursor = emit_dcomp_component_transform3d_matrix( cursor, resource );
         if (resource->type == 0x7c)
             cursor = emit_dcomp_property_set_updates( cursor, resource );
+        if (resource->type == 2)
+            cursor = emit_dcomp_animation_updates( cursor, resource );
         if (resource->type == 0x3c)
             cursor = emit_dcomp_expression_updates( cursor, resource );
         if (resource->type == 0x5c)
@@ -4507,6 +4664,10 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view,
             resource->expression_sources_dirty = FALSE;
             resource->expression_reference_info_dirty = FALSE;
             resource->expression_nodes_dirty = FALSE;
+            resource->animation_primitives_dirty = FALSE;
+            resource->animation_paused_dirty = FALSE;
+            resource->animation_seek_dirty = FALSE;
+            resource->animation_instance_dirty = FALSE;
             resource->keyframe_initialize_dirty = FALSE;
             resource->keyframe_playback_rate_dirty = FALSE;
             resource->keyframe_progress_dirty = FALSE;

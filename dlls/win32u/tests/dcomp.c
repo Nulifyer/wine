@@ -2739,6 +2739,10 @@ static void test_keyframe_animation_protocol(void)
         16, 0x28, 1, 0x9d,
         16, 0x28, 2, 0x02,
         16, 0x28, 3, 0x5c,
+        24, 9, 2, 1, 0x80, 0x60,
+        16, 8, 2, 1,
+        28, 10, 2, 0x1234, 0, 0, 0,
+        12, 6, 2,
         44, 0x11, 3, 0, 0, 0, 0, 0, 0, 0, 0x12,
         16, 0x12, 3, 0,
         72, 0xd4, 3, 7, 1, 0x1388, 0x150, 0, 0x3f800000,
@@ -2753,6 +2757,12 @@ static void test_keyframe_animation_protocol(void)
         2, 2, 0x02, 0,
         2, 3, 0x5c, 0,
     };
+    static const UINT primitive_reference[] = {16, 2, 0, 1};
+    static const UINT primitive_offset[] = {11, 2, 1, 0, 0x80, 0};
+    static const UINT primitive_size[] = {11, 2, 2, 0, 0x60, 0};
+    static const UINT instance[] = {11, 2, 0x0a, 0, 1, 0};
+    static const UINT paused[] = {15, 2, 0x0b, 1, 1};
+    static const UINT seek[] = {15, 2, 0x0c, 8, 0x1234, 0};
     static const UINT expression_type[] = {11, 3, 0, 0, 0x12, 0};
     static const UINT keyframe_type[] = {11, 3, 0x0a, 0, 7, 0};
     static const UINT duration[] = {11, 3, 0x0c, 0, 0x1388, 0};
@@ -2783,6 +2793,21 @@ static void test_keyframe_animation_protocol(void)
 
     status = process_dcomp_test_command( channel, buffer, create, sizeof(create) );
     ok( status == STATUS_SUCCESS, "got keyframe create status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, primitive_reference,
+                                         sizeof(primitive_reference) );
+    ok( status == STATUS_SUCCESS, "got animation primitive reference status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, primitive_offset,
+                                         sizeof(primitive_offset) );
+    ok( status == STATUS_SUCCESS, "got animation primitive offset status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, primitive_size,
+                                         sizeof(primitive_size) );
+    ok( status == STATUS_SUCCESS, "got animation primitive size status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, instance, sizeof(instance) );
+    ok( status == STATUS_SUCCESS, "got animation instance status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, paused, sizeof(paused) );
+    ok( status == STATUS_SUCCESS, "got animation paused status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, seek, sizeof(seek) );
+    ok( status == STATUS_SUCCESS, "got animation seek status %#lx\n", status );
     status = process_dcomp_test_command( channel, buffer, expression_type,
                                          sizeof(expression_type) );
     ok( status == STATUS_SUCCESS, "got keyframe expression type status %#lx\n", status );
