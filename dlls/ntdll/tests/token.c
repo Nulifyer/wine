@@ -486,6 +486,7 @@ static void test_adjust_groups(void)
     TOKEN_SOURCE source = {{0}};
     TOKEN_ELEVATION_TYPE elevation_type;
     TOKEN_LINKED_TOKEN linked_token;
+    ULONG session_id;
     OBJECT_ATTRIBUTES attr;
     TOKEN_OWNER owner;
     TOKEN_USER user;
@@ -542,6 +543,12 @@ static void test_adjust_groups(void)
                                       sizeof(elevation_type), &length );
     ok( status == STATUS_SUCCESS, "TokenElevationType returned %#lx.\n", status );
     ok( elevation_type == TokenElevationTypeDefault, "got elevation type %u.\n", elevation_type );
+
+    status = NtQueryInformationToken( token, TokenSessionId, &session_id,
+                                      sizeof(session_id), &length );
+    ok( status == STATUS_SUCCESS, "TokenSessionId returned %#lx.\n", status );
+    ok( session_id == NtCurrentTeb()->Peb->SessionId, "got session id %lu, expected %lu.\n",
+        session_id, NtCurrentTeb()->Peb->SessionId );
 
     linked_token.LinkedToken = (HANDLE)0xdeadbeef;
     status = NtQueryInformationToken( token, TokenLinkedToken, &linked_token,

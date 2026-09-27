@@ -1556,7 +1556,7 @@ DECL_HANDLER(create_token)
     else
         dacl = default_dacl = create_default_dacl( &domain_users_sid );
 
-    token = create_token( req->primary, default_session_id, user, groups, req->group_count,
+    token = create_token( req->primary, current->process->session_id, user, groups, req->group_count,
                           privs, req->priv_count, dacl, NULL, req->primary_group,
                           req->impersonation_level, TokenElevationTypeDefault );
     if (token)
