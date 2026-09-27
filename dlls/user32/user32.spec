@@ -832,7 +832,7 @@
 @ stdcall LoadMenuIndirectA(ptr)
 @ stdcall LoadMenuIndirectW(ptr)
 @ stdcall LoadMenuW(long wstr)
-@ stub LoadRemoteFonts
+@ stdcall LoadRemoteFonts()
 @ stdcall LoadStringA(long long ptr long)
 @ stdcall LoadStringW(long long ptr long)
 @ stdcall LockSetForegroundWindow(long)

@@ -94,6 +94,7 @@ static NTSTATUS  (WINAPI *pRtlAllocateAndInitializeSidEx)(PSID_IDENTIFIER_AUTHOR
 static PRTL_SPLAY_LINKS (WINAPI *pRtlDelete)(PRTL_SPLAY_LINKS);
 static void      (WINAPI  *pRtlDeleteNoSplay)(PRTL_SPLAY_LINKS, PRTL_SPLAY_LINKS *);
 static BOOLEAN   (WINAPI  *pRtlDeleteElementGenericTable)(PRTL_GENERIC_TABLE,PVOID);
+static BOOLEAN   (WINAPI  *pRtlAreLongPathsEnabled)(void);
 static BOOLEAN   (WINAPI  *pRtlDeleteElementGenericTableAvl)(PRTL_AVL_TABLE,PVOID);
 static void *    (WINAPI  *pRtlEnumerateGenericTable)(PRTL_GENERIC_TABLE, BOOLEAN);
 static void *    (WINAPI  *pRtlEnumerateGenericTableAvl)(PRTL_AVL_TABLE, BOOLEAN);
@@ -193,6 +194,7 @@ static void InitFunctionPtrs(void)
         pRtlAllocateAndInitializeSidEx = (void *)GetProcAddress(hntdll, "RtlAllocateAndInitializeSidEx");
         pRtlDelete = (void *)GetProcAddress(hntdll, "RtlDelete");
         pRtlDeleteElementGenericTable = (void *)GetProcAddress(hntdll, "RtlDeleteElementGenericTable");
+        pRtlAreLongPathsEnabled = (void *)GetProcAddress(hntdll, "RtlAreLongPathsEnabled");
         pRtlDeleteElementGenericTableAvl = (void *)GetProcAddress(hntdll, "RtlDeleteElementGenericTableAvl");
         pRtlDeleteNoSplay = (void *)GetProcAddress(hntdll, "RtlDeleteNoSplay");
         pRtlEnumerateGenericTable = (void *)GetProcAddress(hntdll, "RtlEnumerateGenericTable");
@@ -714,6 +716,25 @@ static void test_RtlAreAnyAccessesGranted(void)
 	   any_accesses[test_num].DesiredAccess,
 	   result, any_accesses[test_num].result);
     } /* for */
+}
+
+static void test_RtlAreLongPathsEnabled(void)
+{
+    PEB *peb = NtCurrentTeb()->Peb;
+    BOOLEAN old_value;
+
+    if (!pRtlAreLongPathsEnabled)
+    {
+        win_skip( "RtlAreLongPathsEnabled is unavailable\n" );
+        return;
+    }
+
+    old_value = peb->IsLongPathAwareProcess;
+    peb->IsLongPathAwareProcess = FALSE;
+    ok( !pRtlAreLongPathsEnabled(), "expected long paths to be disabled\n" );
+    peb->IsLongPathAwareProcess = TRUE;
+    ok( pRtlAreLongPathsEnabled(), "expected long paths to be enabled\n" );
+    peb->IsLongPathAwareProcess = old_value;
 }
 
 static void test_RtlComputeCrc32(void)
@@ -6450,6 +6471,7 @@ START_TEST(rtl)
     test_RtlRandom();
     test_RtlAreAllAccessesGranted();
     test_RtlAreAnyAccessesGranted();
+    test_RtlAreLongPathsEnabled();
     test_process_protection();
     test_RtlComputeCrc32();
     test_HandleTables();

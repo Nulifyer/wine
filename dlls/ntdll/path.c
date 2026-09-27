@@ -33,6 +33,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(file);
 #define IS_SEPARATOR(ch)  ((ch) == '\\' || (ch) == '/')
 
 /***********************************************************************
+ *             RtlAreLongPathsEnabled   (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlAreLongPathsEnabled(void)
+{
+    return NtCurrentTeb()->Peb->IsLongPathAwareProcess;
+}
+
+/***********************************************************************
  *             RtlDetermineDosPathNameType_U   (NTDLL.@)
  */
 RTL_PATH_TYPE WINAPI RtlDetermineDosPathNameType_U( PCWSTR path )

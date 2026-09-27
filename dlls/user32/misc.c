@@ -359,6 +359,14 @@ VOID WINAPI LoadLocalFonts(VOID)
     return;
 }
 
+/***********************************************************************
+ *              LoadRemoteFonts (USER32.@)
+ */
+VOID WINAPI LoadRemoteFonts(VOID)
+{
+    /* Wine's host font collection does not distinguish remote fonts. */
+}
+
 
 /***********************************************************************
  *		User32InitializeImmEntryTable

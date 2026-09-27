@@ -926,10 +926,20 @@ static void test_CharToOem_OemToChar(void)
     }
 }
 
+static void test_LoadRemoteFonts(void)
+{
+    void (WINAPI *load_remote_fonts)(void);
+
+    load_remote_fonts = (void *)GetProcAddress( GetModuleHandleW( L"user32.dll" ), "LoadRemoteFonts" );
+    ok( !!load_remote_fonts, "LoadRemoteFonts is unavailable\n" );
+    if (load_remote_fonts) load_remote_fonts();
+}
+
 START_TEST(text)
 {
     test_TabbedText();
     test_DrawTextCalcRect();
     test_DrawState();
     test_CharToOem_OemToChar();
+    test_LoadRemoteFonts();
 }
