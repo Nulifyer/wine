@@ -77,6 +77,14 @@ static BOOL enum_names( HWINSTA handle, NAMEENUMPROCW func, LPARAM lparam )
     return ret;
 }
 
+/***********************************************************************
+ *           SwitchDesktop  (USER32.@)
+ */
+BOOL WINAPI SwitchDesktop( HDESK desktop )
+{
+    return NtUserSwitchDesktop( desktop, 0, 0 );
+}
+
 /* return a handle to the directory where window station objects are created */
 static HANDLE get_winstations_dir_handle(void)
 {

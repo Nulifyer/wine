@@ -5236,8 +5236,10 @@ NTSTATUS WINAPI wow64_NtUserShowWindowAsync( UINT *args )
 NTSTATUS WINAPI wow64_NtUserSwitchDesktop( UINT *args )
 {
     HDESK handle = get_handle( &args );
+    UINT duration = get_ulong( &args );
+    UINT flags = get_ulong( &args );
 
-    return NtUserSwitchDesktop( handle );
+    return NtUserSwitchDesktop( handle, duration, flags );
 }
 
 NTSTATUS WINAPI wow64_NtUserUnlockWindowStation( UINT *args )

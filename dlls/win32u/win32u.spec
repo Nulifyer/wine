@@ -1480,7 +1480,7 @@
 @ stub -syscall NtUserSuppressWindowActions
 @ stub -syscall NtUserSuppressWindowDisplayChange
 @ stub -syscall NtUserSwapMouseButton
-@ stdcall -syscall NtUserSwitchDesktop(long)
+@ stdcall -syscall NtUserSwitchDesktop(long long long)
 @ stub -syscall NtUserSwitchToThisWindow
 @ stdcall -syscall NtUserSystemParametersInfo(long long ptr long)
 @ stdcall -syscall NtUserSystemParametersInfoForDpi(long long ptr long long)

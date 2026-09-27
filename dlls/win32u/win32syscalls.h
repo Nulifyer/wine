@@ -1482,7 +1482,7 @@
     SYSCALL_ENTRY( 0x15c6, NtUserSuppressWindowActions, 0 ) \
     SYSCALL_ENTRY( 0x15c7, NtUserSuppressWindowDisplayChange, 0 ) \
     SYSCALL_ENTRY( 0x15c8, NtUserSwapMouseButton, 0 ) \
-    SYSCALL_ENTRY( 0x15c9, NtUserSwitchDesktop, 4 ) \
+    SYSCALL_ENTRY( 0x15c9, NtUserSwitchDesktop, 12 ) \
     SYSCALL_ENTRY( 0x15ca, NtUserSwitchToThisWindow, 0 ) \
     SYSCALL_ENTRY( 0x15cb, NtUserSystemParametersInfo, 16 ) \
     SYSCALL_ENTRY( 0x15cc, NtUserSystemParametersInfoForDpi, 20 ) \
@@ -3024,7 +3024,7 @@
     SYSCALL_ENTRY( 0x15c6, NtUserSuppressWindowActions, 0 ) \
     SYSCALL_ENTRY( 0x15c7, NtUserSuppressWindowDisplayChange, 0 ) \
     SYSCALL_ENTRY( 0x15c8, NtUserSwapMouseButton, 0 ) \
-    SYSCALL_ENTRY( 0x15c9, NtUserSwitchDesktop, 8 ) \
+    SYSCALL_ENTRY( 0x15c9, NtUserSwitchDesktop, 24 ) \
     SYSCALL_ENTRY( 0x15ca, NtUserSwitchToThisWindow, 0 ) \
     SYSCALL_ENTRY( 0x15cb, NtUserSystemParametersInfo, 32 ) \
     SYSCALL_ENTRY( 0x15cc, NtUserSystemParametersInfoForDpi, 40 ) \

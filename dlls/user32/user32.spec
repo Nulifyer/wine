@@ -14,6 +14,11 @@
 
 2010 stub -noname SlicerControl  # NtUserSlicerControl
 
+2420 stdcall -arch=i386 SwitchDesktop(long)
+2421 stdcall -arch=i386 SwitchDesktopWithFade(long long long) NtUserSwitchDesktop
+2427 stdcall -arch=win64 SwitchDesktop(long)
+2428 stdcall -arch=win64 SwitchDesktopWithFade(long long long) NtUserSwitchDesktop
+
 2503 stdcall DelegateInput(ptr ptr ptr ptr ptr ptr)  # NtUserDelegateInput
 2504 stdcall UndelegateInput(ptr ptr)  # NtUserUndelegateInput
 2505 stdcall HandleDelegatedInput(ptr long)  # NtUserHandleDelegatedInput
@@ -1144,8 +1149,6 @@
 # @ stub SoundSentry
 @ stdcall SubtractRect(ptr ptr ptr)
 @ stdcall SwapMouseButton(long)
-@ stdcall SwitchDesktop(long) NtUserSwitchDesktop
-# @ stub SwitchDesktopWithFade
 @ stdcall SwitchToThisWindow(long long)
 @ stdcall SystemParametersInfoA(long long ptr long)
 @ stdcall SystemParametersInfoForDpi(long long ptr long long)

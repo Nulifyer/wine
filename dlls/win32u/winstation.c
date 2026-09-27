@@ -742,9 +742,9 @@ HDESK WINAPI NtUserOpenInputDesktop( DWORD flags, BOOL inherit, ACCESS_MASK acce
     return ret;
 }
 
-BOOL WINAPI NtUserSwitchDesktop( HDESK desktop )
+BOOL WINAPI NtUserSwitchDesktop( HDESK desktop, UINT duration, UINT flags )
 {
-    TRACE( "desktop %p\n", desktop );
+    TRACE( "desktop %p, duration %u, flags %#x\n", desktop, duration, flags );
 
     SERVER_START_REQ( set_input_desktop )
     {

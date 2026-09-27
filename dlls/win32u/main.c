@@ -2620,7 +2620,7 @@ BOOL SYSCALL_API NtUserShowWindowAsync( HWND hwnd, INT cmd )
     SYSCALL_FUNC( NtUserShowWindowAsync );
 }
 
-BOOL SYSCALL_API NtUserSwitchDesktop( HDESK handle )
+BOOL SYSCALL_API NtUserSwitchDesktop( HDESK handle, UINT duration, UINT flags )
 {
     SYSCALL_FUNC( NtUserSwitchDesktop );
 }

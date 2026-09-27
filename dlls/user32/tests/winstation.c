@@ -598,10 +598,17 @@ static void test_getuserobjectinformation(void)
 
 static void test_inputdesktop(void)
 {
+    typedef BOOL (WINAPI *switch_desktop_with_fade_fn)(HDESK, UINT, UINT);
+    switch_desktop_with_fade_fn switch_desktop_with_fade;
     HDESK input_desk, old_input_desk, thread_desk, old_thread_desk, new_desk;
     DWORD ret;
     CHAR name[1024];
     INPUT inputs[1];
+
+    switch_desktop_with_fade = (void *)GetProcAddress(GetModuleHandleW(L"user32.dll"),
+                                                       "SwitchDesktopWithFade");
+    if (winetest_platform_is_wine)
+        ok(!!switch_desktop_with_fade, "SwitchDesktopWithFade is unavailable.\n");
 
     inputs[0].type = INPUT_KEYBOARD;
     inputs[0].ki.wVk = 0;
@@ -693,7 +700,7 @@ static void test_inputdesktop(void)
     ok(ret == 1, "unexpected return count %ld\n", ret);
 
     /* Switch input desktop to the new desktop, SendInput should fail. */
-    ret = SwitchDesktop(new_desk);
+    ret = switch_desktop_with_fade ? switch_desktop_with_fade(new_desk, 1, 0) : SwitchDesktop(new_desk);
     ok(ret, "SwitchDesktop failed!\n");
     input_desk = OpenInputDesktop(0, FALSE, DESKTOP_ALL_ACCESS);
     ok(input_desk != NULL, "OpenInputDesktop failed!\n");
