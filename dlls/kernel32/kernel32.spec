@@ -921,6 +921,7 @@
 @ stdcall -import -arch=i386,x86_64 GetXStateFeaturesMask(ptr ptr)
 @ stdcall -import -arch=i386,x86_64 SetXStateFeaturesMask(ptr int64)
 @ stdcall GlobalAddAtomA(str)
+@ stdcall GlobalAddAtomExW(wstr long)
 @ stdcall GlobalAddAtomW(wstr)
 @ stdcall -import GlobalAlloc(long long)
 @ stdcall GlobalCompact(long)

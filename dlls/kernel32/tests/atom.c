@@ -60,6 +60,31 @@ static void do_initW(WCHAR* tmp, const char* pattern, int len)
 
 static BOOL unicode_OS;
 
+static void test_GlobalAddAtomExW(void)
+{
+    ATOM (WINAPI *global_add_atom_ex_w)(LPCWSTR, DWORD);
+    static const WCHAR name[] = L"Wine_GlobalAddAtomExW";
+    ATOM atom;
+
+    global_add_atom_ex_w = (void *)GetProcAddress( GetModuleHandleW( L"kernel32.dll" ), "GlobalAddAtomExW" );
+    if (!global_add_atom_ex_w)
+    {
+        win_skip( "GlobalAddAtomExW is unavailable\n" );
+        return;
+    }
+
+    SetLastError( 0xdeadbeef );
+    atom = global_add_atom_ex_w( name, 2 /* ATOM_FLAG_GLOBAL */ );
+    ok( atom >= 0xc000, "bad atom id %x\n", atom );
+    ok( GlobalFindAtomW( name ) == atom, "could not find atom %x\n", atom );
+    ok( GetLastError() == 0xdeadbeef, "GlobalAddAtomExW set last error %lu\n", GetLastError() );
+    GlobalDeleteAtom( atom );
+
+    SetLastError( 0xdeadbeef );
+    ok( !global_add_atom_ex_w( name, 1 ), "unexpectedly added atom\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+}
+
 static void test_add_atom(void)
 {
     ATOM atom, w_atom;
@@ -590,6 +615,7 @@ START_TEST(atom)
        Win7, so let's turn this app into a GUI app */
     GetDesktopWindow();
 
+    test_GlobalAddAtomExW();
     test_add_atom();
     test_get_atom_name();
     test_error_handling();

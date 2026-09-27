@@ -174,6 +174,20 @@ ATOM WINAPI GlobalAddAtomW( LPCWSTR str )
     return atom;
 }
 
+/***********************************************************************
+ *           GlobalAddAtomExW   (KERNEL32.@)
+ */
+ATOM WINAPI GlobalAddAtomExW( LPCWSTR str, DWORD flags )
+{
+    if (flags != 2) /* ATOM_FLAG_GLOBAL */
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    return GlobalAddAtomW( str );
+}
+
 
 /***********************************************************************
  *           AddAtomW   (KERNEL32.@)
