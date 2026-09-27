@@ -329,6 +329,7 @@ extern UINT set_window_style_bits( HWND hwnd, UINT set_bits, UINT clear_bits );
 extern void update_window_state( HWND hwnd );
 extern HWND window_from_point( HWND hwnd, POINT pt, INT *hittest, BOOL send_nchittest );
 extern HWND get_shell_window(void);
+extern HWND get_shell_change_notify_window(void);
 extern HWND get_progman_window(void);
 extern HWND get_taskman_window(void);
 extern BOOL is_client_surface_window( struct client_surface *surface, HWND hwnd );

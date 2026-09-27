@@ -4167,6 +4167,8 @@ DECL_HANDLER(set_desktop_shell_windows)
     reply->old_shell_listview = new_shell_listview ? new_shell_listview->handle : 0;
     reply->old_progman_window = new_progman_window ? new_progman_window->handle : 0;
     reply->old_taskman_window = new_taskman_window ? new_taskman_window->handle : 0;
+    reply->old_shell_change_notify_window = desktop->shell_change_notify_window;
+    reply->success = 0;
 
     if (req->flags & SET_DESKTOP_SHELL_WINDOWS)
     {
@@ -4180,6 +4182,17 @@ DECL_HANDLER(set_desktop_shell_windows)
     if (req->flags & SET_DESKTOP_TASKMAN_WINDOW)
     {
         if (!get_new_shell_window( &new_taskman_window, req->taskman_window )) goto done;
+    }
+    if (req->flags & SET_DESKTOP_SHELL_CHANGE_NOTIFY_WINDOW)
+    {
+        if (!desktop->shell_window || !desktop->shell_window->thread) goto done;
+        if (desktop->shell_window->thread->process != current->process)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto done;
+        }
+        desktop->shell_change_notify_window = req->shell_change_notify_window;
+        reply->success = 1;
     }
     desktop->shell_window   = new_shell_window;
     desktop->shell_listview = new_shell_listview;

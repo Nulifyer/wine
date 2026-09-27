@@ -94,6 +94,7 @@ struct desktop
     struct window       *shell_listview;   /* shell list view window for this desktop */
     struct window       *progman_window;   /* progman window for this desktop */
     struct window       *taskman_window;   /* taskman window for this desktop */
+    user_handle_t        shell_change_notify_window; /* shell change notification window */
     struct hook_table   *global_hooks;     /* table of global hooks on this desktop */
     struct list          hotkeys;          /* list of registered hotkeys */
     struct list          pointers;         /* list of active pointers */

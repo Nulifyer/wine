@@ -3695,15 +3695,19 @@ enum caret_state
     user_handle_t  shell_listview;      /* handle to the new shell listview window */
     user_handle_t  progman_window;      /* handle to the new program manager window */
     user_handle_t  taskman_window;      /* handle to the new task manager window */
+    user_handle_t  shell_change_notify_window; /* handle to the shell change notification window */
 @REPLY
     user_handle_t  old_shell_window;    /* handle to the shell window */
     user_handle_t  old_shell_listview;  /* handle to the shell listview window */
     user_handle_t  old_progman_window;  /* handle to the new program manager window */
     user_handle_t  old_taskman_window;  /* handle to the new task manager window */
+    user_handle_t  old_shell_change_notify_window; /* handle to the shell change notification window */
+    int            success;             /* whether the requested change succeeded */
 @END
 #define SET_DESKTOP_SHELL_WINDOWS   0x01  /* set both main shell and listview windows */
 #define SET_DESKTOP_PROGMAN_WINDOW  0x02
 #define SET_DESKTOP_TASKMAN_WINDOW  0x04
+#define SET_DESKTOP_SHELL_CHANGE_NOTIFY_WINDOW 0x08
 
 /* Register the logon UI process for the current window station */
 @REQ(register_logon_process)

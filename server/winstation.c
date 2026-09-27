@@ -429,6 +429,7 @@ static bool desktop_init( struct object *obj, const void *init_data )
     desktop->shell_listview = NULL;
     desktop->progman_window = NULL;
     desktop->taskman_window = NULL;
+    desktop->shell_change_notify_window = 0;
     desktop->global_hooks = NULL;
     desktop->close_timeout = NULL;
     desktop->foreground_input = NULL;

@@ -1413,7 +1413,7 @@
     SYSCALL_ENTRY( 0x1581, NtUserSetScrollInfo, 16 ) \
     SYSCALL_ENTRY( 0x1582, NtUserSetSensorPresence, 0 ) \
     SYSCALL_ENTRY( 0x1583, NtUserSetSharedWindowData, 0 ) \
-    SYSCALL_ENTRY( 0x1584, NtUserSetShellChangeNotifyHWND, 0 ) \
+    SYSCALL_ENTRY( 0x1584, NtUserSetShellChangeNotifyHWND, 4 ) \
     SYSCALL_ENTRY( 0x1585, NtUserSetShellWindowEx, 8 ) \
     SYSCALL_ENTRY( 0x1586, NtUserSetSysColors, 12 ) \
     SYSCALL_ENTRY( 0x1587, NtUserSetSysMenu, 0 ) \
@@ -2955,7 +2955,7 @@
     SYSCALL_ENTRY( 0x1581, NtUserSetScrollInfo, 32 ) \
     SYSCALL_ENTRY( 0x1582, NtUserSetSensorPresence, 0 ) \
     SYSCALL_ENTRY( 0x1583, NtUserSetSharedWindowData, 0 ) \
-    SYSCALL_ENTRY( 0x1584, NtUserSetShellChangeNotifyHWND, 0 ) \
+    SYSCALL_ENTRY( 0x1584, NtUserSetShellChangeNotifyHWND, 8 ) \
     SYSCALL_ENTRY( 0x1585, NtUserSetShellWindowEx, 16 ) \
     SYSCALL_ENTRY( 0x1586, NtUserSetSysColors, 24 ) \
     SYSCALL_ENTRY( 0x1587, NtUserSetSysMenu, 0 ) \
@@ -3969,7 +3969,6 @@
     SYSCALL_STUB( NtUserSetProp2 ) \
     SYSCALL_STUB( NtUserSetSensorPresence ) \
     SYSCALL_STUB( NtUserSetSharedWindowData ) \
-    SYSCALL_STUB( NtUserSetShellChangeNotifyHWND ) \
     SYSCALL_STUB( NtUserSetSysMenu ) \
     SYSCALL_STUB( NtUserSetSystemContentRects ) \
     SYSCALL_STUB( NtUserSetSystemCursor ) \

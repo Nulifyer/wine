@@ -2782,6 +2782,7 @@ static void dump_set_desktop_shell_windows_request( const struct set_desktop_she
     fprintf( stderr, ", shell_listview=%08x", req->shell_listview );
     fprintf( stderr, ", progman_window=%08x", req->progman_window );
     fprintf( stderr, ", taskman_window=%08x", req->taskman_window );
+    fprintf( stderr, ", shell_change_notify_window=%08x", req->shell_change_notify_window );
 }
 
 static void dump_set_desktop_shell_windows_reply( const struct set_desktop_shell_windows_reply *req )
@@ -2790,6 +2791,8 @@ static void dump_set_desktop_shell_windows_reply( const struct set_desktop_shell
     fprintf( stderr, ", old_shell_listview=%08x", req->old_shell_listview );
     fprintf( stderr, ", old_progman_window=%08x", req->old_progman_window );
     fprintf( stderr, ", old_taskman_window=%08x", req->old_taskman_window );
+    fprintf( stderr, ", old_shell_change_notify_window=%08x", req->old_shell_change_notify_window );
+    fprintf( stderr, ", success=%d", req->success );
 }
 
 static void dump_register_logon_process_request( const struct register_logon_process_request *req )

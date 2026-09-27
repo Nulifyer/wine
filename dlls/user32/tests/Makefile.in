@@ -27,6 +27,7 @@ SOURCES = \
 	resource.c \
 	resource.rc \
 	scroll.c \
+	shell.c \
 	static.c \
 	sysparams.c \
 	testdll.c \

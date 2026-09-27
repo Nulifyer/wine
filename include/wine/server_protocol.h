@@ -5161,6 +5161,8 @@ struct set_desktop_shell_windows_request
     user_handle_t  shell_listview;
     user_handle_t  progman_window;
     user_handle_t  taskman_window;
+    user_handle_t  shell_change_notify_window;
+    char __pad_36[4];
 };
 struct set_desktop_shell_windows_reply
 {
@@ -5169,10 +5171,13 @@ struct set_desktop_shell_windows_reply
     user_handle_t  old_shell_listview;
     user_handle_t  old_progman_window;
     user_handle_t  old_taskman_window;
+    user_handle_t  old_shell_change_notify_window;
+    int            success;
 };
 #define SET_DESKTOP_SHELL_WINDOWS   0x01
 #define SET_DESKTOP_PROGMAN_WINDOW  0x02
 #define SET_DESKTOP_TASKMAN_WINDOW  0x04
+#define SET_DESKTOP_SHELL_CHANGE_NOTIFY_WINDOW 0x08
 
 
 struct register_logon_process_request
@@ -9432,6 +9437,6 @@ union generic_reply
     struct lock_winstation_reply lock_winstation_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1067
+#define SERVER_PROTOCOL_VERSION 1068
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

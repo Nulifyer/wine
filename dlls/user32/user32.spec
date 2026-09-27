@@ -668,7 +668,7 @@
 @ stdcall GetScrollPos(long long)
 @ stdcall GetScrollRange(long long ptr ptr)
 # @ stub GetSendMessageReceiver
-# @ stub GetShellChangeNotifyWindow
+@ stdcall GetShellChangeNotifyWindow()
 @ stdcall GetShellWindow()
 @ stdcall GetSubMenu(long long)
 @ stdcall GetSysColor(long)
@@ -1085,7 +1085,7 @@
 @ stdcall SetScrollInfo(long long ptr long)
 @ stdcall SetScrollPos(long long long long)
 @ stdcall SetScrollRange(long long long long long)
-# @ stub SetShellChangeNotifyWindow
+@ stdcall SetShellChangeNotifyWindow(long) NtUserSetShellChangeNotifyHWND
 @ stdcall SetShellWindow(long)
 @ stdcall SetShellWindowEx(long long) NtUserSetShellWindowEx
 @ stdcall SetSysColors(long ptr ptr) NtUserSetSysColors

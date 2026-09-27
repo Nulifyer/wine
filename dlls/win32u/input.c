@@ -1530,6 +1530,9 @@ ULONG_PTR WINAPI NtUserGetThreadState( USERTHREADSTATECLASS cls )
     case UserThreadStateMessageTime:
         return get_user_thread_info()->message_time;
 
+    case UserThreadStateShellChangeNotifyWindow:
+        return (ULONG_PTR)get_shell_change_notify_window();
+
     case UserThreadStateDesktopComposited:
         return is_thread_desktop_composited();
 

@@ -2298,12 +2298,15 @@ C_ASSERT( offsetof(struct set_desktop_shell_windows_request, shell_window) == 16
 C_ASSERT( offsetof(struct set_desktop_shell_windows_request, shell_listview) == 20 );
 C_ASSERT( offsetof(struct set_desktop_shell_windows_request, progman_window) == 24 );
 C_ASSERT( offsetof(struct set_desktop_shell_windows_request, taskman_window) == 28 );
-C_ASSERT( sizeof(struct set_desktop_shell_windows_request) == 32 );
+C_ASSERT( offsetof(struct set_desktop_shell_windows_request, shell_change_notify_window) == 32 );
+C_ASSERT( sizeof(struct set_desktop_shell_windows_request) == 40 );
 C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_shell_window) == 8 );
 C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_shell_listview) == 12 );
 C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_progman_window) == 16 );
 C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_taskman_window) == 20 );
-C_ASSERT( sizeof(struct set_desktop_shell_windows_reply) == 24 );
+C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_shell_change_notify_window) == 24 );
+C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, success) == 28 );
+C_ASSERT( sizeof(struct set_desktop_shell_windows_reply) == 32 );
 C_ASSERT( offsetof(struct register_logon_process_request, pid) == 12 );
 C_ASSERT( offsetof(struct register_logon_process_request, secure) == 16 );
 C_ASSERT( sizeof(struct register_logon_process_request) == 24 );

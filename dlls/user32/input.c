@@ -967,6 +967,14 @@ HWND WINAPI GetShellWindow(void)
     return NtUserGetShellWindow();
 }
 
+/***********************************************************************
+ *           GetShellChangeNotifyWindow (USER32.@)
+ */
+HWND WINAPI GetShellChangeNotifyWindow(void)
+{
+    return (HWND)NtUserGetThreadState( UserThreadStateShellChangeNotifyWindow );
+}
+
 
 /***********************************************************************
  *           GetProgmanWindow (USER32.@)

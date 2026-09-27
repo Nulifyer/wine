@@ -6756,6 +6756,38 @@ HWND get_shell_window(void)
     return hwnd;
 }
 
+HWND get_shell_change_notify_window(void)
+{
+    HWND hwnd = 0;
+
+    SERVER_START_REQ(set_desktop_shell_windows)
+    {
+        req->flags = 0;
+        if (!wine_server_call_err(req))
+            hwnd = wine_server_ptr_handle( reply->old_shell_change_notify_window );
+    }
+    SERVER_END_REQ;
+
+    return hwnd;
+}
+
+/***********************************************************************
+ *           NtUserSetShellChangeNotifyHWND (win32u.@)
+ */
+BOOL WINAPI NtUserSetShellChangeNotifyHWND( HWND hwnd )
+{
+    BOOL ret = FALSE;
+
+    SERVER_START_REQ(set_desktop_shell_windows)
+    {
+        req->flags = SET_DESKTOP_SHELL_CHANGE_NOTIFY_WINDOW;
+        req->shell_change_notify_window = wine_server_user_handle( hwnd );
+        if (!wine_server_call_err( req )) ret = reply->success;
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
 /*******************************************************************
  *           NtUserQueryBSDRWindow (win32u.@)
  */

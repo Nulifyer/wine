@@ -1411,7 +1411,7 @@
 @ stdcall -syscall NtUserSetScrollInfo(long long ptr long)
 @ stub -syscall NtUserSetSensorPresence
 @ stub -syscall NtUserSetSharedWindowData
-@ stub -syscall NtUserSetShellChangeNotifyHWND
+@ stdcall -syscall NtUserSetShellChangeNotifyHWND(long)
 @ stdcall -syscall NtUserSetShellWindowEx(long long)
 @ stdcall -syscall NtUserSetSysColors(long ptr ptr)
 @ stub -syscall NtUserSetSysMenu

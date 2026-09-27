@@ -769,6 +769,7 @@ typedef enum _USERTHREADSTATECLASS
     UserThreadStateInSendMessage,
     UserThreadStateMessageTime,
     UserThreadStateIsForeground,
+    UserThreadStateShellChangeNotifyWindow = 0x0e,
     UserThreadStateDesktopComposited = 0x10000 /* Wine internal */
 } USERTHREADSTATECLASS;
 
@@ -1233,6 +1234,7 @@ W32KAPI HWND    WINAPI NtUserSetProgmanWindow( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserSetProp( HWND hwnd, const WCHAR *str, HANDLE handle );
 W32KAPI INT     WINAPI NtUserSetScrollInfo( HWND hwnd, INT bar, const SCROLLINFO *info, BOOL redraw );
 W32KAPI BOOL    WINAPI NtUserSetShellWindowEx( HWND shell, HWND list_view );
+W32KAPI BOOL    WINAPI NtUserSetShellChangeNotifyHWND( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserSetSysColors( INT count, const INT *colors, const COLORREF *values );
 W32KAPI BOOL    WINAPI NtUserSetSystemMenu( HWND hwnd, HMENU menu );
 W32KAPI UINT_PTR WINAPI NtUserSetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout );
