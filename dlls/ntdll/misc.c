@@ -387,6 +387,51 @@ ULONG WINAPI EtwRegisterSecurityProvider(void)
     return ERROR_SUCCESS;
 }
 
+struct etw_private_logger_request
+{
+    ULONG type;
+    ULONG size;
+    ULONGLONG reserved[6];
+    ULONGLONG context[2];
+    WNODE_HEADER logger;
+};
+
+/******************************************************************************
+ *                  EtwProcessPrivateLoggerRequest (NTDLL.@)
+ */
+ULONG WINAPI EtwProcessPrivateLoggerRequest( struct etw_private_logger_request *request )
+{
+    static const GUID system_trace_control_guid =
+        {0x9e814aad, 0x3204, 0x11d2, {0x9a, 0x82, 0x00, 0x60, 0x08, 0xa8, 0x69, 0x39}};
+    ULONGLONG context[2];
+    ULONG error;
+
+    if (request->size < 0xf8) return ERROR_WMI_INSTANCE_NOT_FOUND;
+
+    if (request->logger.BufferSize < 0xb0 ||
+        !(request->logger.Flags & WNODE_FLAG_TRACED_GUID) ||
+        memcmp( &request->logger.Guid, &system_trace_control_guid, sizeof(GUID) ))
+        error = ERROR_INVALID_DATA;
+    else if (request->logger.ProviderId < 1 || request->logger.ProviderId > 6)
+        error = ERROR_INVALID_PARAMETER;
+    else
+        error = ERROR_WMI_INSTANCE_NOT_FOUND;
+
+    FIXME( "request %lu size %lu logger size %lu flags %#lx, returning %lu\n",
+           request->logger.ProviderId, request->size, request->logger.BufferSize,
+           request->logger.Flags, error );
+
+    memcpy( context, request->context, sizeof(context) );
+    memset( request->reserved, 0, 4 * sizeof(ULONGLONG) );
+    request->reserved[3] = HandleToUlong( NtCurrentTeb()->ClientId.UniqueProcess );
+    memcpy( request->reserved + 4, context, sizeof(context) );
+    memset( request->context, 0, sizeof(request->context) );
+    request->size = 0x4c;
+    request->type = 4;
+    request->logger.BufferSize = error;
+    return ERROR_SUCCESS;
+}
+
 /******************************************************************************
  *                  EtwWriteUMSecurityEvent (NTDLL.@)
  */

@@ -66,6 +66,7 @@
 @ stdcall EtwGetTraceEnableLevel(int64)
 @ stdcall -ret64 EtwGetTraceLoggerHandle(ptr)
 @ stdcall EtwLogTraceEvent(int64 ptr)
+@ stdcall EtwProcessPrivateLoggerRequest(ptr)
 @ stdcall EtwRegisterSecurityProvider()
 @ stdcall EtwRegisterTraceGuidsA(ptr ptr ptr long ptr str str ptr)
 @ stdcall EtwRegisterTraceGuidsW(ptr ptr ptr long ptr wstr wstr ptr)
