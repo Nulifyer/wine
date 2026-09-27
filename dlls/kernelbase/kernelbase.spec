@@ -1073,7 +1073,7 @@
 # @ stub PackageFullNameFromProductId
 @ stdcall PackageIdFromFullName(wstr long ptr ptr)
 # @ stub PackageIdFromProductId
-# @ stub PackageNameAndPublisherIdFromFamilyName
+@ stdcall PackageNameAndPublisherIdFromFamilyName(wstr ptr ptr ptr ptr)
 # @ stub PackageRelativeApplicationIdFromProductId
 # @ stub PackageSidFromFamilyName
 # @ stub PackageSidFromProductId

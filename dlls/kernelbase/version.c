@@ -1879,6 +1879,65 @@ LONG WINAPI PackageFamilyNameFromFullName(const WCHAR *full_name, UINT32 *length
     return ERROR_SUCCESS;
 }
 
+static BOOL is_package_name_char(WCHAR ch)
+{
+    return (ch >= L'0' && ch <= L'9') || (ch >= L'A' && ch <= L'Z') ||
+            (ch >= L'a' && ch <= L'z') || ch == L'.' || ch == L'-';
+}
+
+static BOOL is_publisher_id_char(WCHAR ch)
+{
+    static const WCHAR chars[] = L"0123456789abcdefghjkmnpqrstvwxyzABCDEFGHJKMNPQRSTVWXYZ";
+    return !!wcschr(chars, ch);
+}
+
+/***********************************************************************
+ *         PackageNameAndPublisherIdFromFamilyName   (kernelbase.@)
+ */
+LONG WINAPI PackageNameAndPublisherIdFromFamilyName(const WCHAR *family_name, UINT32 *name_length,
+        WCHAR *name, UINT32 *publisher_id_length, WCHAR *publisher_id)
+{
+    const WCHAR *separator, *p;
+    UINT32 required_name, required_publisher_id = PACKAGE_PUBLISHERID_MAX_LENGTH + 1;
+
+    TRACE("family_name %s, name_length %p, name %p, publisher_id_length %p, publisher_id %p.\n",
+            debugstr_w(family_name), name_length, name, publisher_id_length, publisher_id);
+
+    if (!family_name || !name_length || (*name_length && !name) || !publisher_id_length ||
+            (*publisher_id_length && !publisher_id))
+        return ERROR_INVALID_PARAMETER;
+
+    if (!(separator = wcschr(family_name, L'_')))
+        return ERROR_INVALID_PARAMETER;
+
+    required_name = separator - family_name + 1;
+    if (required_name <= PACKAGE_NAME_MIN_LENGTH || required_name > PACKAGE_NAME_MAX_LENGTH + 1)
+        return ERROR_INVALID_PARAMETER;
+    for (p = family_name; p < separator; ++p)
+        if (!is_package_name_char(*p))
+            return ERROR_INVALID_PARAMETER;
+
+    if (wcslen(separator + 1) != PACKAGE_PUBLISHERID_MAX_LENGTH)
+        return ERROR_INVALID_PARAMETER;
+    for (p = separator + 1; *p; ++p)
+        if (!is_publisher_id_char(*p))
+            return ERROR_INVALID_PARAMETER;
+
+    if (*name_length < required_name || *publisher_id_length < required_publisher_id)
+    {
+        *name_length = required_name;
+        *publisher_id_length = required_publisher_id;
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
+
+    memcpy(name, family_name, (required_name - 1) * sizeof(WCHAR));
+    name[required_name - 1] = 0;
+    memcpy(publisher_id, separator + 1, required_publisher_id * sizeof(WCHAR));
+    *name_length = required_name;
+    *publisher_id_length = required_publisher_id;
+    return ERROR_SUCCESS;
+}
+
 /***********************************************************************
  *         PackageFullNameFromId   (kernelbase.@)
  */

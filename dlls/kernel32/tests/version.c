@@ -31,6 +31,7 @@ static UINT (WINAPI * pGetSystemFirmwareTable)(DWORD, DWORD, void *, DWORD);
 static LONG (WINAPI * pPackageFamilyNameFromFullName)(const WCHAR *, UINT32 *, WCHAR *);
 static LONG (WINAPI * pPackageFullNameFromId)(const PACKAGE_ID *, UINT32 *, WCHAR *);
 static LONG (WINAPI * pPackageIdFromFullName)(const WCHAR *, UINT32, UINT32 *, BYTE *);
+static LONG (WINAPI * pPackageNameAndPublisherIdFromFamilyName)(const WCHAR *, UINT32 *, WCHAR *, UINT32 *, WCHAR *);
 
 static NTSTATUS (WINAPI * pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, void *, ULONG, ULONG *);
 static NTSTATUS (WINAPI * pRtlGetVersion)(RTL_OSVERSIONINFOEXW *);
@@ -55,6 +56,7 @@ static void init_function_pointers(void)
     GET_PROC(PackageFamilyNameFromFullName);
     GET_PROC(PackageFullNameFromId);
     GET_PROC(PackageIdFromFullName);
+    GET_PROC(PackageNameAndPublisherIdFromFamilyName);
 
     hmod = GetModuleHandleA("ntdll.dll");
 
@@ -1233,6 +1235,60 @@ static void test_PackageFamilyNameFromFullName(void)
     ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
 }
 
+static void test_PackageNameAndPublisherIdFromFamilyName(void)
+{
+    static const WCHAR family_name[] = L"Microsoft.ScreenSketch_8wekyb3d8bbwe";
+    WCHAR name[PACKAGE_NAME_MAX_LENGTH + 1], publisher_id[PACKAGE_PUBLISHERID_MAX_LENGTH + 1];
+    UINT32 name_length, publisher_id_length;
+    LONG ret;
+
+    if (!pPackageNameAndPublisherIdFromFamilyName)
+    {
+        win_skip("PackageNameAndPublisherIdFromFamilyName not available.\n");
+        return;
+    }
+
+    name_length = ARRAY_SIZE(name);
+    publisher_id_length = ARRAY_SIZE(publisher_id);
+    ret = pPackageNameAndPublisherIdFromFamilyName(NULL, &name_length, name,
+            &publisher_id_length, publisher_id);
+    ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
+
+    ret = pPackageNameAndPublisherIdFromFamilyName(family_name, NULL, name,
+            &publisher_id_length, publisher_id);
+    ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
+
+    name_length = 0;
+    publisher_id_length = 0;
+    ret = pPackageNameAndPublisherIdFromFamilyName(family_name, &name_length, NULL,
+            &publisher_id_length, NULL);
+    ok(ret == ERROR_INSUFFICIENT_BUFFER, "Unexpected ret %ld.\n", ret);
+    ok(name_length == ARRAY_SIZE(L"Microsoft.ScreenSketch"), "Unexpected name length %u.\n", name_length);
+    ok(publisher_id_length == ARRAY_SIZE(L"8wekyb3d8bbwe"),
+            "Unexpected publisher id length %u.\n", publisher_id_length);
+
+    publisher_id_length--;
+    ret = pPackageNameAndPublisherIdFromFamilyName(family_name, &name_length, name,
+            &publisher_id_length, publisher_id);
+    ok(ret == ERROR_INSUFFICIENT_BUFFER, "Unexpected ret %ld.\n", ret);
+    ok(name_length == ARRAY_SIZE(L"Microsoft.ScreenSketch"), "Unexpected name length %u.\n", name_length);
+    ok(publisher_id_length == ARRAY_SIZE(L"8wekyb3d8bbwe"),
+            "Unexpected publisher id length %u.\n", publisher_id_length);
+
+    ret = pPackageNameAndPublisherIdFromFamilyName(family_name, &name_length, name,
+            &publisher_id_length, publisher_id);
+    ok(ret == ERROR_SUCCESS, "Unexpected ret %ld.\n", ret);
+    ok(!wcscmp(name, L"Microsoft.ScreenSketch"), "Unexpected name %s.\n", debugstr_w(name));
+    ok(!wcscmp(publisher_id, L"8wekyb3d8bbwe"),
+            "Unexpected publisher id %s.\n", debugstr_w(publisher_id));
+
+    name_length = ARRAY_SIZE(name);
+    publisher_id_length = ARRAY_SIZE(publisher_id);
+    ret = pPackageNameAndPublisherIdFromFamilyName(L"bad_family", &name_length, name,
+            &publisher_id_length, publisher_id);
+    ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
+}
+
 START_TEST(version)
 {
     char **argv;
@@ -1262,4 +1318,5 @@ START_TEST(version)
     test_PackageIdFromFullName();
     test_PackageFullNameFromId();
     test_PackageFamilyNameFromFullName();
+    test_PackageNameAndPublisherIdFromFamilyName();
 }

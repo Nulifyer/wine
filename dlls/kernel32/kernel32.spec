@@ -1181,6 +1181,7 @@
 @ stdcall -import PackageIdFromFullName(wstr long ptr ptr)
 @ stdcall -import PackageFamilyNameFromFullName(wstr ptr ptr)
 @ stdcall -import PackageFullNameFromId(ptr ptr ptr)
+@ stdcall -import PackageNameAndPublisherIdFromFamilyName(wstr ptr ptr ptr ptr)
 @ stdcall PowerClearRequest(long long)
 @ stdcall PowerCreateRequest(ptr)
 @ stdcall PowerSetRequest(long long)

@@ -147,6 +147,8 @@ LONG WINAPI GetPackageFullNameFromToken(HANDLE token, UINT32 *length, WCHAR *nam
 LONG WINAPI PackageFamilyNameFromFullName(const WCHAR *full_name, UINT32 *name_length, WCHAR *name);
 LONG WINAPI PackageFullNameFromId(const PACKAGE_ID *id, UINT32 *name_length, WCHAR *name);
 LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *buffer_length, BYTE *buffer);
+LONG WINAPI PackageNameAndPublisherIdFromFamilyName(const WCHAR *family_name, UINT32 *name_length, WCHAR *name,
+        UINT32 *publisher_id_length, WCHAR *publisher_id);
 
 #if defined(__cplusplus)
 }
