@@ -15,4 +15,5 @@ SOURCES = \
 	security.c \
 	state_helpers.c \
 	sync.c \
-	timezone.c
+	timezone.c \
+	ui_language.c

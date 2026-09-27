@@ -6386,6 +6386,69 @@ LANGID WINAPI DECLSPEC_HOTPATCH GetSystemDefaultUILanguage(void)
 
 
 /***********************************************************************
+ *      GetUILanguageInfo   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH GetUILanguageInfo( DWORD flags, const WCHAR *languages,
+                                                 WCHAR *fallback, DWORD *fallback_size,
+                                                 DWORD *attributes )
+{
+    DWORD size = fallback_size ? *fallback_size : 0;
+    const WCHAR *end;
+    LCID lcid;
+
+    if (!languages || !languages[0] || (flags & (MUI_LANGUAGE_ID | MUI_LANGUAGE_NAME)) ==
+        (MUI_LANGUAGE_ID | MUI_LANGUAGE_NAME) || flags & ~(MUI_LANGUAGE_ID | MUI_LANGUAGE_NAME) ||
+        (size && !fallback) || (fallback && !fallback_size))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    end = languages + wcslen( languages );
+    if (end[1])
+    {
+        SetLastError( ERROR_FILE_NOT_FOUND );
+        return FALSE;
+    }
+
+    if (flags & MUI_LANGUAGE_ID)
+    {
+        WCHAR *parse_end;
+
+        lcid = wcstoul( languages, &parse_end, 16 );
+        if (parse_end != end || end - languages != 4 || !IsValidLocale( lcid, LCID_INSTALLED ))
+        {
+            SetLastError( ERROR_FILE_NOT_FOUND );
+            return FALSE;
+        }
+    }
+    else if (!IsValidLocaleName( languages ))
+    {
+        SetLastError( ERROR_FILE_NOT_FOUND );
+        return FALSE;
+    }
+
+    if (fallback_size)
+    {
+        *fallback_size = 2;
+        if (fallback)
+        {
+            if (size < 2)
+            {
+                SetLastError( ERROR_INSUFFICIENT_BUFFER );
+                return FALSE;
+            }
+            fallback[0] = fallback[1] = 0;
+        }
+    }
+    if (attributes)
+        *attributes = MUI_FULL_LANGUAGE | MUI_LANGUAGE_INSTALLED | MUI_LANGUAGE_LICENSED;
+    SetLastError( ERROR_SUCCESS );
+    return TRUE;
+}
+
+
+/***********************************************************************
  *      GetSystemPreferredUILanguages   (kernelbase.@)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetSystemPreferredUILanguages( DWORD flags, ULONG *count,
