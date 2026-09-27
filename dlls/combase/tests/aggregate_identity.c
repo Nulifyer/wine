@@ -24,6 +24,7 @@ typedef ULONG (WINAPI *release_agg_id_fn)(void *);
 typedef IInternalUnknown *(WINAPI *get_internal_unknown_fn)(IUnknown *);
 typedef ULONG (WINAPI *update_identity_flags_fn)(IUnknown *, ULONG);
 typedef IUnknown *(WINAPI *get_proxy_manager_fn)(IUnknown *);
+typedef HRESULT (WINAPI *create_object_in_context_fn)(IUnknown *, IUnknown *, REFIID, void **);
 
 static const GUID test_handler_iid =
     {0xf7518c88, 0xb43f, 0x4e8e, {0xad, 0x5a, 0xf0, 0x2c, 0xb2, 0x38, 0x03, 0x8a}};
@@ -77,6 +78,42 @@ static const IUnknownVtbl test_handler_vtbl =
     test_handler_AddRef,
     test_handler_Release,
 };
+
+static void test_create_object_in_context(void)
+{
+    struct test_handler object = {{&test_handler_vtbl}, 1, 0};
+    struct test_handler context = {{&test_handler_vtbl}, 1, 0};
+    create_object_in_context_fn create;
+    HMODULE module;
+    HRESULT hr;
+    void *out;
+
+    module = GetModuleHandleW(L"combase.dll");
+    ok(!!module, "combase.dll is not loaded.\n");
+    if (!module) return;
+    create = (void *)GetProcAddress(module, "CoCreateObjectInContext");
+    ok(!!create, "CoCreateObjectInContext is unavailable.\n");
+    if (!create) return;
+
+    out = (void *)0xdeadbeef;
+    hr = create(&object.IUnknown_iface, &context.IUnknown_iface, &test_handler_iid, &out);
+    ok(hr == S_OK, "CoCreateObjectInContext returned %#lx.\n", hr);
+    ok(out == &object.IUnknown_iface, "Got object %p.\n", out);
+    ok(object.query_count == 1, "Object received %ld queries.\n", object.query_count);
+    ok(object.refs == 2, "Object has %ld references.\n", object.refs);
+    if (out) IUnknown_Release((IUnknown *)out);
+
+    out = (void *)0xdeadbeef;
+    hr = create(NULL, &context.IUnknown_iface, &IID_IUnknown, &out);
+    ok(hr == E_INVALIDARG, "Null object returned %#lx.\n", hr);
+    ok(out == (void *)0xdeadbeef, "Null object changed output to %p.\n", out);
+
+    hr = create(&object.IUnknown_iface, &context.IUnknown_iface, &IID_IUnknown, (void **)8);
+    ok(hr == E_FAIL, "Private thunk shape returned %#lx.\n", hr);
+
+    ok(!IUnknown_Release(&object.IUnknown_iface), "Object was not released.\n");
+    ok(!IUnknown_Release(&context.IUnknown_iface), "Context was not released.\n");
+}
 
 static void test_aggregate_identity(void)
 {
@@ -221,4 +258,5 @@ static void test_aggregate_identity(void)
 START_TEST(aggregate_identity)
 {
     test_aggregate_identity();
+    test_create_object_in_context();
 }

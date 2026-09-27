@@ -99,7 +99,7 @@
 @ stdcall CoCreateInstance(ptr ptr long ptr ptr)
 @ stdcall CoCreateInstanceEx(ptr ptr long ptr long ptr)
 @ stdcall CoCreateInstanceFromApp(ptr ptr long ptr long ptr)
-@ stub CoCreateObjectInContext
+@ stdcall CoCreateObjectInContext(ptr ptr ptr ptr)
 @ stub CoDeactivateObject
 @ stdcall CoDecodeProxy(long int64 ptr)
 @ stdcall CoDecrementMTAUsage(ptr)

@@ -2042,6 +2042,25 @@ HRESULT WINAPI CoCreateInstanceFromApp(REFCLSID rclsid, IUnknown *outer, DWORD c
             count, results);
 }
 
+/***********************************************************************
+ *           CoCreateObjectInContext     [COMBASE.@]
+ */
+HRESULT WINAPI CoCreateObjectInContext(IUnknown *object, IUnknown *context, REFIID riid,
+        void **out)
+{
+    TRACE("%p, %p, %s, %p\n", object, context, debugstr_guid(riid), out);
+
+    /* Private COM API-set contracts also expose an unavailable thunk under
+     * this name and pass flags in r9 instead of a result pointer. */
+    if ((ULONG_PTR)out < 0x10000) return E_FAIL;
+    if (!object || !context || !riid || !out) return E_INVALIDARG;
+    *out = NULL;
+
+    /* Wine's in-process free-threaded marshaler already makes the object
+     * callable from the target contexts used here. Preserve its interface. */
+    return IUnknown_QueryInterface(object, riid, out);
+}
+
 static HRESULT com_get_class_object(REFCLSID rclsid, DWORD clscontext,
         COSERVERINFO *server_info, REFIID riid, void **obj)
 {
