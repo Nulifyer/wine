@@ -2092,6 +2092,11 @@ BOOL SYSCALL_API NtUserKillTimer( HWND hwnd, UINT_PTR id )
     SYSCALL_FUNC( NtUserKillTimer );
 }
 
+BOOL SYSCALL_API NtUserLockWindowStation( HWINSTA handle )
+{
+    SYSCALL_FUNC( NtUserLockWindowStation );
+}
+
 BOOL SYSCALL_API NtUserLockWindowUpdate( HWND hwnd )
 {
     SYSCALL_FUNC( NtUserLockWindowUpdate );
@@ -2618,6 +2623,11 @@ BOOL SYSCALL_API NtUserShowWindowAsync( HWND hwnd, INT cmd )
 BOOL SYSCALL_API NtUserSwitchDesktop( HDESK handle )
 {
     SYSCALL_FUNC( NtUserSwitchDesktop );
+}
+
+BOOL SYSCALL_API NtUserUnlockWindowStation( HWINSTA handle )
+{
+    SYSCALL_FUNC( NtUserUnlockWindowStation );
 }
 
 BOOL SYSCALL_API NtUserSystemParametersInfo( UINT action, UINT val, void *ptr, UINT winini )

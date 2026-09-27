@@ -4749,6 +4749,12 @@ static void dump_report_inertia_request( const struct report_inertia_request *re
     dump_varargs_bytes( ", data=", cur_size );
 }
 
+static void dump_lock_winstation_request( const struct lock_winstation_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", lock=%d", req->lock );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -5183,6 +5189,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_dcomp_surface_state_request,
     (dump_func)dump_open_dcomp_surface_dirty_region_request,
     (dump_func)dump_report_inertia_request,
+    (dump_func)dump_lock_winstation_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5616,6 +5623,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_get_dcomp_surface_state_reply,
     (dump_func)dump_open_dcomp_surface_dirty_region_reply,
+    NULL,
     NULL,
 };
 
@@ -6051,6 +6059,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "get_dcomp_surface_state",
     "open_dcomp_surface_dirty_region",
     "report_inertia",
+    "lock_winstation",
 };
 
 static const struct

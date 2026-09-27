@@ -20,6 +20,8 @@
 static HWND (WINAPI *pQueryBSDRWindow)(void);
 static BOOL (WINAPI *pRegisterBSDRWindow)(HWND, DWORD);
 static DWORD (WINAPI *pRegisterLogonProcess)(DWORD, BOOL);
+static BOOL (WINAPI *pLockWindowStation)(HWINSTA);
+static BOOL (WINAPI *pUnlockWindowStation)(HWINSTA);
 
 static BOOL set_tcb_privilege(BOOL enable)
 {
@@ -71,6 +73,7 @@ static BOOL register_after_owner_exit(char **argv)
 static void test_bsdr_window(char **argv)
 {
     HINSTANCE instance = GetModuleHandleW(NULL);
+    HWINSTA winstation = GetProcessWindowStation();
     HWND first, second, dead;
     BOOL ret;
 
@@ -87,11 +90,28 @@ static void test_bsdr_window(char **argv)
 
     set_tcb_privilege(FALSE);
     SetLastError(0xdeadbeef);
+    ret = pUnlockWindowStation(winstation);
+    ok(!ret, "unregistered process unexpectedly unlocked the window station\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %lu\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
     ret = pRegisterBSDRWindow(first, 0);
     ok(!ret, "unregistered process unexpectedly registered a BSDR window\n");
     ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %lu\n", GetLastError());
 
     if (!register_after_owner_exit(argv)) goto done;
+
+    ret = pLockWindowStation(winstation);
+    ok(ret, "LockWindowStation failed, error %lu\n", GetLastError());
+    ret = pUnlockWindowStation(winstation);
+    ok(ret, "UnlockWindowStation failed, error %lu\n", GetLastError());
+    ret = pUnlockWindowStation(winstation);
+    ok(ret, "repeated UnlockWindowStation failed, error %lu\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pLockWindowStation((HWINSTA)0xdeadbeef);
+    ok(!ret, "LockWindowStation accepted an invalid handle\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %lu\n", GetLastError());
 
     ret = pRegisterBSDRWindow(first, 0);
     ok(ret, "RegisterBSDRWindow failed, error %lu\n", GetLastError());
@@ -137,7 +157,10 @@ START_TEST(bsdr)
     pQueryBSDRWindow = (void *)GetProcAddress(user32, "QueryBSDRWindow");
     pRegisterBSDRWindow = (void *)GetProcAddress(user32, "RegisterBSDRWindow");
     pRegisterLogonProcess = (void *)GetProcAddress(user32, "RegisterLogonProcess");
-    if (!pQueryBSDRWindow || !pRegisterBSDRWindow || !pRegisterLogonProcess)
+    pLockWindowStation = (void *)GetProcAddress(user32, "LockWindowStation");
+    pUnlockWindowStation = (void *)GetProcAddress(user32, "UnlockWindowStation");
+    if (!pQueryBSDRWindow || !pRegisterBSDRWindow || !pRegisterLogonProcess ||
+        !pLockWindowStation || !pUnlockWindowStation)
     {
         win_skip("BSDR registration APIs are unavailable\n");
         return;

@@ -1189,7 +1189,7 @@
     SYSCALL_ENTRY( 0x14a1, NtUserLoadUserApiHook, 0 ) \
     SYSCALL_ENTRY( 0x14a2, NtUserLockCursor, 0 ) \
     SYSCALL_ENTRY( 0x14a3, NtUserLockSetForegroundWindow, 0 ) \
-    SYSCALL_ENTRY( 0x14a4, NtUserLockWindowStation, 0 ) \
+    SYSCALL_ENTRY( 0x14a4, NtUserLockWindowStation, 4 ) \
     SYSCALL_ENTRY( 0x14a5, NtUserLockWindowUpdate, 4 ) \
     SYSCALL_ENTRY( 0x14a6, NtUserLockWorkStation, 0 ) \
     SYSCALL_ENTRY( 0x14a7, NtUserLogicalToPerMonitorDPIPhysicalPoint, 8 ) \
@@ -1503,7 +1503,7 @@
     SYSCALL_ENTRY( 0x15db, NtUserUnhookWindowsHook, 8 ) \
     SYSCALL_ENTRY( 0x15dc, NtUserUnhookWindowsHookEx, 4 ) \
     SYSCALL_ENTRY( 0x15dd, NtUserUnloadKeyboardLayout, 0 ) \
-    SYSCALL_ENTRY( 0x15de, NtUserUnlockWindowStation, 0 ) \
+    SYSCALL_ENTRY( 0x15de, NtUserUnlockWindowStation, 4 ) \
     SYSCALL_ENTRY( 0x15df, NtUserUnregisterClass, 12 ) \
     SYSCALL_ENTRY( 0x15e0, NtUserUnregisterHotKey, 8 ) \
     SYSCALL_ENTRY( 0x15e1, NtUserUnregisterSessionPort, 0 ) \
@@ -2731,7 +2731,7 @@
     SYSCALL_ENTRY( 0x14a1, NtUserLoadUserApiHook, 0 ) \
     SYSCALL_ENTRY( 0x14a2, NtUserLockCursor, 0 ) \
     SYSCALL_ENTRY( 0x14a3, NtUserLockSetForegroundWindow, 0 ) \
-    SYSCALL_ENTRY( 0x14a4, NtUserLockWindowStation, 0 ) \
+    SYSCALL_ENTRY( 0x14a4, NtUserLockWindowStation, 8 ) \
     SYSCALL_ENTRY( 0x14a5, NtUserLockWindowUpdate, 8 ) \
     SYSCALL_ENTRY( 0x14a6, NtUserLockWorkStation, 0 ) \
     SYSCALL_ENTRY( 0x14a7, NtUserLogicalToPerMonitorDPIPhysicalPoint, 16 ) \
@@ -3045,7 +3045,7 @@
     SYSCALL_ENTRY( 0x15db, NtUserUnhookWindowsHook, 16 ) \
     SYSCALL_ENTRY( 0x15dc, NtUserUnhookWindowsHookEx, 8 ) \
     SYSCALL_ENTRY( 0x15dd, NtUserUnloadKeyboardLayout, 0 ) \
-    SYSCALL_ENTRY( 0x15de, NtUserUnlockWindowStation, 0 ) \
+    SYSCALL_ENTRY( 0x15de, NtUserUnlockWindowStation, 8 ) \
     SYSCALL_ENTRY( 0x15df, NtUserUnregisterClass, 24 ) \
     SYSCALL_ENTRY( 0x15e0, NtUserUnregisterHotKey, 16 ) \
     SYSCALL_ENTRY( 0x15e1, NtUserUnregisterSessionPort, 0 ) \
@@ -3830,7 +3830,6 @@
     SYSCALL_STUB( NtUserLoadKeyboardLayoutEx ) \
     SYSCALL_STUB( NtUserLockCursor ) \
     SYSCALL_STUB( NtUserLockSetForegroundWindow ) \
-    SYSCALL_STUB( NtUserLockWindowStation ) \
     SYSCALL_STUB( NtUserLockWorkStation ) \
     SYSCALL_STUB( NtUserLogicalToPhysicalDpiPointForWindow ) \
     SYSCALL_STUB( NtUserLogicalToPhysicalPoint ) \
@@ -4021,7 +4020,6 @@
     SYSCALL_STUB( NtUserTransformPoint ) \
     SYSCALL_STUB( NtUserTransformRect ) \
     SYSCALL_STUB( NtUserUnloadKeyboardLayout ) \
-    SYSCALL_STUB( NtUserUnlockWindowStation ) \
     SYSCALL_STUB( NtUserUnregisterSessionPort ) \
     SYSCALL_STUB( NtUserUpdateClientRect ) \
     SYSCALL_STUB( NtUserUpdateDefaultDesktopThumbnail ) \

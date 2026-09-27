@@ -8108,6 +8108,20 @@ struct report_inertia_reply
     struct reply_header __header;
 };
 
+/* Lock or unlock input-desktop switching for a window station.  Keep new
+ * LinuxNT protocol requests append-only so existing request ids stay stable. */
+struct lock_winstation_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    int          lock;
+    char __pad_20[4];
+};
+struct lock_winstation_reply
+{
+    struct reply_header __header;
+};
+
 
 enum request
 {
@@ -8541,6 +8555,7 @@ enum request
     REQ_get_dcomp_surface_state,
     REQ_open_dcomp_surface_dirty_region,
     REQ_report_inertia,
+    REQ_lock_winstation,
     REQ_NB_REQUESTS
 };
 
@@ -8978,6 +8993,7 @@ union generic_request
     struct get_dcomp_surface_state_request get_dcomp_surface_state_request;
     struct open_dcomp_surface_dirty_region_request open_dcomp_surface_dirty_region_request;
     struct report_inertia_request report_inertia_request;
+    struct lock_winstation_request lock_winstation_request;
 };
 union generic_reply
 {
@@ -9413,8 +9429,9 @@ union generic_reply
     struct get_dcomp_surface_state_reply get_dcomp_surface_state_reply;
     struct open_dcomp_surface_dirty_region_reply open_dcomp_surface_dirty_region_reply;
     struct report_inertia_reply report_inertia_reply;
+    struct lock_winstation_reply lock_winstation_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1065
+#define SERVER_PROTOCOL_VERSION 1067
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

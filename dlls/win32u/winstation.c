@@ -756,6 +756,37 @@ BOOL WINAPI NtUserSwitchDesktop( HDESK desktop )
     return TRUE;
 }
 
+static BOOL lock_window_station( HWINSTA handle, BOOL lock )
+{
+    BOOL ret;
+
+    SERVER_START_REQ( lock_winstation )
+    {
+        req->handle = wine_server_obj_handle( handle );
+        req->lock = lock;
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserLockWindowStation   (win32u.@)
+ */
+BOOL WINAPI NtUserLockWindowStation( HWINSTA handle )
+{
+    return lock_window_station( handle, TRUE );
+}
+
+/***********************************************************************
+ *           NtUserUnlockWindowStation   (win32u.@)
+ */
+BOOL WINAPI NtUserUnlockWindowStation( HWINSTA handle )
+{
+    return lock_window_station( handle, FALSE );
+}
+
 /******************************************************************************
  *              NtUserBuildNameList   (win32u.@)
  */

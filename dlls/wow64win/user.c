@@ -3814,6 +3814,11 @@ NTSTATUS WINAPI wow64_NtUserKillTimer( UINT *args )
     return NtUserKillTimer( hwnd, id );
 }
 
+NTSTATUS WINAPI wow64_NtUserLockWindowStation( UINT *args )
+{
+    return NtUserLockWindowStation( get_handle( &args ) );
+}
+
 NTSTATUS WINAPI wow64_NtUserLockWindowUpdate( UINT *args )
 {
     HWND hwnd = get_handle( &args );
@@ -5233,6 +5238,11 @@ NTSTATUS WINAPI wow64_NtUserSwitchDesktop( UINT *args )
     HDESK handle = get_handle( &args );
 
     return NtUserSwitchDesktop( handle );
+}
+
+NTSTATUS WINAPI wow64_NtUserUnlockWindowStation( UINT *args )
+{
+    return NtUserUnlockWindowStation( get_handle( &args ) );
 }
 
 NTSTATUS WINAPI wow64_NtUserSystemParametersInfo( UINT *args )

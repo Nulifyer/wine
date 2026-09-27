@@ -437,6 +437,7 @@ DECL_HANDLER(set_dcomp_surface_ink_cookie);
 DECL_HANDLER(get_dcomp_surface_state);
 DECL_HANDLER(open_dcomp_surface_dirty_region);
 DECL_HANDLER(report_inertia);
+DECL_HANDLER(lock_winstation);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -871,6 +872,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_dcomp_surface_state,
     (req_handler)req_open_dcomp_surface_dirty_region,
     (req_handler)req_report_inertia,
+    (req_handler)req_lock_winstation,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -3262,3 +3264,6 @@ C_ASSERT( offsetof(struct report_inertia_request, id) == 16 );
 C_ASSERT( offsetof(struct report_inertia_request, flags) == 24 );
 C_ASSERT( offsetof(struct report_inertia_request, window) == 28 );
 C_ASSERT( sizeof(struct report_inertia_request) == 32 );
+C_ASSERT( offsetof(struct lock_winstation_request, handle) == 12 );
+C_ASSERT( offsetof(struct lock_winstation_request, lock) == 16 );
+C_ASSERT( sizeof(struct lock_winstation_request) == 24 );

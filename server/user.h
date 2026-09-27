@@ -50,6 +50,7 @@ struct winstation
     struct event      *desktop_switch_event; /* input-desktop switch notification */
     process_id_t       logon_process_id;   /* process allowed to designate the logon UI */
     process_id_t       logon_ui_process_id;/* process allowed to register the BSDR window */
+    int                locked;             /* desktop switching is restricted to the logon process */
     struct window     *bsdr_window;        /* blocked-shutdown resolver window */
     unsigned int       bsdr_flags;         /* blocked-shutdown resolver registration flags */
     process_id_t       user_api_hook_owner;/* process owning the session user API hook */

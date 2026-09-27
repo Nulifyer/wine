@@ -5412,3 +5412,10 @@ struct alpc_message_info
     user_handle_t    window;          /* regular input destination, or zero for DWM */
     VARARG(data,bytes);                /* copied info, optional region and routing state */
 @END
+
+/* Lock or unlock input-desktop switching for a window station.  Keep new
+ * LinuxNT protocol requests append-only so existing request ids stay stable. */
+@REQ(lock_winstation)
+    obj_handle_t handle;          /* handle to the window station */
+    int          lock;            /* whether to lock desktop switching */
+@END

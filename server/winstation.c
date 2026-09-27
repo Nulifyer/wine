@@ -148,6 +148,7 @@ static bool winstation_init( struct object *obj, const void *init_data )
     winstation->atom_table = NULL;
     winstation->logon_process_id = 0;
     winstation->logon_ui_process_id = 0;
+    winstation->locked = 0;
     winstation->bsdr_window = NULL;
     winstation->bsdr_flags = 0;
     winstation->user_api_hook_owner = 0;
@@ -230,6 +231,7 @@ void cleanup_process_winstation_state( struct process *process )
         {
             winstation->logon_process_id = 0;
             winstation->logon_ui_process_id = 0;
+            winstation->locked = 0;
             winstation->bsdr_window = NULL;
             winstation->bsdr_flags = 0;
         }
@@ -1091,9 +1093,29 @@ DECL_HANDLER(set_input_desktop)
 
     if ((desktop = (struct desktop *)get_handle_obj( current->process, req->handle, 0, &desktop_ops )))
     {
-        if (!set_input_desktop( winstation, desktop )) set_error( STATUS_ILLEGAL_FUNCTION );
+        if (winstation->locked && desktop != winstation->input_desktop &&
+            winstation->logon_process_id != current->process->id)
+            set_error( STATUS_ACCESS_DENIED );
+        else if (!set_input_desktop( winstation, desktop ))
+            set_error( STATUS_ILLEGAL_FUNCTION );
         release_object( desktop );
     }
+
+    release_object( winstation );
+}
+
+/* Restrict input-desktop switching to the registered logon process. */
+DECL_HANDLER(lock_winstation)
+{
+    struct winstation *winstation;
+
+    if (!(winstation = (struct winstation *)get_handle_obj( current->process, req->handle,
+                                                            0, &winstation_ops ))) return;
+
+    if (winstation->logon_process_id != current->process->id)
+        set_error( STATUS_ACCESS_DENIED );
+    else
+        winstation->locked = req->lock;
 
     release_object( winstation );
 }

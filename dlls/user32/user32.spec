@@ -836,7 +836,7 @@
 @ stdcall LoadStringA(long long ptr long)
 @ stdcall LoadStringW(long long ptr long)
 @ stdcall LockSetForegroundWindow(long)
-@ stub LockWindowStation
+@ stdcall LockWindowStation(long) NtUserLockWindowStation
 @ stdcall LockWindowUpdate(long) NtUserLockWindowUpdate
 @ stdcall LockWorkStation()
 @ stdcall LogicalToPhysicalPoint(long ptr)
@@ -1172,7 +1172,7 @@
 @ stdcall UnhookWindowsHookEx(long) NtUserUnhookWindowsHookEx
 @ stdcall UnionRect(ptr ptr ptr)
 @ stdcall UnloadKeyboardLayout(long)
-@ stub UnlockWindowStation
+@ stdcall UnlockWindowStation(long) NtUserUnlockWindowStation
 @ stdcall UnpackDDElParam(long long ptr ptr)
 @ stdcall UnregisterClassA(str long)
 @ stdcall UnregisterClassW(wstr long)

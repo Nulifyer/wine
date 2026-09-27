@@ -1187,7 +1187,7 @@
 @ stdcall -syscall NtUserLoadUserApiHook()
 @ stub -syscall NtUserLockCursor
 @ stub -syscall NtUserLockSetForegroundWindow
-@ stub -syscall NtUserLockWindowStation
+@ stdcall -syscall NtUserLockWindowStation(long)
 @ stdcall -syscall NtUserLockWindowUpdate(long)
 @ stub -syscall NtUserLockWorkStation
 @ stdcall -syscall NtUserLogicalToPerMonitorDPIPhysicalPoint(long ptr)
@@ -1501,7 +1501,7 @@
 @ stdcall -syscall NtUserUnhookWindowsHook(long ptr)
 @ stdcall -syscall NtUserUnhookWindowsHookEx(long)
 @ stub -syscall NtUserUnloadKeyboardLayout
-@ stub -syscall NtUserUnlockWindowStation
+@ stdcall -syscall NtUserUnlockWindowStation(long)
 @ stdcall -syscall NtUserUnregisterClass(ptr ptr ptr)
 @ stdcall -syscall NtUserUnregisterHotKey(long long)
 @ stub -syscall NtUserUnregisterSessionPort
