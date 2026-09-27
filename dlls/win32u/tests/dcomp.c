@@ -3760,6 +3760,7 @@ static void test_visual_target_root_lifecycle(void)
         16, 0x28, 6, 0x16,
         16, 0x28, 7, 0x7f,
         16, 0x28, 8, 0x1e,
+        16, 0x28, 9, 0x59,
         28, 0x31, 6, 0x3f800000, 0x3f000000, 0x3e800000, 0x3f800000,
         48, 0x13f, 7, 0, 0, 0, 0, 0, 0, 0, 0, 1,
         16, 0x13d, 7, 0x3f800000,
@@ -3778,9 +3779,14 @@ static void test_visual_target_root_lifecycle(void)
             0, 0x3f800000, 0, 0,
             0, 0, 0x3f800000, 0,
             0, 0, 0, 0x3f800000,
+        16, 0x194, 3, 9,
         16, 0x1a0, 3, 8,
         16, 0x18c, 3, 7,
         16, 0x16e, 5, 6,
+    };
+    static const UINT expected_interaction_clear[] = {
+        16, 0x194, 3, 0,
+        12, 0x29, 9,
     };
     static const UINT expected_visual_clear[] = {12, 0x187, 3};
     static const UINT expected_clear[] = {
@@ -3913,21 +3919,23 @@ static void test_visual_target_root_lifecycle(void)
     command[4] = 2; command[5] = 6; command[6] = 0x16; command[7] = 0;
     command[8] = 2; command[9] = 7; command[10] = 0x7f; command[11] = 0;
     command[12] = 2; command[13] = 8; command[14] = 0x1e; command[15] = 0;
-    command[16] = 15; command[17] = 6; command[18] = 0; command[19] = 16;
-    command[20] = 0x3f800000; command[21] = 0x3f000000;
-    command[22] = 0x3e800000; command[23] = 0x3f800000;
-    command[24] = 11; command[25] = 7; command[26] = 0x15; command[27] = 0;
-    command[28] = 1; command[29] = 0;
-    command[30] = 15; command[31] = 7; command[32] = 0x11; command[33] = 16;
-    command[34] = 0x3f800000; command[35] = 0x40000000;
-    command[36] = 0x40400000; command[37] = 0x40800000;
-    command[38] = 16; command[39] = 3; command[40] = 4; command[41] = 8;
-    command[42] = 16; command[43] = 3; command[44] = 7; command[45] = 7;
-    command[46] = 16; command[47] = 5; command[48] = 0x34; command[49] = 6;
-    memcpy( buffer, command, 200 );
-    status = NtDCompositionProcessChannelBatchBuffer( channel, 200, &processed, &released );
+    command[16] = 2; command[17] = 9; command[18] = 0x59; command[19] = 0;
+    command[20] = 15; command[21] = 6; command[22] = 0; command[23] = 16;
+    command[24] = 0x3f800000; command[25] = 0x3f000000;
+    command[26] = 0x3e800000; command[27] = 0x3f800000;
+    command[28] = 11; command[29] = 7; command[30] = 0x15; command[31] = 0;
+    command[32] = 1; command[33] = 0;
+    command[34] = 15; command[35] = 7; command[36] = 0x11; command[37] = 16;
+    command[38] = 0x3f800000; command[39] = 0x40000000;
+    command[40] = 0x40400000; command[41] = 0x40800000;
+    command[42] = 16; command[43] = 3; command[44] = 4; command[45] = 8;
+    command[46] = 16; command[47] = 3; command[48] = 7; command[49] = 7;
+    command[50] = 16; command[51] = 5; command[52] = 0x34; command[53] = 6;
+    command[54] = 16; command[55] = 3; command[56] = 0x17; command[57] = 9;
+    memcpy( buffer, command, 232 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 232, &processed, &released );
     ok( status == STATUS_SUCCESS, "got visual content process status %#lx\n", status );
-    ok( processed == 10, "got visual content process count %lu\n", processed );
+    ok( processed == 12, "got visual content process count %lu\n", processed );
     status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
     ok( status == STATUS_SUCCESS, "got visual content commit status %#lx\n", status );
     record = NULL;
@@ -3948,6 +3956,10 @@ static void test_visual_target_root_lifecycle(void)
     memcpy( buffer, command, 16 );
     status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
     ok( status == STATUS_INVALID_PARAMETER, "got invalid visual clip status %#lx\n", status );
+    command[2] = 0x17; command[3] = 8;
+    memcpy( buffer, command, 16 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 16, &processed, &released );
+    ok( status == STATUS_INVALID_PARAMETER, "got invalid visual interaction status %#lx\n", status );
     command[0] = 15; command[1] = 6; command[2] = 0; command[3] = 8;
     command[4] = 0; command[5] = 0;
     memcpy( buffer, command, 24 );
@@ -3958,6 +3970,19 @@ static void test_visual_target_root_lifecycle(void)
     memcpy( buffer, command, 24 );
     status = NtDCompositionProcessChannelBatchBuffer( channel, 24, &processed, &released );
     ok( status == STATUS_INVALID_PARAMETER, "got repeated rectangle mode status %#lx\n", status );
+
+    command[0] = 16; command[1] = 3; command[2] = 0x17; command[3] = 0;
+    command[4] = 4; command[5] = 9;
+    memcpy( buffer, command, 24 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 24, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got interaction clear process status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got interaction clear commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got interaction clear batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_interaction_clear,
+                               sizeof(expected_interaction_clear), "interaction clear" );
 
     command[0] = 23; command[1] = 3; command[2] = 0;
     memcpy( buffer, command, 12 );

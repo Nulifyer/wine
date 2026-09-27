@@ -94,6 +94,7 @@ struct dcomp_resource_view
     UINT references;
     struct list weak_references;
     struct dcomp_resource_view *root;
+    struct dcomp_resource_view *visual_interaction;
     struct dcomp_resource_view *visual_transform;
     struct dcomp_resource_view *visual_clip;
     struct dcomp_resource_view *sprite_content;
@@ -115,6 +116,7 @@ struct dcomp_resource_view
     BOOL released;
     BOOL visual;
     BOOL visual_target;
+    BOOL visual_interaction_dirty;
     BOOL visual_transform_dirty;
     BOOL visual_clip_dirty;
     BOOL sprite_content_dirty;
@@ -661,6 +663,11 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
         resource->root = NULL;
         resource->root_dirty = TRUE;
         release_dcomp_resource_reference( root );
+    }
+    if ((reference = resource->visual_interaction))
+    {
+        resource->visual_interaction = NULL;
+        release_dcomp_resource_reference( reference );
     }
     if ((reference = resource->visual_transform))
     {
@@ -1513,6 +1520,15 @@ static NTSTATUS set_dcomp_visual_reference_property( struct dcomp_channel_view *
             return STATUS_INVALID_PARAMETER;
         replace_dcomp_resource_reference( &resource->visual_transform, reference );
         resource->visual_transform_dirty = TRUE;
+        remove_unannounced_dcomp_resources( view );
+        return STATUS_SUCCESS;
+    }
+    if (property == 0x17)
+    {
+        if (reference && !is_dcomp_derived_resource_type( reference->type, 0x59 ))
+            return STATUS_INVALID_PARAMETER;
+        replace_dcomp_resource_reference( &resource->visual_interaction, reference );
+        resource->visual_interaction_dirty = TRUE;
         remove_unannounced_dcomp_resources( view );
         return STATUS_SUCCESS;
     }
@@ -3637,7 +3653,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             continue;
 
         graph_dirty = !resource->announced || resource->root_dirty || resource->remove_dirty ||
-                      resource->children_clear_dirty || resource->visual_transform_dirty ||
+                      resource->children_clear_dirty || resource->visual_interaction_dirty ||
+                      resource->visual_transform_dirty ||
                       resource->visual_clip_dirty || resource->sprite_content_dirty ||
                       resource->visual_modes_dirty || resource->visual_flags_dirty ||
                       resource->visual_offset_dirty || resource->visual_opacity_dirty ||
@@ -3649,7 +3666,7 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             if (!child->connection_announced) graph_dirty = TRUE;
         if (!graph_dirty) continue;
         TRACE( "graph channel %#x resource %#x/%#x type %#x visual %u parent %#x root %#x "
-               "content %#x transform %#x clip %#x offset [%g,%g,%g] relative_offset [%g,%g,%g] "
+               "content %#x interaction %#x transform %#x clip %#x offset [%g,%g,%g] relative_offset [%g,%g,%g] "
                "size [%g,%g] relative_size [%g,%g] opacity %g modes [%d,%d,%d,%d,%d,%d] flags %#x/%#x "
                "mask_source %#x mask %#x brush_surface %#x surface %p binding %#llx source [%d,%d,%d,%d] "
                "rectangle [%g,%g,%g,%g] rectangle_mode %u/%u/%u\n",
@@ -3657,6 +3674,7 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
                resource->parent ? resource->parent->id : 0,
                resource->root ? resource->root->id : 0,
                resource->sprite_content ? resource->sprite_content->id : 0,
+               resource->visual_interaction ? resource->visual_interaction->id : 0,
                resource->visual_transform ? resource->visual_transform->id : 0,
                resource->visual_clip ? resource->visual_clip->id : 0,
                resource->visual_offset[0], resource->visual_offset[1], resource->visual_offset[2],
@@ -3724,6 +3742,7 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             if (resource->mask_brush_source_dirty) resource_size += 16;
             if (resource->mask_brush_mask_dirty) resource_size += 16;
         }
+        if (!resource->released && resource->visual_interaction_dirty) resource_size += 16;
         if (!resource->released && resource->visual_transform_dirty) resource_size += 16;
         if (!resource->released && resource->visual_clip_dirty) resource_size += 16;
         if (!resource->released && resource->sprite_content_dirty) resource_size += 16;
@@ -3987,6 +4006,9 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
     {
         if (resource->released) continue;
+        if (resource->visual_interaction_dirty)
+            cursor = emit_dcomp_reference_update( cursor, 0x194, resource->id,
+                                                   resource->visual_interaction );
         if (resource->visual_transform_dirty)
             cursor = emit_dcomp_reference_update( cursor, 0x1a0, resource->id,
                                                    resource->visual_transform );
@@ -4057,6 +4079,7 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view,
             resource->color_dirty = FALSE;
             resource->rectangle_dirty = 0;
             resource->region_rectangles_dirty = FALSE;
+            resource->visual_interaction_dirty = FALSE;
             resource->visual_transform_dirty = FALSE;
             resource->visual_clip_dirty = FALSE;
             resource->sprite_content_dirty = FALSE;
