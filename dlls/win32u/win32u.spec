@@ -1436,7 +1436,7 @@
 @ stub -syscall NtUserSetWindowArrangement
 @ stub -syscall NtUserSetWindowBand
 @ stdcall -syscall NtUserSetWindowCompositionAttribute(long ptr)
-@ stub -syscall NtUserSetWindowCompositionTransition
+@ stdcall -syscall NtUserSetWindowCompositionTransition(long long ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtUserSetWindowContextHelpId(long long)
 @ stub -syscall NtUserSetWindowDisplayAffinity
 @ stdcall -syscall NtUserSetWindowFNID(long long)

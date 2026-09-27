@@ -1213,6 +1213,10 @@ W32KAPI BOOL    WINAPI NtUserGetWindowCompositionAttribute( HWND hwnd,
                                                             struct window_composition_attribute_data *data );
 W32KAPI BOOL    WINAPI NtUserSetWindowCompositionAttribute( HWND hwnd,
                                                             const struct window_composition_attribute_data *data );
+W32KAPI BOOL    WINAPI NtUserSetWindowCompositionTransition( HWND hwnd, UINT transition,
+                                                             const void *rect1, const void *rect2,
+                                                             const void *rect3, const void *rect4,
+                                                             const void *rect5 );
 W32KAPI HCURSOR WINAPI NtUserSetCursor( HCURSOR cursor );
 W32KAPI BOOL    WINAPI NtUserSetCursorIconData( HCURSOR cursor, UNICODE_STRING *module, UNICODE_STRING *res_name,
                                                 struct cursoricon_desc *desc );

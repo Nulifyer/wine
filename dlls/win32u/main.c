@@ -2549,6 +2549,14 @@ HWINEVENTHOOK SYSCALL_API NtUserSetWinEventHook( DWORD event_min, DWORD event_ma
     SYSCALL_FUNC( NtUserSetWinEventHook );
 }
 
+BOOL SYSCALL_API NtUserSetWindowCompositionTransition( HWND hwnd, UINT transition,
+                                                        const void *rect1, const void *rect2,
+                                                        const void *rect3, const void *rect4,
+                                                        const void *rect5 )
+{
+    SYSCALL_FUNC( NtUserSetWindowCompositionTransition );
+}
+
 BOOL SYSCALL_API NtUserSetWindowContextHelpId( HWND hwnd, DWORD id )
 {
     SYSCALL_FUNC( NtUserSetWindowContextHelpId );

@@ -9222,6 +9222,43 @@ static void test_IsTopLevelWindow(void)
     DestroyWindow( top );
 }
 
+static void test_SetWindowCompositionTransition(void)
+{
+    BOOL (WINAPI *pSetWindowCompositionTransition)(HWND, UINT, const void *, const void *,
+                                                    const void *, const void *, const void *);
+    unsigned int rects[5][4] = {{1}, {2}, {3}, {4}, {5}};
+    unsigned int expected[5][4];
+    HWND hwnd;
+    BOOL ret;
+
+    pSetWindowCompositionTransition = (void *)GetProcAddress( GetModuleHandleA("user32.dll"),
+                                                              "SetWindowCompositionTransition" );
+    if (!pSetWindowCompositionTransition)
+    {
+        win_skip( "SetWindowCompositionTransition is not available\n" );
+        return;
+    }
+    if (strcmp( winetest_platform, "wine" ))
+    {
+        win_skip( "Wine unsupported-transition behavior only\n" );
+        return;
+    }
+
+    hwnd = CreateWindowA( "static", "transition", WS_OVERLAPPED, 0, 0, 100, 100,
+                          NULL, NULL, GetModuleHandleA(NULL), NULL );
+    ok( !!hwnd, "failed to create test window, error %lu\n", GetLastError() );
+    memcpy( expected, rects, sizeof(rects) );
+
+    SetLastError( 0xdeadbeef );
+    ret = pSetWindowCompositionTransition( hwnd, 0x40000046, rects[0], rects[1],
+                                           rects[2], rects[3], rects[4] );
+    ok( !ret, "unsupported transition succeeded\n" );
+    ok( GetLastError() == ERROR_CALL_NOT_IMPLEMENTED, "got error %lu\n", GetLastError() );
+    ok( !memcmp( rects, expected, sizeof(rects) ), "transition inputs were modified\n" );
+
+    DestroyWindow( hwnd );
+}
+
 static HWND message_window_topmost_hwnd_msg = NULL;
 static BOOL message_window_topmost_received_killfocus;
 
@@ -14741,6 +14778,7 @@ START_TEST(win)
     test_fullscreen();
     test_hwnd_message();
     test_IsTopLevelWindow();
+    test_SetWindowCompositionTransition();
     test_message_window_topmost();
     test_nonclient_area(hwndMain);
     test_params();

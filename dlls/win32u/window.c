@@ -1854,6 +1854,20 @@ BOOL WINAPI NtUserSetWindowCompositionAttribute( HWND hwnd,
     return ret;
 }
 
+/***********************************************************************
+ *           NtUserSetWindowCompositionTransition (win32u.@)
+ */
+BOOL WINAPI NtUserSetWindowCompositionTransition( HWND hwnd, UINT transition,
+                                                   const void *rect1, const void *rect2,
+                                                   const void *rect3, const void *rect4,
+                                                   const void *rect5 )
+{
+    FIXME( "unsupported window transition %p %#x %p %p %p %p %p\n",
+           hwnd, transition, rect1, rect2, rect3, rect4, rect5 );
+    RtlSetLastWin32Error( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
 /**********************************************************************
  *           NtUserSetCoreWindow (win32u.@)
  */
