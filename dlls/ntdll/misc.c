@@ -30,6 +30,29 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
+/******************************************************************************
+ *                  RtlQueryResourcePolicy (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlQueryResourcePolicy( ULONG resource, ULONG flags, ULONG *policy, SIZE_T size )
+{
+    if (!policy || flags || size != sizeof(*policy)) return STATUS_INVALID_PARAMETER;
+
+    switch (resource)
+    {
+    case 2: /* disk speed */
+        /* Windows uses this value when the volume speed query is unsupported. */
+        *policy = 10;
+        return STATUS_SUCCESS;
+    case 0: /* physical memory */
+    case 1: /* disk space */
+    case 3: /* disk write constraint */
+        FIXME( "resource %lu is not implemented\n", resource );
+        return STATUS_NOT_IMPLEMENTED;
+    default:
+        return STATUS_INVALID_INFO_CLASS;
+    }
+}
+
 LPCSTR debugstr_us( const UNICODE_STRING *us )
 {
     if (!us) return "<null>";
