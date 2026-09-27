@@ -418,6 +418,34 @@ HRESULT WINAPI RoInitializeStrict(enum ro_apartment_type type)
 }
 
 /***********************************************************************
+ *      RoInitializeASTA (combase.134)
+ */
+HRESULT WINAPI RoInitializeASTA(void)
+{
+    return RoInitializeStrict(RO_APARTMENT_ASTA);
+}
+
+/***********************************************************************
+ *      RoGetDesignMode (combase.90)
+ */
+HRESULT WINAPI RoGetDesignMode(BOOL *enabled)
+{
+    if (!enabled) return E_INVALIDARG;
+    *enabled = FALSE;
+    return S_OK;
+}
+
+/***********************************************************************
+ *      RoGetDesignModeV2 (combase.157)
+ */
+HRESULT WINAPI RoGetDesignModeV2(BOOL *enabled)
+{
+    if (!enabled) return E_INVALIDARG;
+    *enabled = FALSE;
+    return S_OK;
+}
+
+/***********************************************************************
  *      RoUninitialize (combase.@)
  */
 void WINAPI RoUninitialize(void)
@@ -526,6 +554,25 @@ HRESULT WINAPI RoActivateInstance(HSTRING classid, IInspectable **instance)
     }
 
     return hr;
+}
+
+/***********************************************************************
+ *      RoActivateInstanceAsUser (combase.147)
+ */
+HRESULT WINAPI RoActivateInstanceAsUser(HSTRING classid, UINT64 user_context, IInspectable **instance)
+{
+    FIXME("(%p, %s, %p): ignoring user context\n", classid, wine_dbgstr_longlong(user_context), instance);
+    return RoActivateInstance(classid, instance);
+}
+
+/***********************************************************************
+ *      RoGetActivationFactoryAsUser (combase.148)
+ */
+HRESULT WINAPI RoGetActivationFactoryAsUser(HSTRING classid, UINT64 user_context, REFIID iid, void **factory)
+{
+    FIXME("(%p, %s, %s, %p): ignoring user context\n", classid, wine_dbgstr_longlong(user_context),
+            debugstr_guid(iid), factory);
+    return RoGetActivationFactory(classid, iid, factory);
 }
 
 struct agile_reference

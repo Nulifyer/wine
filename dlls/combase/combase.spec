@@ -1,3 +1,7 @@
+66 stdcall -noname CoGetSharedServiceId(ptr)
+67 stdcall -noname CoAddRefSharedService(long)
+68 stdcall -noname CoReleaseSharedService(long)
+69 stdcall -noname CoRegisterServerShutdownDelay(ptr long)
 153 stdcall -noname RoGetRegistrationStoreContext(long ptr long ptr ptr)
 164 stdcall -noname RpcMarshalRestrictedErrorFromTlsToExtent(ptr ptr)
 165 stdcall -noname RpcMarshalRestrictedErrorFromTls(ptr ptr)
@@ -6,7 +10,8 @@
 177 stdcall -noname SetChainRestrictedErrors()
 178 stdcall -noname ClearChainRestrictedErrors()
 179 stdcall -noname RoInitializeStrict(long)
-180 stdcall -noname CoUnmarshalInterface_ordinal180(ptr ptr ptr) CoUnmarshalInterface
+180 stdcall -noname CoDoesOtherSideVariantMarshalingNeedTrailingPadding(ptr)
+181 stdcall -noname CoDoesOtherSideSupportUDTMarshaling(ptr)
 359 stdcall CoUnmarshalHresult(ptr ptr)
 360 stdcall CoUnmarshalInterface(ptr ptr ptr)
 513 stdcall InternalIsApartmentInitialized()
@@ -14,66 +19,67 @@
 599 stub WindowsInspectString2
 600 stdcall WindowsIsStringEmpty(ptr)
 
-1 extern ObjectStublessClient3 rpcrt4.__wine_ObjectStublessClient3
-@ extern ObjectStublessClient4 rpcrt4.__wine_ObjectStublessClient4
-@ extern ObjectStublessClient5 rpcrt4.__wine_ObjectStublessClient5
-@ extern ObjectStublessClient6 rpcrt4.__wine_ObjectStublessClient6
-@ extern ObjectStublessClient7 rpcrt4.__wine_ObjectStublessClient7
-@ extern ObjectStublessClient8 rpcrt4.__wine_ObjectStublessClient8
-@ extern ObjectStublessClient9 rpcrt4.__wine_ObjectStublessClient9
-@ extern ObjectStublessClient10 rpcrt4.__wine_ObjectStublessClient10
-@ extern ObjectStublessClient11 rpcrt4.__wine_ObjectStublessClient11
-@ extern ObjectStublessClient12 rpcrt4.__wine_ObjectStublessClient12
-@ extern ObjectStublessClient13 rpcrt4.__wine_ObjectStublessClient13
-@ extern ObjectStublessClient14 rpcrt4.__wine_ObjectStublessClient14
-@ extern ObjectStublessClient15 rpcrt4.__wine_ObjectStublessClient15
-@ extern ObjectStublessClient16 rpcrt4.__wine_ObjectStublessClient16
-@ extern ObjectStublessClient17 rpcrt4.__wine_ObjectStublessClient17
-@ extern ObjectStublessClient18 rpcrt4.__wine_ObjectStublessClient18
-@ extern ObjectStublessClient19 rpcrt4.__wine_ObjectStublessClient19
-@ extern ObjectStublessClient20 rpcrt4.__wine_ObjectStublessClient20
-@ extern ObjectStublessClient21 rpcrt4.__wine_ObjectStublessClient21
-@ extern ObjectStublessClient22 rpcrt4.__wine_ObjectStublessClient22
-@ extern ObjectStublessClient23 rpcrt4.__wine_ObjectStublessClient23
-@ extern ObjectStublessClient24 rpcrt4.__wine_ObjectStublessClient24
-@ extern ObjectStublessClient25 rpcrt4.__wine_ObjectStublessClient25
-@ extern ObjectStublessClient26 rpcrt4.__wine_ObjectStublessClient26
-@ extern ObjectStublessClient27 rpcrt4.__wine_ObjectStublessClient27
-@ extern ObjectStublessClient28 rpcrt4.__wine_ObjectStublessClient28
-@ extern ObjectStublessClient29 rpcrt4.__wine_ObjectStublessClient29
-@ extern ObjectStublessClient30 rpcrt4.__wine_ObjectStublessClient30
-@ extern ObjectStublessClient31 rpcrt4.__wine_ObjectStublessClient31
-@ extern ObjectStublessClient32 rpcrt4.__wine_ObjectStublessClient32
-@ extern NdrProxyForwardingFunction3 rpcrt4.__wine_NdrProxyForwardingFunction3
-@ extern NdrProxyForwardingFunction4 rpcrt4.__wine_NdrProxyForwardingFunction4
-@ extern NdrProxyForwardingFunction5 rpcrt4.__wine_NdrProxyForwardingFunction5
-@ extern NdrProxyForwardingFunction6 rpcrt4.__wine_NdrProxyForwardingFunction6
-@ extern NdrProxyForwardingFunction7 rpcrt4.__wine_NdrProxyForwardingFunction7
-@ extern NdrProxyForwardingFunction8 rpcrt4.__wine_NdrProxyForwardingFunction8
-@ extern NdrProxyForwardingFunction9 rpcrt4.__wine_NdrProxyForwardingFunction9
-@ extern NdrProxyForwardingFunction10 rpcrt4.__wine_NdrProxyForwardingFunction10
-@ extern NdrProxyForwardingFunction11 rpcrt4.__wine_NdrProxyForwardingFunction11
-@ extern NdrProxyForwardingFunction12 rpcrt4.__wine_NdrProxyForwardingFunction12
-@ extern NdrProxyForwardingFunction13 rpcrt4.__wine_NdrProxyForwardingFunction13
-@ extern NdrProxyForwardingFunction14 rpcrt4.__wine_NdrProxyForwardingFunction14
-@ extern NdrProxyForwardingFunction15 rpcrt4.__wine_NdrProxyForwardingFunction15
-@ extern NdrProxyForwardingFunction16 rpcrt4.__wine_NdrProxyForwardingFunction16
-@ extern NdrProxyForwardingFunction17 rpcrt4.__wine_NdrProxyForwardingFunction17
-@ extern NdrProxyForwardingFunction18 rpcrt4.__wine_NdrProxyForwardingFunction18
-@ extern NdrProxyForwardingFunction19 rpcrt4.__wine_NdrProxyForwardingFunction19
-@ extern NdrProxyForwardingFunction20 rpcrt4.__wine_NdrProxyForwardingFunction20
-@ extern NdrProxyForwardingFunction21 rpcrt4.__wine_NdrProxyForwardingFunction21
-@ extern NdrProxyForwardingFunction22 rpcrt4.__wine_NdrProxyForwardingFunction22
-@ extern NdrProxyForwardingFunction23 rpcrt4.__wine_NdrProxyForwardingFunction23
-@ extern NdrProxyForwardingFunction24 rpcrt4.__wine_NdrProxyForwardingFunction24
-@ extern NdrProxyForwardingFunction25 rpcrt4.__wine_NdrProxyForwardingFunction25
-@ extern NdrProxyForwardingFunction26 rpcrt4.__wine_NdrProxyForwardingFunction26
-@ extern NdrProxyForwardingFunction27 rpcrt4.__wine_NdrProxyForwardingFunction27
-@ extern NdrProxyForwardingFunction28 rpcrt4.__wine_NdrProxyForwardingFunction28
-@ extern NdrProxyForwardingFunction29 rpcrt4.__wine_NdrProxyForwardingFunction29
-@ extern NdrProxyForwardingFunction30 rpcrt4.__wine_NdrProxyForwardingFunction30
-@ extern NdrProxyForwardingFunction31 rpcrt4.__wine_NdrProxyForwardingFunction31
-@ extern NdrProxyForwardingFunction32 rpcrt4.__wine_NdrProxyForwardingFunction32
+1 stub -noname WinRTNotifyChangedStore
+2 extern ObjectStublessClient3 rpcrt4.__wine_ObjectStublessClient3
+3 extern ObjectStublessClient4 rpcrt4.__wine_ObjectStublessClient4
+4 extern ObjectStublessClient5 rpcrt4.__wine_ObjectStublessClient5
+5 extern ObjectStublessClient6 rpcrt4.__wine_ObjectStublessClient6
+6 extern ObjectStublessClient7 rpcrt4.__wine_ObjectStublessClient7
+7 extern ObjectStublessClient8 rpcrt4.__wine_ObjectStublessClient8
+8 extern ObjectStublessClient9 rpcrt4.__wine_ObjectStublessClient9
+9 extern ObjectStublessClient10 rpcrt4.__wine_ObjectStublessClient10
+10 extern ObjectStublessClient11 rpcrt4.__wine_ObjectStublessClient11
+11 extern ObjectStublessClient12 rpcrt4.__wine_ObjectStublessClient12
+12 extern ObjectStublessClient13 rpcrt4.__wine_ObjectStublessClient13
+13 extern ObjectStublessClient14 rpcrt4.__wine_ObjectStublessClient14
+14 extern ObjectStublessClient15 rpcrt4.__wine_ObjectStublessClient15
+15 extern ObjectStublessClient16 rpcrt4.__wine_ObjectStublessClient16
+16 extern ObjectStublessClient17 rpcrt4.__wine_ObjectStublessClient17
+17 extern ObjectStublessClient18 rpcrt4.__wine_ObjectStublessClient18
+18 extern ObjectStublessClient19 rpcrt4.__wine_ObjectStublessClient19
+19 extern ObjectStublessClient20 rpcrt4.__wine_ObjectStublessClient20
+20 extern ObjectStublessClient21 rpcrt4.__wine_ObjectStublessClient21
+21 extern ObjectStublessClient22 rpcrt4.__wine_ObjectStublessClient22
+22 extern ObjectStublessClient23 rpcrt4.__wine_ObjectStublessClient23
+23 extern ObjectStublessClient24 rpcrt4.__wine_ObjectStublessClient24
+24 extern ObjectStublessClient25 rpcrt4.__wine_ObjectStublessClient25
+25 extern ObjectStublessClient26 rpcrt4.__wine_ObjectStublessClient26
+26 extern ObjectStublessClient27 rpcrt4.__wine_ObjectStublessClient27
+27 extern ObjectStublessClient28 rpcrt4.__wine_ObjectStublessClient28
+28 extern ObjectStublessClient29 rpcrt4.__wine_ObjectStublessClient29
+29 extern ObjectStublessClient30 rpcrt4.__wine_ObjectStublessClient30
+30 extern ObjectStublessClient31 rpcrt4.__wine_ObjectStublessClient31
+31 extern ObjectStublessClient32 rpcrt4.__wine_ObjectStublessClient32
+32 extern NdrProxyForwardingFunction3 rpcrt4.__wine_NdrProxyForwardingFunction3
+33 extern NdrProxyForwardingFunction4 rpcrt4.__wine_NdrProxyForwardingFunction4
+34 extern NdrProxyForwardingFunction5 rpcrt4.__wine_NdrProxyForwardingFunction5
+35 extern NdrProxyForwardingFunction6 rpcrt4.__wine_NdrProxyForwardingFunction6
+36 extern NdrProxyForwardingFunction7 rpcrt4.__wine_NdrProxyForwardingFunction7
+37 extern NdrProxyForwardingFunction8 rpcrt4.__wine_NdrProxyForwardingFunction8
+38 extern NdrProxyForwardingFunction9 rpcrt4.__wine_NdrProxyForwardingFunction9
+39 extern NdrProxyForwardingFunction10 rpcrt4.__wine_NdrProxyForwardingFunction10
+40 extern NdrProxyForwardingFunction11 rpcrt4.__wine_NdrProxyForwardingFunction11
+41 extern NdrProxyForwardingFunction12 rpcrt4.__wine_NdrProxyForwardingFunction12
+42 extern NdrProxyForwardingFunction13 rpcrt4.__wine_NdrProxyForwardingFunction13
+43 extern NdrProxyForwardingFunction14 rpcrt4.__wine_NdrProxyForwardingFunction14
+44 extern NdrProxyForwardingFunction15 rpcrt4.__wine_NdrProxyForwardingFunction15
+45 extern NdrProxyForwardingFunction16 rpcrt4.__wine_NdrProxyForwardingFunction16
+46 extern NdrProxyForwardingFunction17 rpcrt4.__wine_NdrProxyForwardingFunction17
+47 extern NdrProxyForwardingFunction18 rpcrt4.__wine_NdrProxyForwardingFunction18
+48 extern NdrProxyForwardingFunction19 rpcrt4.__wine_NdrProxyForwardingFunction19
+49 extern NdrProxyForwardingFunction20 rpcrt4.__wine_NdrProxyForwardingFunction20
+50 extern NdrProxyForwardingFunction21 rpcrt4.__wine_NdrProxyForwardingFunction21
+51 extern NdrProxyForwardingFunction22 rpcrt4.__wine_NdrProxyForwardingFunction22
+52 extern NdrProxyForwardingFunction23 rpcrt4.__wine_NdrProxyForwardingFunction23
+53 extern NdrProxyForwardingFunction24 rpcrt4.__wine_NdrProxyForwardingFunction24
+54 extern NdrProxyForwardingFunction25 rpcrt4.__wine_NdrProxyForwardingFunction25
+55 extern NdrProxyForwardingFunction26 rpcrt4.__wine_NdrProxyForwardingFunction26
+56 extern NdrProxyForwardingFunction27 rpcrt4.__wine_NdrProxyForwardingFunction27
+57 extern NdrProxyForwardingFunction28 rpcrt4.__wine_NdrProxyForwardingFunction28
+58 extern NdrProxyForwardingFunction29 rpcrt4.__wine_NdrProxyForwardingFunction29
+59 extern NdrProxyForwardingFunction30 rpcrt4.__wine_NdrProxyForwardingFunction30
+60 extern NdrProxyForwardingFunction31 rpcrt4.__wine_NdrProxyForwardingFunction31
+61 extern NdrProxyForwardingFunction32 rpcrt4.__wine_NdrProxyForwardingFunction32
 @ stub NdrOleInitializeExtension
 @ stdcall RoFailFastWithErrorContextInternal2(long long ptr)
 @ stub RoFailFastWithErrorContextInternal
@@ -372,3 +378,65 @@
 @ stdcall WindowsTrimStringStart(ptr ptr ptr)
 @ stdcall CoGetSystemSecurityPermissions(long ptr)
 @ stdcall RoGetServerActivatableClasses(ptr ptr ptr)
+86 stdcall -noname CoBeginProcessEvents(ptr)
+87 stdcall -noname CoMsgWaitInProcessEvents(ptr long ptr long long long)
+88 stdcall -noname CoEndProcessEvents(ptr)
+90 stdcall -noname RoGetDesignMode(ptr)
+95 stdcall -noname CoSignalPendingGitRegistrationWaits()
+100 stdcall -noname CoSetASTATestMode(long)
+101 stdcall -noname CoVrfNotifyOleInit()
+102 stdcall -noname CoVrfNotifyOleUninit()
+103 stdcall -noname CoVrfShouldCallOleInit(ptr)
+104 stdcall -noname CoVrfNotifyExtraOleUninit()
+111 stdcall -noname CoHandlePriorityEventsFromMessagePump()
+120 stdcall -noname CoRegisterForApartmentShutdown_ordinal120(ptr ptr ptr) RoRegisterForApartmentShutdown
+122 stdcall -noname CoGetApartmentIdentifier_ordinal122(ptr) CoGetApartmentIdentifier
+134 stdcall -noname RoInitializeASTA()
+140 stdcall -noname CoAllowSetForegroundWindow(ptr ptr)
+147 stdcall -noname RoActivateInstanceAsUser(ptr int64 ptr)
+148 stdcall -noname RoGetActivationFactoryAsUser(ptr int64 ptr ptr)
+157 stdcall -noname RoGetDesignModeV2(ptr)
+167 stdcall -noname CoGetCallContextOfObject(ptr ptr ptr)
+168 stdcall -noname CoImpersonateClientOfObject(ptr ptr)
+185 stub -noname HENHMETAFILE_UserSize
+186 stub -noname HENHMETAFILE_UserMarshal
+187 stub -noname HENHMETAFILE_UserUnmarshal
+188 stub -noname HENHMETAFILE_UserFree
+189 stub -noname HMETAFILEPICT_UserSize
+190 stub -noname HMETAFILEPICT_UserMarshal
+191 stub -noname HMETAFILEPICT_UserUnmarshal
+192 stub -noname HMETAFILEPICT_UserFree
+193 stub -noname HMETAFILE_UserSize
+194 stub -noname HMETAFILE_UserMarshal
+195 stub -noname HMETAFILE_UserUnmarshal
+196 stub -noname HMETAFILE_UserFree
+197 stub -noname SNB_UserSize
+198 stub -noname SNB_UserMarshal
+199 stub -noname SNB_UserUnmarshal
+200 stub -noname SNB_UserFree
+201 stub -noname STGMEDIUM_UserSize
+202 stub -noname STGMEDIUM_UserMarshal
+203 stub -noname STGMEDIUM_UserUnmarshal
+204 stub -noname STGMEDIUM_UserFree
+205 stub -noname HENHMETAFILE_UserSize64
+206 stub -noname HENHMETAFILE_UserMarshal64
+207 stub -noname HENHMETAFILE_UserUnmarshal64
+208 stub -noname HENHMETAFILE_UserFree_ordinal208
+209 stub -noname HMETAFILEPICT_UserSize64
+210 stub -noname HMETAFILEPICT_UserMarshal64
+211 stub -noname HMETAFILEPICT_UserUnmarshal64
+212 stub -noname HMETAFILEPICT_UserFree_ordinal212
+213 stub -noname HMETAFILE_UserSize64
+214 stub -noname HMETAFILE_UserMarshal64
+215 stub -noname HMETAFILE_UserUnmarshal64
+216 stub -noname HMETAFILE_UserFree_ordinal216
+217 stub -noname SNB_UserSize64
+218 stub -noname SNB_UserMarshal64
+219 stub -noname SNB_UserUnmarshal64
+220 stub -noname SNB_UserFree_ordinal220
+221 stub -noname STGMEDIUM_UserSize64
+222 stub -noname STGMEDIUM_UserMarshal64
+223 stub -noname STGMEDIUM_UserUnmarshal64
+224 stub -noname STGMEDIUM_UserFree64
+231 stub -noname GetInternalSourceMarshalingContextAttribute
+232 stub -noname FindMarshalingContextAttribute

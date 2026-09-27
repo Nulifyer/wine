@@ -68,7 +68,20 @@ extern HRESULT WINAPI COMBASE_DllGetClassObject(REFCLSID rclsid, REFIID riid, vo
 static LONG com_lockcount;
 static LONG cleanup_flags;
 
-static LONG com_server_process_refcount;
+struct server_reference
+{
+    struct list entry;
+    ULONG id, refs, delay;
+    HANDLE stop_event;
+    TP_TIMER *timer;
+    BOOL cancelled, shutdown;
+};
+
+static struct server_reference server_process;
+static struct list shared_services = LIST_INIT(shared_services);
+static BOOL shared_services_initialized;
+/* Serializes timer cancellation while registered_classes_cs is dropped to drain callbacks. */
+static SRWLOCK server_reference_lock = SRWLOCK_INIT;
 
 extern HRESULT WINAPI RoGetApartmentIdentifier(UINT64 *identifier);
 
@@ -176,6 +189,169 @@ static CRITICAL_SECTION_DEBUG registered_classes_cs_debug =
       0, 0, { (DWORD_PTR)(__FILE__ ": registered_classes_cs") }
 };
 static CRITICAL_SECTION registered_classes_cs = { &registered_classes_cs_debug, -1, 0, 0, 0, 0 };
+
+/* Reference entries live until DLL teardown. A registered timer retains the DLL
+ * through its callback environment; only explicit replacement/removal closes it.
+ * Callbacks take registered_classes_cs, never server_reference_lock. */
+static struct server_reference *get_server_reference(ULONG id, BOOL create)
+{
+    struct server_reference *entry;
+
+    LIST_FOR_EACH_ENTRY(entry, &shared_services, struct server_reference, entry)
+        if (entry->id == id) return entry;
+    if (!create || !(entry = calloc(1, sizeof(*entry)))) return NULL;
+    entry->id = id;
+    list_add_tail(&shared_services, &entry->entry);
+    return entry;
+}
+
+static void cancel_server_delay(struct server_reference *entry)
+{
+    if (!entry->timer) return;
+    entry->cancelled = TRUE;
+    SetThreadpoolTimer(entry->timer, NULL, 0, 0);
+    LeaveCriticalSection(&registered_classes_cs);
+    WaitForThreadpoolTimerCallbacks(entry->timer, TRUE);
+    EnterCriticalSection(&registered_classes_cs);
+}
+
+static void CALLBACK server_delay_expired(TP_CALLBACK_INSTANCE *instance, void *context, TP_TIMER *timer)
+{
+    struct server_reference *entry = context;
+
+    EnterCriticalSection(&registered_classes_cs);
+    if (!entry->cancelled)
+    {
+        entry->shutdown = TRUE;
+        /* FIXME: suspend this service's class registrations before signaling. */
+        SetEvent(entry->stop_event);
+        if (entry != &server_process) entry->stop_event = NULL;
+    }
+    LeaveCriticalSection(&registered_classes_cs);
+}
+
+static ULONG change_server_reference(struct server_reference *entry, BOOL add)
+{
+    LARGE_INTEGER due;
+
+    if (add)
+    {
+        cancel_server_delay(entry);
+        return ++entry->refs;
+    }
+    if (!--entry->refs)
+    {
+        if (entry->timer && entry->stop_event && entry->delay)
+        {
+            due.QuadPart = -(LONGLONG)entry->delay * 10000;
+            entry->cancelled = FALSE;
+            SetThreadpoolTimer(entry->timer, (FILETIME *)&due, 0, 0);
+        }
+        else
+        {
+            entry->shutdown = TRUE;
+            /* FIXME: suspend this service's class registrations. */
+        }
+    }
+    return entry->refs;
+}
+
+HRESULT WINAPI CoGetSharedServiceId(ULONG *id)
+{
+    DWORD error = GetLastError();
+    HRESULT hr = S_OK;
+
+    AcquireSRWLockExclusive(&server_reference_lock);
+    EnterCriticalSection(&registered_classes_cs);
+    shared_services_initialized = TRUE;
+    if (!id) hr = E_INVALIDARG;
+    else
+    {
+        *id = (ULONG)(ULONG_PTR)NtCurrentTeb()->SubProcessTag;
+        if (!get_server_reference(*id, TRUE)) hr = E_OUTOFMEMORY;
+    }
+    LeaveCriticalSection(&registered_classes_cs);
+    ReleaseSRWLockExclusive(&server_reference_lock);
+    SetLastError(error);
+    return hr;
+}
+
+static ULONG change_shared_service(ULONG id, BOOL add)
+{
+    DWORD error = GetLastError();
+    struct server_reference *entry;
+    ULONG refs = ~0u;
+
+    AcquireSRWLockExclusive(&server_reference_lock);
+    EnterCriticalSection(&registered_classes_cs);
+    if (add) shared_services_initialized = TRUE;
+    if (!shared_services_initialized) refs = 0;
+    else if ((entry = get_server_reference(id, FALSE))) refs = change_server_reference(entry, add);
+    LeaveCriticalSection(&registered_classes_cs);
+    ReleaseSRWLockExclusive(&server_reference_lock);
+    SetLastError(error);
+    return refs;
+}
+
+ULONG WINAPI CoAddRefSharedService(ULONG id)
+{
+    return change_shared_service(id, TRUE);
+}
+
+ULONG WINAPI CoReleaseSharedService(ULONG id)
+{
+    return change_shared_service(id, FALSE);
+}
+
+HRESULT WINAPI CoRegisterServerShutdownDelay(HANDLE event, ULONG milliseconds)
+{
+    DWORD error = GetLastError();
+    ULONG id = (ULONG)(ULONG_PTR)NtCurrentTeb()->SubProcessTag;
+    TP_CALLBACK_ENVIRON environment = {0};
+    struct server_reference *entry;
+    HRESULT hr = S_OK;
+
+    AcquireSRWLockExclusive(&server_reference_lock);
+    EnterCriticalSection(&registered_classes_cs);
+    shared_services_initialized = TRUE;
+    if ((!event && milliseconds) || (event && !milliseconds)) hr = E_INVALIDARG;
+    else if (!(entry = id ? get_server_reference(id, TRUE) : &server_process)) hr = E_OUTOFMEMORY;
+    else
+    {
+        cancel_server_delay(entry);
+        if (entry->timer)
+        {
+            CloseThreadpoolTimer(entry->timer);
+            entry->timer = NULL;
+        }
+        entry->stop_event = NULL;
+        entry->delay = 0;
+        if (event)
+        {
+            if (entry == &server_process && entry->shutdown)
+            {
+                hr = CO_E_SERVER_STOPPING;
+                error = 0;
+            }
+            else
+            {
+                environment.Version = 1;
+                environment.RaceDll = hProxyDll;
+                if (!(entry->timer = CreateThreadpoolTimer(server_delay_expired, entry, &environment)))
+                    hr = HRESULT_FROM_WIN32(GetLastError());
+                else
+                {
+                    entry->stop_event = event;
+                    entry->delay = milliseconds;
+                }
+            }
+        }
+    }
+    LeaveCriticalSection(&registered_classes_cs);
+    ReleaseSRWLockExclusive(&server_reference_lock);
+    SetLastError(error);
+    return hr;
+}
 
 IUnknown * com_get_registered_class_object(const struct apartment *apt, REFCLSID rclsid, DWORD clscontext)
 {
@@ -2061,6 +2237,150 @@ HRESULT WINAPI CoCreateObjectInContext(IUnknown *object, IUnknown *context, REFI
     return IUnknown_QueryInterface(object, riid, out);
 }
 
+/***********************************************************************
+ *           CoBeginProcessEvents     [COMBASE.86]
+ */
+void WINAPI CoBeginProcessEvents(void *context)
+{
+    TRACE("%p\n", context);
+    memset(context, 0, 0x60);
+}
+
+/***********************************************************************
+ *           CoMsgWaitInProcessEvents     [COMBASE.87]
+ */
+DWORD WINAPI CoMsgWaitInProcessEvents(void *context, DWORD count, const HANDLE *handles,
+        DWORD timeout, DWORD wake_mask, DWORD flags)
+{
+    TRACE("%p, %lu, %p, %lu, %#lx, %#lx\n", context, count, handles, timeout, wake_mask, flags);
+
+    if (count >= 0x39 || (flags & MWMO_WAITALL))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return WAIT_FAILED;
+    }
+
+    return MsgWaitForMultipleObjectsEx(count, handles, timeout, wake_mask, flags);
+}
+
+/***********************************************************************
+ *           CoEndProcessEvents     [COMBASE.88]
+ */
+void WINAPI CoEndProcessEvents(void *context)
+{
+    TRACE("%p\n", context);
+}
+
+/***********************************************************************
+ *           CoSignalPendingGitRegistrationWaits     [COMBASE.95]
+ */
+void WINAPI CoSignalPendingGitRegistrationWaits(void)
+{
+    TRACE("\n");
+}
+
+static LONG asta_test_mode_flags;
+
+/***********************************************************************
+ *           CoSetASTATestMode     [COMBASE.100]
+ */
+void WINAPI CoSetASTATestMode(DWORD flags)
+{
+    TRACE("%#lx\n", flags);
+    InterlockedExchange(&asta_test_mode_flags, flags);
+}
+
+/***********************************************************************
+ *           CoVrfNotifyOleInit     [COMBASE.101]
+ */
+void WINAPI CoVrfNotifyOleInit(void)
+{
+    TRACE("\n");
+}
+
+/***********************************************************************
+ *           CoVrfNotifyOleUninit     [COMBASE.102]
+ */
+void WINAPI CoVrfNotifyOleUninit(void)
+{
+    TRACE("\n");
+}
+
+/***********************************************************************
+ *           CoVrfShouldCallOleInit     [COMBASE.103]
+ */
+void WINAPI CoVrfShouldCallOleInit(const char *api)
+{
+    TRACE("%s\n", debugstr_a(api));
+}
+
+/***********************************************************************
+ *           CoVrfNotifyExtraOleUninit     [COMBASE.104]
+ */
+void WINAPI CoVrfNotifyExtraOleUninit(void)
+{
+    TRACE("\n");
+}
+
+/***********************************************************************
+ *           CoHandlePriorityEventsFromMessagePump     [COMBASE.111]
+ */
+void WINAPI CoHandlePriorityEventsFromMessagePump(void)
+{
+    TRACE("\n");
+}
+
+/***********************************************************************
+ *           CoAllowSetForegroundWindow     [COMBASE.140]
+ */
+HRESULT WINAPI CoAllowSetForegroundWindow(IUnknown *object, void *reserved)
+{
+    TRACE("%p, %p\n", object, reserved);
+    if (!object || reserved) return E_INVALIDARG;
+    FIXME("foreground-transfer interface is not implemented\n");
+    return S_OK;
+}
+
+/***********************************************************************
+ *           CoGetCallContextOfObject     [COMBASE.167]
+ */
+HRESULT WINAPI CoGetCallContextOfObject(IUnknown *object, REFIID iid, void **out)
+{
+    TRACE("%p, %s, %p\n", object, debugstr_guid(iid), out);
+    if (!out) return E_POINTER;
+    *out = NULL;
+    return S_OK;
+}
+
+/***********************************************************************
+ *           CoImpersonateClientOfObject     [COMBASE.168]
+ */
+HRESULT WINAPI CoImpersonateClientOfObject(IUnknown *object, BOOL *impersonated)
+{
+    TRACE("%p, %p\n", object, impersonated);
+    if (!impersonated) return E_POINTER;
+    *impersonated = FALSE;
+    return S_OK;
+}
+
+/***********************************************************************
+ *           CoDoesOtherSideVariantMarshalingNeedTrailingPadding     [COMBASE.180]
+ */
+BOOL WINAPI CoDoesOtherSideVariantMarshalingNeedTrailingPadding(void *marshal_context)
+{
+    TRACE("%p\n", marshal_context);
+    return FALSE;
+}
+
+/***********************************************************************
+ *           CoDoesOtherSideSupportUDTMarshaling     [COMBASE.181]
+ */
+BOOL WINAPI CoDoesOtherSideSupportUDTMarshaling(void *marshal_context)
+{
+    TRACE("%p\n", marshal_context);
+    return TRUE;
+}
+
 static HRESULT com_get_class_object(REFCLSID rclsid, DWORD clscontext,
         COSERVERINFO *server_info, REFIID riid, void **obj)
 {
@@ -3802,16 +4122,16 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoRevokeClassObject(DWORD cookie)
  */
 ULONG WINAPI CoAddRefServerProcess(void)
 {
+    DWORD error = GetLastError();
     ULONG refs;
 
-    TRACE("\n");
-
+    AcquireSRWLockExclusive(&server_reference_lock);
     EnterCriticalSection(&registered_classes_cs);
-    refs = ++com_server_process_refcount;
+    shared_services_initialized = TRUE;
+    refs = change_server_reference(&server_process, TRUE);
     LeaveCriticalSection(&registered_classes_cs);
-
-    TRACE("refs before: %ld\n", refs - 1);
-
+    ReleaseSRWLockExclusive(&server_reference_lock);
+    SetLastError(error);
     return refs;
 }
 
@@ -3820,19 +4140,15 @@ ULONG WINAPI CoAddRefServerProcess(void)
  */
 ULONG WINAPI CoReleaseServerProcess(void)
 {
+    DWORD error = GetLastError();
     ULONG refs;
 
-    TRACE("\n");
-
+    AcquireSRWLockExclusive(&server_reference_lock);
     EnterCriticalSection(&registered_classes_cs);
-
-    refs = --com_server_process_refcount;
-    /* FIXME: suspend objects */
-
+    refs = change_server_reference(&server_process, FALSE);
     LeaveCriticalSection(&registered_classes_cs);
-
-    TRACE("refs after: %ld\n", refs);
-
+    ReleaseSRWLockExclusive(&server_reference_lock);
+    SetLastError(error);
     return refs;
 }
 
@@ -4200,6 +4516,12 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
         }
         git_release();
         apartment_global_cleanup();
+        while (!list_empty(&shared_services))
+        {
+            struct server_reference *entry = LIST_ENTRY(list_head(&shared_services), struct server_reference, entry);
+            list_remove(&entry->entry);
+            free(entry);
+        }
         DeleteCriticalSection(&registered_classes_cs);
         rpc_unregister_channel_hooks();
         break;

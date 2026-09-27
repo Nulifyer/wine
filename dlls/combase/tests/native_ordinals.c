@@ -30,6 +30,7 @@ typedef BOOL (WINAPI *is_apartment_initialized_fn)(void);
 typedef BOOL (WINAPI *quirk_is_enabled_fn)(void *);
 typedef HRESULT (WINAPI *register_disconnect_fn)(IUnknown *, DWORD, IUnknown *, void *, void **);
 typedef HRESULT (WINAPI *unregister_disconnect_fn)(void *);
+typedef BOOL (WINAPI *other_side_marshaling_fn)(void *);
 
 struct test_unknown
 {
@@ -227,10 +228,12 @@ static void test_native_ordinals(void)
     quirk_is_enabled_fn quirk_is_enabled;
     register_disconnect_fn register_disconnect;
     unregister_disconnect_fn unregister_disconnect;
+    other_side_marshaling_fn needs_trailing_padding, supports_udt;
     HMODULE module = GetModuleHandleW(L"combase.dll");
     HMODULE kernelbase = GetModuleHandleW(L"kernelbase.dll");
     FARPROC co_unmarshal_hresult, co_unmarshal_interface;
     FARPROC windows_inspect_string, windows_inspect_string2, windows_is_string_empty;
+    ULONG_PTR marshal_context[3] = {0};
     void *output;
     HRESULT hr;
 
@@ -245,6 +248,8 @@ static void test_native_ordinals(void)
     unmarshal_error = (void *)GetProcAddress(module, (const char *)166);
     get_registration_store_context = (void *)GetProcAddress(module, (const char *)153);
     ro_initialize_strict = (void *)GetProcAddress(module, (const char *)179);
+    needs_trailing_padding = (void *)GetProcAddress(module, (const char *)180);
+    supports_udt = (void *)GetProcAddress(module, (const char *)181);
     co_unmarshal_hresult = GetProcAddress(module, "CoUnmarshalHresult");
     co_unmarshal_interface = GetProcAddress(module, "CoUnmarshalInterface");
     windows_inspect_string = GetProcAddress(module, "WindowsInspectString");
@@ -264,6 +269,8 @@ static void test_native_ordinals(void)
     ok(!!unmarshal_error, "Ordinal 166 is unavailable.\n");
     ok(!!get_registration_store_context, "Ordinal 153 is unavailable.\n");
     ok(!!ro_initialize_strict, "Ordinal 179 is unavailable.\n");
+    ok(!!needs_trailing_padding, "Ordinal 180 is unavailable.\n");
+    ok(!!supports_udt, "Ordinal 181 is unavailable.\n");
     ok(!!is_error_propagation_enabled, "IsErrorPropagationEnabled is unavailable.\n");
     ok(!!is_apartment_initialized, "InternalIsApartmentInitialized is unavailable.\n");
     ok(!!register_disconnect, "InternalCoRegisterDisconnectCallback is unavailable.\n");
@@ -275,8 +282,12 @@ static void test_native_ordinals(void)
             "Ordinal 177 still resolves to CoWaitForMultipleHandles.\n");
     ok((void *)ro_initialize_strict != (void *)co_unmarshal_hresult,
             "Ordinal 179 still resolves to CoUnmarshalHresult.\n");
-    ok(GetProcAddress(module, (const char *)180) == co_unmarshal_interface,
-            "Ordinal 180 no longer preserves the CoUnmarshalInterface alias.\n");
+    ok((FARPROC)needs_trailing_padding != co_unmarshal_interface,
+            "Ordinal 180 still resolves to CoUnmarshalInterface.\n");
+    ok(GetProcAddress(module, (const char *)2) == GetProcAddress(module, "ObjectStublessClient3"),
+            "Ordinal 2 does not resolve to ObjectStublessClient3.\n");
+    ok(GetProcAddress(module, (const char *)32) == GetProcAddress(module, "NdrProxyForwardingFunction3"),
+            "Ordinal 32 does not resolve to NdrProxyForwardingFunction3.\n");
     ok(GetProcAddress(module, (const char *)359) == co_unmarshal_hresult,
             "Ordinal 359 does not resolve to CoUnmarshalHresult.\n");
     ok(GetProcAddress(module, (const char *)360) == co_unmarshal_interface,
@@ -289,6 +300,11 @@ static void test_native_ordinals(void)
             "Ordinal 600 does not resolve to WindowsIsStringEmpty.\n");
     ok(GetProcAddress(module, (const char *)513) == (FARPROC)is_apartment_initialized,
             "Ordinal 513 does not resolve to InternalIsApartmentInitialized.\n");
+
+    if (needs_trailing_padding)
+        ok(!needs_trailing_padding(marshal_context), "Unexpected trailing-padding support.\n");
+    if (supports_udt)
+        ok(supports_udt(marshal_context), "Expected UDT marshaling support.\n");
 
     if (is_apartment_initialized)
     {

@@ -25,6 +25,11 @@ typedef IInternalUnknown *(WINAPI *get_internal_unknown_fn)(IUnknown *);
 typedef ULONG (WINAPI *update_identity_flags_fn)(IUnknown *, ULONG);
 typedef IUnknown *(WINAPI *get_proxy_manager_fn)(IUnknown *);
 typedef HRESULT (WINAPI *create_object_in_context_fn)(IUnknown *, IUnknown *, REFIID, void **);
+typedef void (WINAPI *begin_process_events_fn)(void *);
+typedef DWORD (WINAPI *msg_wait_in_process_events_fn)(void *, DWORD, const HANDLE *, DWORD, DWORD, DWORD);
+typedef void (WINAPI *end_process_events_fn)(void *);
+typedef void (WINAPI *set_asta_test_mode_fn)(DWORD);
+typedef void (WINAPI *handle_priority_events_fn)(void);
 
 static const GUID test_handler_iid =
     {0xf7518c88, 0xb43f, 0x4e8e, {0xad, 0x5a, 0xf0, 0x2c, 0xb2, 0x38, 0x03, 0x8a}};
@@ -113,6 +118,53 @@ static void test_create_object_in_context(void)
 
     ok(!IUnknown_Release(&object.IUnknown_iface), "Object was not released.\n");
     ok(!IUnknown_Release(&context.IUnknown_iface), "Context was not released.\n");
+}
+
+static void test_process_events_ordinals(void)
+{
+    msg_wait_in_process_events_fn msg_wait;
+    handle_priority_events_fn handle_priority;
+    begin_process_events_fn begin;
+    end_process_events_fn end;
+    set_asta_test_mode_fn set_asta_test_mode;
+    unsigned char context[0x60];
+    HMODULE module;
+    DWORD ret;
+    unsigned int i;
+
+    module = GetModuleHandleW(L"combase.dll");
+    ok(!!module, "combase.dll is not loaded.\n");
+    if (!module) return;
+    begin = (void *)GetProcAddress(module, (const char *)86);
+    msg_wait = (void *)GetProcAddress(module, (const char *)87);
+    end = (void *)GetProcAddress(module, (const char *)88);
+    set_asta_test_mode = (void *)GetProcAddress(module, (const char *)100);
+    handle_priority = (void *)GetProcAddress(module, (const char *)111);
+    ok(!!begin, "COMBase ordinal 86 is unavailable.\n");
+    ok(!!msg_wait, "COMBase ordinal 87 is unavailable.\n");
+    ok(!!end, "COMBase ordinal 88 is unavailable.\n");
+    ok(!!set_asta_test_mode, "COMBase ordinal 100 is unavailable.\n");
+    ok(!!handle_priority, "COMBase ordinal 111 is unavailable.\n");
+    if (!begin || !msg_wait || !end || !set_asta_test_mode || !handle_priority) return;
+
+    memset(context, 0xcc, sizeof(context));
+    begin(context);
+    for (i = 0; i < sizeof(context); ++i)
+        ok(!context[i], "Context byte %u is %#x.\n", i, context[i]);
+
+    SetLastError(0xdeadbeef);
+    ret = msg_wait(context, 0x39, NULL, 0, 0, 0);
+    ok(ret == WAIT_FAILED, "Got wait result %#lx.\n", ret);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Got error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = msg_wait(context, 0, NULL, 0, 0, MWMO_WAITALL);
+    ok(ret == WAIT_FAILED, "Got wait-all result %#lx.\n", ret);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Got wait-all error %lu.\n", GetLastError());
+
+    set_asta_test_mode(0);
+    handle_priority();
+    end(context);
 }
 
 static void test_aggregate_identity(void)
@@ -259,4 +311,5 @@ START_TEST(aggregate_identity)
 {
     test_aggregate_identity();
     test_create_object_in_context();
+    test_process_events_ordinals();
 }
