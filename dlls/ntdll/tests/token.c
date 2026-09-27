@@ -484,6 +484,8 @@ static void test_adjust_groups(void)
     TOKEN_PRIMARY_GROUP primary_group;
     TOKEN_PRIVILEGES privileges = {0};
     TOKEN_SOURCE source = {{0}};
+    TOKEN_ELEVATION_TYPE elevation_type;
+    TOKEN_LINKED_TOKEN linked_token;
     OBJECT_ATTRIBUTES attr;
     TOKEN_OWNER owner;
     TOKEN_USER user;
@@ -535,6 +537,17 @@ static void test_adjust_groups(void)
     if (status) return;
 
     check_token_object_dacl( token, "created token" );
+
+    status = NtQueryInformationToken( token, TokenElevationType, &elevation_type,
+                                      sizeof(elevation_type), &length );
+    ok( status == STATUS_SUCCESS, "TokenElevationType returned %#lx.\n", status );
+    ok( elevation_type == TokenElevationTypeDefault, "got elevation type %u.\n", elevation_type );
+
+    linked_token.LinkedToken = (HANDLE)0xdeadbeef;
+    status = NtQueryInformationToken( token, TokenLinkedToken, &linked_token,
+                                      sizeof(linked_token), &length );
+    ok( status == STATUS_SUCCESS, "TokenLinkedToken returned %#lx.\n", status );
+    ok( !linked_token.LinkedToken, "got linked token %p.\n", linked_token.LinkedToken );
 
     {
         TOKEN_STATISTICS statistics;

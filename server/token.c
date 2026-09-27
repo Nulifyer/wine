@@ -1557,7 +1557,8 @@ DECL_HANDLER(create_token)
         dacl = default_dacl = create_default_dacl( &domain_users_sid );
 
     token = create_token( req->primary, default_session_id, user, groups, req->group_count,
-                          privs, req->priv_count, dacl, NULL, req->primary_group, req->impersonation_level, 0 );
+                          privs, req->priv_count, dacl, NULL, req->primary_group,
+                          req->impersonation_level, TokenElevationTypeDefault );
     if (token)
     {
         if (default_set_sd( &token->obj, params.sd ? params.sd : &empty_sd,
