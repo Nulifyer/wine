@@ -28,6 +28,8 @@
 static BOOL (WINAPI * pGetProductInfo)(DWORD, DWORD, DWORD, DWORD, DWORD *);
 static UINT (WINAPI * pEnumSystemFirmwareTables)(DWORD, void *, DWORD);
 static UINT (WINAPI * pGetSystemFirmwareTable)(DWORD, DWORD, void *, DWORD);
+static LONG (WINAPI * pGetEffectivePackageStatusForUser)(HANDLE, const WCHAR *, UINT32 *);
+static LONG (WINAPI * pGetPackageStatus)(const WCHAR *, UINT32 *);
 static LONG (WINAPI * pPackageFamilyNameFromFullName)(const WCHAR *, UINT32 *, WCHAR *);
 static LONG (WINAPI * pPackageFullNameFromId)(const PACKAGE_ID *, UINT32 *, WCHAR *);
 static LONG (WINAPI * pPackageIdFromFullName)(const WCHAR *, UINT32, UINT32 *, BYTE *);
@@ -57,6 +59,11 @@ static void init_function_pointers(void)
     GET_PROC(PackageFullNameFromId);
     GET_PROC(PackageIdFromFullName);
     GET_PROC(PackageNameAndPublisherIdFromFamilyName);
+
+    hmod = GetModuleHandleA("kernelbase.dll");
+
+    GET_PROC(GetEffectivePackageStatusForUser);
+    GET_PROC(GetPackageStatus);
 
     hmod = GetModuleHandleA("ntdll.dll");
 
@@ -1289,6 +1296,47 @@ static void test_PackageNameAndPublisherIdFromFamilyName(void)
     ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
 }
 
+static void test_package_status(void)
+{
+    static const WCHAR valid_name[] = L"LinuxNT.Missing_1.0.0.0_x64__cw5n1h2txyewy";
+    UINT32 status;
+    LONG ret;
+
+    if (!pGetPackageStatus || !pGetEffectivePackageStatusForUser)
+    {
+        win_skip("Package status functions not available.\n");
+        return;
+    }
+
+    status = 0xa5a5a5a5;
+    SetLastError(0x12345678);
+    ret = pGetPackageStatus(valid_name, &status);
+    ok(ret == ERROR_SUCCESS, "Unexpected ret %ld.\n", ret);
+    ok(status == 0, "Unexpected status %#x.\n", status);
+    ok(GetLastError() == 0x12345678, "Unexpected last error %lu.\n", GetLastError());
+
+    status = 0xa5a5a5a5;
+    SetLastError(0x12345678);
+    ret = pGetEffectivePackageStatusForUser(NULL, valid_name, &status);
+    ok(ret == ERROR_SUCCESS, "Unexpected ret %ld.\n", ret);
+    ok(status == 0, "Unexpected status %#x.\n", status);
+    ok(GetLastError() == ERROR_SUCCESS, "Unexpected last error %lu.\n", GetLastError());
+
+    status = 0xa5a5a5a5;
+    SetLastError(0x12345678);
+    ret = pGetPackageStatus(L"invalid", &status);
+    ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
+    ok(status == 0xa5a5a5a5, "Unexpected status %#x.\n", status);
+    ok(GetLastError() == 0x12345678, "Unexpected last error %lu.\n", GetLastError());
+
+    status = 0xa5a5a5a5;
+    SetLastError(0x12345678);
+    ret = pGetEffectivePackageStatusForUser(NULL, L"", &status);
+    ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
+    ok(status == 0xa5a5a5a5, "Unexpected status %#x.\n", status);
+    ok(GetLastError() == 0x12345678, "Unexpected last error %lu.\n", GetLastError());
+}
+
 START_TEST(version)
 {
     char **argv;
@@ -1319,4 +1367,5 @@ START_TEST(version)
     test_PackageFullNameFromId();
     test_PackageFamilyNameFromFullName();
     test_PackageNameAndPublisherIdFromFamilyName();
+    test_package_status();
 }

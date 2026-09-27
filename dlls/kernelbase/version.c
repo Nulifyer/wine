@@ -36,6 +36,7 @@
 #include "winnls.h"
 #include "winternl.h"
 #include "winerror.h"
+#include "winreg.h"
 #include "appmodel.h"
 
 #include "kernelbase.h"
@@ -1716,6 +1717,70 @@ LONG WINAPI GetPackagePathByFullName(const WCHAR *name, UINT32 *len, WCHAR *path
     FIXME( "(%s %p %p): stub\n", debugstr_w(name), len, path );
 
     return APPMODEL_ERROR_NO_PACKAGE;
+}
+
+/***********************************************************************
+ *         GetPackageStatus   (kernelbase.@)
+ */
+LONG WINAPI GetPackageStatus(const WCHAR *package_full_name, UINT32 *status)
+{
+    static const WCHAR root[] =
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\StateChange\\PackageList\\";
+    WCHAR key_name[ARRAY_SIZE(root) + PACKAGE_FULL_NAME_MAX_LENGTH];
+    BYTE identity[sizeof(PACKAGE_ID) + (PACKAGE_FULL_NAME_MAX_LENGTH + 3) * sizeof(WCHAR)];
+    UINT32 identity_size = sizeof(identity);
+    DWORD value = 0, type, size = sizeof(value), saved_error = GetLastError();
+    HKEY key;
+    LONG ret;
+
+    TRACE("package_full_name %s, status %p.\n", debugstr_w(package_full_name), status);
+
+    if (!package_full_name || !package_full_name[0] || !status)
+        return ERROR_INVALID_PARAMETER;
+    if (lstrlenW(package_full_name) > PACKAGE_FULL_NAME_MAX_LENGTH)
+        return ERROR_INVALID_PARAMETER;
+
+    lstrcpyW(key_name, root);
+    lstrcatW(key_name, package_full_name);
+    ret = RegOpenKeyExW(HKEY_LOCAL_MACHINE, key_name, 0, KEY_READ, &key);
+    if (!ret)
+    {
+        ret = RegQueryValueExW(key, L"PackageStatus", NULL, &type, (BYTE *)&value, &size);
+        RegCloseKey(key);
+        if (ret == ERROR_FILE_NOT_FOUND)
+            ret = ERROR_SUCCESS;
+        else if (!ret && (type != REG_DWORD || size != sizeof(value)))
+            ret = APPMODEL_ERROR_PACKAGE_RUNTIME_CORRUPT;
+    }
+    else if (ret == ERROR_FILE_NOT_FOUND)
+    {
+        ret = PackageIdFromFullName(package_full_name, 0, &identity_size, identity);
+    }
+
+    if (!ret)
+        *status = value;
+    SetLastError(saved_error);
+    return ret;
+}
+
+/***********************************************************************
+ *         GetEffectivePackageStatusForUser   (kernelbase.@)
+ */
+LONG WINAPI GetEffectivePackageStatusForUser(HANDLE token, const WCHAR *package_full_name, UINT32 *status)
+{
+    UINT32 machine_status;
+    LONG ret;
+
+    TRACE("token %p, package_full_name %s, status %p.\n", token, debugstr_w(package_full_name), status);
+
+    if ((ret = GetPackageStatus(package_full_name, &machine_status)))
+        return ret;
+
+    /* The per-user StateChange status store is not implemented. No recorded
+     * per-user state is the healthy zero-status partition. */
+    *status = machine_status;
+    SetLastError(ERROR_SUCCESS);
+    return ERROR_SUCCESS;
 }
 
 static const struct
