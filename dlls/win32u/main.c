@@ -2087,6 +2087,11 @@ BOOL SYSCALL_API NtUserIsTopLevelWindow( HWND hwnd )
     SYSCALL_FUNC( NtUserIsTopLevelWindow );
 }
 
+BOOL SYSCALL_API NtUserIsWindowBroadcastingDpiToChildren( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserIsWindowBroadcastingDpiToChildren );
+}
+
 BOOL SYSCALL_API NtUserKillSystemTimer( HWND hwnd, UINT_PTR id )
 {
     SYSCALL_FUNC( NtUserKillSystemTimer );

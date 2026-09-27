@@ -9259,6 +9259,72 @@ static void test_SetWindowCompositionTransition(void)
     DestroyWindow( hwnd );
 }
 
+static void test_IsWindowBroadcastingDpiToChildren(void)
+{
+    static const struct
+    {
+        DPI_AWARENESS_CONTEXT context;
+        BOOL expected;
+    }
+    tests[] =
+    {
+        {DPI_AWARENESS_CONTEXT_UNAWARE, FALSE},
+        {DPI_AWARENESS_CONTEXT_SYSTEM_AWARE, FALSE},
+        {DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, FALSE},
+        {DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, TRUE},
+    };
+    BOOL (WINAPI *pIsWindowBroadcastingDpiToChildren)(HWND);
+    BOOL (WINAPI *pAreDpiAwarenessContextsEqual)(DPI_AWARENESS_CONTEXT, DPI_AWARENESS_CONTEXT);
+    DPI_AWARENESS_CONTEXT (WINAPI *pSetThreadDpiAwarenessContext)(DPI_AWARENESS_CONTEXT);
+    DPI_AWARENESS_CONTEXT (WINAPI *pGetWindowDpiAwarenessContext)(HWND);
+    DPI_AWARENESS_CONTEXT previous;
+    unsigned int i;
+    HWND hwnd;
+    BOOL ret;
+
+    pIsWindowBroadcastingDpiToChildren = (void *)GetProcAddress( GetModuleHandleA("user32.dll"),
+                                                                 (const char *)2706 );
+    pAreDpiAwarenessContextsEqual = (void *)GetProcAddress( GetModuleHandleA("user32.dll"),
+                                                            "AreDpiAwarenessContextsEqual" );
+    pSetThreadDpiAwarenessContext = (void *)GetProcAddress( GetModuleHandleA("user32.dll"),
+                                                            "SetThreadDpiAwarenessContext" );
+    pGetWindowDpiAwarenessContext = (void *)GetProcAddress( GetModuleHandleA("user32.dll"),
+                                                            "GetWindowDpiAwarenessContext" );
+    if (!pIsWindowBroadcastingDpiToChildren || !pAreDpiAwarenessContextsEqual ||
+        !pSetThreadDpiAwarenessContext || !pGetWindowDpiAwarenessContext)
+    {
+        win_skip( "DPI broadcast functions are not available\n" );
+        return;
+    }
+
+    SetLastError( 0xdeadbeef );
+    ret = pIsWindowBroadcastingDpiToChildren( (HWND)0xdeadbeef );
+    ok( !ret, "invalid window is broadcasting DPI\n" );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "got error %lu\n", GetLastError() );
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        previous = pSetThreadDpiAwarenessContext( tests[i].context );
+        ok( !!previous, "failed to set context %p, error %lu\n", tests[i].context, GetLastError() );
+        hwnd = CreateWindowA( "static", "dpi broadcast", WS_OVERLAPPED, 0, 0, 100, 100,
+                              NULL, NULL, GetModuleHandleA(NULL), NULL );
+        ok( !!hwnd, "failed to create window for context %p, error %lu\n",
+            tests[i].context, GetLastError() );
+        ok( pAreDpiAwarenessContextsEqual( pGetWindowDpiAwarenessContext( hwnd ), tests[i].context ),
+            "context %p stored as %p\n", tests[i].context,
+            pGetWindowDpiAwarenessContext( hwnd ) );
+
+        SetLastError( 0xdeadbeef );
+        ret = pIsWindowBroadcastingDpiToChildren( hwnd );
+        ok( ret == tests[i].expected, "context %p returned %d\n", tests[i].context, ret );
+        ok( GetLastError() == 0xdeadbeef, "context %p changed error to %lu\n",
+            tests[i].context, GetLastError() );
+
+        DestroyWindow( hwnd );
+        pSetThreadDpiAwarenessContext( previous );
+    }
+}
+
 static HWND message_window_topmost_hwnd_msg = NULL;
 static BOOL message_window_topmost_received_killfocus;
 
@@ -14779,6 +14845,7 @@ START_TEST(win)
     test_hwnd_message();
     test_IsTopLevelWindow();
     test_SetWindowCompositionTransition();
+    test_IsWindowBroadcastingDpiToChildren();
     test_message_window_topmost();
     test_nonclient_area(hwndMain);
     test_params();

@@ -5941,12 +5941,6 @@ static WND *create_window_handle( HWND parent, HWND owner, UNICODE_STRING *name,
     struct tagCLASS *class = NULL;
     WND *win;
 
-    if (NTUSER_DPI_CONTEXT_IS_MONITOR_AWARE( dpi_context ) && dpi_context != NTUSER_DPI_PER_MONITOR_AWARE)
-    {
-        FIXME( "DPI context %#x not implemented\n", dpi_context );
-        dpi_context = NTUSER_DPI_PER_MONITOR_AWARE;
-    }
-
     if (!is_desktop_class( name ))
     {
         if (parent && parent != get_desktop_window()) dpi = get_win_monitor_dpi( parent, &raw_dpi );
@@ -7022,6 +7016,21 @@ BOOL WINAPI NtUserIsChildWindowDpiMessageEnabled( HWND hwnd )
 {
     FIXME( "%p: stub\n", hwnd );
     return FALSE;
+}
+
+/***********************************************************************
+ *            NtUserIsWindowBroadcastingDpiToChildren (win32u.@)
+ */
+BOOL WINAPI NtUserIsWindowBroadcastingDpiToChildren( HWND hwnd )
+{
+    UINT context = get_window_dpi_awareness_context( hwnd );
+
+    if (!context) return FALSE;
+
+    /* Per-monitor-v1 windows may opt in through NtUserEnableChildWindowDpiMessage,
+     * which is not implemented yet. Per-monitor-v2 windows always broadcast. */
+    return NTUSER_DPI_CONTEXT_GET_AWARENESS( context ) == DPI_AWARENESS_PER_MONITOR_AWARE &&
+           NTUSER_DPI_CONTEXT_GET_VERSION( context ) == 2;
 }
 
 /*****************************************************************

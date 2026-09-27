@@ -1174,7 +1174,7 @@
 @ stub -syscall NtUserIsResizeLayoutSynchronizationEnabled
 @ stdcall -syscall NtUserIsTopLevelWindow(long)
 @ stub -syscall NtUserIsTouchWindow
-@ stub -syscall NtUserIsWindowBroadcastingDpiToChildren
+@ stdcall -syscall NtUserIsWindowBroadcastingDpiToChildren(long)
 @ stub -syscall NtUserIsWindowDisplayChangeSuppressed
 @ stub -syscall NtUserIsWindowGDIScaledDpiMessageEnabled
 @ stdcall -syscall NtUserKillSystemTimer(long long)

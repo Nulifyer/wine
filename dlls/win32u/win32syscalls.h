@@ -1176,7 +1176,7 @@
     SYSCALL_ENTRY( 0x1494, NtUserIsResizeLayoutSynchronizationEnabled, 0 ) \
     SYSCALL_ENTRY( 0x1495, NtUserIsTopLevelWindow, 4 ) \
     SYSCALL_ENTRY( 0x1496, NtUserIsTouchWindow, 0 ) \
-    SYSCALL_ENTRY( 0x1497, NtUserIsWindowBroadcastingDpiToChildren, 0 ) \
+    SYSCALL_ENTRY( 0x1497, NtUserIsWindowBroadcastingDpiToChildren, 4 ) \
     SYSCALL_ENTRY( 0x1498, NtUserIsWindowDisplayChangeSuppressed, 0 ) \
     SYSCALL_ENTRY( 0x1499, NtUserIsWindowGDIScaledDpiMessageEnabled, 0 ) \
     SYSCALL_ENTRY( 0x149a, NtUserKillSystemTimer, 8 ) \
@@ -2718,7 +2718,7 @@
     SYSCALL_ENTRY( 0x1494, NtUserIsResizeLayoutSynchronizationEnabled, 0 ) \
     SYSCALL_ENTRY( 0x1495, NtUserIsTopLevelWindow, 8 ) \
     SYSCALL_ENTRY( 0x1496, NtUserIsTouchWindow, 0 ) \
-    SYSCALL_ENTRY( 0x1497, NtUserIsWindowBroadcastingDpiToChildren, 0 ) \
+    SYSCALL_ENTRY( 0x1497, NtUserIsWindowBroadcastingDpiToChildren, 8 ) \
     SYSCALL_ENTRY( 0x1498, NtUserIsWindowDisplayChangeSuppressed, 0 ) \
     SYSCALL_ENTRY( 0x1499, NtUserIsWindowGDIScaledDpiMessageEnabled, 0 ) \
     SYSCALL_ENTRY( 0x149a, NtUserKillSystemTimer, 16 ) \
@@ -3820,7 +3820,6 @@
     SYSCALL_STUB( NtUserIsQueueAttached ) \
     SYSCALL_STUB( NtUserIsResizeLayoutSynchronizationEnabled ) \
     SYSCALL_STUB( NtUserIsTouchWindow ) \
-    SYSCALL_STUB( NtUserIsWindowBroadcastingDpiToChildren ) \
     SYSCALL_STUB( NtUserIsWindowDisplayChangeSuppressed ) \
     SYSCALL_STUB( NtUserIsWindowGDIScaledDpiMessageEnabled ) \
     SYSCALL_STUB( NtUserLW_LoadFonts ) \
