@@ -1,0 +1,26 @@
+/* Proxies for WinRT delegates used by Windows.UI.Xaml. */
+
+#pragma makedep proxy
+#pragma makedep register
+#pragma makedep ident
+
+import "inspectable.idl";
+
+[
+    object,
+    uuid(5c21c742-2ced-4fd9-ba38-7118d40e966b),
+    pointer_default(unique)
+]
+interface IWindowSizeChangedEventHandler : IUnknown
+{
+    [local] HRESULT GetIids([out] ULONG *iid_count, [out, size_is(,*iid_count)] IID **iids);
+    [local] HRESULT GetRuntimeClassName([out] void **class_name);
+    [local] HRESULT GetTrustLevel([out] int *trust_level);
+    HRESULT Invoke([in] IInspectable *sender, [in] IInspectable *args);
+}
+
+[
+    threading(both),
+    uuid(b8da6310-e19b-11d0-933c-00a0c90dcaa9)
+]
+coclass PSFactoryBuffer { interface IPSFactoryBuffer; }

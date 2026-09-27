@@ -14,6 +14,7 @@ SOURCES = \
 	actxprxy_shldisp.idl \
 	actxprxy_shobjidl.idl \
 	actxprxy_winrt_shell.idl \
+	actxprxy_winrt_xaml.idl \
 	actxprxy_urlhist.idl \
 	usrmarshal.c
 
