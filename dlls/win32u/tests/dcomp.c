@@ -2733,6 +2733,86 @@ done:
     CloseHandle( event );
 }
 
+static void test_keyframe_animation_protocol(void)
+{
+    static const UINT expected[] = {
+        16, 0x28, 1, 0x9d,
+        16, 0x28, 2, 0x02,
+        16, 0x28, 3, 0x5c,
+        44, 0x11, 3, 0, 0, 0, 0, 0, 0, 0, 0x12,
+        16, 0x12, 3, 0,
+        72, 0xd4, 3, 7, 1, 0x1388, 0x150, 0, 0x3f800000,
+            0, 0, 0, 2, 0, 0, 0, 0, 0,
+        36, 0xda, 3, 0, 0, 0, 0, 1, 0,
+        16, 0xd7, 3, 0,
+        16, 0xd8, 3, 0,
+        16, 0xd6, 3, 0x3f800000,
+    };
+    static const UINT create[] = {
+        2, 1, 0x9d, 0,
+        2, 2, 0x02, 0,
+        2, 3, 0x5c, 0,
+    };
+    static const UINT expression_type[] = {11, 3, 0, 0, 0x12, 0};
+    static const UINT keyframe_type[] = {11, 3, 0x0a, 0, 7, 0};
+    static const UINT duration[] = {11, 3, 0x0c, 0, 0x1388, 0};
+    static const UINT iterations[] = {11, 3, 0x0d, 0, 0x150, 0};
+    static const UINT value_reference[] = {16, 3, 0x0b, 1};
+    static const UINT animation_reference[] = {16, 3, 0x18, 2};
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = NULL, state;
+    UINT channel = 0, size = 0x1000, batch;
+    UINT64 cookie = 0;
+    NTSTATUS status;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create keyframe event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got keyframe connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got keyframe channel status %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got keyframe bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got keyframe create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    status = process_dcomp_test_command( channel, buffer, create, sizeof(create) );
+    ok( status == STATUS_SUCCESS, "got keyframe create status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, expression_type,
+                                         sizeof(expression_type) );
+    ok( status == STATUS_SUCCESS, "got keyframe expression type status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, keyframe_type,
+                                         sizeof(keyframe_type) );
+    ok( status == STATUS_SUCCESS, "got keyframe type status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, duration, sizeof(duration) );
+    ok( status == STATUS_SUCCESS, "got keyframe duration status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, iterations, sizeof(iterations) );
+    ok( status == STATUS_SUCCESS, "got keyframe iteration status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, value_reference,
+                                         sizeof(value_reference) );
+    ok( status == STATUS_SUCCESS, "got keyframe value reference status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, animation_reference,
+                                         sizeof(animation_reference) );
+    ok( status == STATUS_SUCCESS, "got keyframe animation reference status %#lx\n", status );
+
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got keyframe commit status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got keyframe batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected, sizeof(expected),
+                               "keyframe animation" );
+
+done:
+    if (buffer) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_shared_manipulation_transform(void)
 {
     struct dcomposition_connection_batch *record = NULL;
@@ -5901,6 +5981,7 @@ START_TEST(dcomp)
     test_legacy_render_target_protocol();
     test_expression_graph();
     test_expression_weak_reference_reuse();
+    test_keyframe_animation_protocol();
     test_shared_manipulation_transform();
     test_shared_section_lifecycle();
     test_frame_lifecycle();

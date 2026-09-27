@@ -106,6 +106,9 @@ struct dcomp_resource_view
     struct dcomp_resource_view *window_sprite_bitmap;
     struct dcomp_resource_view *window_sprite_clip;
     struct dcomp_resource_view *expression_shared_section;
+    struct dcomp_resource_view *keyframe_value;
+    struct dcomp_resource_view *keyframe_animation;
+    struct dcomp_weak_reference keyframe_secondary_value;
     struct dcomp_resource_view *render_target_desktop_tree;
     struct dcomp_resource_view *desktop_tree_root;
     struct dcomp_resource_view *parent;
@@ -240,6 +243,31 @@ struct dcomp_resource_view
     BOOL expression_sources_dirty;
     BOOL expression_reference_info_dirty;
     BOOL expression_nodes_dirty;
+    UINT keyframe_expression_type;
+    UINT64 keyframe_duration;
+    UINT64 keyframe_iteration_count;
+    float keyframe_initial_delay;
+    float keyframe_iteration_duration;
+    float keyframe_playback_rate;
+    float keyframe_progress;
+    UINT keyframe_direction;
+    UINT keyframe_playback_state;
+    UINT keyframe_stop_behavior;
+    UINT keyframe_delay_behavior;
+    UINT keyframe_progress_behavior;
+    UINT keyframe_coordinate_space;
+    UINT keyframe_property_1a;
+    UINT keyframe_property_1b;
+    UINT keyframe_property_1c;
+    UINT64 keyframe_playback_time;
+    UINT64 keyframe_seek_time;
+    BYTE keyframe_flag;
+    BOOL keyframe_initialize_dirty;
+    BOOL keyframe_playback_rate_dirty;
+    BOOL keyframe_progress_dirty;
+    BOOL keyframe_progress_behavior_dirty;
+    BOOL keyframe_seek_dirty;
+    BOOL keyframe_playback_state_dirty;
     BOOL shared_section_bound;
     BOOL shared_section_announced;
     BOOL shared_write;
@@ -646,6 +674,7 @@ static void clear_dcomp_expression_weak_references( struct dcomp_resource_view *
     UINT i;
 
     set_dcomp_weak_reference( &resource->expression_property_resource, NULL );
+    set_dcomp_weak_reference( &resource->keyframe_secondary_value, NULL );
     for (i = 0; i < resource->expression_source_count; ++i)
         set_dcomp_weak_reference( &resource->expression_sources[i], NULL );
 }
@@ -724,6 +753,16 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
     if ((reference = resource->expression_shared_section))
     {
         resource->expression_shared_section = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->keyframe_value))
+    {
+        resource->keyframe_value = NULL;
+        release_dcomp_resource_reference( reference );
+    }
+    if ((reference = resource->keyframe_animation))
+    {
+        resource->keyframe_animation = NULL;
         release_dcomp_resource_reference( reference );
     }
     if ((reference = resource->render_target_desktop_tree))
@@ -915,6 +954,7 @@ static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource
     resource->references = 1;
     list_init( &resource->weak_references );
     list_init( &resource->expression_property_resource.entry );
+    list_init( &resource->keyframe_secondary_value.entry );
     resource->visual = is_dcomp_visual_resource_type( type );
     resource->visual_opacity = 1.0f;
     resource->component_transform3d_matrix[0] = 1.0f;
@@ -934,6 +974,17 @@ static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource
         resource->rectangle[2] = resource->rectangle[3] = 2097152.0f;
     }
     if (type == 0x3c) resource->expression_base_dirty = resource->expression_property_4_dirty = TRUE;
+    if (type == 0x5c)
+    {
+        resource->expression_base_dirty = resource->expression_property_4_dirty = TRUE;
+        resource->keyframe_playback_rate = 1.0f;
+        resource->keyframe_iteration_duration = 1.0f;
+        resource->keyframe_initialize_dirty = TRUE;
+        resource->keyframe_playback_rate_dirty = TRUE;
+        resource->keyframe_progress_dirty = TRUE;
+        resource->keyframe_progress_behavior_dirty = TRUE;
+        resource->keyframe_playback_state_dirty = TRUE;
+    }
     if (type == 0x60)
     {
         resource->render_target_scale2 = 1.0f;
@@ -2154,6 +2205,178 @@ static NTSTATUS set_dcomp_expression_reference_array_property( struct dcomp_chan
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS set_dcomp_keyframe_integer_property( struct dcomp_resource_view *resource,
+                                                      UINT property, INT64 value )
+{
+    UINT *target = NULL;
+
+    switch (property)
+    {
+    case 0x0a:
+        target = &resource->keyframe_expression_type;
+        break;
+    case 0x0c:
+        if (resource->keyframe_duration == value) return STATUS_SUCCESS;
+        resource->keyframe_duration = value;
+        resource->keyframe_initialize_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 0x0d:
+        if (resource->keyframe_iteration_count == value) return STATUS_SUCCESS;
+        resource->keyframe_iteration_count = value;
+        resource->keyframe_initialize_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 0x11:
+        if ((UINT64)value > 4) return STATUS_INVALID_PARAMETER;
+        target = &resource->keyframe_direction;
+        break;
+    case 0x12:
+        if ((UINT64)value > 2) return STATUS_INVALID_PARAMETER;
+        target = &resource->keyframe_stop_behavior;
+        break;
+    case 0x13:
+    {
+        LARGE_INTEGER counter;
+
+        if ((UINT64)value > 2) return STATUS_INVALID_PARAMETER;
+        if (resource->keyframe_playback_state == value) return STATUS_SUCCESS;
+        if (value == 1 && resource->keyframe_playback_state == 0)
+        {
+            NtQueryPerformanceCounter( &counter, NULL );
+            resource->keyframe_playback_time = counter.QuadPart;
+        }
+        else if (!value)
+            resource->keyframe_playback_time = 0;
+        resource->keyframe_playback_state = value;
+        resource->keyframe_playback_state_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    case 0x14:
+        target = &resource->keyframe_coordinate_space;
+        break;
+    case 0x15:
+        if ((UINT64)value > 4) return STATUS_INVALID_PARAMETER;
+        target = &resource->keyframe_delay_behavior;
+        break;
+    case 0x1a:
+        target = &resource->keyframe_property_1a;
+        break;
+    case 0x1b:
+        target = &resource->keyframe_property_1b;
+        break;
+    case 0x1c:
+        if ((UINT64)value > 1) return STATUS_INVALID_PARAMETER;
+        target = &resource->keyframe_property_1c;
+        break;
+    case 0x21:
+        if ((UINT64)value > 1) return STATUS_INVALID_PARAMETER;
+        if (resource->keyframe_progress_behavior == value) return STATUS_SUCCESS;
+        resource->keyframe_progress_behavior = value;
+        resource->keyframe_progress_behavior_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 0x22:
+        resource->keyframe_flag = !!value;
+        resource->keyframe_initialize_dirty = TRUE;
+        return STATUS_SUCCESS;
+    default:
+        return set_dcomp_expression_integer_property( resource, property, value );
+    }
+
+    if (*target != (UINT)value)
+    {
+        *target = value;
+        resource->keyframe_initialize_dirty = TRUE;
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_keyframe_float_property( struct dcomp_resource_view *resource,
+                                                    UINT property, float value )
+{
+    float *target;
+    BOOL *dirty;
+
+    switch (property)
+    {
+    case 0x0f:
+        if (value < 0.0f) return STATUS_INVALID_PARAMETER;
+        target = &resource->keyframe_initial_delay;
+        dirty = &resource->keyframe_initialize_dirty;
+        break;
+    case 0x10:
+        if (value <= 0.0f && value != -1.0f) return STATUS_INVALID_PARAMETER;
+        target = &resource->keyframe_iteration_duration;
+        dirty = &resource->keyframe_initialize_dirty;
+        break;
+    case 0x1e:
+        target = &resource->keyframe_playback_rate;
+        dirty = &resource->keyframe_playback_rate_dirty;
+        break;
+    case 0x20:
+        if (value < 0.0f || value > 1.0f) return STATUS_INVALID_PARAMETER;
+        target = &resource->keyframe_progress;
+        dirty = &resource->keyframe_progress_dirty;
+        break;
+    default:
+        return STATUS_NOT_SUPPORTED;
+    }
+    if (*target != value)
+    {
+        *target = value;
+        *dirty = TRUE;
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_keyframe_buffer_property( struct dcomp_resource_view *resource,
+                                                     UINT property, const BYTE *data, UINT size )
+{
+    LARGE_INTEGER counter;
+
+    if (property == 5)
+        return set_dcomp_expression_buffer_property( resource, property, data, size );
+    if (property != 0x16) return STATUS_NOT_SUPPORTED;
+    if (size != sizeof(resource->keyframe_seek_time)) return STATUS_INVALID_PARAMETER;
+    NtQueryPerformanceCounter( &counter, NULL );
+    resource->keyframe_playback_time = counter.QuadPart;
+    memcpy( &resource->keyframe_seek_time, data, sizeof(resource->keyframe_seek_time) );
+    resource->keyframe_seek_dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_keyframe_reference_property( struct dcomp_channel_view *view,
+                                                        struct dcomp_resource_view *resource,
+                                                        UINT property, UINT reference_id )
+{
+    struct dcomp_resource_view *reference = NULL;
+
+    if (reference_id && !(reference = find_dcomp_resource_view( view, reference_id )))
+        return STATUS_ACCESS_DENIED;
+    if (property == 0x0b)
+    {
+        if (reference && !is_dcomp_derived_resource_type( reference->type, 0x9d ))
+            return STATUS_INVALID_PARAMETER;
+        replace_dcomp_resource_reference( &resource->keyframe_value, reference );
+        resource->keyframe_initialize_dirty = TRUE;
+    }
+    else if (property == 0x18)
+    {
+        if (reference && reference->type != 2) return STATUS_INVALID_PARAMETER;
+        replace_dcomp_resource_reference( &resource->keyframe_animation, reference );
+        resource->keyframe_initialize_dirty = TRUE;
+    }
+    else if (property == 0x19)
+    {
+        if (reference && !is_dcomp_derived_resource_type( reference->type, 0x9d ))
+            return STATUS_INVALID_PARAMETER;
+        set_dcomp_weak_reference( &resource->keyframe_secondary_value, reference );
+        resource->keyframe_initialize_dirty = TRUE;
+    }
+    else
+        return set_dcomp_expression_reference_property( view, resource, property, reference_id );
+    remove_unannounced_dcomp_resources( view );
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS set_dcomp_visual_target_root( struct dcomp_channel_view *view,
                                                struct dcomp_resource_view *target,
                                                UINT property, UINT root_id )
@@ -2466,6 +2689,11 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                 status = set_dcomp_rectangle_integer_property( resource, property, value );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 0x5c)
+            {
+                status = set_dcomp_keyframe_integer_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
             else if (resource->type == 0x3c)
             {
                 status = set_dcomp_expression_integer_property( resource, property, value );
@@ -2523,6 +2751,11 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                 status = set_dcomp_surface_brush_float_property( resource, property, value );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 0x5c)
+            {
+                status = set_dcomp_keyframe_float_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
         }
         else if (type == 15)
         {
@@ -2566,6 +2799,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                 if ((status = set_dcomp_property_set_buffer_property( resource, property,
                                                                        buffer + 16, size )))
                     return status;
+            }
+            else if (resource->type == 0x5c)
+            {
+                status = set_dcomp_keyframe_buffer_property( resource, property,
+                                                              buffer + 16, size );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
             else if (resource->type == 0x3c)
             {
@@ -2641,6 +2880,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             else if (resource->visual)
             {
                 status = set_dcomp_visual_reference_property( view, resource, property, root_id );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+            else if (resource->type == 0x5c)
+            {
+                status = set_dcomp_keyframe_reference_property( view, resource,
+                                                                 property, root_id );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
             else if (resource->type == 0x3c)
@@ -3671,6 +3916,110 @@ static BYTE *emit_dcomp_expression_updates( BYTE *cursor,
     return cursor;
 }
 
+static data_size_t dcomp_keyframe_update_size( const struct dcomp_resource_view *resource )
+{
+    data_size_t size = dcomp_expression_update_size( resource );
+
+    if (resource->keyframe_initialize_dirty && resource->keyframe_value &&
+        resource->keyframe_iteration_count) size += 72;
+    if (resource->keyframe_playback_state_dirty) size += 36;
+    if (resource->keyframe_progress_dirty) size += 16;
+    if (resource->keyframe_progress_behavior_dirty) size += 16;
+    if (resource->keyframe_seek_dirty) size += 36;
+    if (resource->keyframe_playback_rate_dirty) size += 16;
+    return size;
+}
+
+static BYTE *emit_dcomp_keyframe_updates( BYTE *cursor,
+                                           const struct dcomp_resource_view *resource )
+{
+    struct dcomp_resource_view *reference;
+    UINT command[18];
+
+    cursor = emit_dcomp_expression_updates( cursor, resource );
+    if (resource->keyframe_initialize_dirty && resource->keyframe_value &&
+        resource->keyframe_iteration_count)
+    {
+        memset( command, 0, sizeof(command) );
+        command[0] = sizeof(command);
+        command[1] = 0xd4; /* MILCMD_KEYFRAMEANIMATION_SETKEYFRAMEDATA */
+        command[2] = resource->id;
+        command[3] = resource->keyframe_expression_type;
+        command[4] = resource->keyframe_value->id;
+        command[5] = resource->keyframe_duration;
+        command[6] = resource->keyframe_iteration_count;
+        memcpy( command + 7, &resource->keyframe_initial_delay,
+                sizeof(resource->keyframe_initial_delay) );
+        memcpy( command + 8, &resource->keyframe_iteration_duration,
+                sizeof(resource->keyframe_iteration_duration) );
+        command[9] = resource->keyframe_direction;
+        command[10] = resource->keyframe_stop_behavior;
+        command[11] = resource->keyframe_delay_behavior;
+        if (resource->keyframe_animation) command[12] = resource->keyframe_animation->id;
+        if ((reference = resource->keyframe_secondary_value.target)) command[13] = reference->id;
+        command[14] = resource->keyframe_property_1a;
+        command[15] = resource->keyframe_property_1b;
+        command[16] = resource->keyframe_property_1c;
+        ((BYTE *)command)[68] = resource->keyframe_flag;
+        memcpy( cursor, command, sizeof(command) );
+        cursor += sizeof(command);
+    }
+    if (resource->keyframe_playback_state_dirty)
+    {
+        memset( command, 0, 36 );
+        command[0] = 36;
+        command[1] = 0xda; /* MILCMD_KEYFRAMEANIMATION_UPDATEPLAYBACKSTATE */
+        command[2] = resource->id;
+        command[3] = resource->keyframe_playback_state;
+        memcpy( (BYTE *)command + 20, &resource->keyframe_playback_time,
+                sizeof(resource->keyframe_playback_time) );
+        ((BYTE *)command)[28] = 1;
+        memcpy( cursor, command, 36 );
+        cursor += 36;
+    }
+    if (resource->keyframe_progress_dirty)
+    {
+        UINT progress[4] = {16, 0xd7, resource->id};
+
+        memcpy( progress + 3, &resource->keyframe_progress,
+                sizeof(resource->keyframe_progress) );
+        memcpy( cursor, progress, sizeof(progress) );
+        cursor += sizeof(progress);
+    }
+    if (resource->keyframe_progress_behavior_dirty)
+    {
+        UINT behavior[4] = {16, 0xd8, resource->id,
+                            resource->keyframe_progress_behavior};
+
+        memcpy( cursor, behavior, sizeof(behavior) );
+        cursor += sizeof(behavior);
+    }
+    if (resource->keyframe_seek_dirty)
+    {
+        memset( command, 0, 36 );
+        command[0] = 36;
+        command[1] = 0xd9; /* MILCMD_KEYFRAMEANIMATION_SETSEEKSTATE */
+        command[2] = resource->id;
+        memcpy( command + 3, &resource->keyframe_playback_time,
+                sizeof(resource->keyframe_playback_time) );
+        memcpy( (BYTE *)command + 20, &resource->keyframe_seek_time,
+                sizeof(resource->keyframe_seek_time) );
+        ((BYTE *)command)[28] = 1;
+        memcpy( cursor, command, 36 );
+        cursor += 36;
+    }
+    if (resource->keyframe_playback_rate_dirty)
+    {
+        UINT rate[4] = {16, 0xd6, resource->id};
+
+        memcpy( rate + 3, &resource->keyframe_playback_rate,
+                sizeof(resource->keyframe_playback_rate) );
+        memcpy( cursor, rate, sizeof(rate) );
+        cursor += sizeof(rate);
+    }
+    return cursor;
+}
+
 static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
                                              BYTE **data, data_size_t *data_size )
 {
@@ -3773,6 +4122,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             resource_size += dcomp_property_set_update_size( resource );
         if (!resource->released && resource->type == 0x3c)
             resource_size += dcomp_expression_update_size( resource );
+        if (!resource->released && resource->type == 0x5c)
+            resource_size += dcomp_keyframe_update_size( resource );
         if (!resource->released && resource->type == 0x6a)
             resource_size += dcomp_manipulation_update_size( resource );
         if (!resource->released && resource->type == 0x2a &&
@@ -4008,6 +4359,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             cursor = emit_dcomp_property_set_updates( cursor, resource );
         if (resource->type == 0x3c)
             cursor = emit_dcomp_expression_updates( cursor, resource );
+        if (resource->type == 0x5c)
+            cursor = emit_dcomp_keyframe_updates( cursor, resource );
         if (resource->type == 0x6a)
             cursor = emit_dcomp_manipulation_updates( cursor, resource );
     }
@@ -4154,6 +4507,12 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view,
             resource->expression_sources_dirty = FALSE;
             resource->expression_reference_info_dirty = FALSE;
             resource->expression_nodes_dirty = FALSE;
+            resource->keyframe_initialize_dirty = FALSE;
+            resource->keyframe_playback_rate_dirty = FALSE;
+            resource->keyframe_progress_dirty = FALSE;
+            resource->keyframe_progress_behavior_dirty = FALSE;
+            resource->keyframe_seek_dirty = FALSE;
+            resource->keyframe_playback_state_dirty = FALSE;
             resource->manipulation_components_dirty = FALSE;
             resource->manipulation_cookie_dirty = FALSE;
             if (resource->shared_section_bound) resource->shared_section_announced = TRUE;
