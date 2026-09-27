@@ -2979,6 +2979,8 @@ static LRESULT CALLBACK cowait_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
 {
     if(cowait_msgs_last < ARRAY_SIZE(cowait_msgs))
         cowait_msgs[cowait_msgs_last++] = msg;
+    if(msg == WM_TIMER)
+        KillTimer(hwnd, wparam);
     if(msg == WM_DDE_FIRST)
         return 6;
     return DefWindowProcA(hwnd, msg, wparam, lparam);
@@ -3109,6 +3111,7 @@ static void test_CoWaitForMultipleHandles(void)
     BOOL success;
     HRESULT hr;
     HWND hWnd;
+    UINT_PTR timer_id;
     MSG msg;
 
     hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -3295,6 +3298,32 @@ static void test_CoWaitForMultipleHandles(void)
     index = WaitForSingleObject(thread, 200);
     ok(index == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
     CloseHandle(thread);
+
+    /* Explicit window-message dispatch also applies to ordinary posted messages. */
+    cowait_msgs_reset();
+    index = 0xdeadbeef;
+    PostMessageA(hWnd, WM_USER + 2, 0, 0);
+    success = PeekMessageA(&msg, hWnd, WM_USER + 2, WM_USER + 2, PM_NOREMOVE);
+    ok(success, "PeekMessageA returned FALSE\n");
+    hr = CoWaitForMultipleHandles(COWAIT_INPUTAVAILABLE | COWAIT_DISPATCH_WINDOW_MESSAGES,
+                                  50, 2, handles, &index);
+    ok(hr == RPC_S_CALLPENDING, "expected RPC_S_CALLPENDING, got 0x%08lx\n", hr);
+    cowait_msgs_expect_notified(WM_USER + 2);
+    cowait_msgs_expect_empty();
+    success = PeekMessageA(&msg, hWnd, WM_USER + 2, WM_USER + 2, PM_REMOVE);
+    ok(!success, "CoWaitForMultipleHandles did not dispatch the posted message\n");
+
+    /* The wake mask must cover every category that explicit dispatch can consume. */
+    cowait_msgs_reset();
+    index = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    timer_id = SetTimer(hWnd, 0x1234, 1, NULL);
+    ok(timer_id == 0x1234, "SetTimer failed, error %lu\n", GetLastError());
+    hr = CoWaitForMultipleHandles(COWAIT_INPUTAVAILABLE | COWAIT_DISPATCH_WINDOW_MESSAGES,
+                                  500, 2, handles, &index);
+    ok(hr == RPC_S_CALLPENDING, "expected RPC_S_CALLPENDING, got 0x%08lx\n", hr);
+    cowait_msgs_expect_notified(WM_TIMER);
+    cowait_msgs_expect_empty();
 
     cowait_msgs_reset();
     PostMessageA(hWnd, 0, 0, 0);

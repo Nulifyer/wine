@@ -2388,10 +2388,15 @@ HRESULT WINAPI CoRevokeInitializeSpy(ULARGE_INTEGER cookie)
     return S_OK;
 }
 
-static BOOL com_peek_message(struct apartment *apt, MSG *msg)
+static BOOL com_peek_message(struct apartment *apt, MSG *msg, DWORD flags)
 {
     /* First try to retrieve messages for incoming COM calls to the apartment window */
-    return (apt->win && PeekMessageW(msg, apt->win, 0, 0, PM_REMOVE | PM_NOYIELD)) ||
+    if (apt->win && PeekMessageW(msg, apt->win, 0, 0, PM_REMOVE | PM_NOYIELD)) return TRUE;
+
+    if (flags & COWAIT_DISPATCH_WINDOW_MESSAGES)
+        return PeekMessageW(msg, NULL, 0, 0, PM_REMOVE | PM_NOYIELD);
+
+    return
             /* Next retrieve other messages necessary for the app to remain responsive */
             PeekMessageW(msg, NULL, WM_DDE_FIRST, WM_DDE_LAST, PM_REMOVE | PM_NOYIELD) ||
             PeekMessageW(msg, NULL, 0, 0, PM_QS_PAINT | PM_QS_SENDMESSAGE | PM_REMOVE | PM_NOYIELD);
@@ -2436,12 +2441,17 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD flags, DWORD timeout, ULONG handle
         wait_flags |= MWMO_WAITALL;
     if (flags & COWAIT_ALERTABLE)
         wait_flags |= MWMO_ALERTABLE;
+    if (flags & COWAIT_INPUTAVAILABLE)
+        wait_flags |= MWMO_INPUTAVAILABLE;
 
     start_time = GetTickCount();
 
     while (TRUE)
     {
+        DWORD wake_mask = QS_SENDMESSAGE | QS_ALLPOSTMESSAGE | QS_PAINT;
         DWORD now = GetTickCount(), res;
+
+        if (flags & COWAIT_DISPATCH_WINDOW_MESSAGES) wake_mask = QS_ALLINPUT;
 
         if (now - start_time > timeout)
         {
@@ -2464,7 +2474,7 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD flags, DWORD timeout, ULONG handle
             if (res == WAIT_TIMEOUT)
                 res = MsgWaitForMultipleObjectsEx(handle_count, handles,
                         timeout == INFINITE ? INFINITE : start_time + timeout - now,
-                        QS_SENDMESSAGE | QS_ALLPOSTMESSAGE | QS_PAINT, wait_flags);
+                        wake_mask, wait_flags);
 
             if (res == WAIT_OBJECT_0 + handle_count)  /* messages available */
             {
@@ -2506,7 +2516,7 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD flags, DWORD timeout, ULONG handle
 
                 /* Some apps (e.g. Visio 2010) don't handle WM_PAINT properly and loop forever,
                  * so after processing 100 messages we go back to checking the wait handles */
-                while (msg_count++ < 100 && com_peek_message(apt, &msg))
+                while (msg_count++ < 100 && com_peek_message(apt, &msg, flags))
                 {
                     if (msg.message == WM_QUIT)
                     {
