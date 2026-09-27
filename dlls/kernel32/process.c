@@ -535,16 +535,6 @@ BOOL WINAPI CmdBatNotification( BOOL bBatchRunning )
     return FALSE;
 }
 
-/***********************************************************************
- *           RegisterApplicationRestart       (KERNEL32.@)
- */
-HRESULT WINAPI RegisterApplicationRestart(PCWSTR pwzCommandLine, DWORD dwFlags)
-{
-    FIXME("(%s,%ld)\n", debugstr_w(pwzCommandLine), dwFlags);
-
-    return S_OK;
-}
-
 /**********************************************************************
  *           WTSGetActiveConsoleSessionId     (KERNEL32.@)
  */
@@ -895,16 +885,6 @@ BOOL WINAPI GetProcessDEPPolicy(HANDLE process, LPDWORD flags, PBOOL permanent)
 
     if (permanent) *permanent = (dep_flags & MEM_EXECUTE_OPTION_PERMANENT) != 0;
     return TRUE;
-}
-
-/***********************************************************************
- *           UnregisterApplicationRestart       (KERNEL32.@)
- */
-HRESULT WINAPI UnregisterApplicationRestart(void)
-{
-    FIXME(": stub\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return S_OK;
 }
 
 /***********************************************************************

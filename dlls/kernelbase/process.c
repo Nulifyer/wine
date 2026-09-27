@@ -810,6 +810,28 @@ HRESULT WINAPI /* DECLSPEC_HOTPATCH */ GetApplicationRestartSettings( HANDLE pro
 
 
 /***********************************************************************
+ *           RegisterApplicationRestart   (kernelbase.@)
+ */
+HRESULT WINAPI RegisterApplicationRestart( const WCHAR *cmdline, DWORD flags )
+{
+    FIXME( "%s, %#lx: stub\n", debugstr_w(cmdline), flags );
+
+    if (cmdline && wcslen(cmdline) >= RESTART_MAX_CMD_LINE) return E_INVALIDARG;
+    return S_OK;
+}
+
+
+/***********************************************************************
+ *           UnregisterApplicationRestart   (kernelbase.@)
+ */
+HRESULT WINAPI UnregisterApplicationRestart(void)
+{
+    FIXME( ": stub\n" );
+    return S_OK;
+}
+
+
+/***********************************************************************
  *           GetCurrentProcess   (kernelbase.@)
  */
 HANDLE WINAPI kernelbase_GetCurrentProcess(void)

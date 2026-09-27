@@ -1381,6 +1381,7 @@
 @ stdcall RegSetValueExW(long wstr long long ptr long)
 @ stdcall RegUnLoadKeyA(long str)
 @ stdcall RegUnLoadKeyW(long wstr)
+@ stdcall RegisterApplicationRestart(wstr long)
 # @ stub RegisterBadMemoryNotification
 @ stdcall RegisterGPNotificationInternal() gpapi.RegisterGPNotificationInternalWorker
 # @ stub RegisterStateChangeNotification
@@ -1692,6 +1693,7 @@
 @ stdcall UnmapViewOfFile(ptr)
 @ stdcall UnmapViewOfFile2(long ptr long)
 @ stdcall UnmapViewOfFileEx(ptr long)
+@ stdcall UnregisterApplicationRestart()
 # @ stub UnregisterBadMemoryNotification
 @ stdcall UnregisterGPNotificationInternal() gpapi.UnregisterGPNotificationInternalWorker
 # @ stub UnregisterStateChangeNotification

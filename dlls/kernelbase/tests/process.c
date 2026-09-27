@@ -47,6 +47,39 @@ static HRESULT (WINAPI *pGetMachineTypeAttributes)(USHORT, MACHINE_ATTRIBUTES *)
 static BOOL (WINAPI *pIsWow64Process2)(HANDLE, USHORT *, USHORT *);
 static DWORD (WINAPI *pWTSGetServiceSessionId)(void);
 static BOOL (WINAPI *pWTSIsServerContainer)(void);
+static HRESULT (WINAPI *pRegisterApplicationRestart)(const WCHAR *, DWORD);
+static HRESULT (WINAPI *pUnregisterApplicationRestart)(void);
+
+static void test_application_restart(void)
+{
+    WCHAR command[RESTART_MAX_CMD_LINE + 1];
+    unsigned int i;
+    HRESULT hr;
+
+    if (!pRegisterApplicationRestart || !pUnregisterApplicationRestart)
+    {
+        win_skip("Application restart functions are not available.\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    hr = pRegisterApplicationRestart(NULL, 0x80000008);
+    ok(hr == S_OK, "got hr %#lx\n", hr);
+    ok(GetLastError() == 0xdeadbeef, "last error changed to %lu\n", GetLastError());
+
+    for (i = 0; i < RESTART_MAX_CMD_LINE; ++i) command[i] = 'a';
+    command[RESTART_MAX_CMD_LINE - 1] = 0;
+    hr = pRegisterApplicationRestart(command, 0x80000008);
+    ok(hr == S_OK, "got hr %#lx\n", hr);
+
+    command[RESTART_MAX_CMD_LINE - 1] = 'a';
+    command[RESTART_MAX_CMD_LINE] = 0;
+    hr = pRegisterApplicationRestart(command, 0);
+    ok(hr == E_INVALIDARG, "got hr %#lx\n", hr);
+
+    hr = pUnregisterApplicationRestart();
+    ok(hr == S_OK, "got hr %#lx\n", hr);
+}
 
 static void test_CompareObjectHandles(void)
 {
@@ -740,6 +773,8 @@ static void init_funcs(void)
     X(UnmapViewOfFile2);
     X(WTSGetServiceSessionId);
     X(WTSIsServerContainer);
+    X(RegisterApplicationRestart);
+    X(UnregisterApplicationRestart);
 
     hmod = GetModuleHandleA("ntdll.dll");
 
@@ -764,4 +799,5 @@ START_TEST(process)
     test_GetMachineTypeAttributes();
     test_windows_light_process();
     test_WTSIsServerContainer();
+    test_application_restart();
 }
