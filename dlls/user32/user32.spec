@@ -50,7 +50,7 @@
 2531 stub -noname SetCalibrationData  # NtUserSetCalibrationData
 2532 stub -noname SetDisplayMapping  # NtUserSetDisplayMapping
 2533 stub -noname CanBrokerForceForeground  # NtUserCanBrokerForceForeground
-2534 stub @
+2534 stdcall -noname InternalClipCursor(long long)
 2535 stub @
 2536 stdcall -noname SetWindowServicesDestroyCallback(ptr ptr)
 2537 stub -noname SendEventMessage  # NtUserSendEventMessage
@@ -127,9 +127,9 @@
 2612 stdcall -noname InitThreadCoreMessagingIocp(long) NtUserInitThreadCoreMessagingIocp
 2613 stdcall -noname DrainThreadCoreMessagingCompletions() NtUserDrainThreadCoreMessagingCompletions
 2614 stub -noname GetResizeDCompositionSynchronizationObject  # NtUserGetResizeDCompositionSynchronizationObject
-2615 stub -noname EnableResizeLayoutSynchronization  # NtUserEnableResizeLayoutSynchronization
+2615 stdcall -noname EnableResizeLayoutSynchronization(long long)
 2616 stub -noname BeginLayoutUpdate  # NtUserBeginLayoutUpdate
-2617 stub -noname IsResizeLayoutSynchronizationEnabled  # NtUserIsResizeLayoutSynchronizationEnabled
+2617 stdcall -noname IsResizeLayoutSynchronizationEnabled(long)
 2618 stub @
 2619 stub @
 2620 stub @
@@ -138,7 +138,7 @@
 
 2627 stub -noname SetBridgeWindowChild  # NtUserSetBridgeWindowChild
 
-2633 stub -noname CreateActivationObject  # NtUserCreateActivationObject
+2633 stdcall -noname CreateActivationObject(long ptr ptr)  # NtUserCreateActivationObject
 2634 stub -noname SetTSFEventState  # NtUserSetTSFEventState
 2635 stdcall -noname IsWindowGdiScaledX(long)
 2636 stdcall -noname GetCurrentDpiInfoForWindow(long ptr) NtUserGetCurrentDpiInfoForWindow
@@ -160,7 +160,7 @@
 2652 stdcall -noname GetUniformSpaceMapping(long ptr) NtUserGetUniformSpaceMapping
 2653 stub -noname GetPointerProprietaryId  # NtUserGetPointerProprietaryId
 
-2656 stub -noname EnableMouseInPointerForWindow  # NtUserEnableMouseInPointerForWindow
+2656 stdcall -noname EnableMouseInPointerForWindow(long long)
 2657 stub -noname SetProcessMousewheelRoutingMode  # NtUserSetProcessMousewheelRoutingMode
 2658 stub -noname SetDesktopVisualInputSink  # NtUserSetDesktopVisualInputSink
 2659 stub @
@@ -1113,7 +1113,7 @@
 @ stdcall SetWindowCompositionTransition(long long ptr ptr ptr ptr ptr) NtUserSetWindowCompositionTransition
 @ stdcall SetWindowContextHelpId(long long) NtUserSetWindowContextHelpId
 @ stdcall SetWindowDisplayAffinity(long long)
-# @ stub SetWindowFeedbackSetting
+@ stdcall SetWindowFeedbackSetting(long long long long ptr)
 @ stdcall SetWindowLongA(long long long)
 @ stdcall -arch=win64 SetWindowLongPtrA(long long long)
 @ stdcall -arch=win64 SetWindowLongPtrW(long long long)

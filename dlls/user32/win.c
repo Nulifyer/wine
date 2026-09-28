@@ -120,6 +120,96 @@ HWND WIN_IsCurrentProcess( HWND hwnd )
     return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrentProcessWindow ));
 }
 
+/*************************************************************************
+ *              CreateActivationObject   (USER32.2633)
+ *
+ * The native syscall creates a win32k-side identity used to associate an
+ * InputHost instance with its CoreMessaging activation.  Wine has no
+ * separate win32k object for that association, so preserve the caller's
+ * stable 64-bit identity as the activation token.
+ */
+BOOL WINAPI CreateActivationObject( UINT type, const ULONGLONG *identity,
+                                    ULONGLONG *activation_object )
+{
+    TRACE( "type %u, identity %p, activation_object %p\n", type, identity, activation_object );
+
+    if (!identity || !activation_object)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    *activation_object = *identity;
+    return TRUE;
+}
+
+/*************************************************************************
+ *              InternalClipCursor   (USER32.2534)
+ *
+ * InputHost uses this private helper to confine the pointer to its window
+ * while it owns input.  The native implementation resolves the window rect
+ * before forwarding to the ordinary cursor clipping path.
+ */
+BOOL WINAPI InternalClipCursor( HWND hwnd, BOOL enable )
+{
+    RECT rect;
+
+    TRACE( "hwnd %p, enable %u\n", hwnd, enable );
+
+    if (!enable) return NtUserClipCursor( NULL );
+    if (!hwnd || !GetWindowRect( hwnd, &rect )) return FALSE;
+    return NtUserClipCursor( &rect );
+}
+
+/*************************************************************************
+ *              EnableResizeLayoutSynchronization   (USER32.2615)
+ */
+BOOL WINAPI EnableResizeLayoutSynchronization( HWND hwnd, BOOL enable )
+{
+    static const WCHAR property[] = L"__wine_resize_layout_synchronization";
+
+    TRACE( "hwnd %p, enable %u\n", hwnd, enable );
+
+    if (!IsWindow( hwnd )) return FALSE;
+    if (enable) return SetPropW( hwnd, property, (HANDLE)1 );
+    RemovePropW( hwnd, property );
+    return TRUE;
+}
+
+/*************************************************************************
+ *              IsResizeLayoutSynchronizationEnabled   (USER32.2617)
+ */
+BOOL WINAPI IsResizeLayoutSynchronizationEnabled( HWND hwnd )
+{
+    static const WCHAR property[] = L"__wine_resize_layout_synchronization";
+
+    TRACE( "hwnd %p\n", hwnd );
+    return IsWindow( hwnd ) && GetPropW( hwnd, property ) != NULL;
+}
+
+/*************************************************************************
+ *              SetWindowFeedbackSetting   (USER32.@)
+ */
+BOOL WINAPI SetWindowFeedbackSetting( HWND hwnd, FEEDBACK_TYPE feedback, DWORD flags,
+                                      UINT32 size, const void *configuration )
+{
+    TRACE( "hwnd %p, feedback %u, flags %#lx, size %u, configuration %p\n",
+           hwnd, feedback, flags, size, configuration );
+
+    /* Windows.UI uses this to suppress native touch/pen visual feedback on
+     * its CoreWindow. Wine does not generate that feedback. */
+    return TRUE;
+}
+
+/***********************************************************************
+ *              EnableMouseInPointerForWindow   (USER32.@)
+ */
+BOOL WINAPI EnableMouseInPointerForWindow( HWND hwnd, BOOL enable )
+{
+    FIXME( "hwnd %p: applying per-window mouse-in-pointer state process-wide\n", hwnd );
+    return NtUserEnableMouseInPointer( enable );
+}
+
 
 /***********************************************************************
  *           WIN_IsCurrentThread

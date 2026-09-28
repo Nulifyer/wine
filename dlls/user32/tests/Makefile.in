@@ -19,6 +19,7 @@ SOURCES = \
 	edit.c \
 	generated.c \
 	input.c \
+	inputhost.c \
 	listbox.c \
 	menu.c \
 	monitor.c \
