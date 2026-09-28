@@ -1808,6 +1808,93 @@ static void test_error_reporting(void)
     set_error_reporting_flags(RO_ERROR_REPORTING_USESETERRORINFO);
 }
 
+static void test_language_exception_error_info(void)
+{
+    struct unk_impl language = {{&unk_vtbl}, 1}, propagation1 = {{&unk_vtbl}, 1};
+    struct unk_impl propagation2 = {{&unk_vtbl}, 1};
+    ILanguageExceptionErrorInfo2 *language_info, *head, *previous;
+    ILanguageExceptionErrorInfo *language_info1;
+    IRestrictedErrorInfo *restricted;
+    IUnknown *unknown, *value;
+    HRESULT hr;
+    BOOL ret;
+
+    set_error_reporting_flags(RO_ERROR_REPORTING_USESETERRORINFO);
+    ret = RoOriginateLanguageException(E_FAIL, NULL, &language.IUnknown_iface);
+    ok(ret, "RoOriginateLanguageException failed.\n");
+    ok(language.ref == 2, "Expected language exception refcount 2, got %ld.\n", language.ref);
+
+    hr = GetRestrictedErrorInfo(&restricted);
+    ok(hr == S_OK, "GetRestrictedErrorInfo returned %#lx.\n", hr);
+    hr = IRestrictedErrorInfo_QueryInterface(restricted, &IID_ILanguageExceptionErrorInfo,
+                                             (void **)&language_info1);
+    ok(hr == S_OK, "QueryInterface(ILanguageExceptionErrorInfo) returned %#lx.\n", hr);
+    hr = IRestrictedErrorInfo_QueryInterface(restricted, &IID_ILanguageExceptionErrorInfo2,
+                                             (void **)&language_info);
+    ok(hr == S_OK, "QueryInterface(ILanguageExceptionErrorInfo2) returned %#lx.\n", hr);
+
+    hr = ILanguageExceptionErrorInfo_QueryInterface(language_info1, &IID_IUnknown, (void **)&unknown);
+    ok(hr == S_OK, "QueryInterface(IUnknown) returned %#lx.\n", hr);
+    ok(unknown == (IUnknown *)restricted, "Expected controlling unknown %p, got %p.\n", restricted, unknown);
+    IUnknown_Release(unknown);
+    ILanguageExceptionErrorInfo_Release(language_info1);
+
+    value = NULL;
+    hr = ILanguageExceptionErrorInfo2_GetLanguageException(language_info, &value);
+    ok(hr == S_OK, "GetLanguageException returned %#lx.\n", hr);
+    ok(value == &language.IUnknown_iface, "Expected language exception %p, got %p.\n",
+       &language.IUnknown_iface, value);
+    if (value) IUnknown_Release(value);
+
+    previous = (ILanguageExceptionErrorInfo2 *)0xdeadbeef;
+    hr = ILanguageExceptionErrorInfo2_GetPreviousLanguageExceptionErrorInfo(language_info, &previous);
+    ok(hr == S_OK, "GetPreviousLanguageExceptionErrorInfo returned %#lx.\n", hr);
+    ok(previous == NULL, "Expected no previous error info, got %p.\n", previous);
+    head = (ILanguageExceptionErrorInfo2 *)0xdeadbeef;
+    hr = ILanguageExceptionErrorInfo2_GetPropagationContextHead(language_info, &head);
+    ok(hr == S_OK, "GetPropagationContextHead returned %#lx.\n", hr);
+    ok(head == NULL, "Expected no propagation head, got %p.\n", head);
+
+    hr = ILanguageExceptionErrorInfo2_CapturePropagationContext(language_info,
+                                                                 &propagation1.IUnknown_iface);
+    ok(hr == S_OK, "CapturePropagationContext returned %#lx.\n", hr);
+    ok(propagation1.ref == 2, "Expected propagation refcount 2, got %ld.\n", propagation1.ref);
+    hr = ILanguageExceptionErrorInfo2_CapturePropagationContext(language_info,
+                                                                 &propagation2.IUnknown_iface);
+    ok(hr == S_OK, "CapturePropagationContext returned %#lx.\n", hr);
+    ok(propagation2.ref == 2, "Expected propagation refcount 2, got %ld.\n", propagation2.ref);
+
+    head = NULL;
+    hr = ILanguageExceptionErrorInfo2_GetPropagationContextHead(language_info, &head);
+    ok(hr == S_OK, "GetPropagationContextHead returned %#lx.\n", hr);
+    ok(head != NULL, "Expected a propagation head.\n");
+    value = NULL;
+    hr = ILanguageExceptionErrorInfo2_GetLanguageException(head, &value);
+    ok(hr == S_OK, "GetLanguageException returned %#lx.\n", hr);
+    ok(value == &propagation2.IUnknown_iface, "Expected propagation exception %p, got %p.\n",
+       &propagation2.IUnknown_iface, value);
+    if (value) IUnknown_Release(value);
+
+    previous = NULL;
+    hr = ILanguageExceptionErrorInfo2_GetPreviousLanguageExceptionErrorInfo(head, &previous);
+    ok(hr == S_OK, "GetPreviousLanguageExceptionErrorInfo returned %#lx.\n", hr);
+    ok(previous != NULL, "Expected previous propagation info.\n");
+    value = NULL;
+    hr = ILanguageExceptionErrorInfo2_GetLanguageException(previous, &value);
+    ok(hr == S_OK, "GetLanguageException returned %#lx.\n", hr);
+    ok(value == &propagation1.IUnknown_iface, "Expected propagation exception %p, got %p.\n",
+       &propagation1.IUnknown_iface, value);
+    if (value) IUnknown_Release(value);
+    if (previous) ILanguageExceptionErrorInfo2_Release(previous);
+    if (head) ILanguageExceptionErrorInfo2_Release(head);
+
+    ILanguageExceptionErrorInfo2_Release(language_info);
+    IRestrictedErrorInfo_Release(restricted);
+    ok(language.ref == 1, "Expected language exception refcount 1, got %ld.\n", language.ref);
+    ok(propagation1.ref == 1, "Expected propagation refcount 1, got %ld.\n", propagation1.ref);
+    ok(propagation2.ref == 1, "Expected propagation refcount 1, got %ld.\n", propagation2.ref);
+}
+
 START_TEST(roapi)
 {
     char **argv;
@@ -1833,6 +1920,7 @@ START_TEST(roapi)
     test_RoTransformError();
     test_SetRestrictedErrorInfo();
     test_error_reporting();
+    test_language_exception_error_info();
 
     SetLastError(0xdeadbeef);
     ret = DeleteFileW(L"wine.combase.test.dll");

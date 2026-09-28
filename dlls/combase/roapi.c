@@ -1022,12 +1022,19 @@ struct restricted_error_info
 {
     IRestrictedErrorInfo IRestrictedErrorInfo_iface;
     IErrorInfo IErrorInfo_iface;
+    ILanguageExceptionErrorInfo2 ILanguageExceptionErrorInfo2_iface;
     IRestrictedErrorInfo *previous;
+    IRestrictedErrorInfo *propagation_head;
+    IUnknown *language_exception;
     BSTR description;
     BSTR restricted_description;
     HRESULT code;
+    UINT propagation_count;
     LONG ref;
 };
+
+static HRESULT restricted_error_info_create(HRESULT code, ULONG len_msg, const WCHAR *message, ULONG len_desc,
+        const WCHAR *desc, IRestrictedErrorInfo *previous, IUnknown *language_exception, IErrorInfo **info);
 
 static inline struct restricted_error_info *impl_from_IRestrictedErrorInfo(IRestrictedErrorInfo *iface)
 {
@@ -1048,6 +1055,12 @@ static HRESULT WINAPI restricted_error_info_QueryInterface(IRestrictedErrorInfo 
     if (IsEqualGUID(iid, &IID_IErrorInfo))
     {
         IErrorInfo_AddRef((*out = &impl->IErrorInfo_iface));
+        return S_OK;
+    }
+    if (IsEqualGUID(iid, &IID_ILanguageExceptionErrorInfo) ||
+            IsEqualGUID(iid, &IID_ILanguageExceptionErrorInfo2))
+    {
+        ILanguageExceptionErrorInfo2_AddRef((*out = &impl->ILanguageExceptionErrorInfo2_iface));
         return S_OK;
     }
 
@@ -1073,6 +1086,8 @@ static ULONG WINAPI restricted_error_info_Release(IRestrictedErrorInfo *iface)
     if (!ref)
     {
         if (impl->previous) IRestrictedErrorInfo_Release(impl->previous);
+        if (impl->propagation_head) IRestrictedErrorInfo_Release(impl->propagation_head);
+        if (impl->language_exception) IUnknown_Release(impl->language_exception);
         SysFreeString(impl->description);
         SysFreeString(impl->restricted_description);
         free(impl);
@@ -1198,8 +1213,111 @@ static const IErrorInfoVtbl error_info_vtbl =
     error_info_GetHelpContext
 };
 
+static inline struct restricted_error_info *impl_from_ILanguageExceptionErrorInfo2(
+        ILanguageExceptionErrorInfo2 *iface)
+{
+    return CONTAINING_RECORD(iface, struct restricted_error_info, ILanguageExceptionErrorInfo2_iface);
+}
+
+static HRESULT WINAPI language_exception_error_info_QueryInterface(ILanguageExceptionErrorInfo2 *iface,
+        REFIID iid, void **out)
+{
+    struct restricted_error_info *impl = impl_from_ILanguageExceptionErrorInfo2(iface);
+
+    return IRestrictedErrorInfo_QueryInterface(&impl->IRestrictedErrorInfo_iface, iid, out);
+}
+
+static ULONG WINAPI language_exception_error_info_AddRef(ILanguageExceptionErrorInfo2 *iface)
+{
+    struct restricted_error_info *impl = impl_from_ILanguageExceptionErrorInfo2(iface);
+
+    return IRestrictedErrorInfo_AddRef(&impl->IRestrictedErrorInfo_iface);
+}
+
+static ULONG WINAPI language_exception_error_info_Release(ILanguageExceptionErrorInfo2 *iface)
+{
+    struct restricted_error_info *impl = impl_from_ILanguageExceptionErrorInfo2(iface);
+
+    return IRestrictedErrorInfo_Release(&impl->IRestrictedErrorInfo_iface);
+}
+
+static HRESULT WINAPI language_exception_error_info_GetLanguageException(ILanguageExceptionErrorInfo2 *iface,
+        IUnknown **language_exception)
+{
+    struct restricted_error_info *impl = impl_from_ILanguageExceptionErrorInfo2(iface);
+
+    *language_exception = impl->language_exception;
+    if (*language_exception) IUnknown_AddRef(*language_exception);
+    return S_OK;
+}
+
+static HRESULT WINAPI language_exception_error_info_GetPreviousLanguageExceptionErrorInfo(
+        ILanguageExceptionErrorInfo2 *iface, ILanguageExceptionErrorInfo2 **previous)
+{
+    struct restricted_error_info *impl = impl_from_ILanguageExceptionErrorInfo2(iface);
+
+    if (!previous) return E_INVALIDARG;
+    *previous = NULL;
+    if (!impl->previous) return S_OK;
+    return IRestrictedErrorInfo_QueryInterface(impl->previous, &IID_ILanguageExceptionErrorInfo2,
+                                               (void **)previous);
+}
+
+static HRESULT WINAPI language_exception_error_info_CapturePropagationContext(
+        ILanguageExceptionErrorInfo2 *iface, IUnknown *language_exception)
+{
+    struct restricted_error_info *impl = impl_from_ILanguageExceptionErrorInfo2(iface);
+    IRestrictedErrorInfo *head = NULL;
+    IErrorInfo *error_info = NULL;
+    UINT32 flags;
+    HRESULT hr;
+
+    if (impl->propagation_count >= 150) return S_OK;
+    RoGetErrorReportingFlags(&flags);
+    if ((flags & RO_ERROR_REPORTING_SUPPRESSSETERRORINFO) ||
+            (!(flags & RO_ERROR_REPORTING_USESETERRORINFO) && !IsDebuggerPresent()))
+        return S_OK;
+
+    hr = restricted_error_info_create(impl->code, SysStringLen(impl->restricted_description),
+            impl->restricted_description, SysStringLen(impl->description), impl->description,
+            impl->propagation_head, language_exception, &error_info);
+    if (FAILED(hr)) return hr;
+
+    hr = IErrorInfo_QueryInterface(error_info, &IID_IRestrictedErrorInfo, (void **)&head);
+    IErrorInfo_Release(error_info);
+    if (FAILED(hr)) return hr;
+
+    if (impl->propagation_head) IRestrictedErrorInfo_Release(impl->propagation_head);
+    impl->propagation_head = head;
+    ++impl->propagation_count;
+    return S_OK;
+}
+
+static HRESULT WINAPI language_exception_error_info_GetPropagationContextHead(
+        ILanguageExceptionErrorInfo2 *iface, ILanguageExceptionErrorInfo2 **head)
+{
+    struct restricted_error_info *impl = impl_from_ILanguageExceptionErrorInfo2(iface);
+
+    if (!head) return E_INVALIDARG;
+    *head = NULL;
+    if (!impl->propagation_head) return S_OK;
+    return IRestrictedErrorInfo_QueryInterface(impl->propagation_head, &IID_ILanguageExceptionErrorInfo2,
+                                               (void **)head);
+}
+
+static const ILanguageExceptionErrorInfo2Vtbl language_exception_error_info_vtbl =
+{
+    language_exception_error_info_QueryInterface,
+    language_exception_error_info_AddRef,
+    language_exception_error_info_Release,
+    language_exception_error_info_GetLanguageException,
+    language_exception_error_info_GetPreviousLanguageExceptionErrorInfo,
+    language_exception_error_info_CapturePropagationContext,
+    language_exception_error_info_GetPropagationContextHead,
+};
+
 static HRESULT restricted_error_info_create(HRESULT code, ULONG len_msg, const WCHAR *message, ULONG len_desc,
-                                     const WCHAR *desc, IRestrictedErrorInfo *previous, IErrorInfo **info)
+        const WCHAR *desc, IRestrictedErrorInfo *previous, IUnknown *language_exception, IErrorInfo **info)
 {
     struct restricted_error_info *impl;
 
@@ -1207,12 +1325,16 @@ static HRESULT restricted_error_info_create(HRESULT code, ULONG len_msg, const W
 
     impl->IRestrictedErrorInfo_iface.lpVtbl = &restricted_error_info_vtbl;
     impl->IErrorInfo_iface.lpVtbl = &error_info_vtbl;
+    impl->ILanguageExceptionErrorInfo2_iface.lpVtbl = &language_exception_error_info_vtbl;
     impl->previous = previous;
     if (previous) IRestrictedErrorInfo_AddRef(previous);
+    impl->language_exception = language_exception;
+    if (language_exception) IUnknown_AddRef(language_exception);
     impl->code = code;
     impl->ref = 1;
     if (!(impl->description = SysAllocStringLen(desc, len_desc)))
     {
+        if (language_exception) IUnknown_Release(language_exception);
         if (previous) IRestrictedErrorInfo_Release(previous);
         free(impl);
         return E_OUTOFMEMORY;
@@ -1225,6 +1347,7 @@ static HRESULT restricted_error_info_create(HRESULT code, ULONG len_msg, const W
     }
     if (!(impl->restricted_description = SysAllocStringLen(message, len_msg)))
     {
+        if (language_exception) IUnknown_Release(language_exception);
         if (previous) IRestrictedErrorInfo_Release(previous);
         SysFreeString(impl->description);
         free(impl);
@@ -1357,13 +1480,21 @@ HRESULT WINAPI RoGetRegistrationStoreContext(UINT32 scope, void *sid, UINT32 fla
     return E_NOTIMPL;
 }
 
+static BOOL ro_originate_error(HRESULT error, UINT max_len, const WCHAR *message,
+        IUnknown *language_exception);
+
 /***********************************************************************
  *      RoOriginateLanguageException (combase.@)
  */
 BOOL WINAPI RoOriginateLanguageException(HRESULT error, HSTRING message, IUnknown *language_exception)
 {
-    FIXME("%#lx, %s, %p: semi-stub\n", error, debugstr_hstring(message), language_exception);
-    return RoOriginateError(error, message);
+    const WCHAR *buf;
+    UINT32 len;
+
+    TRACE("%#lx, %s, %p\n", error, debugstr_hstring(message), language_exception);
+
+    buf = WindowsGetStringRawBuffer(message, &len);
+    return ro_originate_error(error, len, buf, language_exception);
 }
 
 /***********************************************************************
@@ -1390,6 +1521,12 @@ static LONG WINAPI rooriginate_handler(EXCEPTION_POINTERS *ptrs)
  *      RoOriginateErrorW (combase.@)
  */
 BOOL WINAPI RoOriginateErrorW(HRESULT error, UINT max_len, const WCHAR *message)
+{
+    return ro_originate_error(error, max_len, message, NULL);
+}
+
+static BOOL ro_originate_error(HRESULT error, UINT max_len, const WCHAR *message,
+        IUnknown *language_exception)
 {
     BOOL set_error, raise_exception, ret = TRUE;
     UINT32 flags, len_msg = 0, len_desc;
@@ -1422,7 +1559,8 @@ BOOL WINAPI RoOriginateErrorW(HRESULT error, UINT max_len, const WCHAR *message)
         IErrorInfo *info = NULL;
         HRESULT hr;
 
-        if (FAILED(restricted_error_info_create(error, len_msg, message, len_desc, desc, NULL, &info)))
+        if (FAILED(restricted_error_info_create(error, len_msg, message, len_desc, desc, NULL,
+                                                language_exception, &info)))
             ret = FALSE;
         /* If restricted_error_info_create failed, this clears the current error object. */
         if (FAILED(hr = set_error_info(info)))
@@ -1580,7 +1718,8 @@ BOOL WINAPI RoTransformErrorW(HRESULT old_error, HRESULT new_error, UINT max_len
         HRESULT hr;
 
         previous = get_matching_previous_error(old_error);
-        if (FAILED(restricted_error_info_create(new_error, len_msg, message, len_desc, desc, previous, &info)))
+        if (FAILED(restricted_error_info_create(new_error, len_msg, message, len_desc, desc, previous,
+                                                NULL, &info)))
             ret = FALSE;
         if (FAILED(hr = set_error_info(info)))
         {
