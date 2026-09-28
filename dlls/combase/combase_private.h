@@ -130,6 +130,7 @@ struct tlsdata
     CO_MTA_USAGE_COOKIE implicit_mta_cookie; /* mta referenced by roapi from sta thread */
     ULONG_PTR         outgoing_call_state;
     BOOL              chain_restricted_errors;
+    struct list       tls_entry;     /* process-wide TLS registry */
 };
 
 C_ASSERT(offsetof(struct tlsdata, inits) == (sizeof(void *) == 8 ? 0x28 : 0x18));

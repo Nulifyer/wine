@@ -67,6 +67,8 @@ extern HRESULT WINAPI COMBASE_DllGetClassObject(REFCLSID rclsid, REFIID riid, vo
  */
 static LONG com_lockcount;
 static LONG cleanup_flags;
+static struct list tlsdata_list = LIST_INIT(tlsdata_list);
+static SRWLOCK tlsdata_lock = SRWLOCK_INIT;
 
 struct server_reference
 {
@@ -626,9 +628,54 @@ HRESULT WINAPI InternalTlsAllocData(struct tlsdata **data)
 
     (*data)->outgoing_call_state = ~(ULONG_PTR)0;
     list_init(&(*data)->spies);
+    AcquireSRWLockExclusive(&tlsdata_lock);
+    list_add_tail(&tlsdata_list, &(*data)->tls_entry);
+    ReleaseSRWLockExclusive(&tlsdata_lock);
     NtCurrentTeb()->ReservedForOle = *data;
 
     return S_OK;
+}
+
+/***********************************************************************
+ *           CleanupTlsComl2State    (combase.@)
+ */
+void WINAPI CleanupTlsComl2State(struct tlsdata *tlsdata)
+{
+    IErrorInfo *errorinfo;
+
+    TRACE("%p\n", tlsdata);
+
+    if (!tlsdata) return;
+    if ((errorinfo = InterlockedExchangePointer((void **)&tlsdata->errorinfo, NULL)))
+        IErrorInfo_Release(errorinfo);
+}
+
+/***********************************************************************
+ *           CleanupComl2StateInAllTls    (combase.@)
+ */
+void WINAPI CleanupComl2StateInAllTls(void)
+{
+    struct tlsdata *tlsdata;
+    IErrorInfo **errorinfos;
+    unsigned int count = 0, i = 0;
+
+    TRACE("\n");
+
+    AcquireSRWLockShared(&tlsdata_lock);
+    LIST_FOR_EACH_ENTRY(tlsdata, &tlsdata_list, struct tlsdata, tls_entry)
+        count++;
+    if (!(errorinfos = calloc(count, sizeof(*errorinfos))))
+    {
+        ReleaseSRWLockShared(&tlsdata_lock);
+        return;
+    }
+    LIST_FOR_EACH_ENTRY(tlsdata, &tlsdata_list, struct tlsdata, tls_entry)
+        errorinfos[i++] = InterlockedExchangePointer((void **)&tlsdata->errorinfo, NULL);
+    ReleaseSRWLockShared(&tlsdata_lock);
+
+    for (i = 0; i < count; i++)
+        if (errorinfos[i]) IErrorInfo_Release(errorinfos[i]);
+    free(errorinfos);
 }
 
 struct global_options
@@ -4466,13 +4513,16 @@ static void com_cleanup_tlsdata(void)
     if (!tlsdata)
         return;
 
+    AcquireSRWLockExclusive(&tlsdata_lock);
+    list_remove(&tlsdata->tls_entry);
+    ReleaseSRWLockExclusive(&tlsdata_lock);
+
     if (tlsdata->apt)
         apartment_release(tlsdata->apt);
     if (tlsdata->implicit_mta_cookie)
         apartment_decrement_mta_usage(tlsdata->implicit_mta_cookie);
 
-    if (tlsdata->errorinfo)
-        IErrorInfo_Release(tlsdata->errorinfo);
+    CleanupTlsComl2State(tlsdata);
     if (tlsdata->state)
         IUnknown_Release(tlsdata->state);
 

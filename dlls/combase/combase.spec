@@ -12,6 +12,8 @@
 179 stdcall -noname RoInitializeStrict(long)
 180 stdcall -noname CoDoesOtherSideVariantMarshalingNeedTrailingPadding(ptr)
 181 stdcall -noname CoDoesOtherSideSupportUDTMarshaling(ptr)
+248 stdcall CleanupComl2StateInAllTls()
+250 stdcall CleanupTlsComl2State(ptr)
 359 stdcall CoUnmarshalHresult(ptr ptr)
 360 stdcall CoUnmarshalInterface(ptr ptr ptr)
 513 stdcall InternalIsApartmentInitialized()
