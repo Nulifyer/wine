@@ -951,6 +951,7 @@
 @ stdcall RtlLengthRequiredSid(long)
 @ stdcall RtlLengthSecurityDescriptor(ptr)
 @ stdcall RtlLengthSid(ptr)
+@ stdcall RtlLoadString(long long ptr long ptr ptr ptr ptr)
 @ stdcall RtlLocalTimeToSystemTime(ptr ptr)
 @ stdcall RtlLocaleNameToLcid(wstr ptr long)
 @ stdcall RtlLocateExtendedFeature(ptr long ptr)

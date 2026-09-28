@@ -1,0 +1,6 @@
+#include "windef.h"
+
+STRINGTABLE
+BEGIN
+    0x1234 "LinuxNT RtlLoadString"
+END

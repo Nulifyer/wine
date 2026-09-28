@@ -18,6 +18,46 @@
 
 #include "wine/test.h"
 
+static const WCHAR expected_string[] = L"LinuxNT RtlLoadString";
+
+static void test_load_string(void)
+{
+    NTSTATUS (WINAPI *load_string)(HMODULE, USHORT, const WCHAR *, ULONG,
+                                   const WCHAR **, USHORT *, void *, void *);
+    HMODULE ntdll = GetModuleHandleA( "ntdll.dll" );
+    const WCHAR *string = (void *)0xdeadbeef;
+    USHORT length = 0xdead;
+    NTSTATUS status;
+
+    load_string = (void *)GetProcAddress( ntdll, "RtlLoadString" );
+    ok( !!load_string, "RtlLoadString is unavailable\n" );
+    if (!load_string) return;
+
+    status = load_string( GetModuleHandleW( NULL ), 0x1234, NULL, 0, &string, &length, NULL, NULL );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    ok( length == ARRAY_SIZE(expected_string) - 1, "got length %u\n", length );
+    ok( string && !memcmp( string, expected_string, sizeof(expected_string) - sizeof(WCHAR) ),
+        "got string %s\n", debugstr_wn(string, length) );
+
+    string = (void *)0xdeadbeef;
+    length = 0xdead;
+    status = load_string( GetModuleHandleW( NULL ), 0x1234, L"", 1, &string, &length, NULL, NULL );
+    ok( status == STATUS_SUCCESS, "got status %#lx\n", status );
+    ok( length == ARRAY_SIZE(expected_string) - 1, "got length %u\n", length );
+    ok( string && !memcmp( string, expected_string, sizeof(expected_string) - sizeof(WCHAR) ),
+        "got string %s\n", debugstr_wn(string, length) );
+
+    status = load_string( NULL, 0x1234, NULL, 0, &string, &length, NULL, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status );
+    status = load_string( GetModuleHandleW( NULL ), 0x1234, NULL, 0, NULL, &length, NULL, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status );
+    status = load_string( GetModuleHandleW( NULL ), 0x1234, NULL, 2, &string, &length, NULL, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "got status %#lx\n", status );
+    status = load_string( GetModuleHandleW( NULL ), 0x1234, NULL, 1, &string, &length,
+                          (void *)string, NULL );
+    ok( status == STATUS_NOT_SUPPORTED, "got status %#lx\n", status );
+}
+
 static void test_query_resource_policy(void)
 {
     NTSTATUS (WINAPI *query_resource_policy)(ULONG, ULONG, ULONG *, SIZE_T);
@@ -46,5 +86,6 @@ static void test_query_resource_policy(void)
 
 START_TEST(resource)
 {
+    test_load_string();
     test_query_resource_policy();
 }

@@ -31,6 +31,7 @@ SOURCES = \
 	remove_privileges.c \
 	reg.c \
 	resource.c \
+	resource.rc \
 	rtl.c \
 	rtlbitmap.c \
 	rtlstr.c \

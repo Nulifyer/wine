@@ -837,3 +837,61 @@ NTSTATUS WINAPI RtlFindMessage( HMODULE hmod, ULONG type, ULONG lang,
     }
     return STATUS_MESSAGE_NOT_FOUND;
 }
+
+/**********************************************************************
+ *      RtlLoadString  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlLoadString( HMODULE module, USHORT id, const WCHAR *language, ULONG flags,
+                               const WCHAR **ret, USHORT *length, void *unknown1, void *unknown2 )
+{
+    const IMAGE_RESOURCE_DATA_ENTRY *entry;
+    const WCHAR *string, *end;
+    LDR_RESOURCE_INFO info;
+    ULONG resource_size;
+    LCID locale;
+    NTSTATUS status;
+    unsigned int i;
+    void *data;
+
+    TRACE( "module %p, id %#x, language %p, flags %#lx, ret %p, length %p\n",
+           module, id, language, flags, ret, length );
+
+    if (!module || !ret || (flags & ~1)) return STATUS_INVALID_PARAMETER;
+    if ((flags & 1) && (unknown1 || unknown2)) return STATUS_NOT_SUPPORTED;
+
+    if ((ULONG_PTR)language > 0xffff)
+    {
+        if (!*language)
+            locale = 0;
+        else if (RtlLocaleNameToLcid( language, &locale, 3 ))
+            return STATUS_INVALID_PARAMETER;
+    }
+    else
+        locale = (ULONG_PTR)language;
+
+    info.Type = 6; /* RT_STRING */
+    info.Name = (id >> 4) + 1;
+    info.Language = LOWORD(locale);
+    if ((status = LdrFindResource_U( module, &info, 3, &entry ))) return status;
+    if ((status = LdrAccessResource( module, entry, &data, &resource_size ))) return status;
+    if (resource_size > 0xffff) return STATUS_INVALID_IMAGE_FORMAT;
+
+    string = data;
+    end = (const WCHAR *)((const char *)data + resource_size);
+    for (i = 0; i <= (id & 0xf); ++i)
+    {
+        USHORT string_length;
+
+        if (string >= end) return STATUS_INVALID_IMAGE_FORMAT;
+        string_length = *string++;
+        if ((SIZE_T)(end - string) < string_length) return STATUS_INVALID_IMAGE_FORMAT;
+        if (i == (id & 0xf))
+        {
+            *ret = string;
+            if (length) *length = string_length;
+            return STATUS_SUCCESS;
+        }
+        string += string_length;
+    }
+    return STATUS_INVALID_IMAGE_FORMAT;
+}
