@@ -24,6 +24,8 @@
 #include "hstring.idl"
 #include "wine/orpc.idl"
 
+import "oleidl.idl";
+
 [
     threading(both),
     uuid(00000320-0000-0000-c000-000000000046)
@@ -137,4 +139,47 @@ interface IRundown : IRemUnknownN
         [in, range(1, MAX_OID_RUNDOWNS_PER_CALL)] DWORD cOid,
         [in, size_is(cOid)] OID aOid[],
         [out, size_is(cOid)] BYTE aRundownStatus[]);
+}
+
+typedef [wire_marshal(ULONG)] enum CallerLocalityIndicator
+{
+    CallerIsDirect = 0,
+    CallerIsInproc = 1,
+    CallerIsOutofproc = 2,
+} CallerLocalityIndicator;
+
+typedef struct tagInterfaceData
+{
+    ULONG ulCntData;
+    [size_is(ulCntData)] BYTE abData[];
+} InterfaceData;
+
+[
+    object,
+    uuid(00000160-0000-0000-C000-000000000046),
+    pointer_default(unique)
+]
+interface IPrivDragDrop : IUnknown
+{
+    HRESULT PrivDragDrop(
+        [in] CallerLocalityIndicator locality,
+        [in] HWND hwnd,
+        [in, unique] InterfaceData *interface_data,
+        [in] ULONG operation,
+        [in] ULONG key_state,
+        [in] POINTL point,
+        [in, out, unique] ULONG *effect,
+        [in] ULONG process_id,
+        [in, unique] IDataObject *data_object,
+        [in] HWND other_hwnd);
+
+    HRESULT IsBrokeredTarget(
+        [out] BOOL *brokered);
+
+    HRESULT SetDropSourceEnterpriseId(
+        [in, string, unique] const WCHAR *enterprise_id);
+
+    HRESULT GetEnterpriseDropTargetStatus(
+        [out] BOOL *is_enterprise_target,
+        [out] BOOL *policy_allows_drop);
 }

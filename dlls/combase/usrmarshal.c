@@ -1158,3 +1158,96 @@ void __RPC_USER HSTRING_UserFree64(ULONG *flags, HSTRING *str)
 {
     if (str) HSTRING_UserFree(flags, str);
 }
+
+static BOOL caller_locality_remote(ULONG flags)
+{
+    /* Native COMBase also rejects its internal cross-container marshal context. */
+    return LOWORD(flags) == MSHCTX_DIFFERENTMACHINE || LOWORD(flags) == 5;
+}
+
+enum caller_locality_indicator
+{
+    caller_is_direct = 0,
+    caller_is_inproc = 1,
+    caller_is_outofproc = 2,
+};
+
+ULONG __RPC_USER CallerLocalityIndicator_UserSize(ULONG *flags, ULONG size,
+        LONG *locality)
+{
+    if (caller_locality_remote(*flags) || *locality != caller_is_direct)
+        RpcRaiseException(RPC_S_INVALID_TAG);
+
+    ALIGN_LENGTH(size, 3);
+    return size + sizeof(ULONG);
+}
+
+BYTE * __RPC_USER CallerLocalityIndicator_UserMarshal(ULONG *flags, BYTE *buf,
+        LONG *locality)
+{
+    ULONG *wire;
+
+    if (caller_locality_remote(*flags) || *locality != caller_is_direct)
+        RpcRaiseException(RPC_S_INVALID_TAG);
+
+    wire = ALIGNED_POINTER(buf, 3);
+    *wire = 0;
+    return (BYTE *)(wire + 1);
+}
+
+BYTE * __RPC_USER CallerLocalityIndicator_UserUnmarshal(ULONG *flags, BYTE *buf,
+        LONG *locality)
+{
+    const ULONG *wire = ALIGNED_POINTER(buf, 3);
+
+    if (caller_locality_remote(*flags) || *wire)
+        RpcRaiseException(RPC_S_INVALID_TAG);
+
+    *locality = LOWORD(*flags) == MSHCTX_INPROC ? caller_is_inproc : caller_is_outofproc;
+    return (BYTE *)(wire + 1);
+}
+
+void __RPC_USER CallerLocalityIndicator_UserFree(ULONG *flags,
+        LONG *locality)
+{
+}
+
+ULONG __RPC_USER CallerLocalityIndicator_UserSize64(ULONG *flags, ULONG size,
+        LONG *locality)
+{
+    if (caller_locality_remote(*flags) || *locality != caller_is_direct)
+        RpcRaiseException(RPC_S_INVALID_TAG);
+
+    ALIGN_LENGTH(size, 7);
+    return size + sizeof(ULONG);
+}
+
+BYTE * __RPC_USER CallerLocalityIndicator_UserMarshal64(ULONG *flags, BYTE *buf,
+        LONG *locality)
+{
+    ULONG *wire;
+
+    if (caller_locality_remote(*flags) || *locality != caller_is_direct)
+        RpcRaiseException(RPC_S_INVALID_TAG);
+
+    wire = ALIGNED_POINTER(buf, 7);
+    *wire = 0;
+    return (BYTE *)(wire + 1);
+}
+
+BYTE * __RPC_USER CallerLocalityIndicator_UserUnmarshal64(ULONG *flags, BYTE *buf,
+        LONG *locality)
+{
+    const ULONG *wire = ALIGNED_POINTER(buf, 7);
+
+    if (caller_locality_remote(*flags) || *wire)
+        RpcRaiseException(RPC_S_INVALID_TAG);
+
+    *locality = LOWORD(*flags) == MSHCTX_INPROC ? caller_is_inproc : caller_is_outofproc;
+    return (BYTE *)(wire + 1);
+}
+
+void __RPC_USER CallerLocalityIndicator_UserFree64(ULONG *flags,
+        LONG *locality)
+{
+}

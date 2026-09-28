@@ -12,6 +12,7 @@ SOURCES = \
 	implicit_local_server.c \
 	native_ordinals.c \
 	outgoing_call_state.c \
+	priv_dragdrop.c \
 	proxy_factory.c \
 	restricted_error.c \
 	roapi.c \
