@@ -26,6 +26,16 @@
 #include <objbase.h>
 
 #include "wine/test.h"
+
+#define LVM_QUERYINTERFACE (LVM_FIRST + 189)
+
+static const IID IID_IListView_Win7 =
+    {0xe5b16af2, 0x3990, 0x4681, {0xa6, 0x09, 0x1f, 0x06, 0x0c, 0xd1, 0x42, 0x69}};
+
+typedef HRESULT (WINAPI *listview_get_window_fn)(IUnknown *, HWND *);
+typedef HRESULT (WINAPI *listview_set_extended_style_fn)(IUnknown *, DWORD, DWORD, DWORD *);
+typedef HRESULT (WINAPI *listview_get_tooltip_fn)(IUnknown *, HWND *);
+typedef HRESULT (WINAPI *listview_get_column_margin_fn)(IUnknown *, RECT *);
 #include "v6util.h"
 #include "msg.h"
 
@@ -7791,6 +7801,68 @@ static void test_WM_PAINT(void)
     DestroyWindow(hwnd);
 }
 
+static void test_queryinterface(void)
+{
+    const void *const *vtbl;
+    IUnknown *iface = (IUnknown *)0xdeadbeef, *unknown = NULL;
+    IUnknown *invalid_iface = (IUnknown *)0xdeadbeef;
+    DWORD old_style = 0xdeadbeef;
+    HWND hwnd, tooltip = NULL;
+    LRESULT ret;
+    HRESULT hr;
+    RECT margin;
+
+    hwnd = create_listview_control(LVS_REPORT);
+    ret = SendMessageA(hwnd, LVM_QUERYINTERFACE, (WPARAM)&IID_IListView_Win7, (LPARAM)&iface);
+    ok(ret == TRUE, "LVM_QUERYINTERFACE returned %Id.\n", ret);
+    ok(iface != NULL, "Expected a list-view interface.\n");
+    if (!ret || !iface)
+    {
+        DestroyWindow(hwnd);
+        return;
+    }
+
+    hr = iface->lpVtbl->QueryInterface(iface, &IID_IUnknown, (void **)&unknown);
+    ok(hr == S_OK, "QueryInterface returned %#lx.\n", hr);
+    ok(unknown == iface, "Expected identity pointer %p, got %p.\n", iface, unknown);
+    if (unknown) unknown->lpVtbl->Release(unknown);
+
+    vtbl = *(const void *const **)iface;
+    hr = ((listview_get_window_fn)vtbl[3])(iface, &tooltip);
+    ok(hr == S_OK, "GetWindow returned %#lx.\n", hr);
+    ok(tooltip == hwnd, "Expected window %p, got %p.\n", hwnd, tooltip);
+
+    hr = ((listview_set_extended_style_fn)vtbl[81])(iface, LVS_EX_FULLROWSELECT,
+                                                    LVS_EX_FULLROWSELECT, &old_style);
+    ok(hr == S_OK, "SetExtendedStyle returned %#lx.\n", hr);
+    ok(old_style == 0, "Expected old style 0, got %#lx.\n", old_style);
+    ok(SendMessageA(hwnd, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0) & LVS_EX_FULLROWSELECT,
+       "Expected LVS_EX_FULLROWSELECT.\n");
+
+    tooltip = NULL;
+    hr = ((listview_get_tooltip_fn)vtbl[84])(iface, &tooltip);
+    ok(hr == S_OK, "GetToolTip returned %#lx.\n", hr);
+    ok(IsWindow(tooltip), "Expected a tooltip window, got %p.\n", tooltip);
+
+    SetRect(&margin, 1, 2, 3, 4);
+    hr = ((listview_get_column_margin_fn)vtbl[140])(iface, &margin);
+    ok(hr == S_OK, "GetColumnMargin returned %#lx.\n", hr);
+    ok(IsRectEmpty(&margin), "Expected an empty column margin, got %s.\n", wine_dbgstr_rect(&margin));
+
+    ret = SendMessageA(hwnd, CCM_SETNOTIFYWINDOW, (WPARAM)GetDesktopWindow(), 0);
+    ok((HWND)ret == hwndparent, "Expected old notify window %p, got %p.\n", hwndparent, (HWND)ret);
+    ret = SendMessageA(hwnd, CCM_SETNOTIFYWINDOW, (WPARAM)hwndparent, 0);
+    ok((HWND)ret == GetDesktopWindow(), "Expected old notify window %p, got %p.\n",
+       GetDesktopWindow(), (HWND)ret);
+
+    ret = SendMessageA(hwnd, LVM_QUERYINTERFACE, (WPARAM)&IID_IClassFactory, (LPARAM)&invalid_iface);
+    ok(ret == FALSE, "Unexpected LVM_QUERYINTERFACE result %Id.\n", ret);
+    ok(invalid_iface == NULL, "Expected a NULL interface, got %p.\n", invalid_iface);
+
+    iface->lpVtbl->Release(iface);
+    DestroyWindow(hwnd);
+}
+
 START_TEST(listview)
 {
     ULONG_PTR ctx_cookie;
@@ -7916,6 +7988,7 @@ START_TEST(listview)
     test_LVM_GETHOTCURSOR();
     test_LVM_GETORIGIN(TRUE);
     test_customdraw_background(TRUE);
+    test_queryinterface();
     test_WM_PAINT();
 
     uninit_winevent_hook();

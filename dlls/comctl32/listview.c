@@ -206,6 +206,15 @@ typedef struct tagDELAYED_ITEM_EDIT
   INT iItem;
 } DELAYED_ITEM_EDIT;
 
+typedef struct tagLISTVIEW_INFO LISTVIEW_INFO;
+
+typedef struct listview_interface
+{
+    const void *const *lpVtbl;
+    LISTVIEW_INFO *info;
+    LONG refs;
+} LISTVIEW_INTERFACE;
+
 enum notification_mask
 {
   NOTIFY_MASK_ITEM_CHANGE = 0x1,
@@ -213,7 +222,7 @@ enum notification_mask
   NOTIFY_MASK_UNMASK_ALL = 0xffffffff
 };
 
-typedef struct tagLISTVIEW_INFO
+struct tagLISTVIEW_INFO
 {
   /* control window */
   HWND hwndSelf;
@@ -326,7 +335,124 @@ typedef struct tagLISTVIEW_INFO
 
   /* misc */
   INT iVersion;            /* CCM_[G,S]ETVERSION */
-} LISTVIEW_INFO;
+  LISTVIEW_INTERFACE *iface;
+  IUnknown *owner_data_callback;
+  IUnknown *subitem_callback;
+  DWORD selection_flags;
+};
+
+#define LVM_QUERYINTERFACE (LVM_FIRST + 189)
+
+static const IID IID_IListView_Win7 =
+    {0xe5b16af2, 0x3990, 0x4681, {0xa6, 0x09, 0x1f, 0x06, 0x0c, 0xd1, 0x42, 0x69}};
+
+static DWORD LISTVIEW_SetExtendedListViewStyle(LISTVIEW_INFO *infoPtr, DWORD mask, DWORD ex_style);
+
+static HRESULT WINAPI listview_iface_QueryInterface(LISTVIEW_INTERFACE *iface, REFIID iid, void **out)
+{
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (!IsEqualIID(iid, &IID_IUnknown) && !IsEqualIID(iid, &IID_IListView_Win7)) return E_NOINTERFACE;
+    *out = iface;
+    InterlockedIncrement(&iface->refs);
+    return S_OK;
+}
+
+static ULONG WINAPI listview_iface_AddRef(LISTVIEW_INTERFACE *iface)
+{
+    return InterlockedIncrement(&iface->refs);
+}
+
+static ULONG WINAPI listview_iface_Release(LISTVIEW_INTERFACE *iface)
+{
+    LONG refs = InterlockedDecrement(&iface->refs);
+
+    if (!refs) Free(iface);
+    return refs;
+}
+
+static HRESULT WINAPI listview_iface_GetWindow(LISTVIEW_INTERFACE *iface, HWND *hwnd)
+{
+    if (!hwnd) return E_POINTER;
+    *hwnd = iface->info ? iface->info->hwndSelf : NULL;
+    return iface->info ? S_OK : RPC_E_DISCONNECTED;
+}
+
+static HRESULT WINAPI listview_iface_ContextSensitiveHelp(LISTVIEW_INTERFACE *iface, BOOL enter_mode)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI listview_iface_SetSelectionFlags(LISTVIEW_INTERFACE *iface, DWORD mask, DWORD flags)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    iface->info->selection_flags = (iface->info->selection_flags & ~mask) | (flags & mask);
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_SetExtendedStyle(LISTVIEW_INTERFACE *iface, DWORD mask,
+                                                       DWORD style, DWORD *old_style)
+{
+    DWORD old;
+
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    old = LISTVIEW_SetExtendedListViewStyle(iface->info, mask, style);
+    if (old_style) *old_style = old;
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_GetToolTip(LISTVIEW_INTERFACE *iface, HWND *tooltip)
+{
+    if (!tooltip) return E_POINTER;
+    *tooltip = NULL;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    if (!iface->info->hwndToolTip)
+        iface->info->hwndToolTip = COMCTL32_CreateToolTip(iface->info->hwndSelf);
+    *tooltip = iface->info->hwndToolTip;
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_SetOwnerDataCallback(LISTVIEW_INTERFACE *iface, IUnknown *callback)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    if (callback) callback->lpVtbl->AddRef(callback);
+    if (iface->info->owner_data_callback)
+        iface->info->owner_data_callback->lpVtbl->Release(iface->info->owner_data_callback);
+    iface->info->owner_data_callback = callback;
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_GetColumnMargin(LISTVIEW_INTERFACE *iface, RECT *margin)
+{
+    if (!margin) return E_POINTER;
+    SetRectEmpty(margin);
+    return iface->info ? S_OK : RPC_E_DISCONNECTED;
+}
+
+static HRESULT WINAPI listview_iface_SetSubItemCallback(LISTVIEW_INTERFACE *iface, IUnknown *callback)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    if (callback) callback->lpVtbl->AddRef(callback);
+    if (iface->info->subitem_callback)
+        iface->info->subitem_callback->lpVtbl->Release(iface->info->subitem_callback);
+    iface->info->subitem_callback = callback;
+    return S_OK;
+}
+
+static const void *const listview_iface_vtbl[144] =
+{
+    [0] = listview_iface_QueryInterface,
+    [1] = listview_iface_AddRef,
+    [2] = listview_iface_Release,
+    [3] = listview_iface_GetWindow,
+    [4] = listview_iface_ContextSensitiveHelp,
+    [26] = listview_iface_SetSelectionFlags,
+    [81] = listview_iface_SetExtendedStyle,
+    [84] = listview_iface_GetToolTip,
+    [112] = listview_iface_SetOwnerDataCallback,
+    [140] = listview_iface_GetColumnMargin,
+    [141] = listview_iface_SetSubItemCallback,
+};
 
 /*
  * constants
@@ -9572,9 +9698,18 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, WPARAM wParam, const CREATESTRUCTW *
   infoPtr = Alloc(sizeof(*infoPtr));
   if (!infoPtr) return FALSE;
 
+  if (!(infoPtr->iface = Alloc(sizeof(*infoPtr->iface))))
+  {
+      Free(infoPtr);
+      return FALSE;
+  }
+
   SetWindowLongPtrW(hwnd, 0, (DWORD_PTR)infoPtr);
 
   infoPtr->hwndSelf = hwnd;
+  infoPtr->iface->lpVtbl = listview_iface_vtbl;
+  infoPtr->iface->info = infoPtr;
+  infoPtr->iface->refs = 1;
   infoPtr->dwStyle = lpcs->style;    /* Note: may be changed in WM_CREATE */
   map_style_view(infoPtr);
   /* determine the type of structures to use */
@@ -10534,6 +10669,12 @@ static LRESULT LISTVIEW_NCDestroy(LISTVIEW_INFO *infoPtr)
   if (infoPtr->hDefaultFont) DeleteObject(infoPtr->hDefaultFont);
   if (infoPtr->clrBk != CLR_NONE) DeleteObject(infoPtr->hBkBrush);
   if (infoPtr->hBkBitmap) DeleteObject(infoPtr->hBkBitmap);
+  if (infoPtr->owner_data_callback)
+      infoPtr->owner_data_callback->lpVtbl->Release(infoPtr->owner_data_callback);
+  if (infoPtr->subitem_callback)
+      infoPtr->subitem_callback->lpVtbl->Release(infoPtr->subitem_callback);
+  infoPtr->iface->info = NULL;
+  listview_iface_Release(infoPtr->iface);
 
   SetWindowLongPtrW(infoPtr->hwndSelf, 0, 0);
 
@@ -11667,6 +11808,16 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
   case LVM_MAPINDEXTOID:
     return LISTVIEW_MapIndexToId(infoPtr, (INT)wParam);
+
+  case LVM_QUERYINTERFACE:
+    return listview_iface_QueryInterface(infoPtr->iface, (REFIID)wParam, (void **)lParam) == S_OK;
+
+  case CCM_SETNOTIFYWINDOW:
+  {
+    HWND old_notify = infoPtr->hwndNotify;
+    infoPtr->hwndNotify = (HWND)wParam;
+    return (LRESULT)old_notify;
+  }
 
   /* case LVM_MOVEGROUP: */
 
