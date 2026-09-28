@@ -41,6 +41,39 @@ static void test_wer_xbox_fallback(void)
     }
 }
 
+static void test_minuser_set_class_scope_fallback(void)
+{
+    static const char *modules[] =
+    {
+        "ext-ms-win-rtcore-minuser-private-ext-l1-1-0.dll",
+        "EXT-MS-WIN-RTCORE-MINUSER-PRIVATE-EXT-L1-1-1.DLL",
+        "ext-ms-win-rtcore-minuser-private-ext-l1-1-2.dll",
+        "ext-ms-win-rtcore-minuser-private-ext-l1-1-3.dll",
+    };
+    BOOL (WINAPI *handler)(const WCHAR *, HINSTANCE, DWORD);
+    unsigned int i;
+    BOOL ret;
+
+    for (i = 0; i < ARRAY_SIZE(modules); ++i)
+    {
+        handler = (void *)pDelayLoadFailureHook( modules[i], "SetClassScope" );
+        ok(!!handler, "%s returned a null fallback\n", modules[i]);
+        if (!handler) continue;
+
+        SetLastError( 0xdeadbeef );
+        ret = handler( L"Wine.SetClassScope", GetModuleHandleW( NULL ), 2 );
+        ok(ret == FALSE, "%s fallback returned %d\n", modules[i], ret);
+        ok(GetLastError() == ERROR_PROC_NOT_FOUND, "%s fallback set error %lu\n",
+           modules[i], GetLastError());
+
+        SetLastError( 0xdeadbeef );
+        ret = handler( (const WCHAR *)MAKEINTATOM(1), GetModuleHandleW( NULL ), 2 );
+        ok(ret == FALSE, "%s atom fallback returned %d\n", modules[i], ret);
+        ok(GetLastError() == ERROR_PROC_NOT_FOUND, "%s atom fallback set error %lu\n",
+           modules[i], GetLastError());
+    }
+}
+
 START_TEST(loader)
 {
     HMODULE module = GetModuleHandleA( "kernelbase.dll" );
@@ -53,4 +86,5 @@ START_TEST(loader)
     }
 
     test_wer_xbox_fallback();
+    test_minuser_set_class_scope_fallback();
 }

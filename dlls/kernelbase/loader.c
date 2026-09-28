@@ -215,12 +215,26 @@ static BOOL WINAPI xer_should_wer_manage_root_directory(void)
     return TRUE;
 }
 
+static BOOL WINAPI set_class_scope( const WCHAR *class, HINSTANCE instance, DWORD scope )
+{
+    RtlSetLastWin32Error( ERROR_PROC_NOT_FOUND );
+    return FALSE;
+}
+
 static const struct delay_load_fallback delay_load_fallbacks[] =
 {
     { "ext-ms-win-wer-xbox-l1-2-0.dll", "XerShouldWerManageRootDirectory",
       (FARPROC)xer_should_wer_manage_root_directory },
     { "ext-ms-win-wer-xbox-l1-2-1.dll", "XerShouldWerManageRootDirectory",
       (FARPROC)xer_should_wer_manage_root_directory },
+    { "ext-ms-win-rtcore-minuser-private-ext-l1-1-0.dll", "SetClassScope",
+      (FARPROC)set_class_scope },
+    { "ext-ms-win-rtcore-minuser-private-ext-l1-1-1.dll", "SetClassScope",
+      (FARPROC)set_class_scope },
+    { "ext-ms-win-rtcore-minuser-private-ext-l1-1-2.dll", "SetClassScope",
+      (FARPROC)set_class_scope },
+    { "ext-ms-win-rtcore-minuser-private-ext-l1-1-3.dll", "SetClassScope",
+      (FARPROC)set_class_scope },
 };
 
 static BOOL ascii_equal_ignore_case( const char *left, const char *right )
