@@ -142,7 +142,7 @@
 @ stdcall CoGetPSClsid(ptr ptr)
 @ stub CoGetProcessIdentifier
 @ stdcall CoRegisterForApartmentShutdown(ptr ptr ptr) RoRegisterForApartmentShutdown
-@ stub CoGetStdMarshalEx
+303 stdcall CoGetStdMarshalEx(ptr long ptr)
 @ stdcall CoGetApartmentIdentifier(ptr)
 @ stdcall CoGetTreatAsClass(ptr ptr)
 @ stdcall CoImpersonateClient()

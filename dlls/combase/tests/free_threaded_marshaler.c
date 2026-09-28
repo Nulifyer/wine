@@ -18,6 +18,7 @@
 #include "wine/test.h"
 
 typedef HRESULT (WINAPI *dll_get_class_object_fn)(REFCLSID, REFIID, void **);
+typedef HRESULT (WINAPI *co_get_std_marshal_ex_fn)(IUnknown *, DWORD, IUnknown **);
 
 struct test_object
 {
@@ -141,8 +142,49 @@ static void test_custom_unmarshal(void)
     CoUninitialize();
 }
 
+static void test_std_marshal_ex(void)
+{
+    struct test_object object = {{&test_object_vtbl}, 1, NULL};
+    co_get_std_marshal_ex_fn get_std_marshal_ex;
+    IMarshal *marshal = NULL;
+    IUnknown *inner = NULL;
+    HMODULE module;
+    HRESULT hr;
+
+    module = GetModuleHandleW(L"combase.dll");
+    ok(!!module, "combase.dll is not loaded.\n");
+    if (!module) return;
+
+    get_std_marshal_ex = (void *)GetProcAddress(module, "CoGetStdMarshalEx");
+    ok(!!get_std_marshal_ex, "CoGetStdMarshalEx is unavailable.\n");
+    if (!get_std_marshal_ex) return;
+
+    hr = get_std_marshal_ex(&object.IUnknown_iface, 1, &inner);
+    ok(hr == S_OK, "CoGetStdMarshalEx returned %#lx.\n", hr);
+    ok(!!inner, "CoGetStdMarshalEx returned NULL.\n");
+    if (inner)
+    {
+        hr = IUnknown_QueryInterface(inner, &IID_IMarshal, (void **)&marshal);
+        ok(hr == S_OK, "IMarshal query returned %#lx.\n", hr);
+        if (marshal) IMarshal_Release(marshal);
+        IUnknown_Release(inner);
+    }
+
+    inner = (IUnknown *)0xdeadbeef;
+    hr = get_std_marshal_ex(NULL, 1, &inner);
+    ok(hr == E_INVALIDARG, "null outer returned %#lx.\n", hr);
+    ok(!inner, "null outer returned %p.\n", inner);
+    hr = get_std_marshal_ex(&object.IUnknown_iface, 2, &inner);
+    ok(hr == E_INVALIDARG, "unsupported flags returned %#lx.\n", hr);
+    ok(!inner, "unsupported flags returned %p.\n", inner);
+    hr = get_std_marshal_ex(&object.IUnknown_iface, 1, NULL);
+    ok(hr == E_POINTER, "null output returned %#lx.\n", hr);
+    ok(object.refcount == 1, "object refcount is %ld.\n", object.refcount);
+}
+
 START_TEST(free_threaded_marshaler)
 {
     test_direct_class_object();
     test_custom_unmarshal();
+    test_std_marshal_ex();
 }

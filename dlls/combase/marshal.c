@@ -2698,3 +2698,22 @@ HRESULT WINAPI CoGetStandardMarshal(REFIID riid, IUnknown *pUnk, DWORD dwDestCon
 
     return StdMarshalImpl_Construct(&IID_IMarshal, dwDestContext, dest_context, (void **)marshal);
 }
+
+/***********************************************************************
+ *            CoGetStdMarshalEx        (combase.@)
+ */
+HRESULT WINAPI CoGetStdMarshalEx(IUnknown *outer, DWORD flags, IUnknown **inner)
+{
+    TRACE("outer %p, flags %#lx, inner %p\n", outer, flags, inner);
+
+    if (!inner) return E_POINTER;
+    *inner = NULL;
+    if (!outer || flags > 1) return E_INVALIDARG;
+
+    /* Wine's standard marshaler is not yet aggregatable and cannot consume
+     * the compact version-16 proxy tables emitted for current WinRT
+     * interfaces. Keep the object in-process and preserve aggregation
+     * identity through the free-threaded marshaler until that RPC path is
+     * implemented. */
+    return CoCreateFreeThreadedMarshaler(outer, inner);
+}
