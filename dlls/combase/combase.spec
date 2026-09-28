@@ -284,6 +284,7 @@
 @ stub InternalFillLocalOXIDInfo
 @ stub InternalFreeObjRef
 @ stub InternalGetWindowPropInterface
+@ stdcall InternalGetWindowPropInterface2(long int64 long ptr ptr ptr)
 @ stdcall InternalIrotEnumRunning(ptr)
 @ stdcall InternalIrotGetObject(ptr ptr ptr)
 @ stdcall InternalIrotGetTimeOfLastChange(ptr ptr)
@@ -296,6 +297,8 @@
 @ stub InternalNotifyDDStartOrStop
 @ stub InternalOleModalLoopBlockFn
 @ stub InternalRegisterWindowPropInterface
+@ stdcall InternalRegisterWindowPropInterface2(long ptr ptr long ptr)
+@ stdcall InternalRevokeWindowPropInterface(long int64 ptr ptr ptr)
 @ stub InternalReleaseMarshalObjRef
 @ stub InternalSTAInvoke
 @ stub InternalServerExceptionFilter
