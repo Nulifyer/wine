@@ -125,13 +125,15 @@ HRESULT WINAPI AddDependencyToProcessPackageGraph(const WCHAR *family, const WCH
 
     TRACE("%s, %s, %d, %#x\n", debugstr_w(family), debugstr_w(alias), ordering, options);
     if (!family || !*family) return E_INVALIDARG;
-    /* Ordering/options beyond the reached private contract need their own
-     * baseline, not the public AddPackageDependency parameter conventions. */
-    if (ordering || options != 3) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+    /* Explorer's inbox XAML host uses zero while existing package-graph callers
+     * use 3. Other values still need a native baseline. */
+    if (ordering || (options && options != 3)) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
     hr = package_catalog_family(family, &package);
     if (FAILED(hr)) goto done;
     if (!package) { hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND); goto done; }
-    if (package->next || package->type != 1)
+    /* The private graph accepts both ordinary packages and framework packages;
+     * Explorer adds the inbox Microsoft.UI.Xaml.CBS framework here. */
+    if (package->next || (package->type != 1 && package->type != 2))
     { hr = HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED); goto done; }
     if (!(node = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*node))))
     { hr = E_OUTOFMEMORY; goto done; }
