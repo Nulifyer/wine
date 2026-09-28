@@ -788,6 +788,7 @@ static void test_local_interactive_logon(void)
     struct test_auth_buffer auth;
     TOKEN_SOURCE source = {{'W','i','n','l','o','g','o','n'}};
     TOKEN_STATISTICS statistics;
+    TOKEN_DEFAULT_DACL *token_default;
     TOKEN_GROUPS *token_groups;
     TOKEN_USER *token_user;
     LSA_OPERATIONAL_MODE mode;
@@ -797,8 +798,9 @@ static void test_local_interactive_logon(void)
     WCHAR username[UNLEN + 1], wrong_user[] = L"not-the-local-user", wrong_password[] = L"wrong";
     WCHAR empty[] = L"";
     ULONG username_len = ARRAY_SIZE(username), package, profile_len, size, auth_len, output_len, i;
-    BYTE dialup_sid[SECURITY_MAX_SID_SIZE];
+    BYTE dialup_sid[SECURITY_MAX_SID_SIZE], system_sid[SECURITY_MAX_SID_SIZE];
     DWORD dialup_sid_size = sizeof(dialup_sid);
+    DWORD system_sid_size = sizeof(system_sid);
     struct
     {
         DWORD GroupCount;
@@ -808,6 +810,7 @@ static void test_local_interactive_logon(void)
     HANDLE untrusted, trusted, token;
     LUID logon_id;
     NTSTATUS status, substatus;
+    BOOL found_system, found_user;
 
     if (!winetest_platform_is_wine)
     {
@@ -904,6 +907,31 @@ static void test_local_interactive_logon(void)
         ok( *GetSidSubAuthority( token_user->User.Sid,
                                 *GetSidSubAuthorityCount(token_user->User.Sid) - 1 ) == 1000,
             "got unexpected local-account RID.\n" );
+        size = 0;
+        status = NtQueryInformationToken( token, TokenDefaultDacl, NULL, 0, &size );
+        ok( status == STATUS_BUFFER_TOO_SMALL, "TokenDefaultDacl size returned %#lx.\n", status );
+        token_default = malloc( size );
+        status = NtQueryInformationToken( token, TokenDefaultDacl, token_default, size, &size );
+        ok( status == STATUS_SUCCESS, "TokenDefaultDacl returned %#lx.\n", status );
+        found_system = found_user = FALSE;
+        ok( CreateWellKnownSid( WinLocalSystemSid, NULL, system_sid, &system_sid_size ),
+            "CreateWellKnownSid failed: %lu.\n", GetLastError() );
+        if (!status && token_default->DefaultDacl)
+        {
+            for (i = 0; i < token_default->DefaultDacl->AceCount; ++i)
+            {
+                ACCESS_ALLOWED_ACE *ace;
+
+                if (!GetAce( token_default->DefaultDacl, i, (void **)&ace ) ||
+                    ace->Header.AceType != ACCESS_ALLOWED_ACE_TYPE || !(ace->Mask & GENERIC_ALL))
+                    continue;
+                if (EqualSid( &ace->SidStart, token_user->User.Sid )) found_user = TRUE;
+                if (EqualSid( &ace->SidStart, system_sid )) found_system = TRUE;
+            }
+        }
+        ok( found_user, "default DACL does not grant the local user generic access.\n" );
+        ok( found_system, "default DACL does not grant Local System generic access.\n" );
+        free( token_default );
         free( token_user );
         size = 0;
         status = NtQueryInformationToken( token, TokenGroups, NULL, 0, &size );

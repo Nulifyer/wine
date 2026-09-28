@@ -214,7 +214,9 @@ static NTSTATUS create_local_token( const struct lsa_local_account *account, DWO
     static const DWORD users_subauth[] = { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_USERS };
     static const DWORD admins_subauth[] = { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS };
     static const DWORD interactive_subauth[] = { SECURITY_INTERACTIVE_RID };
-    union sid_buffer world, local, authenticated, users, admins, interactive, logon;
+    static const DWORD system_subauth[] = { SECURITY_LOCAL_SYSTEM_RID };
+    union sid_buffer world, local, authenticated, users, admins, interactive, logon, system;
+    BYTE default_dacl_buffer[sizeof(ACL) + 2 * (sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + SECURITY_MAX_SID_SIZE)];
     DWORD logon_subauth[3];
     TOKEN_GROUPS *groups = NULL;
     SID_AND_ATTRIBUTES *group_entries;
@@ -223,7 +225,7 @@ static NTSTATUS create_local_token( const struct lsa_local_account *account, DWO
         DWORD PrivilegeCount;
         LUID_AND_ATTRIBUTES Privileges[1];
     } privileges;
-    TOKEN_DEFAULT_DACL default_dacl = {NULL};
+    TOKEN_DEFAULT_DACL default_dacl;
     TOKEN_PRIMARY_GROUP primary_group;
     TOKEN_OWNER owner;
     TOKEN_SOURCE source;
@@ -277,7 +279,14 @@ static NTSTATUS create_local_token( const struct lsa_local_account *account, DWO
         (status = initialize_sid( &users.sid, &nt_authority, 2, users_subauth )) ||
         (status = initialize_sid( &admins.sid, &nt_authority, 2, admins_subauth )) ||
         (status = initialize_sid( &interactive.sid, &nt_authority, 1, interactive_subauth )) ||
-        (status = initialize_sid( &logon.sid, &nt_authority, 3, logon_subauth )))
+        (status = initialize_sid( &logon.sid, &nt_authority, 3, logon_subauth )) ||
+        (status = initialize_sid( &system.sid, &nt_authority, 1, system_subauth )))
+        goto done;
+
+    default_dacl.DefaultDacl = (ACL *)default_dacl_buffer;
+    if ((status = RtlCreateAcl( default_dacl.DefaultDacl, sizeof(default_dacl_buffer), ACL_REVISION )) ||
+        (status = RtlAddAccessAllowedAce( default_dacl.DefaultDacl, ACL_REVISION, GENERIC_ALL, &system.sid )) ||
+        (status = RtlAddAccessAllowedAce( default_dacl.DefaultDacl, ACL_REVISION, GENERIC_ALL, user_sid )))
         goto done;
 
     group_count = 6 + extra_count + !have_logon_id;
