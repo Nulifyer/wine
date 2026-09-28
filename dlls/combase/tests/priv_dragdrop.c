@@ -166,6 +166,7 @@ START_TEST(priv_dragdrop)
     struct dragdrop_object object = {{&dragdrop_vtbl}, 1};
     struct client_args args = {0};
     IStream *stream = NULL;
+    CLSID clsid;
     HANDLE thread;
     HRESULT hr;
 
@@ -173,8 +174,10 @@ START_TEST(priv_dragdrop)
     ok(hr == S_OK, "CoInitializeEx returned %#lx.\n", hr);
     if (FAILED(hr)) return;
 
-    hr = CoRegisterPSClsid(&priv_dragdrop_iid, &psfactory_clsid);
-    ok(hr == S_OK, "CoRegisterPSClsid returned %#lx.\n", hr);
+    hr = CoGetPSClsid(&priv_dragdrop_iid, &clsid);
+    ok(hr == S_OK, "CoGetPSClsid returned %#lx.\n", hr);
+    ok(IsEqualCLSID(&clsid, &psfactory_clsid), "got proxy/stub CLSID %s.\n",
+            wine_dbgstr_guid(&clsid));
 
     hr = CoMarshalInterThreadInterfaceInStream(&priv_dragdrop_iid,
             (IUnknown *)&object.IPrivDragDrop_iface, &stream);

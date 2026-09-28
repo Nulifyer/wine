@@ -43,6 +43,8 @@ static const IID inspectable_iid =
     {0xaf86e2e0, 0xb12d, 0x4c6a, {0x9c, 0x5a, 0xd7, 0xaa, 0x65, 0x10, 0x1e, 0x90}};
 static const IID activation_factory_iid =
     {0x00000035, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
+static const IID priv_dragdrop_iid =
+    {0x00000160, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
 
 static ULONG_PTR global_options[COMGLB_PROPERTIES_RESERVED3 + 1];
 
@@ -3048,9 +3050,9 @@ HRESULT WINAPI CoGetPSClsid(REFIID riid, CLSID *pclsid)
     if (!pclsid)
         return E_INVALIDARG;
 
-    /* IInspectable and IActivationFactory are standard WinRT interfaces and
-     * are owned by combase's built-in proxy/stub factory. */
-    if (IsEqualIID(riid, &inspectable_iid) || IsEqualIID(riid, &activation_factory_iid))
+    /* These interfaces are owned by combase's built-in proxy/stub factory. */
+    if (IsEqualIID(riid, &inspectable_iid) || IsEqualIID(riid, &activation_factory_iid) ||
+            IsEqualIID(riid, &priv_dragdrop_iid))
     {
         *pclsid = CLSID_PSFactoryBuffer;
         return S_OK;
