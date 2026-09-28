@@ -49,6 +49,7 @@ typedef BOOL (WINAPI *undelegate_input_fn)(HWND, UINT);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
 typedef BOOL (WINAPI *force_enable_numpad_translation_fn)(BOOL);
+typedef UINT (WINAPI *get_window_dpi_fn)(HWND);
 
 static get_process_ui_context_information_fn pGetProcessUIContextInformation;
 static is_immersive_process_fn pIsImmersiveProcess;
@@ -136,6 +137,31 @@ static void test_force_enable_numpad_translation(HMODULE module)
     ok(previous, "main thread lost enabled state %d.\n", previous);
     previous = function(FALSE);
     ok(!previous, "repeated disable returned previous state %d.\n", previous);
+}
+
+static void test_get_window_dpi(HMODULE module)
+{
+    get_window_dpi_fn get_window_dpi = (void *)GetProcAddress(module, (const char *)2707);
+    HWND desktop = GetDesktopWindow();
+    UINT dpi;
+
+    ok(!!get_window_dpi, "GetWindowDPI ordinal is unavailable.\n");
+    if (!get_window_dpi) return;
+
+    SetLastError(0xdeadbeef);
+    dpi = get_window_dpi(NULL);
+    ok(!dpi, "null window returned %u.\n", dpi);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "null window error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    dpi = get_window_dpi((HWND)0xdeadbeef);
+    ok(!dpi, "invalid window returned %u.\n", dpi);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "invalid window error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    dpi = get_window_dpi(desktop);
+    ok(dpi == GetDpiForWindow(desktop), "desktop returned %u.\n", dpi);
+    ok(GetLastError() == 0xdeadbeef, "desktop changed last error to %lu.\n", GetLastError());
 }
 
 static UINT_PTR WINAPI input_delegate_callback(MSG *message, void *context)
@@ -1258,6 +1284,7 @@ START_TEST(native_ordinals)
 
     module = GetModuleHandleW(L"user32.dll");
     test_force_enable_numpad_translation(module);
+    test_get_window_dpi(module);
     test_input_delegation(module);
     test_schedule_dispatch_notification(module);
     test_queue_status_readonly(module);

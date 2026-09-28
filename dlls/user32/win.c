@@ -757,6 +757,18 @@ UINT WINAPI GetDpiForWindow( HWND hwnd )
 
 
 /***********************************************************************
+ *              GetWindowDPI   (USER32.2707)
+ */
+UINT WINAPI GetWindowDPI( HWND hwnd )
+{
+    UINT dpi = NtUserGetDpiForWindow( hwnd );
+
+    if (!dpi) SetLastError( ERROR_INVALID_PARAMETER );
+    return dpi;
+}
+
+
+/***********************************************************************
  *           SwitchToThisWindow (USER32.@)
  */
 void WINAPI SwitchToThisWindow( HWND hwnd, BOOL alt_tab )
