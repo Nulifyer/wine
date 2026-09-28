@@ -108,7 +108,7 @@
 @ stub -syscall NtDxgkVailConnect
 @ stub -syscall NtDxgkVailDisconnect
 @ stub -syscall NtDxgkVailPromoteCompositionSurface
-@ stub -syscall NtEnableOneCoreTransformMode
+@ stdcall -syscall NtEnableOneCoreTransformMode()
 @ stub -syscall NtFlipObjectAddContent
 @ stub -syscall NtFlipObjectAddPoolBuffer
 @ stub -syscall NtFlipObjectConsumerAcquirePresent
@@ -676,7 +676,7 @@
 @ stub -syscall NtGdiXLATEOBJ_iXlate
 @ stub -syscall NtHWCursorUpdatePointer
 @ stub -syscall NtInputSpaceRegionFromPoint
-@ stub -syscall NtIsOneCoreTransformMode
+@ stdcall -syscall NtIsOneCoreTransformMode()
 @ stdcall -syscall NtKSTInitialize(long long)
 @ stdcall -syscall NtKSTWait()
 @ stub -syscall NtMITAccessibilityTimerNotification

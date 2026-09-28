@@ -46,6 +46,11 @@ ALL_SYSCALLS
 #define SYSCALL_API __attribute__((naked, hybrid_patchable))
 #define SYSCALL_FUNC(name) __ASM_SYSCALL_FUNC( __id_##name, name )
 
+BOOL SYSCALL_API NtEnableOneCoreTransformMode(void)
+{
+    SYSCALL_FUNC( NtEnableOneCoreTransformMode );
+}
+
 INT SYSCALL_API NtGdiAbortDoc( HDC hdc )
 {
     SYSCALL_FUNC( NtGdiAbortDoc );
@@ -2080,6 +2085,11 @@ BOOL SYSCALL_API NtUserIsClipboardFormatAvailable( UINT format )
 BOOL SYSCALL_API NtUserIsMouseInPointerEnabled(void)
 {
     SYSCALL_FUNC( NtUserIsMouseInPointerEnabled );
+}
+
+BOOL SYSCALL_API NtIsOneCoreTransformMode(void)
+{
+    SYSCALL_FUNC( NtIsOneCoreTransformMode );
 }
 
 BOOL SYSCALL_API NtUserIsTopLevelWindow( HWND hwnd )

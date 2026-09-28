@@ -459,7 +459,7 @@
 @ stdcall EnableMenuItem(long long long) NtUserEnableMenuItem
 @ stdcall EnableMouseInPointer(long) NtUserEnableMouseInPointer
 @ stdcall EnableNonClientDpiScaling(long)
-# @ stub EnableOneCoreTransformMode
+@ stdcall EnableOneCoreTransformMode() NtEnableOneCoreTransformMode
 @ stdcall EnableScrollBar(long long long)
 # @ stub EnableSessionForMMCSS
 @ stdcall EnableWindow(long long) NtUserEnableWindow
@@ -795,7 +795,7 @@
 @ stdcall IsMenu(long)
 @ stdcall IsMouseInPointerEnabled() NtUserIsMouseInPointerEnabled
 # @ stub SetThreadCursorCreationScaling
-# @ stub IsOneCoreTransformMode
+@ stdcall IsOneCoreTransformMode() NtIsOneCoreTransformMode
 @ stdcall IsProcessDPIAware()
 @ stdcall IsRectEmpty(ptr)
 # @ stub IsSETEnabled

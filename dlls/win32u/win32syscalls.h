@@ -3169,7 +3169,6 @@
     SYSCALL_STUB( NtDxgkVailConnect ) \
     SYSCALL_STUB( NtDxgkVailDisconnect ) \
     SYSCALL_STUB( NtDxgkVailPromoteCompositionSurface ) \
-    SYSCALL_STUB( NtEnableOneCoreTransformMode ) \
     SYSCALL_STUB( NtFlipObjectAddContent ) \
     SYSCALL_STUB( NtFlipObjectAddPoolBuffer ) \
     SYSCALL_STUB( NtFlipObjectConsumerAcquirePresent ) \
@@ -3512,7 +3511,6 @@
     SYSCALL_STUB( NtGdiXLATEOBJ_iXlate ) \
     SYSCALL_STUB( NtHWCursorUpdatePointer ) \
     SYSCALL_STUB( NtInputSpaceRegionFromPoint ) \
-    SYSCALL_STUB( NtIsOneCoreTransformMode ) \
     SYSCALL_STUB( NtMITAccessibilityTimerNotification ) \
     SYSCALL_STUB( NtMITActivateInputProcessing ) \
     SYSCALL_STUB( NtMITConfigureVirtualTouchpad ) \

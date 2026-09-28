@@ -612,6 +612,7 @@ static const KBDTABLES kbdus_tables =
 
 static LONG clipping_cursor; /* clipping thread counter */
 static LONG enable_mouse_in_pointer = -1;
+static LONG one_core_transform_mode;
 static LONG last_frame = 0;
 
 struct pointer
@@ -3334,6 +3335,23 @@ BOOL WINAPI NtUserIsMouseInPointerEnabled(void)
     BOOL ret = ReadNoFence( &enable_mouse_in_pointer ) == 1;
     TRACE( "-> %d.\n", ret );
     return ret;
+}
+
+/**********************************************************************
+ *       NtEnableOneCoreTransformMode    (win32u.@)
+ */
+BOOL WINAPI NtEnableOneCoreTransformMode(void)
+{
+    InterlockedExchange( &one_core_transform_mode, TRUE );
+    return TRUE;
+}
+
+/**********************************************************************
+ *       NtIsOneCoreTransformMode    (win32u.@)
+ */
+BOOL WINAPI NtIsOneCoreTransformMode(void)
+{
+    return ReadNoFence( &one_core_transform_mode );
 }
 
 BOOL is_mouse_in_pointer_enabled( HWND hwnd )

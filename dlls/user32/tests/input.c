@@ -425,6 +425,8 @@ static LRESULT CALLBACK append_message_wndproc( HWND hwnd, UINT msg, WPARAM wpar
 
 static BOOL (WINAPI *pEnableMouseInPointer)( BOOL );
 static BOOL (WINAPI *pIsMouseInPointerEnabled)(void);
+static BOOL (WINAPI *pEnableOneCoreTransformMode)(void);
+static BOOL (WINAPI *pIsOneCoreTransformMode)(void);
 static BOOL (WINAPI *pGetCurrentInputMessageSource)( INPUT_MESSAGE_SOURCE *source );
 static BOOL (WINAPI *pGetPointerType)(UINT32, POINTER_INPUT_TYPE*);
 static BOOL (WINAPI *pGetPointerInfo)(UINT32, POINTER_INFO*);
@@ -461,7 +463,9 @@ static void init_function_pointers(void)
 
     GET_PROC(DelegateInput);
     GET_PROC(EnableMouseInPointer);
+    GET_PROC(EnableOneCoreTransformMode);
     GET_PROC(IsMouseInPointerEnabled);
+    GET_PROC(IsOneCoreTransformMode);
     GET_PROC(GetCurrentInputMessageSource);
     GET_PROC(GetMouseMovePointsEx);
     GET_PROC(GetPointerInfo);
@@ -6180,6 +6184,20 @@ static void test_EnableMouseInPointer( const char *arg )
     winetest_pop_context();
 }
 
+static void test_OneCoreTransformMode(void)
+{
+    BOOL ret;
+
+    ret = pIsOneCoreTransformMode();
+    ok( !ret, "IsOneCoreTransformMode returned %u before enable\n", ret );
+    ret = pEnableOneCoreTransformMode();
+    ok( ret, "EnableOneCoreTransformMode failed\n" );
+    ret = pIsOneCoreTransformMode();
+    ok( ret, "IsOneCoreTransformMode returned %u after enable\n", ret );
+    ret = pEnableOneCoreTransformMode();
+    ok( ret, "repeated EnableOneCoreTransformMode failed\n" );
+}
+
 static BOOL CALLBACK get_virtual_screen_proc( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
 {
     RECT *virtual_rect = (RECT *)lp;
@@ -6975,6 +6993,8 @@ START_TEST(input)
         return test_GetMouseMovePointsEx_process();
     if (argc >= 4 && !strcmp( argv[2], "test_EnableMouseInPointer" ))
         return test_EnableMouseInPointer( argv[3] );
+    if (argc >= 3 && !strcmp( argv[2], "test_OneCoreTransformMode" ))
+        return test_OneCoreTransformMode();
     if (argc >= 4 && !strcmp( argv[2], "test_ClipCursor_dirty" ))
         return test_ClipCursor_dirty( argv[3] );
     if (argc >= 3 && !strcmp( argv[2], "test_ClipCursor_process" ))
@@ -7039,6 +7059,11 @@ START_TEST(input)
         run_in_process( argv, "test_EnableMouseInPointer 0" );
         run_in_process( argv, "test_EnableMouseInPointer 1" );
     }
+
+    if (!pEnableOneCoreTransformMode || !pIsOneCoreTransformMode)
+        win_skip( "OneCore transform mode functions are not available\n" );
+    else
+        run_in_process( argv, "test_OneCoreTransformMode" );
 
     test_ClipCursor( argv );
     run_in_desktop( argv, "test_system_messages_with_rawinput_nolegacy", 1 );

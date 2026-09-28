@@ -999,6 +999,7 @@ W32KAPI BOOL    WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags )
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointer( BOOL );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointerForThread(void);
 W32KAPI BOOL    WINAPI NtUserEnableMouseInputForCursorSuppression( BOOL enable );
+W32KAPI BOOL    WINAPI NtEnableOneCoreTransformMode(void);
 W32KAPI BOOL    WINAPI NtUserEnableScrollBar( HWND hwnd, UINT bar, UINT flags );
 W32KAPI BOOL    WINAPI NtUserEnableWindow( HWND hwnd, BOOL enable );
 W32KAPI BOOL    WINAPI NtUserEnableWindowResizeOptimization( UINT flags, UINT value, UINT timeout );
@@ -1123,6 +1124,7 @@ W32KAPI INT     WINAPI NtUserInternalGetWindowText( HWND hwnd, WCHAR *text, INT 
 W32KAPI BOOL    WINAPI NtUserIsChildWindowDpiMessageEnabled( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserIsClipboardFormatAvailable( UINT format );
 W32KAPI BOOL    WINAPI NtUserIsMouseInPointerEnabled(void);
+W32KAPI BOOL    WINAPI NtIsOneCoreTransformMode(void);
 W32KAPI BOOL    WINAPI NtUserIsTopLevelWindow( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserIsWindowBroadcastingDpiToChildren( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserInvalidateRect( HWND hwnd, const RECT *rect, BOOL erase );
