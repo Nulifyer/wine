@@ -19,6 +19,8 @@ SOURCES = \
 	roapi.c \
 	rpc.c \
 	string.c \
+	stdactivator.c \
+	stdactivator.idl \
 	stubmanager.c \
 	combase_unknwn.idl \
 	usrmarshal.c \

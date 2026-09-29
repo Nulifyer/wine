@@ -1,0 +1,60 @@
+/*
+ * Private standard-activator ABI, from matching COMBASE public symbols.
+ * Copyright 2026 Nulifyer
+ *
+ * This library is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License, version 2.1 or
+ * any later version.
+ */
+
+#pragma makedep header
+import "objidl.idl";
+
+[
+    local,
+    object,
+    uuid(000001b8-0000-0000-c000-000000000046)
+]
+interface IStandardActivator : IUnknown
+{
+    HRESULT StandardGetClassObject(REFCLSID clsid, DWORD context, COSERVERINFO *server,
+                                  REFIID iid, void **object);
+    HRESULT StandardCreateInstance(REFCLSID clsid, IUnknown *outer, DWORD context,
+                                  COSERVERINFO *server, DWORD count, MULTI_QI *results);
+    HRESULT StandardGetInstanceFromFile(COSERVERINFO *server, CLSID *clsid, IUnknown *outer,
+                                       DWORD context, DWORD mode, OLECHAR *name,
+                                       DWORD count, MULTI_QI *results);
+    HRESULT StandardGetInstanceFromIStorage(COSERVERINFO *server, CLSID *clsid, IUnknown *outer,
+                                           DWORD context, IStorage *storage, DWORD count,
+                                           MULTI_QI *results);
+    HRESULT Reset();
+}
+
+[
+    local,
+    object,
+    uuid(000001b9-0000-0000-c000-000000000046)
+]
+interface ISpecialSystemProperties : IUnknown
+{
+    HRESULT SetSessionId(DWORD session, BOOL console, BOOL remote);
+    HRESULT GetSessionId(DWORD *session, BOOL *console);
+    HRESULT GetSessionId2(DWORD *session, BOOL *console, BOOL *remote);
+    HRESULT SetClientImpersonating(BOOL impersonating);
+    HRESULT GetClientImpersonating(BOOL *impersonating);
+    HRESULT SetPartitionId(REFGUID partition);
+    HRESULT GetPartitionId(GUID *partition);
+    HRESULT SetProcessRequestType(DWORD type);
+    HRESULT GetProcessRequestType(DWORD *type);
+    HRESULT SetOrigClsctx(DWORD context);
+    HRESULT GetOrigClsctx(DWORD *context);
+    HRESULT GetDefaultAuthenticationLevel(DWORD *level);
+    HRESULT SetDefaultAuthenticationLevel(DWORD level);
+    HRESULT GetLUARunLevel(DWORD *level, ULONG_PTR *window);
+    HRESULT SetLUARunLevel(DWORD level, ULONG_PTR window);
+    HRESULT FlagQuery(DWORD flags);
+    HRESULT FlagSet(DWORD flags);
+    HRESULT FlagClear(DWORD flags);
+    HRESULT SetServiceId(DWORD service);
+    HRESULT GetServiceId(DWORD *service);
+}

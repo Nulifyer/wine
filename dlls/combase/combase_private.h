@@ -22,6 +22,9 @@
 
 extern HINSTANCE hProxyDll;
 
+extern const CLSID CLSID_ComActivator;
+HRESULT standard_activator_get_class_factory(REFIID iid, void **object);
+
 HRESULT git_get_class_factory(REFIID riid, void **obj);
 void git_release(void);
 HRESULT ftmarshal_get_class_factory(REFIID riid, void **obj);

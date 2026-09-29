@@ -17,6 +17,7 @@ SOURCES = \
 	restricted_error.c \
 	roapi.c \
 	string.c \
+	stdactivator.c \
 	windowprop.c \
 	wine.combase.test.c \
 	wine.combase.test.spec
