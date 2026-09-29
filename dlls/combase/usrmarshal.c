@@ -32,6 +32,41 @@ WINE_DEFAULT_DEBUG_CHANNEL(ole);
 #define ALIGN_LENGTH(_Len, _Align) _Len = ALIGNED_LENGTH(_Len, _Align)
 #define ALIGN_POINTER(_Ptr, _Align) _Ptr = ALIGNED_POINTER(_Ptr, _Align)
 
+/* call_as/local adapters for combase_unknwn.idl.  Each proxy module needs
+ * these entry points beside its generated IClassFactory proxy and stub. */
+
+HRESULT CALLBACK IClassFactory_CreateInstance_Proxy(IClassFactory *iface,
+        IUnknown *outer, REFIID iid, void **obj)
+{
+    TRACE("(%p, %s, %p)\n", outer, debugstr_guid(iid), obj);
+    *obj = NULL;
+    if (outer)
+    {
+        ERR("aggregation is not allowed on remote objects\n");
+        return CLASS_E_NOAGGREGATION;
+    }
+    return IClassFactory_RemoteCreateInstance_Proxy(iface, iid, (IUnknown **)obj);
+}
+
+HRESULT __RPC_STUB IClassFactory_CreateInstance_Stub(IClassFactory *iface,
+        REFIID iid, IUnknown **obj)
+{
+    TRACE("(%s, %p)\n", debugstr_guid(iid), obj);
+    return IClassFactory_CreateInstance(iface, NULL, iid, (void **)obj);
+}
+
+HRESULT CALLBACK IClassFactory_LockServer_Proxy(IClassFactory *iface, BOOL lock)
+{
+    FIXME(":stub\n");
+    return E_NOTIMPL;
+}
+
+HRESULT __RPC_STUB IClassFactory_LockServer_Stub(IClassFactory *iface, BOOL lock)
+{
+    FIXME(":stub\n");
+    return E_NOTIMPL;
+}
+
 static const char* debugstr_user_flags(ULONG *pFlags)
 {
     char buf[12];

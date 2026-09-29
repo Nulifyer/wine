@@ -19,6 +19,7 @@ SOURCES = \
 	rpc.c \
 	string.c \
 	stubmanager.c \
+	combase_unknwn.idl \
 	usrmarshal.c \
 	windowprop.c \
 	winrt.idl

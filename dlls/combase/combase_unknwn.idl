@@ -1,0 +1,19 @@
+/*
+ * Standard COM class-factory proxy definitions
+ *
+ * Copyright 2026 Nulifyer
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ */
+
+/* The generated header includes rpc.h, which includes unknwn.h.  Keep the
+ * declarations available to widl while suppressing the duplicate C header. */
+
+#pragma makedep proxy
+
+cpp_quote("#if 0")
+#include "unknwn.idl"
+cpp_quote("#endif")

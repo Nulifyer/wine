@@ -30,6 +30,52 @@ static const IID irundown_iid =
 static const IID unknown_iid =
     {0x9d512b93, 0x74ee, 0x4cb2, {0xa0, 0x42, 0x91, 0x7e, 0x50, 0x67, 0x65, 0xd1}};
 
+static HRESULT WINAPI class_factory_QueryInterface(IClassFactory *iface, REFIID iid, void **out)
+{
+    if (IsEqualIID(iid, &IID_IUnknown) || IsEqualIID(iid, &IID_IClassFactory))
+    {
+        *out = iface;
+        IClassFactory_AddRef(iface);
+        return S_OK;
+    }
+
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI class_factory_AddRef(IClassFactory *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI class_factory_Release(IClassFactory *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI class_factory_CreateInstance(IClassFactory *iface, IUnknown *outer,
+        REFIID iid, void **out)
+{
+    *out = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI class_factory_LockServer(IClassFactory *iface, BOOL lock)
+{
+    return S_OK;
+}
+
+static const IClassFactoryVtbl class_factory_vtbl =
+{
+    class_factory_QueryInterface,
+    class_factory_AddRef,
+    class_factory_Release,
+    class_factory_CreateInstance,
+    class_factory_LockServer,
+};
+
+static IClassFactory class_factory = {&class_factory_vtbl};
+
 struct inspectable_object
 {
     IInspectable IInspectable_iface;
@@ -275,6 +321,47 @@ static void test_irundown_proxy(void)
     if (iface) IUnknown_Release((IUnknown *)iface);
     if (proxy) IRpcProxyBuffer_Release(proxy);
     if (factory) IPSFactoryBuffer_Release(factory);
+    CoUninitialize();
+}
+
+static void test_class_factory_proxy(void)
+{
+    IPSFactoryBuffer *factory = NULL;
+    IRpcStubBuffer *stub = NULL;
+    IRpcProxyBuffer *proxy = NULL;
+    IClassFactory *proxy_iface = NULL;
+    CLSID clsid;
+    HRESULT hr;
+
+    hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    ok(hr == S_OK, "CoInitializeEx returned %#lx.\n", hr);
+    if (FAILED(hr)) return;
+
+    hr = CoGetPSClsid(&IID_IClassFactory, &clsid);
+    ok(hr == S_OK, "CoGetPSClsid(IClassFactory) returned %#lx.\n", hr);
+    ok(IsEqualCLSID(&clsid, &psfactory_clsid), "got proxy CLSID %s.\n", wine_dbgstr_guid(&clsid));
+
+    hr = CoGetClassObject(&psfactory_clsid, CLSCTX_INPROC_SERVER | CLSCTX_PS_DLL, NULL,
+            &IID_IPSFactoryBuffer, (void **)&factory);
+    ok(hr == S_OK, "CoGetClassObject returned %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        hr = IPSFactoryBuffer_CreateStub(factory, &IID_IClassFactory,
+                (IUnknown *)&class_factory, &stub);
+        ok(hr == S_OK, "CreateStub(IClassFactory) returned %#lx.\n", hr);
+        ok(!!stub, "CreateStub returned a NULL stub.\n");
+        if (stub) IRpcStubBuffer_Release(stub);
+
+        hr = IPSFactoryBuffer_CreateProxy(factory, NULL, &IID_IClassFactory, &proxy,
+                (void **)&proxy_iface);
+        ok(hr == S_OK, "CreateProxy(IClassFactory) returned %#lx.\n", hr);
+        ok(!!proxy, "CreateProxy returned a NULL proxy.\n");
+        ok(!!proxy_iface, "CreateProxy returned a NULL interface.\n");
+        if (proxy_iface) IClassFactory_Release(proxy_iface);
+        if (proxy) IRpcProxyBuffer_Release(proxy);
+        IPSFactoryBuffer_Release(factory);
+    }
+
     CoUninitialize();
 }
 
@@ -575,6 +662,7 @@ START_TEST(proxy_factory)
 {
     test_direct_class_object();
     test_irundown_proxy();
+    test_class_factory_proxy();
     test_inspectable_proxy();
     test_activation_factory_proxy();
 }

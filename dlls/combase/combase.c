@@ -3051,7 +3051,8 @@ HRESULT WINAPI CoGetPSClsid(REFIID riid, CLSID *pclsid)
         return E_INVALIDARG;
 
     /* These interfaces are owned by combase's built-in proxy/stub factory. */
-    if (IsEqualIID(riid, &inspectable_iid) || IsEqualIID(riid, &activation_factory_iid) ||
+    if (IsEqualIID(riid, &IID_IClassFactory) || IsEqualIID(riid, &inspectable_iid) ||
+            IsEqualIID(riid, &activation_factory_iid) ||
             IsEqualIID(riid, &priv_dragdrop_iid))
     {
         *pclsid = CLSID_PSFactoryBuffer;
