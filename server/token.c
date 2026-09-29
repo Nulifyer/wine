@@ -83,6 +83,9 @@ static const struct sid authenticated_user_sid = { SID_REVISION, 1, SECURITY_NT_
 static const struct sid high_label_sid = { SID_REVISION, 1, SECURITY_MANDATORY_LABEL_AUTHORITY, { SECURITY_MANDATORY_HIGH_RID } };
 
 static struct luid prev_luid_value = { 1000, 0 };
+static struct list session_user_tokens = LIST_INIT(session_user_tokens);
+
+static void register_session_user_token( struct token *token, int replace );
 
 static const WCHAR token_name[] = {'T','o','k','e','n'};
 
@@ -122,6 +125,8 @@ struct token
     int            impersonation_level; /* impersonation level this token is capable of if non-primary token */
     int            elevation;       /* elevation type */
     struct list    kernel_object;   /* list of kernel object pointers */
+    struct list    session_user_entry; /* registered interactive-session user token */
+    unsigned int   session_user : 1; /* token belongs to the registered session-user lineage */
 };
 
 struct privilege
@@ -499,6 +504,7 @@ static void token_destroy( struct object *obj )
     assert( obj->ops == &token_ops );
     token = (struct token *)obj;
 
+    if (!list_empty( &token->session_user_entry )) list_remove( &token->session_user_entry );
     free( token->user );
     free( token->trust_level );
 
@@ -556,6 +562,8 @@ static struct token *create_token( unsigned int primary, unsigned int session_id
         list_init( &token->groups );
         list_init( &token->restricting );
         list_init( &token->kernel_object );
+        list_init( &token->session_user_entry );
+        token->session_user = 0;
         token->restricted = 0;
         token->primary = primary;
         token->session_id = session_id;
@@ -760,6 +768,9 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
             }
         }
     }
+
+    if (src_token->session_user && token->primary)
+        register_session_user_token( token, 0 );
 
     return token;
 }
@@ -1403,6 +1414,45 @@ unsigned int token_get_session_id( struct token *token )
 void token_set_session_id( struct token *token, unsigned int session_id )
 {
     token->session_id = session_id;
+}
+
+static struct token *find_session_user_token( unsigned int session_id )
+{
+    struct token *token;
+
+    LIST_FOR_EACH_ENTRY( token, &session_user_tokens, struct token, session_user_entry )
+        if (token->session_id == session_id) return token;
+    return NULL;
+}
+
+static void unregister_session_user_token( struct token *token )
+{
+    if (!list_empty( &token->session_user_entry ))
+    {
+        list_remove( &token->session_user_entry );
+        list_init( &token->session_user_entry );
+    }
+    token->session_user = 0;
+}
+
+static void register_session_user_token( struct token *token, int replace )
+{
+    struct token *previous, *next;
+
+    unregister_session_user_token( token );
+    if (!token->primary || equal_sid( token->user, &local_system_sid ) ||
+        !token_sid_present( token, &interactive_sid, 0 ))
+        return;
+
+    if (replace)
+    {
+        LIST_FOR_EACH_ENTRY_SAFE( previous, next, &session_user_tokens,
+                                  struct token, session_user_entry )
+            if (previous->session_id == token->session_id)
+                unregister_session_user_token( previous );
+    }
+    token->session_user = 1;
+    list_add_tail( &session_user_tokens, &token->session_user_entry );
 }
 
 static unsigned int token_trust_access_mask( struct token *token, const struct security_descriptor *sd )
@@ -2178,9 +2228,30 @@ DECL_HANDLER(set_token_session_id)
         if (!thread_single_check_privilege( current, SeTcbPrivilege ))
             set_error( STATUS_PRIVILEGE_NOT_HELD );
         else
+        {
             token_set_session_id( token, req->session_id );
+            register_session_user_token( token, 1 );
+        }
         release_object( token );
     }
+}
+
+DECL_HANDLER(get_session_user_token)
+{
+    struct token *token;
+
+    reply->token = 0;
+    if (!thread_single_check_privilege( current, SeTcbPrivilege ))
+    {
+        set_error( STATUS_PRIVILEGE_NOT_HELD );
+        return;
+    }
+    if (!(token = find_session_user_token( req->session_id )))
+    {
+        set_error( STATUS_NO_SUCH_LOGON_SESSION );
+        return;
+    }
+    reply->token = alloc_handle( current->process, token, TOKEN_ALL_ACCESS, 0 );
 }
 
 DECL_HANDLER(set_token_session_reference)

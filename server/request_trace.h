@@ -4803,6 +4803,16 @@ static void dump_set_activation_object_redirection_request( const struct set_act
     dump_luid( ", target=", &req->target );
 }
 
+static void dump_get_session_user_token_request( const struct get_session_user_token_request *req )
+{
+    fprintf( stderr, " session_id=%08x", req->session_id );
+}
+
+static void dump_get_session_user_token_reply( const struct get_session_user_token_reply *req )
+{
+    fprintf( stderr, " token=%04x", req->token );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -5243,6 +5253,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_destroy_activation_object_request,
     (dump_func)dump_query_activation_object_request,
     (dump_func)dump_set_activation_object_redirection_request,
+    (dump_func)dump_get_session_user_token_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5683,6 +5694,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_query_activation_object_reply,
     NULL,
+    (dump_func)dump_get_session_user_token_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -6123,6 +6135,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "destroy_activation_object",
     "query_activation_object",
     "set_activation_object_redirection",
+    "get_session_user_token",
 };
 
 static const struct
@@ -6252,6 +6265,7 @@ static const struct
     { "NO_MORE_ENTRIES",             STATUS_NO_MORE_ENTRIES },
     { "NO_SUCH_DEVICE",              STATUS_NO_SUCH_DEVICE },
     { "NO_SUCH_FILE",                STATUS_NO_SUCH_FILE },
+    { "NO_SUCH_LOGON_SESSION",       STATUS_NO_SUCH_LOGON_SESSION },
     { "NO_TOKEN",                    STATUS_NO_TOKEN },
     { "OBJECT_NAME_COLLISION",       STATUS_OBJECT_NAME_COLLISION },
     { "OBJECT_NAME_EXISTS",          STATUS_OBJECT_NAME_EXISTS },

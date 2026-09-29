@@ -388,12 +388,122 @@ static void test_WTSQuerySessionInformation(void)
 
 static void test_WTSQueryUserToken(void)
 {
+    TOKEN_STATISTICS registered_stats, queried_stats;
+    HANDLE registered = NULL, descendant = NULL, queried = NULL;
+    TOKEN_TYPE type;
+    BOOLEAN previous, ignored;
+    DWORD original_session, session, size;
+    NTSTATUS status;
     BOOL ret;
 
     SetLastError(0xdeadbeef);
     ret = WTSQueryUserToken(WTS_CURRENT_SESSION, NULL);
     ok(!ret, "expected WTSQueryUserToken to fail\n");
     ok(GetLastError()==ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER got: %ld\n", GetLastError());
+
+    if (!winetest_platform_is_wine) return;
+
+    ret = DuplicateTokenEx( GetCurrentProcessToken(), TOKEN_ALL_ACCESS, NULL,
+                            SecurityImpersonation, TokenPrimary, &registered );
+    ok(ret, "DuplicateTokenEx failed, error %lu.\n", GetLastError());
+    if (!ret) return;
+
+    size = sizeof(original_session);
+    ret = GetTokenInformation( registered, TokenSessionId, &original_session, size, &size );
+    ok(ret, "GetTokenInformation failed, error %lu.\n", GetLastError());
+    if (!ret) goto done;
+
+    status = RtlAdjustPrivilege( SE_TCB_PRIVILEGE, TRUE, FALSE, &previous );
+    if (status == STATUS_PRIVILEGE_NOT_HELD)
+    {
+        win_skip("SeTcbPrivilege is unavailable.\n");
+        goto done;
+    }
+    ok(status == STATUS_SUCCESS, "RtlAdjustPrivilege returned %#lx.\n", status);
+    if (status) goto done;
+
+    session = original_session == 0x7ffffffe ? 0x7ffffffd : 0x7ffffffe;
+    ret = SetTokenInformation( registered, TokenSessionId, &session, sizeof(session) );
+    ok(ret, "SetTokenInformation failed, error %lu.\n", GetLastError());
+    if (!ret) goto restore_privilege;
+
+    status = RtlAdjustPrivilege( SE_TCB_PRIVILEGE, FALSE, FALSE, &ignored );
+    ok(status == STATUS_SUCCESS, "RtlAdjustPrivilege returned %#lx.\n", status);
+    SetLastError( 0xdeadbeef );
+    ret = WTSQueryUserToken( session, &queried );
+    ok(!ret, "WTSQueryUserToken unexpectedly succeeded without SeTcbPrivilege.\n");
+    ok(GetLastError() == ERROR_PRIVILEGE_NOT_HELD, "got error %lu.\n", GetLastError());
+    ok(!queried, "got token %p.\n", queried);
+
+    status = RtlAdjustPrivilege( SE_TCB_PRIVILEGE, TRUE, FALSE, &ignored );
+    ok(status == STATUS_SUCCESS, "RtlAdjustPrivilege returned %#lx.\n", status);
+    ret = WTSQueryUserToken( session, &queried );
+    ok(ret, "WTSQueryUserToken failed, error %lu.\n", GetLastError());
+    if (ret)
+    {
+        size = sizeof(type);
+        ret = GetTokenInformation( queried, TokenType, &type, size, &size );
+        ok(ret, "GetTokenInformation(TokenType) failed, error %lu.\n", GetLastError());
+        ok(type == TokenPrimary, "got token type %u.\n", type);
+        size = sizeof(session);
+        session = 0;
+        ret = GetTokenInformation( queried, TokenSessionId, &session, size, &size );
+        ok(ret, "GetTokenInformation(TokenSessionId) failed, error %lu.\n", GetLastError());
+        ok(session == (original_session == 0x7ffffffe ? 0x7ffffffd : 0x7ffffffe),
+           "got session %#lx.\n", session);
+        size = sizeof(registered_stats);
+        ret = GetTokenInformation( registered, TokenStatistics, &registered_stats, size, &size );
+        ok(ret, "GetTokenInformation(TokenStatistics) failed, error %lu.\n", GetLastError());
+        size = sizeof(queried_stats);
+        ret = GetTokenInformation( queried, TokenStatistics, &queried_stats, size, &size );
+        ok(ret, "GetTokenInformation(TokenStatistics) failed, error %lu.\n", GetLastError());
+        ok(!memcmp(&registered_stats.TokenId, &queried_stats.TokenId, sizeof(registered_stats.TokenId)),
+           "returned a different token.\n");
+        CloseHandle( queried );
+        queried = NULL;
+    }
+
+    ret = DuplicateTokenEx( registered, TOKEN_ALL_ACCESS, NULL,
+                            SecurityImpersonation, TokenPrimary, &descendant );
+    ok(ret, "DuplicateTokenEx failed, error %lu.\n", GetLastError());
+    if (ret)
+    {
+        CloseHandle( registered );
+        registered = NULL;
+        ret = WTSQueryUserToken( session, &queried );
+        ok(ret, "WTSQueryUserToken lost a live token descendant, error %lu.\n", GetLastError());
+        if (ret)
+        {
+            size = sizeof(registered_stats);
+            ret = GetTokenInformation( descendant, TokenStatistics, &registered_stats, size, &size );
+            ok(ret, "GetTokenInformation(TokenStatistics) failed, error %lu.\n", GetLastError());
+            size = sizeof(queried_stats);
+            ret = GetTokenInformation( queried, TokenStatistics, &queried_stats, size, &size );
+            ok(ret, "GetTokenInformation(TokenStatistics) failed, error %lu.\n", GetLastError());
+            ok(!memcmp(&registered_stats.TokenId, &queried_stats.TokenId, sizeof(registered_stats.TokenId)),
+               "returned a different token descendant.\n");
+            CloseHandle( queried );
+            queried = NULL;
+        }
+        registered = descendant;
+        descendant = NULL;
+    }
+
+    ret = SetTokenInformation( registered, TokenSessionId, &original_session, sizeof(original_session) );
+    ok(ret, "SetTokenInformation restore failed, error %lu.\n", GetLastError());
+    SetLastError( 0xdeadbeef );
+    ret = WTSQueryUserToken( original_session == 0x7ffffffe ? 0x7ffffffd : 0x7ffffffe, &queried );
+    ok(!ret, "WTSQueryUserToken unexpectedly found the retired session.\n");
+    ok(GetLastError() == ERROR_NO_SUCH_LOGON_SESSION, "got error %lu.\n", GetLastError());
+    ok(!queried, "got token %p.\n", queried);
+
+restore_privilege:
+    status = RtlAdjustPrivilege( SE_TCB_PRIVILEGE, previous, FALSE, &ignored );
+    ok(status == STATUS_SUCCESS, "RtlAdjustPrivilege returned %#lx.\n", status);
+done:
+    if (queried) CloseHandle( queried );
+    if (descendant) CloseHandle( descendant );
+    if (registered) CloseHandle( registered );
 }
 
 static void test_WTSEnumerateSessions(void)

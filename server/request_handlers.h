@@ -443,6 +443,7 @@ DECL_HANDLER(configure_activation_object);
 DECL_HANDLER(destroy_activation_object);
 DECL_HANDLER(query_activation_object);
 DECL_HANDLER(set_activation_object_redirection);
+DECL_HANDLER(get_session_user_token);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -883,6 +884,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_destroy_activation_object,
     (req_handler)req_query_activation_object,
     (req_handler)req_set_activation_object_redirection,
+    (req_handler)req_get_session_user_token,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -3304,3 +3306,7 @@ C_ASSERT( sizeof(struct query_activation_object_reply) == 40 );
 C_ASSERT( offsetof(struct set_activation_object_redirection_request, source) == 12 );
 C_ASSERT( offsetof(struct set_activation_object_redirection_request, target) == 20 );
 C_ASSERT( sizeof(struct set_activation_object_redirection_request) == 32 );
+C_ASSERT( offsetof(struct get_session_user_token_request, session_id) == 12 );
+C_ASSERT( sizeof(struct get_session_user_token_request) == 16 );
+C_ASSERT( offsetof(struct get_session_user_token_reply, token) == 8 );
+C_ASSERT( sizeof(struct get_session_user_token_reply) == 16 );

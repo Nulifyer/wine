@@ -5463,3 +5463,11 @@ struct alpc_message_info
     struct luid    source;        /* source activation object */
     struct luid    target;        /* target activation object, or zero */
 @END
+
+/* Return the registered interactive user token for a session.  Keep new
+ * LinuxNT protocol requests append-only so existing request ids stay stable. */
+@REQ(get_session_user_token)
+    unsigned int    session_id; /* session identifier */
+@REPLY
+    obj_handle_t    token;      /* primary user token */
+@END

@@ -25,6 +25,7 @@
 #include "lmcons.h"
 #include "wtsapi32.h"
 #include "wine/debug.h"
+#include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wtsapi);
 
@@ -644,17 +645,39 @@ BOOL WINAPI WTSQuerySessionInformationW(HANDLE server, DWORD session_id, WTS_INF
  */
 BOOL WINAPI WTSQueryUserToken(ULONG session_id, PHANDLE token)
 {
-    FIXME("%lu %p semi-stub!\n", session_id, token);
+    NTSTATUS status;
+
+    TRACE("%lu %p\n", session_id, token);
 
     if (!token)
     {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
+    *token = NULL;
 
-    return DuplicateHandle(GetCurrentProcess(), GetCurrentProcessToken(),
-                           GetCurrentProcess(), token,
-                           0, FALSE, DUPLICATE_SAME_ACCESS);
+    if (session_id == WTS_CURRENT_SESSION &&
+        !ProcessIdToSessionId( GetCurrentProcessId(), &session_id ))
+        return FALSE;
+
+    SERVER_START_REQ( get_session_user_token )
+    {
+        req->session_id = session_id;
+        status = wine_server_call( req );
+        if (!status) *token = wine_server_ptr_handle( reply->token );
+    }
+    SERVER_END_REQ;
+
+    if (status)
+    {
+        DWORD error = RtlNtStatusToDosError( status );
+
+        TRACE("session %lu failed, status %#lx, error %lu\n", session_id, status, error);
+        SetLastError( error );
+        return FALSE;
+    }
+    TRACE("session %lu returned token %p\n", session_id, *token);
+    return TRUE;
 }
 
 /************************************************************

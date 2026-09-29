@@ -8201,6 +8201,20 @@ struct set_activation_object_redirection_reply
     struct reply_header __header;
 };
 
+/* Return the registered interactive user token for a session.  Keep new
+ * LinuxNT protocol requests append-only so existing request ids stay stable. */
+struct get_session_user_token_request
+{
+    struct request_header __header;
+    unsigned int    session_id;
+};
+struct get_session_user_token_reply
+{
+    struct reply_header __header;
+    obj_handle_t    token;
+    char __pad_12[4];
+};
+
 
 enum request
 {
@@ -8640,6 +8654,7 @@ enum request
     REQ_destroy_activation_object,
     REQ_query_activation_object,
     REQ_set_activation_object_redirection,
+    REQ_get_session_user_token,
     REQ_NB_REQUESTS
 };
 
@@ -9083,6 +9098,7 @@ union generic_request
     struct destroy_activation_object_request destroy_activation_object_request;
     struct query_activation_object_request query_activation_object_request;
     struct set_activation_object_redirection_request set_activation_object_redirection_request;
+    struct get_session_user_token_request get_session_user_token_request;
 };
 union generic_reply
 {
@@ -9524,8 +9540,9 @@ union generic_reply
     struct destroy_activation_object_reply destroy_activation_object_reply;
     struct query_activation_object_reply query_activation_object_reply;
     struct set_activation_object_redirection_reply set_activation_object_redirection_reply;
+    struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1069
+#define SERVER_PROTOCOL_VERSION 1076
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
