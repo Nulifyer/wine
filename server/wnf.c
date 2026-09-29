@@ -54,17 +54,40 @@
 #define WNF_PNPA_PORTS_CHANGED 0x0096003da3bc3875ULL
 #define WNF_PNPA_PORTS_CHANGED_SESSION 0x0096003da3bc4035ULL
 #define WNF_PO_SCENARIO_CHANGE 0x41c6013da3bce875ULL
+#define WNF_RM_MEMORY_MONITOR_USAGE_METRICS 0x41c6033fa3bc0875ULL
+#define WNF_RM_GAME_MODE_ACTIVE 0x41c6033fa3bc1075ULL
+#define WNF_RM_QUIET_MODE 0x41c6033fa3bc1875ULL
+#define WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE 0x41c6033fa3bc2075ULL
+#define WNF_HAM_SYSTEM_STATE_CHANGED 0x418b0f25a3bc0875ULL
 #define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
 #define WNF_SHEL_LOCKSCREEN_ACTIVE 0x0d83063ea3bc5835ULL
+#define WNF_THME_THEME_CHANGED 0x048b0639a3bc0875ULL
 #define WNF_TMCN_ISTABLETMODE 0x0f850339a3bc0835ULL
+#define WNF_UMGR_SIHOST_READY 0x13810338a3bc0835ULL
+#define WNF_UMGR_USER_LOGIN 0x13810338a3bc1075ULL
+#define WNF_UMGR_USER_LOGOUT 0x13810338a3bc1875ULL
+#define WNF_UMGR_SESSIONUSER_TOKEN_CHANGE 0x13810338a3bc2875ULL
+#define WNF_UMGR_SESSION_ACTIVE_SHELL_USER_CHANGE 0x13810338a3bc3035ULL
+#define WNF_UMGR_USER_PICTURE_CHANGED 0x13810338a3bc4075ULL
+#define WNF_UMGR_USER_PICTURE_ID 0x13810338a3bc48f5ULL
+#define WNF_UMGR_USER_PICTURE_CHANGED_CONTAINED 0x19890c35a3bc5075ULL
 
 static const struct sid network_service_sid =
     { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_NETWORK_SERVICE_RID } };
+
+enum well_known_writer
+{
+    WNF_WRITER_NONE,
+    WNF_WRITER_USER,
+    WNF_WRITER_SYSTEM,
+    WNF_WRITER_RPC_SERVICE,
+};
 
 struct well_known_state
 {
     unsigned __int64 name;
     unsigned int maximum, initial_size, initial_stamp;
+    enum well_known_writer writer;
 };
 
 static const struct well_known_state well_known_states[] =
@@ -92,10 +115,24 @@ static const struct well_known_state well_known_states[] =
     { WNF_PNPA_HARDWAREPROFILES_CHANGED_SESSION },
     { WNF_PNPA_PORTS_CHANGED },
     { WNF_PNPA_PORTS_CHANGED_SESSION },
-    { WNF_PO_SCENARIO_CHANGE, 20 },
-    { WNF_RPCF_FWMAN_RUNNING, sizeof(unsigned int) },
-    { WNF_SHEL_LOCKSCREEN_ACTIVE, sizeof(unsigned int) },
+    { WNF_PO_SCENARIO_CHANGE, 20, 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_RM_MEMORY_MONITOR_USAGE_METRICS, 24, 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_RM_GAME_MODE_ACTIVE, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_RM_QUIET_MODE, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_HAM_SYSTEM_STATE_CHANGED, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_RPCF_FWMAN_RUNNING, sizeof(unsigned int), 0, 0, WNF_WRITER_RPC_SERVICE },
+    { WNF_SHEL_LOCKSCREEN_ACTIVE, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_THME_THEME_CHANGED },
     { WNF_TMCN_ISTABLETMODE, sizeof(unsigned int) },
+    { WNF_UMGR_SIHOST_READY, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_UMGR_USER_LOGIN, 16, 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_UMGR_USER_LOGOUT, 16, 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_UMGR_SESSIONUSER_TOKEN_CHANGE, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_UMGR_SESSION_ACTIVE_SHELL_USER_CHANGE, 12, 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_UMGR_USER_PICTURE_CHANGED, 0, 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_UMGR_USER_PICTURE_ID, 78, 0, 0, WNF_WRITER_USER },
+    { WNF_UMGR_USER_PICTURE_CHANGED_CONTAINED, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
 };
 
 static const WCHAR wnf_name[] = {'W','n','f','S','t','a','t','e'};
@@ -239,9 +276,11 @@ static int find_session_process( struct process *process, void *context )
 static struct wnf_state *find_state( unsigned __int64 name, int explicit_scope,
                                      unsigned int session )
 {
+    const unsigned __int64 decoded = name ^ WNF_NAME_KEY;
     struct session_search search = { session, 0 };
-    unsigned int scope = ((name ^ WNF_NAME_KEY) >> 6) & 0xf;
+    unsigned int scope = (decoded >> 6) & 0xf;
     struct wnf_state *state;
+    struct well_known_state fallback;
     unsigned int i;
     if (explicit_scope)
     {
@@ -258,6 +297,18 @@ static struct wnf_state *find_state( unsigned __int64 name, int explicit_scope,
     for (i = 0; i < sizeof(well_known_states) / sizeof(well_known_states[0]); i++)
         if (name == well_known_states[i].name)
             return create_well_known_state( &well_known_states[i], scope == 1 ? session : 0 );
+
+    /* The well-known namespace is provisioned by Windows and changes between builds.  Materialize
+     * structurally valid names as read-only empty states so consumers can subscribe even when Wine
+     * has no payload or publisher contract for a newer state.  Named entries above remain the only
+     * well-known states that may be published. */
+    if ((decoded & 0xf) == 1 && ((decoded >> 4) & 3) == 0 &&
+        (scope == 0 || scope == 1 || scope == 2 || scope == 4) && decoded >> 32)
+    {
+        memset( &fallback, 0, sizeof(fallback) );
+        fallback.name = name;
+        return create_well_known_state( &fallback, scope == 1 ? session : 0 );
+    }
     set_error( STATUS_OBJECT_NAME_NOT_FOUND );
     return NULL;
 }
@@ -272,17 +323,30 @@ static int check_state( struct wnf_state *state, unsigned int access, int has_ty
 
 static int can_write_well_known_state( const struct wnf_state *state )
 {
+    const struct well_known_state *definition = NULL;
     const struct sid *user;
     struct token *token;
+    unsigned int i;
 
     if (!state->well_known) return 1;
+    for (i = 0; i < sizeof(well_known_states) / sizeof(well_known_states[0]); i++)
+        if (well_known_states[i].name == state->name) { definition = &well_known_states[i]; break; }
+    if (!definition) { set_error( STATUS_ACCESS_DENIED ); return 0; }
     token = current->token ? current->token : current->process->token;
     user = token ? token_get_user( token ) : NULL;
-    if (user &&
-        (((state->name == WNF_PO_SCENARIO_CHANGE || state->name == WNF_SHEL_LOCKSCREEN_ACTIVE) &&
-          equal_sid( user, &local_system_sid )) ||
-         (state->name == WNF_RPCF_FWMAN_RUNNING &&
-          (equal_sid( user, &local_system_sid ) || equal_sid( user, &network_service_sid ))))) return 1;
+    if (user) switch (definition->writer)
+    {
+    case WNF_WRITER_USER:
+        return 1;
+    case WNF_WRITER_SYSTEM:
+        if (equal_sid( user, &local_system_sid )) return 1;
+        break;
+    case WNF_WRITER_RPC_SERVICE:
+        if (equal_sid( user, &local_system_sid ) || equal_sid( user, &network_service_sid )) return 1;
+        break;
+    default:
+        break;
+    }
     set_error( STATUS_ACCESS_DENIED );
     return 0;
 }

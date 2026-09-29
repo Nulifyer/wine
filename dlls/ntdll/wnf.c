@@ -196,6 +196,55 @@ NTSTATUS WINAPI RtlPublishWnfStateData( ULONGLONG state, const GUID *type, const
                explicit_scope, status );
     return status;
 }
+NTSTATUS WINAPI RtlQueryWnfMetaNotification( ULONG *value, ULONG info, ULONGLONG state,
+                                             const void *explicit_scope )
+{
+    TRACE( "%p, %lu, %#I64x, %p\n", value, info, state, explicit_scope );
+    return NtQueryWnfStateNameInformation( &state, info, explicit_scope, value, sizeof(*value) );
+}
+static NTSTATUS query_wnf_meta_events( ULONGLONG state, ULONG mask, ULONG *events )
+{
+    NTSTATUS status;
+    ULONG value;
+
+    *events = 0;
+    if (mask & 8)
+    {
+        if ((status = NtQueryWnfStateNameInformation( &state, 2, NULL, &value, sizeof(value) )))
+            return status;
+        if (value) *events |= 8;
+    }
+    if (mask & 6)
+    {
+        if ((status = NtQueryWnfStateNameInformation( &state, 1, NULL, &value, sizeof(value) )))
+            return status;
+        if (value && (mask & 2)) *events |= 2;
+        else if (!value && (mask & 4)) *events |= 4;
+    }
+    return STATUS_SUCCESS;
+}
+NTSTATUS WINAPI RtlWaitForWnfMetaNotification( ULONGLONG state, ULONG mask, ULONG timeout,
+                                               ULONG unknown, ULONG *events )
+{
+    const ULONG poll_interval = 50;
+    NTSTATUS status;
+    ULONG elapsed = 0, delay_ms;
+    LARGE_INTEGER delay;
+
+    TRACE( "%#I64x, %#lx, %lu, %lu, %p\n", state, mask, timeout, unknown, events );
+    if (!events || !mask || (mask & ~0x0e)) return STATUS_INVALID_PARAMETER;
+    UNREFERENCED_PARAMETER(unknown);
+    for (;;)
+    {
+        if ((status = query_wnf_meta_events( state, mask, events ))) return status;
+        if (*events) return STATUS_SUCCESS;
+        if (elapsed >= timeout) return STATUS_TIMEOUT;
+        delay_ms = min( poll_interval, timeout - elapsed );
+        delay.QuadPart = -(LONGLONG)delay_ms * 10000;
+        if ((status = NtDelayExecution( FALSE, &delay ))) return status;
+        elapsed += delay_ms;
+    }
+}
 NTSTATUS WINAPI RtlQueryWnfStateData( ULONG *stamp, ULONGLONG state, PWNF_USER_CALLBACK callback,
                                       void *context, const GUID *type )
 {

@@ -44,9 +44,23 @@
 #define WNF_PNPA_PORTS_CHANGED 0x0096003da3bc3875ULL
 #define WNF_PNPA_PORTS_CHANGED_SESSION 0x0096003da3bc4035ULL
 #define WNF_PO_SCENARIO_CHANGE 0x41c6013da3bce875ULL
+#define WNF_RM_MEMORY_MONITOR_USAGE_METRICS 0x41c6033fa3bc0875ULL
+#define WNF_RM_GAME_MODE_ACTIVE 0x41c6033fa3bc1075ULL
+#define WNF_RM_QUIET_MODE 0x41c6033fa3bc1875ULL
+#define WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE 0x41c6033fa3bc2075ULL
+#define WNF_HAM_SYSTEM_STATE_CHANGED 0x418b0f25a3bc0875ULL
 #define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
 #define WNF_SHEL_LOCKSCREEN_ACTIVE 0x0d83063ea3bc5835ULL
+#define WNF_THME_THEME_CHANGED 0x048b0639a3bc0875ULL
 #define WNF_TMCN_ISTABLETMODE 0x0f850339a3bc0835ULL
+#define WNF_UMGR_SIHOST_READY 0x13810338a3bc0835ULL
+#define WNF_UMGR_USER_LOGIN 0x13810338a3bc1075ULL
+#define WNF_UMGR_USER_LOGOUT 0x13810338a3bc1875ULL
+#define WNF_UMGR_SESSIONUSER_TOKEN_CHANGE 0x13810338a3bc2875ULL
+#define WNF_UMGR_SESSION_ACTIVE_SHELL_USER_CHANGE 0x13810338a3bc3035ULL
+#define WNF_UMGR_USER_PICTURE_CHANGED 0x13810338a3bc4075ULL
+#define WNF_UMGR_USER_PICTURE_ID 0x13810338a3bc48f5ULL
+#define WNF_UMGR_USER_PICTURE_CHANGED_CONTAINED 0x19890c35a3bc5075ULL
 
 typedef NTSTATUS (WINAPI *wnf_callback)( ULONGLONG, ULONG, const GUID *, void *, const void *, ULONG );
 static NTSTATUS (WINAPI *pNtCreateWnfStateName)( ULONGLONG *, ULONG, ULONG, BOOLEAN, const GUID *,
@@ -62,6 +76,7 @@ static NTSTATUS (WINAPI *pNtUnsubscribeWnfStateChange)( const ULONGLONG * );
 static ULONG (WINAPI *pRtlAllocateWnfSerializationGroup)( void );
 static NTSTATUS (WINAPI *pRtlPublishWnfStateData)( ULONGLONG, const GUID *, const void *, ULONG,
                                                   const void * );
+static NTSTATUS (WINAPI *pRtlQueryWnfMetaNotification)( ULONG *, ULONG, ULONGLONG, const void * );
 static NTSTATUS (WINAPI *pRtlQueryWnfStateData)( ULONG *, ULONGLONG, wnf_callback, void *,
                                                 const GUID * );
 static NTSTATUS (WINAPI *pRtlTestAndPublishWnfStateData)( ULONGLONG, const GUID *, const void *, ULONG,
@@ -71,6 +86,7 @@ static NTSTATUS (WINAPI *pRtlSubscribeWnfStateChangeNotification)( void **, ULON
                                                                   ULONG, ULONG );
 static NTSTATUS (WINAPI *pRtlUnsubscribeWnfNotificationWaitForCompletion)( void * );
 static NTSTATUS (WINAPI *pRtlUnsubscribeWnfStateChangeNotification)( void * );
+static NTSTATUS (WINAPI *pRtlWaitForWnfMetaNotification)( ULONGLONG, ULONG, ULONG, ULONG, ULONG * );
 
 struct cross_process_callback_context
 {
@@ -221,6 +237,8 @@ START_TEST(wnf)
     pRtlAllocateWnfSerializationGroup =
         (void *)GetProcAddress( ntdll, "RtlAllocateWnfSerializationGroup" );
     pRtlPublishWnfStateData = (void *)GetProcAddress( ntdll, "RtlPublishWnfStateData" );
+    pRtlQueryWnfMetaNotification =
+        (void *)GetProcAddress( ntdll, "RtlQueryWnfMetaNotification" );
     pRtlQueryWnfStateData = (void *)GetProcAddress( ntdll, "RtlQueryWnfStateData" );
     pRtlTestAndPublishWnfStateData =
         (void *)GetProcAddress( ntdll, "RtlTestAndPublishWnfStateData" );
@@ -230,6 +248,8 @@ START_TEST(wnf)
         (void *)GetProcAddress( ntdll, "RtlUnsubscribeWnfNotificationWaitForCompletion" );
     pRtlUnsubscribeWnfStateChangeNotification =
         (void *)GetProcAddress( ntdll, "RtlUnsubscribeWnfStateChangeNotification" );
+    pRtlWaitForWnfMetaNotification =
+        (void *)GetProcAddress( ntdll, "RtlWaitForWnfMetaNotification" );
     if (!pNtQueryWnfStateData || !pNtSubscribeWnfStateChange ||
         !pNtUnsubscribeWnfStateChange || !pRtlPublishWnfStateData || !pRtlQueryWnfStateData ||
         !pRtlTestAndPublishWnfStateData || !pRtlSubscribeWnfStateChangeNotification ||
@@ -293,6 +313,65 @@ START_TEST(wnf)
             }
         }
 
+        if (pRtlQueryWnfMetaNotification && pRtlWaitForWnfMetaNotification)
+        {
+            ULONGLONG state = 0;
+            ULONG events, meta;
+
+            status = pNtCreateWnfStateName( &state, 3, 0, FALSE, NULL, sizeof(value), &sd );
+            ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+            if (!status)
+            {
+                meta = 0xdeadbeef;
+                status = pRtlQueryWnfMetaNotification( &meta, 2, state, NULL );
+                ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                ok( meta == 1, "expected no-subscriber state, got %lu\n", meta );
+
+                events = 0xdeadbeef;
+                status = pRtlWaitForWnfMetaNotification( state, 8, 0, 0, &events );
+                ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                ok( events == 8, "expected no-subscriber event, got %#lx\n", events );
+
+                subscription = NULL;
+                status = pRtlSubscribeWnfStateChangeNotification( &subscription, state, 0,
+                                                                  callback, NULL, NULL, 0, 0 );
+                ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                if (!status)
+                {
+                    meta = 0xdeadbeef;
+                    status = pRtlQueryWnfMetaNotification( &meta, 1, state, NULL );
+                    ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                    ok( meta == 1, "expected subscriber state, got %lu\n", meta );
+
+                    events = 0xdeadbeef;
+                    status = pRtlWaitForWnfMetaNotification( state, 2, 0, 0, &events );
+                    ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                    ok( events == 2, "expected subscriber event, got %#lx\n", events );
+
+                    events = 0xdeadbeef;
+                    status = pRtlWaitForWnfMetaNotification( state, 8, 1, 0, &events );
+                    ok( status == STATUS_TIMEOUT, "expected STATUS_TIMEOUT, got %#lx\n", status );
+                    ok( !events, "expected no event, got %#lx\n", events );
+
+                    status = pRtlUnsubscribeWnfNotificationWaitForCompletion( subscription );
+                    ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+                }
+
+                events = 0xdeadbeef;
+                status = pRtlWaitForWnfMetaNotification( state, 1, 0, 0, &events );
+                ok( status == STATUS_INVALID_PARAMETER,
+                    "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+
+                status = pRtlWaitForWnfMetaNotification( state, 0, 0, 0, &events );
+                ok( status == STATUS_INVALID_PARAMETER,
+                    "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+
+                status = pNtDeleteWnfStateName( &state );
+                ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+            }
+        }
+        else win_skip( "WNF meta-notification functions are unavailable\n" );
+
         for (i = 0; i < ARRAY_SIZE(lifetimes); i++)
         {
             winetest_push_context( "cross-process lifetime %lu", lifetimes[i] );
@@ -340,6 +419,33 @@ START_TEST(wnf)
     ok( status == STATUS_ACCESS_DENIED, "expected STATUS_ACCESS_DENIED, got %#lx\n", status );
     status = pRtlTestAndPublishWnfStateData( name, NULL, NULL, 0, NULL, 0 );
     ok( status == STATUS_ACCESS_DENIED, "expected STATUS_ACCESS_DENIED, got %#lx\n", status );
+
+    {
+        const ULONGLONG system_publishers[] =
+        {
+            WNF_UMGR_SIHOST_READY,
+            WNF_UMGR_USER_LOGIN,
+            WNF_UMGR_USER_LOGOUT,
+            WNF_UMGR_SESSIONUSER_TOKEN_CHANGE,
+            WNF_UMGR_SESSION_ACTIVE_SHELL_USER_CHANGE,
+            WNF_UMGR_USER_PICTURE_CHANGED,
+            WNF_UMGR_USER_PICTURE_CHANGED_CONTAINED,
+            WNF_RM_MEMORY_MONITOR_USAGE_METRICS,
+            WNF_RM_GAME_MODE_ACTIVE,
+            WNF_RM_QUIET_MODE,
+            WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE,
+            WNF_HAM_SYSTEM_STATE_CHANGED,
+        };
+        unsigned int i;
+
+        for (i = 0; i < ARRAY_SIZE(system_publishers); i++)
+        {
+            status = pRtlPublishWnfStateData( system_publishers[i], NULL, NULL, 0, NULL );
+            ok( status == STATUS_ACCESS_DENIED,
+                "%#I64x: expected STATUS_ACCESS_DENIED, got %#lx\n",
+                system_publishers[i], status );
+        }
+    }
 
     stamp = 0xdeadbeef;
     size = 0xdeadbeef;
@@ -407,9 +513,23 @@ START_TEST(wnf)
             WNF_PNPA_PORTS_CHANGED,
             WNF_PNPA_PORTS_CHANGED_SESSION,
             WNF_PO_SCENARIO_CHANGE,
+            WNF_RM_MEMORY_MONITOR_USAGE_METRICS,
+            WNF_RM_GAME_MODE_ACTIVE,
+            WNF_RM_QUIET_MODE,
+            WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE,
+            WNF_HAM_SYSTEM_STATE_CHANGED,
             WNF_RPCF_FWMAN_RUNNING,
             WNF_SHEL_LOCKSCREEN_ACTIVE,
+            WNF_THME_THEME_CHANGED,
             WNF_TMCN_ISTABLETMODE,
+            WNF_UMGR_SIHOST_READY,
+            WNF_UMGR_USER_LOGIN,
+            WNF_UMGR_USER_LOGOUT,
+            WNF_UMGR_SESSIONUSER_TOKEN_CHANGE,
+            WNF_UMGR_SESSION_ACTIVE_SHELL_USER_CHANGE,
+            WNF_UMGR_USER_PICTURE_CHANGED,
+            WNF_UMGR_USER_PICTURE_ID,
+            WNF_UMGR_USER_PICTURE_CHANGED_CONTAINED,
         };
         ULONGLONG id = 0xdeadbeef;
         unsigned int i;
@@ -429,6 +549,37 @@ START_TEST(wnf)
                     well_known_names[i], status );
             }
         }
+    }
+
+    {
+        const ULONGLONG versioned_well_known = 0x15950b39a3bc0075ULL; /* owner tag TEST */
+        const ULONGLONG invalid_version = versioned_well_known ^ 3;
+        const ULONGLONG invalid_scope = versioned_well_known ^ (0xfULL << 6);
+        ULONGLONG id = 0xdeadbeef;
+
+        status = pNtSubscribeWnfStateChange( &versioned_well_known, 0, 0x11, &id );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+        ok( id && id != 0xdeadbeef, "expected a new subscription id, got %#I64x\n", id );
+        if (!status)
+        {
+            status = pNtUnsubscribeWnfStateChange( &versioned_well_known );
+            ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+        }
+
+        status = pRtlPublishWnfStateData( versioned_well_known, NULL, NULL, 0, NULL );
+        ok( status == STATUS_ACCESS_DENIED, "expected STATUS_ACCESS_DENIED, got %#lx\n", status );
+
+        id = 0xdeadbeef;
+        status = pNtSubscribeWnfStateChange( &invalid_version, 0, 0x11, &id );
+        ok( status == STATUS_OBJECT_NAME_NOT_FOUND,
+            "expected STATUS_OBJECT_NAME_NOT_FOUND, got %#lx\n", status );
+        ok( id == 0xdeadbeef, "subscription id changed to %#I64x\n", id );
+
+        id = 0xdeadbeef;
+        status = pNtSubscribeWnfStateChange( &invalid_scope, 0, 0x11, &id );
+        ok( status == STATUS_OBJECT_NAME_NOT_FOUND,
+            "expected STATUS_OBJECT_NAME_NOT_FOUND, got %#lx\n", status );
+        ok( id == 0xdeadbeef, "subscription id changed to %#I64x\n", id );
     }
 
     {
@@ -470,6 +621,22 @@ START_TEST(wnf)
                     ime_private_mode_states[i], status );
             }
         }
+    }
+
+    {
+        BYTE picture_id[78], oversized_picture_id[79];
+
+        memset( picture_id, 0x5a, sizeof(picture_id) );
+        memset( oversized_picture_id, 0x5a, sizeof(oversized_picture_id) );
+        status = pRtlPublishWnfStateData( WNF_UMGR_USER_PICTURE_ID, NULL,
+                                         picture_id, sizeof(picture_id), NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+        status = pRtlPublishWnfStateData( WNF_UMGR_USER_PICTURE_ID, NULL,
+                                         oversized_picture_id, sizeof(oversized_picture_id), NULL );
+        ok( status == STATUS_INVALID_PARAMETER,
+            "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+        status = pNtDeleteWnfStateData( &((ULONGLONG){WNF_UMGR_USER_PICTURE_ID}), NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
     }
 
     {
