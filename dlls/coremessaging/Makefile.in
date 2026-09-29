@@ -6,5 +6,7 @@ SOURCES = \
 	async.c \
 	async_private.idl \
 	classes.idl \
+	calling.c \
 	main.c \
-	queue.c
+	queue.c \
+	session.c

@@ -1,5 +1,5 @@
 @ stub CoreUICallComputeMaximumMessageSize
-@ stub CoreUICallCreateConversationHost
+@ stdcall CoreUICallCreateConversationHost(ptr ptr ptr ptr)
 @ stub CoreUICallCreateEndpointHost
 @ stub CoreUICallCreateEndpointHostWithSendPriority
 @ stub CoreUICallGetAddressOfParameterInBuffer
@@ -8,19 +8,19 @@
 @ stub CoreUICallSendVaList
 @ stub CoreUIConfigureTestHost
 @ stub CoreUIConfigureUserIntegration
-@ stub CoreUICreate
+@ stdcall CoreUICreate(ptr)
 @ stub CoreUICreateAnonymousStream
-@ stub CoreUICreateEx
+@ stdcall CoreUICreateEx(long ptr)
 @ stub CoreUIInitializeTestService
-@ stub CoreUIOpenExisting
+@ stdcall CoreUIOpenExisting(ptr)
 @ stub CoreUIRouteToTestRegistrar
 @ stub CoreUIUninitializeTestService
 @ stdcall CreateDispatcherQueueController(long long long ptr)
-@ stub CreateDispatcherQueueForCurrentThread
+@ stdcall CreateDispatcherQueueForCurrentThread(ptr)
 @ stdcall -private DllCanUnloadNow()
 @ stdcall -private DllGetActivationFactory(ptr ptr)
 @ stub DllGetClassObject
-@ stub GetDispatcherQueueForCurrentThread
+@ stdcall GetDispatcherQueueForCurrentThread(ptr)
 @ stub MsgBlobCreateShared
 @ stub MsgBlobCreateStack
 @ stub MsgBufferShare

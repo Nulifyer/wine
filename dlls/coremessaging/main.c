@@ -26,6 +26,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(messaging);
 struct dispatcher_queue_controller_statics
 {
     IActivationFactory IActivationFactory_iface;
+    IDispatcherQueueStatics IDispatcherQueueStatics_iface;
     IDispatcherQueueControllerStatics IDispatcherQueueControllerStatics_iface;
     LONG ref;
 };
@@ -54,6 +55,13 @@ static HRESULT WINAPI factory_QueryInterface( IActivationFactory *iface, REFIID 
     if (IsEqualGUID( iid, &IID_IDispatcherQueueControllerStatics ))
     {
         *out = &impl->IDispatcherQueueControllerStatics_iface;
+        IInspectable_AddRef( *out );
+        return S_OK;
+    }
+
+    if (IsEqualGUID( iid, &IID_IDispatcherQueueStatics ))
+    {
+        *out = &impl->IDispatcherQueueStatics_iface;
         IInspectable_AddRef( *out );
         return S_OK;
     }
@@ -118,6 +126,28 @@ static const struct IActivationFactoryVtbl factory_vtbl =
 
 DEFINE_IINSPECTABLE( dispatcher_queue_controller_statics, IDispatcherQueueControllerStatics, struct dispatcher_queue_controller_statics, IActivationFactory_iface )
 
+DEFINE_IINSPECTABLE( dispatcher_queue_statics, IDispatcherQueueStatics, struct dispatcher_queue_controller_statics, IActivationFactory_iface )
+
+static HRESULT WINAPI dispatcher_queue_statics_GetForCurrentThread( IDispatcherQueueStatics *iface,
+                                                                    IDispatcherQueue **result )
+{
+    TRACE( "iface %p, result %p.\n", iface, result );
+    return dispatcher_queue_get_for_current_thread( result );
+}
+
+static const struct IDispatcherQueueStaticsVtbl dispatcher_queue_statics_vtbl =
+{
+    dispatcher_queue_statics_QueryInterface,
+    dispatcher_queue_statics_AddRef,
+    dispatcher_queue_statics_Release,
+    /* IInspectable methods */
+    dispatcher_queue_statics_GetIids,
+    dispatcher_queue_statics_GetRuntimeClassName,
+    dispatcher_queue_statics_GetTrustLevel,
+    /* IDispatcherQueueStatics methods */
+    dispatcher_queue_statics_GetForCurrentThread,
+};
+
 static HRESULT WINAPI dispatcher_queue_controller_statics_CreateOnDedicatedThread( IDispatcherQueueControllerStatics *iface, IDispatcherQueueController **result )
 {
     DispatcherQueueOptions options = {sizeof(options), DQTYPE_THREAD_DEDICATED, DQTAT_COM_ASTA};
@@ -144,6 +174,7 @@ static const struct IDispatcherQueueControllerStaticsVtbl dispatcher_queue_contr
 static struct dispatcher_queue_controller_statics dispatcher_queue_controller_statics =
 {
     {&factory_vtbl},
+    {&dispatcher_queue_statics_vtbl},
     {&dispatcher_queue_controller_statics_vtbl},
     1,
 };
@@ -158,7 +189,8 @@ HRESULT WINAPI DllGetActivationFactory( HSTRING classid, IActivationFactory **fa
 
     *factory = NULL;
 
-    if (!wcscmp( name, RuntimeClass_Windows_System_DispatcherQueueController ))
+    if (!wcscmp( name, RuntimeClass_Windows_System_DispatcherQueue ) ||
+        !wcscmp( name, RuntimeClass_Windows_System_DispatcherQueueController ))
         IActivationFactory_QueryInterface( dispatcher_queue_controller_factory, &IID_IActivationFactory, (void **)factory );
 
     if (*factory) return S_OK;

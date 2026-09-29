@@ -691,6 +691,33 @@ static HRESULT dispatcher_queue_create( DispatcherQueueOptions options, struct d
     return S_OK;
 }
 
+HRESULT dispatcher_queue_get_for_current_thread( IDispatcherQueue **out )
+{
+    struct dispatcher_queue *queue;
+
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (!InitOnceExecuteOnce( &dispatcher_queue_init_once, dispatcher_queue_global_init, NULL, NULL ))
+        return HRESULT_FROM_WIN32( GetLastError() );
+
+    if ((queue = TlsGetValue( dispatcher_queue_tls )))
+        IDispatcherQueue_AddRef( (*out = &queue->IDispatcherQueue_iface) );
+    return S_OK;
+}
+
+HRESULT dispatcher_queue_create_for_current_thread( IDispatcherQueue **out )
+{
+    DispatcherQueueOptions options = {sizeof(options), DQTYPE_THREAD_CURRENT, DQTAT_COM_NONE};
+    struct dispatcher_queue *queue;
+    HRESULT hr;
+
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (FAILED(hr = dispatcher_queue_create( options, &queue ))) return hr;
+    *out = &queue->IDispatcherQueue_iface;
+    return S_OK;
+}
+
 static HRESULT WINAPI dispatcher_queue_controller_QueryInterface( IDispatcherQueueController *iface,
                                                                   REFIID iid, void **out )
 {
