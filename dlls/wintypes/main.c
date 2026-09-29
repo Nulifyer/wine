@@ -612,6 +612,14 @@ static ULONG STDMETHODCALLTYPE property_value_Release(IPropertyValue *iface)
                 for (i = 0; i < impl->value_size; i++)
                     WindowsDeleteString(string_array[i]);
             }
+            else if (impl->type == PropertyType_InspectableArray)
+            {
+                IInspectable **inspectable_array = impl->value;
+                unsigned int i;
+
+                for (i = 0; i < impl->value_size; i++)
+                    if (inspectable_array[i]) IInspectable_Release(inspectable_array[i]);
+            }
             free(impl->value);
         }
         free(impl);
@@ -858,8 +866,33 @@ static HRESULT STDMETHODCALLTYPE property_value_GetStringArray(IPropertyValue *i
 
 static HRESULT STDMETHODCALLTYPE property_value_GetInspectableArray(IPropertyValue *iface, UINT32 *value_size, IInspectable ***value)
 {
-    FIXME("iface %p, value_size %p, value %p stub!\n", iface, value_size, value);
-    return E_NOTIMPL;
+    struct property_value *impl = impl_from_IPropertyValue(iface);
+    IInspectable **copy;
+    unsigned int i;
+
+    TRACE("iface %p, value_size %p, value %p.\n", iface, value_size, value);
+
+    if (!value_size || !value)
+        return E_POINTER;
+
+    *value_size = 0;
+    *value = NULL;
+    if (impl->type != PropertyType_InspectableArray)
+        return TYPE_E_TYPEMISMATCH;
+
+    if (!impl->value_size)
+        return S_OK;
+
+    if (!(copy = CoTaskMemAlloc(impl->value_size * sizeof(*copy))))
+        return E_OUTOFMEMORY;
+
+    memcpy(copy, impl->value, impl->value_size * sizeof(*copy));
+    for (i = 0; i < impl->value_size; i++)
+        if (copy[i]) IInspectable_AddRef(copy[i]);
+
+    *value_size = impl->value_size;
+    *value = copy;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE property_value_GetGuidArray(IPropertyValue *iface, UINT32 *value_size, GUID **value)
@@ -1508,8 +1541,16 @@ static HRESULT STDMETHODCALLTYPE property_value_statics_CreateString(IPropertyVa
 static HRESULT STDMETHODCALLTYPE property_value_statics_CreateInspectable(IPropertyValueStatics *iface,
         IInspectable *value, IInspectable **property_value)
 {
-    FIXME("iface %p, value %p, property_value %p stub!\n", iface, value, property_value);
-    return E_NOTIMPL;
+    TRACE("iface %p, value %p, property_value %p.\n", iface, value, property_value);
+
+    if (!property_value)
+        return E_POINTER;
+    if (!value)
+        return E_INVALIDARG;
+
+    IInspectable_AddRef(value);
+    *property_value = value;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE property_value_statics_CreateGuid(IPropertyValueStatics *iface,
@@ -1672,8 +1713,43 @@ static HRESULT STDMETHODCALLTYPE property_value_statics_CreateStringArray(IPrope
 static HRESULT STDMETHODCALLTYPE property_value_statics_CreateInspectableArray(IPropertyValueStatics *iface,
         UINT32 value_size, IInspectable **value, IInspectable **property_value)
 {
-    FIXME("iface %p, value_size %u, value %p, property_value %p stub!\n", iface, value_size, value, property_value);
-    return E_NOTIMPL;
+    struct property_value *impl;
+    IInspectable **copy = NULL;
+    unsigned int i;
+
+    TRACE("iface %p, value_size %u, value %p, property_value %p.\n", iface, value_size, value, property_value);
+
+    if (!property_value)
+        return E_POINTER;
+
+    *property_value = NULL;
+    if (value_size && !value)
+        return E_POINTER;
+
+    if (!(impl = calloc(1, sizeof(*impl))))
+        return E_OUTOFMEMORY;
+
+    if (value_size)
+    {
+        if (!(copy = calloc(value_size, sizeof(*copy))))
+        {
+            free(impl);
+            return E_OUTOFMEMORY;
+        }
+
+        memcpy(copy, value, value_size * sizeof(*copy));
+        for (i = 0; i < value_size; i++)
+            if (copy[i]) IInspectable_AddRef(copy[i]);
+    }
+
+    impl->IPropertyValue_iface.lpVtbl = &property_value_vtbl;
+    impl->type = PropertyType_InspectableArray;
+    impl->ref = 1;
+    impl->value = copy;
+    impl->value_size = value_size;
+
+    *property_value = (IInspectable *)&impl->IPropertyValue_iface;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE property_value_statics_CreateGuidArray(IPropertyValueStatics *iface,

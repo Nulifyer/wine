@@ -905,6 +905,7 @@ static void test_IPropertyValueStatics(void)
     IReference_Point *iref_point;
     IReference_Size *iref_size;
     IReference_Rect *iref_rect;
+    IInspectable **inspectable_values, *source;
     IPropertyValue *value = NULL;
     enum PropertyType type;
     unsigned int i, count;
@@ -988,6 +989,81 @@ static void test_IPropertyValueStatics(void)
     hr = IPropertyValueStatics_CreateString(statics, (HSTRING)-1, NULL);
     ok(hr == E_POINTER, "Got unexpected hr %#lx.\n", hr);
 
+    IPropertyValue_Release(value);
+
+    /* Inspectable values retain identity instead of creating an IPropertyValue wrapper. */
+    hr = IPropertyValueStatics_CreateInspectable(statics, (IInspectable *)factory, NULL);
+    ok(hr == E_POINTER, "Got unexpected hr %#lx.\n", hr);
+
+    inspectable = (IInspectable *)0xdeadbeef;
+    hr = IPropertyValueStatics_CreateInspectable(statics, NULL, &inspectable);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    hr = IActivationFactory_QueryInterface(factory, &IID_IInspectable, (void **)&source);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IPropertyValueStatics_CreateInspectable(statics, source, &inspectable);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(inspectable == source, "Got inspectable %p, expected %p.\n", inspectable, source);
+    IInspectable_Release(source);
+    hr = IInspectable_QueryInterface(inspectable, &IID_IActivationFactory, (void **)&tmp_inspectable);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    IInspectable_Release(tmp_inspectable);
+    IInspectable_Release(inspectable);
+
+    /* Inspectable arrays own their inputs and return a separately owned copy. */
+    inspectable = (IInspectable *)0xdeadbeef;
+    hr = IPropertyValueStatics_CreateInspectableArray(statics, 1, NULL, &inspectable);
+    ok(hr == E_POINTER, "Got unexpected hr %#lx.\n", hr);
+    ok(inspectable == NULL, "Got unexpected inspectable %p.\n", inspectable);
+
+    hr = IPropertyValueStatics_CreateInspectableArray(statics, 0, NULL, NULL);
+    ok(hr == E_POINTER, "Got unexpected hr %#lx.\n", hr);
+
+    hr = IPropertyValueStatics_CreateInspectableArray(statics, 0, NULL, &inspectable);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IInspectable_QueryInterface(inspectable, &IID_IPropertyValue, (void **)&value);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    IInspectable_Release(inspectable);
+    hr = IPropertyValue_get_Type(value, &type);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(type == PropertyType_InspectableArray, "Got unexpected type %d.\n", type);
+    inspectable_values = (IInspectable **)0xdeadbeef;
+    count = 0xdeadbeef;
+    hr = IPropertyValue_GetInspectableArray(value, &count, &inspectable_values);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!count, "Got unexpected count %u.\n", count);
+    ok(inspectable_values == NULL, "Got unexpected array %p.\n", inspectable_values);
+    IPropertyValue_Release(value);
+
+    hr = IPropertyValueStatics_CreateUInt8(statics, byte_value, &source);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    inspectable_values = &source;
+    hr = IPropertyValueStatics_CreateInspectableArray(statics, 1, inspectable_values, &inspectable);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    IInspectable_Release(source);
+    hr = IInspectable_QueryInterface(inspectable, &IID_IPropertyValue, (void **)&value);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    IInspectable_Release(inspectable);
+
+    hr = IPropertyValue_GetInspectableArray(value, NULL, &inspectable_values);
+    ok(hr == E_POINTER, "Got unexpected hr %#lx.\n", hr);
+    hr = IPropertyValue_GetInspectableArray(value, &count, NULL);
+    ok(hr == E_POINTER, "Got unexpected hr %#lx.\n", hr);
+
+    inspectable_values = NULL;
+    count = 0;
+    hr = IPropertyValue_GetInspectableArray(value, &count, &inspectable_values);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(count == 1, "Got unexpected count %u.\n", count);
+    ok(inspectable_values != NULL, "Got unexpected array.\n");
+    if (inspectable_values)
+    {
+        hr = IInspectable_QueryInterface(inspectable_values[0], &IID_IPropertyValue, (void **)&tmp_inspectable);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        IInspectable_Release(tmp_inspectable);
+        IInspectable_Release(inspectable_values[0]);
+        CoTaskMemFree(inspectable_values);
+    }
     IPropertyValue_Release(value);
 
     /* Parameter checks for array types */
