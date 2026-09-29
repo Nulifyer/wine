@@ -37,6 +37,7 @@
 #include "shlwapi.h"
 
 #include "wine/debug.h"
+#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(shcore);
 
@@ -45,6 +46,301 @@ HWND WINAPI SHCreateWorkerWindowW(WNDPROC, HWND, DWORD, DWORD, HMENU, LONG_PTR);
 
 static DWORD shcore_tls;
 static IUnknown *process_ref;
+
+enum scale_scope_type
+{
+    SCALE_SCOPE_DEVICE,
+    SCALE_SCOPE_WINDOW,
+};
+
+struct scale_notification
+{
+    struct list entry;
+    HWND window;
+    UINT message;
+    DWORD cookie;
+};
+
+struct scale_scope
+{
+    struct list entry;
+    struct list notifications;
+    enum scale_scope_type type;
+    union
+    {
+        DISPLAY_DEVICE_TYPE device;
+        HWND window;
+    } id;
+    DEVICE_SCALE_FACTOR factor;
+    HMONITOR monitor;
+    DWORD next_cookie;
+};
+
+struct scale_event
+{
+    struct list entry;
+    HANDLE event;
+    ULONGLONG cookie;
+};
+
+static SRWLOCK scale_lock = SRWLOCK_INIT;
+static struct list scale_scopes = LIST_INIT(scale_scopes);
+static struct list scale_events = LIST_INIT(scale_events);
+static HWINEVENTHOOK scale_event_hook;
+static ULONGLONG next_scale_event_cookie;
+static DEVICE_SCALE_FACTOR event_scale_factor = DEVICE_SCALE_FACTOR_INVALID;
+
+HRESULT WINAPI GetScaleFactorForWindow(HWND, DEVICE_SCALE_FACTOR *);
+
+struct ICoreWindowInterop;
+struct ICoreWindowInteropVtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct ICoreWindowInterop *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct ICoreWindowInterop *);
+    ULONG (WINAPI *Release)(struct ICoreWindowInterop *);
+    HRESULT (WINAPI *GetWindowHandle)(struct ICoreWindowInterop *, HWND *);
+};
+
+struct ICoreWindowInterop
+{
+    const struct ICoreWindowInteropVtbl *lpVtbl;
+};
+
+static const IID IID_ICoreWindowInterop =
+    {0x45d64a29, 0xa63e, 0x4cb6, {0xb4, 0x98, 0x57, 0x81, 0xd2, 0x98, 0xcb, 0x4f}};
+
+static DEVICE_SCALE_FACTOR scale_factor_from_dpi(UINT dpi)
+{
+    static const DEVICE_SCALE_FACTOR factors[] =
+    {
+        SCALE_100_PERCENT, SCALE_120_PERCENT, SCALE_125_PERCENT, SCALE_140_PERCENT,
+        SCALE_150_PERCENT, SCALE_160_PERCENT, SCALE_175_PERCENT, SCALE_180_PERCENT,
+        SCALE_200_PERCENT, SCALE_225_PERCENT, SCALE_250_PERCENT, SCALE_300_PERCENT,
+        SCALE_350_PERCENT, SCALE_400_PERCENT, SCALE_450_PERCENT, SCALE_500_PERCENT,
+    };
+    UINT percent = MulDiv(dpi ? dpi : 96, 100, 96), best_delta = ~0u, delta;
+    DEVICE_SCALE_FACTOR best = SCALE_100_PERCENT;
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(factors); ++i)
+    {
+        delta = factors[i] > percent ? factors[i] - percent : percent - factors[i];
+        if (delta >= best_delta) continue;
+        best = factors[i];
+        best_delta = delta;
+    }
+    return best;
+}
+
+static HRESULT get_scale_scope_state(struct scale_scope *scope, DEVICE_SCALE_FACTOR *factor,
+        HMONITOR *monitor)
+{
+    if (scope->type == SCALE_SCOPE_WINDOW)
+    {
+        HRESULT hr = GetScaleFactorForWindow(scope->id.window, factor);
+
+        if (FAILED(hr)) return hr;
+        *monitor = MonitorFromWindow(scope->id.window, MONITOR_DEFAULTTONEAREST);
+    }
+    else
+    {
+        *factor = GetScaleFactorForDevice(scope->id.device);
+        *monitor = MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY);
+    }
+    return S_OK;
+}
+
+static struct scale_scope *find_scale_scope(enum scale_scope_type type, ULONG_PTR id)
+{
+    struct scale_scope *scope;
+
+    LIST_FOR_EACH_ENTRY(scope, &scale_scopes, struct scale_scope, entry)
+    {
+        if (scope->type != type) continue;
+        if (type == SCALE_SCOPE_WINDOW && scope->id.window == (HWND)id) return scope;
+        if (type == SCALE_SCOPE_DEVICE && scope->id.device == (DISPLAY_DEVICE_TYPE)id) return scope;
+    }
+    return NULL;
+}
+
+static struct scale_scope *create_scale_scope(enum scale_scope_type type, ULONG_PTR id)
+{
+    struct scale_scope *scope;
+
+    if (!(scope = calloc(1, sizeof(*scope)))) return NULL;
+    list_init(&scope->notifications);
+    scope->type = type;
+    if (type == SCALE_SCOPE_WINDOW)
+        scope->id.window = (HWND)id;
+    else
+        scope->id.device = (DISPLAY_DEVICE_TYPE)id;
+    scope->factor = DEVICE_SCALE_FACTOR_INVALID;
+    get_scale_scope_state(scope, &scope->factor, &scope->monitor);
+    list_add_tail(&scale_scopes, &scope->entry);
+    return scope;
+}
+
+static void signal_scale_events(void)
+{
+    struct scale_event *event;
+
+    LIST_FOR_EACH_ENTRY(event, &scale_events, struct scale_event, entry)
+        SetEvent(event->event);
+}
+
+static BOOL update_scale_scope(struct scale_scope *scope)
+{
+    DEVICE_SCALE_FACTOR factor;
+    struct scale_notification *notification;
+    HMONITOR monitor;
+    WPARAM changed = 0;
+
+    if (FAILED(get_scale_scope_state(scope, &factor, &monitor))) return FALSE;
+    if (scope->factor != factor) changed |= 1;
+    if (scope->monitor != monitor) changed |= 2;
+    scope->factor = factor;
+    scope->monitor = monitor;
+    if (!changed) return FALSE;
+
+    LIST_FOR_EACH_ENTRY(notification, &scope->notifications, struct scale_notification, entry)
+        PostMessageW(notification->window, notification->message, changed, 0);
+    return TRUE;
+}
+
+static void remove_scale_scope(struct scale_scope *scope)
+{
+    struct scale_notification *notification, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE(notification, next, &scope->notifications, struct scale_notification, entry)
+    {
+        list_remove(&notification->entry);
+        free(notification);
+    }
+    list_remove(&scope->entry);
+    free(scope);
+}
+
+static void CALLBACK scale_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND window,
+        LONG object_id, LONG child_id, DWORD thread_id, DWORD time)
+{
+    struct scale_scope *scope, *next;
+    DEVICE_SCALE_FACTOR factor;
+    BOOL changed = FALSE;
+
+    if (object_id != OBJID_WINDOW || child_id != CHILDID_SELF) return;
+
+    AcquireSRWLockExclusive(&scale_lock);
+    LIST_FOR_EACH_ENTRY_SAFE(scope, next, &scale_scopes, struct scale_scope, entry)
+    {
+        if (scope->type == SCALE_SCOPE_WINDOW && scope->id.window == window)
+        {
+            if (event == EVENT_OBJECT_DESTROY)
+                remove_scale_scope(scope);
+            else
+                changed |= update_scale_scope(scope);
+        }
+        else if (scope->type == SCALE_SCOPE_DEVICE && event == EVENT_OBJECT_LOCATIONCHANGE)
+            changed |= update_scale_scope(scope);
+    }
+    if (event == EVENT_OBJECT_LOCATIONCHANGE)
+    {
+        factor = GetScaleFactorForDevice(DEVICE_PRIMARY);
+        if (event_scale_factor != DEVICE_SCALE_FACTOR_INVALID && event_scale_factor != factor)
+            changed = TRUE;
+        event_scale_factor = factor;
+    }
+    if (changed) signal_scale_events();
+    ReleaseSRWLockExclusive(&scale_lock);
+}
+
+static HRESULT ensure_scale_event_hook(void)
+{
+    HWINEVENTHOOK hook;
+
+    if (scale_event_hook) return S_OK;
+    hook = SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_LOCATIONCHANGE, NULL,
+            scale_win_event_proc, GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT);
+    if (!hook) return HRESULT_FROM_WIN32(GetLastError());
+
+    AcquireSRWLockExclusive(&scale_lock);
+    if (!scale_event_hook)
+        scale_event_hook = hook;
+    else
+        UnhookWinEvent(hook);
+    ReleaseSRWLockExclusive(&scale_lock);
+    return S_OK;
+}
+
+static HRESULT register_scale_notification(enum scale_scope_type type, ULONG_PTR id,
+        HWND window, UINT message, DWORD *cookie)
+{
+    struct scale_notification *notification;
+    struct scale_scope *scope;
+    HRESULT hr;
+
+    TRACE("type %u, id %p, window %p, message %#x, cookie %p.\n",
+            type, (void *)id, window, message, cookie);
+    if (!cookie) return E_INVALIDARG;
+    *cookie = 0;
+    if (!IsWindow(window)) return E_INVALIDARG;
+    if (type == SCALE_SCOPE_WINDOW && id && !IsWindow((HWND)id)) return E_INVALIDARG;
+    if (FAILED(hr = ensure_scale_event_hook())) return hr;
+    if (!(notification = calloc(1, sizeof(*notification)))) return E_OUTOFMEMORY;
+
+    AcquireSRWLockExclusive(&scale_lock);
+    if (!(scope = find_scale_scope(type, id)) && !(scope = create_scale_scope(type, id)))
+    {
+        ReleaseSRWLockExclusive(&scale_lock);
+        free(notification);
+        return E_OUTOFMEMORY;
+    }
+    if (!(notification->cookie = ++scope->next_cookie))
+        notification->cookie = ++scope->next_cookie;
+    notification->window = window;
+    notification->message = message;
+    list_add_tail(&scope->notifications, &notification->entry);
+    *cookie = notification->cookie;
+    ReleaseSRWLockExclusive(&scale_lock);
+    return S_OK;
+}
+
+static HRESULT revoke_scale_notification(enum scale_scope_type type, ULONG_PTR id, DWORD cookie,
+        BOOL absent_scope_succeeds)
+{
+    struct scale_notification *notification;
+    struct scale_scope *scope;
+    HRESULT hr = E_INVALIDARG;
+
+    AcquireSRWLockExclusive(&scale_lock);
+    if (!(scope = find_scale_scope(type, id)))
+        hr = absent_scope_succeeds ? S_OK : E_INVALIDARG;
+    else LIST_FOR_EACH_ENTRY(notification, &scope->notifications, struct scale_notification, entry)
+    {
+        if (notification->cookie != cookie) continue;
+        list_remove(&notification->entry);
+        free(notification);
+        hr = S_OK;
+        break;
+    }
+    ReleaseSRWLockExclusive(&scale_lock);
+    return hr;
+}
+
+static void cleanup_scale_notifications(void)
+{
+    struct scale_scope *scope, *scope_next;
+    struct scale_event *event, *event_next;
+
+    if (scale_event_hook) UnhookWinEvent(scale_event_hook);
+    LIST_FOR_EACH_ENTRY_SAFE(scope, scope_next, &scale_scopes, struct scale_scope, entry)
+        remove_scale_scope(scope);
+    LIST_FOR_EACH_ENTRY_SAFE(event, event_next, &scale_events, struct scale_event, entry)
+    {
+        list_remove(&event->entry);
+        CloseHandle(event->event);
+        free(event);
+    }
+}
 
 BOOL WINAPI GUIDFromStringW(LPCWSTR string, GUID *guid)
 {
@@ -116,6 +412,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
             break;
         case DLL_PROCESS_DETACH:
             if (reserved) break;
+            cleanup_scale_notifications();
             if (shcore_tls != TLS_OUT_OF_INDEXES)
                 TlsFree(shcore_tls);
             break;
@@ -144,17 +441,75 @@ HRESULT WINAPI GetDpiForMonitor(HMONITOR monitor, MONITOR_DPI_TYPE type, UINT *x
 
 HRESULT WINAPI GetScaleFactorForMonitor(HMONITOR monitor, DEVICE_SCALE_FACTOR *scale)
 {
-    FIXME("(%p %p): stub\n", monitor, scale);
+    UINT x, y;
 
+    if (!scale) return E_INVALIDARG;
     *scale = SCALE_100_PERCENT;
+    if (!monitor) monitor = MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY);
+    if (!GetDpiForMonitorInternal(monitor, MDT_EFFECTIVE_DPI, &x, &y))
+        return HRESULT_FROM_WIN32(GetLastError());
+    *scale = scale_factor_from_dpi(x);
     return S_OK;
 }
 
 DEVICE_SCALE_FACTOR WINAPI GetScaleFactorForDevice(DISPLAY_DEVICE_TYPE device_type)
 {
-    FIXME("%d\n", device_type);
+    DEVICE_SCALE_FACTOR scale;
 
-    return SCALE_100_PERCENT;
+    if (FAILED(GetScaleFactorForMonitor(NULL, &scale))) return SCALE_100_PERCENT;
+    return scale;
+}
+
+HRESULT WINAPI GetSystemScaleFactorForWindow(HWND hwnd, DEVICE_SCALE_FACTOR *scale)
+{
+    UINT dpi;
+
+    if (!scale) return E_INVALIDARG;
+    if (!(dpi = hwnd ? GetDpiForWindow(hwnd) : GetDpiForSystem())) dpi = 96;
+    *scale = scale_factor_from_dpi(dpi);
+    return S_OK;
+}
+
+HRESULT WINAPI GetOverrideScaleFactorForWindow(HWND hwnd, UINT *scale)
+{
+    HANDLE value;
+
+    if (!scale) return E_INVALIDARG;
+    value = hwnd ? GetPropW(hwnd, L"WindowOverrideScaleFactor") : NULL;
+    *scale = value ? HandleToULong(value) : 100;
+    return S_OK;
+}
+
+HRESULT WINAPI GetScaleFactorForWindow(HWND hwnd, DEVICE_SCALE_FACTOR *scale)
+{
+    DEVICE_SCALE_FACTOR system_scale;
+    UINT override_scale;
+    HRESULT hr;
+
+    if (!scale) return E_INVALIDARG;
+    *scale = SCALE_100_PERCENT;
+    if (FAILED(hr = GetSystemScaleFactorForWindow(hwnd, &system_scale))) return hr;
+    if (FAILED(hr = GetOverrideScaleFactorForWindow(hwnd, &override_scale))) return hr;
+    *scale = scale_factor_from_dpi(MulDiv(system_scale, override_scale * 96, 10000));
+    return S_OK;
+}
+
+HRESULT WINAPI GetScaleFactorForCoreWindow(IUnknown *window, DEVICE_SCALE_FACTOR *scale)
+{
+    struct ICoreWindowInterop *interop;
+    HWND hwnd = NULL;
+    HRESULT hr;
+
+    if (!scale) return E_INVALIDARG;
+    *scale = SCALE_100_PERCENT;
+    if (window)
+    {
+        if (FAILED(hr = IUnknown_QueryInterface(window, &IID_ICoreWindowInterop, (void **)&interop))) return hr;
+        hr = interop->lpVtbl->GetWindowHandle(interop, &hwnd);
+        interop->lpVtbl->Release(interop);
+        if (FAILED(hr)) return hr;
+    }
+    return GetScaleFactorForWindow(hwnd, scale);
 }
 
 HRESULT WINAPI _IStream_Read(IStream *stream, void *dest, ULONG size)
@@ -2663,10 +3018,32 @@ FEATURE_ENABLED_STATE WINAPI GetFeatureEnabledState(UINT32 feature, FEATURE_CHAN
 /*************************************************************************
  * RegisterScaleChangeEvent        [SHCORE.@]
  */
-HRESULT WINAPI RegisterScaleChangeEvent(HANDLE handle, DWORD_PTR *cookie)
+HRESULT WINAPI RegisterScaleChangeEvent(HANDLE handle, ULONGLONG *cookie)
 {
-    FIXME("(%p, %p) stub\n", handle, cookie);
-    return E_NOTIMPL;
+    struct scale_event *event;
+    HRESULT hr;
+
+    TRACE("handle %p, cookie %p.\n", handle, cookie);
+    if (!cookie) return E_INVALIDARG;
+    if (FAILED(hr = ensure_scale_event_hook())) return hr;
+    if (!(event = calloc(1, sizeof(*event)))) return E_OUTOFMEMORY;
+    if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &event->event,
+            EVENT_MODIFY_STATE, FALSE, 0))
+    {
+        HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+
+        free(event);
+        return hr;
+    }
+
+    AcquireSRWLockExclusive(&scale_lock);
+    if (!(event->cookie = ++next_scale_event_cookie))
+        event->cookie = ++next_scale_event_cookie;
+    event_scale_factor = GetScaleFactorForDevice(DEVICE_PRIMARY);
+    list_add_tail(&scale_events, &event->entry);
+    *cookie = event->cookie;
+    ReleaseSRWLockExclusive(&scale_lock);
+    return S_OK;
 }
 
 /*************************************************************************
@@ -2674,11 +3051,80 @@ HRESULT WINAPI RegisterScaleChangeEvent(HANDLE handle, DWORD_PTR *cookie)
  */
 HRESULT WINAPI RegisterScaleChangeNotifications(DISPLAY_DEVICE_TYPE display_device, HWND hwnd, UINT msg, DWORD *cookie)
 {
-    FIXME("(%d, %p, %u, %p) stub\n", display_device, hwnd, msg, cookie);
+    if (display_device != DEVICE_PRIMARY && display_device != DEVICE_IMMERSIVE)
+    {
+        if (cookie) *cookie = 0;
+        return E_INVALIDARG;
+    }
+    return register_scale_notification(SCALE_SCOPE_DEVICE, display_device, hwnd, msg, cookie);
+}
 
-    if (cookie) *cookie = 0;
+/*************************************************************************
+ * RevokeScaleChangeNotifications        [SHCORE.@]
+ */
+HRESULT WINAPI RevokeScaleChangeNotifications(DISPLAY_DEVICE_TYPE display_device, DWORD cookie)
+{
+    TRACE("device %u, cookie %#lx.\n", display_device, cookie);
+    if (display_device != DEVICE_PRIMARY && display_device != DEVICE_IMMERSIVE)
+        return E_INVALIDARG;
+    return revoke_scale_notification(SCALE_SCOPE_DEVICE, display_device, cookie, FALSE);
+}
 
-    return E_NOTIMPL;
+/*************************************************************************
+ * UnregisterScaleChangeEvent        [SHCORE.@]
+ */
+HRESULT WINAPI UnregisterScaleChangeEvent(ULONGLONG cookie)
+{
+    struct scale_event *event;
+    HRESULT hr = E_INVALIDARG;
+
+    TRACE("cookie %s.\n", wine_dbgstr_longlong(cookie));
+    AcquireSRWLockExclusive(&scale_lock);
+    LIST_FOR_EACH_ENTRY(event, &scale_events, struct scale_event, entry)
+    {
+        if (event->cookie != cookie) continue;
+        list_remove(&event->entry);
+        CloseHandle(event->event);
+        free(event);
+        hr = S_OK;
+        break;
+    }
+    ReleaseSRWLockExclusive(&scale_lock);
+    return hr;
+}
+
+/*************************************************************************
+ * RegisterScaleChangeNotificationsForWindow        [SHCORE.245]
+ */
+HRESULT WINAPI RegisterScaleChangeNotificationsForWindow(HWND target, HWND hwnd, UINT msg, DWORD *cookie)
+{
+    return register_scale_notification(SCALE_SCOPE_WINDOW, (ULONG_PTR)target, hwnd, msg, cookie);
+}
+
+/*************************************************************************
+ * RevokeScaleChangeNotificationsForWindow        [SHCORE.246]
+ */
+HRESULT WINAPI RevokeScaleChangeNotificationsForWindow(HWND target, DWORD cookie)
+{
+    TRACE("target %p, cookie %#lx.\n", target, cookie);
+    return revoke_scale_notification(SCALE_SCOPE_WINDOW, (ULONG_PTR)target, cookie, TRUE);
+}
+
+/*************************************************************************
+ * UpdateScalingInfoCache        [SHCORE.249]
+ */
+HRESULT WINAPI UpdateScalingInfoCache(void)
+{
+    struct scale_scope *scope;
+    BOOL changed = FALSE;
+
+    TRACE("refreshing scale scopes.\n");
+    AcquireSRWLockExclusive(&scale_lock);
+    LIST_FOR_EACH_ENTRY(scope, &scale_scopes, struct scale_scope, entry)
+        changed |= update_scale_scope(scope);
+    if (changed) signal_scale_events();
+    ReleaseSRWLockExclusive(&scale_lock);
+    return S_OK;
 }
 
 /*************************************************************************

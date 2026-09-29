@@ -25,6 +25,7 @@
 #include "objidl.h"
 #include "objbase.h"
 #include "shlwapi.h"
+#include "shellscalingapi.h"
 #include "winternl.h"
 #include "appmodel.h"
 
@@ -48,6 +49,17 @@ static DWORD (WINAPI *pSHRegGetPathA)(HKEY, const char *, const char *, char *, 
 static DWORD (WINAPI *pSHCopyKeyA)(HKEY, const char *, HKEY, DWORD);
 static HRESULT (WINAPI *pSHCreateStreamOnFileA)(const char *path, DWORD mode, IStream **stream);
 static HRESULT (WINAPI *pIStream_Size)(IStream *stream, ULARGE_INTEGER *size);
+static HRESULT (WINAPI *pGetScaleFactorForWindow)(HWND, DEVICE_SCALE_FACTOR *);
+static HRESULT (WINAPI *pGetOverrideScaleFactorForWindow)(HWND, UINT *);
+static HRESULT (WINAPI *pGetSystemScaleFactorForWindow)(HWND, DEVICE_SCALE_FACTOR *);
+static HRESULT (WINAPI *pGetScaleFactorForCoreWindow)(IUnknown *, DEVICE_SCALE_FACTOR *);
+static HRESULT (WINAPI *pRegisterScaleChangeEvent)(HANDLE, ULONGLONG *);
+static HRESULT (WINAPI *pUnregisterScaleChangeEvent)(ULONGLONG);
+static HRESULT (WINAPI *pRegisterScaleChangeNotifications)(DISPLAY_DEVICE_TYPE, HWND, UINT, DWORD *);
+static HRESULT (WINAPI *pRevokeScaleChangeNotifications)(DISPLAY_DEVICE_TYPE, DWORD);
+static HRESULT (WINAPI *pRegisterScaleChangeNotificationsForWindow)(HWND, HWND, UINT, DWORD *);
+static HRESULT (WINAPI *pRevokeScaleChangeNotificationsForWindow)(HWND, DWORD);
+static HRESULT (WINAPI *pUpdateScalingInfoCache)(void);
 
 /* Keys used for testing */
 #define REG_TEST_KEY        "Software\\Wine\\Test"
@@ -84,6 +96,142 @@ static void init(HMODULE hshcore)
     X(SHCreateStreamOnFileA);
     X(IStream_Size);
 #undef X
+    pGetScaleFactorForWindow = (void *)GetProcAddress(hshcore, (const char *)244);
+    pGetOverrideScaleFactorForWindow = (void *)GetProcAddress(hshcore, (const char *)247);
+    pGetSystemScaleFactorForWindow = (void *)GetProcAddress(hshcore, (const char *)248);
+    pGetScaleFactorForCoreWindow = (void *)GetProcAddress(hshcore, (const char *)265);
+    pRegisterScaleChangeEvent = (void *)GetProcAddress(hshcore, "RegisterScaleChangeEvent");
+    pUnregisterScaleChangeEvent = (void *)GetProcAddress(hshcore, "UnregisterScaleChangeEvent");
+    pRegisterScaleChangeNotifications = (void *)GetProcAddress(hshcore, "RegisterScaleChangeNotifications");
+    pRevokeScaleChangeNotifications = (void *)GetProcAddress(hshcore, "RevokeScaleChangeNotifications");
+    pRegisterScaleChangeNotificationsForWindow = (void *)GetProcAddress(hshcore, (const char *)245);
+    pRevokeScaleChangeNotificationsForWindow = (void *)GetProcAddress(hshcore, (const char *)246);
+    pUpdateScalingInfoCache = (void *)GetProcAddress(hshcore, (const char *)249);
+}
+
+static void test_scale_factor_queries(void)
+{
+    DEVICE_SCALE_FACTOR window_scale, system_scale, core_scale;
+    UINT override_scale;
+    HRESULT hr;
+
+    ok(!!pGetScaleFactorForWindow, "GetScaleFactorForWindow is missing.\n");
+    ok(!!pGetOverrideScaleFactorForWindow, "GetOverrideScaleFactorForWindow is missing.\n");
+    ok(!!pGetSystemScaleFactorForWindow, "GetSystemScaleFactorForWindow is missing.\n");
+    ok(!!pGetScaleFactorForCoreWindow, "GetScaleFactorForCoreWindow is missing.\n");
+    if (!pGetScaleFactorForWindow || !pGetOverrideScaleFactorForWindow ||
+        !pGetSystemScaleFactorForWindow || !pGetScaleFactorForCoreWindow) return;
+
+    window_scale = system_scale = core_scale = DEVICE_SCALE_FACTOR_INVALID;
+    override_scale = 0;
+    hr = pGetOverrideScaleFactorForWindow(NULL, &override_scale);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(override_scale == 100, "got override scale %u.\n", override_scale);
+    hr = pGetSystemScaleFactorForWindow(NULL, &system_scale);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(system_scale >= SCALE_100_PERCENT, "got system scale %u.\n", system_scale);
+    hr = pGetScaleFactorForWindow(NULL, &window_scale);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(window_scale == system_scale, "got window scale %u, system scale %u.\n", window_scale, system_scale);
+    hr = pGetScaleFactorForCoreWindow(NULL, &core_scale);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(core_scale == window_scale, "got core scale %u, window scale %u.\n", core_scale, window_scale);
+}
+
+static void test_scale_change_notifications(void)
+{
+    static const UINT message = WM_APP + 0x321;
+    DWORD cookie1 = 0xdeadbeef, cookie2 = 0xdeadbeef;
+    ULONGLONG event_cookie = 0;
+    HANDLE event;
+    HWND window;
+    HRESULT hr;
+    MSG msg;
+
+    ok(!!pRegisterScaleChangeEvent, "RegisterScaleChangeEvent is missing.\n");
+    ok(!!pUnregisterScaleChangeEvent, "UnregisterScaleChangeEvent is missing.\n");
+    ok(!!pRegisterScaleChangeNotifications, "RegisterScaleChangeNotifications is missing.\n");
+    ok(!!pRevokeScaleChangeNotifications, "RevokeScaleChangeNotifications is missing.\n");
+    ok(!!pRegisterScaleChangeNotificationsForWindow,
+            "RegisterScaleChangeNotificationsForWindow is missing.\n");
+    ok(!!pRevokeScaleChangeNotificationsForWindow,
+            "RevokeScaleChangeNotificationsForWindow is missing.\n");
+    ok(!!pUpdateScalingInfoCache, "UpdateScalingInfoCache is missing.\n");
+    if (!pRegisterScaleChangeEvent || !pUnregisterScaleChangeEvent ||
+        !pRegisterScaleChangeNotifications || !pRevokeScaleChangeNotifications ||
+        !pRegisterScaleChangeNotificationsForWindow ||
+        !pRevokeScaleChangeNotificationsForWindow || !pUpdateScalingInfoCache)
+        return;
+
+    window = CreateWindowA("static", "scale notification", 0,
+            0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
+    ok(!!window, "failed to create window, error %lu.\n", GetLastError());
+    if (!window) return;
+
+    hr = pRegisterScaleChangeNotificationsForWindow(window, NULL, message, &cookie1);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    ok(!cookie1, "got cookie %#lx.\n", cookie1);
+
+    hr = pRegisterScaleChangeNotificationsForWindow(window, window, message, &cookie1);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(!!cookie1, "got cookie %#lx.\n", cookie1);
+    hr = pRegisterScaleChangeNotificationsForWindow(window, window, message, &cookie2);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(!!cookie2 && cookie2 != cookie1, "got cookies %#lx and %#lx.\n", cookie1, cookie2);
+
+    SetPropW(window, L"WindowOverrideScaleFactor", ULongToHandle(125));
+    hr = pUpdateScalingInfoCache();
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(PeekMessageW(&msg, window, message, message, PM_REMOVE), "missing first scale notification.\n");
+    ok(msg.wParam == 1 && !msg.lParam, "got parameters %Ix, %Ix.\n", msg.wParam, msg.lParam);
+    ok(PeekMessageW(&msg, window, message, message, PM_REMOVE), "missing second scale notification.\n");
+    ok(msg.wParam == 1 && !msg.lParam, "got parameters %Ix, %Ix.\n", msg.wParam, msg.lParam);
+
+    hr = pRevokeScaleChangeNotificationsForWindow(window, cookie1);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    hr = pRevokeScaleChangeNotificationsForWindow(window, cookie1);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    SetPropW(window, L"WindowOverrideScaleFactor", ULongToHandle(150));
+    hr = pUpdateScalingInfoCache();
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(PeekMessageW(&msg, window, message, message, PM_REMOVE), "missing remaining scale notification.\n");
+    ok(msg.wParam == 1 && !msg.lParam, "got parameters %Ix, %Ix.\n", msg.wParam, msg.lParam);
+    ok(!PeekMessageW(&msg, window, message, message, PM_REMOVE), "got an extra scale notification.\n");
+
+    hr = pRevokeScaleChangeNotificationsForWindow(window, cookie2);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    hr = pRevokeScaleChangeNotificationsForWindow(GetDesktopWindow(), 1);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+
+    cookie1 = 0xdeadbeef;
+    hr = pRegisterScaleChangeNotifications(DEVICE_PRIMARY, window, message, &cookie1);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(!!cookie1, "got cookie %#lx.\n", cookie1);
+    hr = pRevokeScaleChangeNotifications(DEVICE_PRIMARY, cookie1);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    hr = pRevokeScaleChangeNotifications(DEVICE_PRIMARY, cookie1);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    cookie1 = 0xdeadbeef;
+    hr = pRegisterScaleChangeNotifications(0x7fffffff, window, message, &cookie1);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+    ok(!cookie1, "got cookie %#lx.\n", cookie1);
+    hr = pRevokeScaleChangeNotifications(0x7fffffff, 1);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    ok(!!event, "failed to create event, error %lu.\n", GetLastError());
+    hr = pRegisterScaleChangeEvent(event, &event_cookie);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(!!event_cookie, "got event cookie %s.\n", wine_dbgstr_longlong(event_cookie));
+    CloseHandle(event);
+    hr = pUnregisterScaleChangeEvent(event_cookie);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    hr = pUnregisterScaleChangeEvent(event_cookie);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    RemovePropW(window, L"WindowOverrideScaleFactor");
+    DestroyWindow(window);
 }
 
 static HRESULT WINAPI unk_QI(IUnknown *iface, REFIID riid, void **obj)
@@ -856,6 +1004,8 @@ START_TEST(shcore)
     init(hshcore);
 
     test_AppUserModelID();
+    test_scale_factor_queries();
+    test_scale_change_notifications();
     test_process_reference();
     test_SHUnicodeToAnsi();
     test_SHAnsiToUnicode();

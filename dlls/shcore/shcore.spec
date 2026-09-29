@@ -34,7 +34,7 @@
 @ stdcall RecordFeatureUsage(long long long str)
 @ stdcall RegisterScaleChangeEvent(ptr ptr)
 @ stdcall RegisterScaleChangeNotifications(long ptr long ptr)
-@ stub RevokeScaleChangeNotifications
+@ stdcall RevokeScaleChangeNotifications(long long)
 @ stdcall SHAnsiToAnsi(str ptr long)
 @ stdcall SHAnsiToUnicode(str ptr long)
 @ stdcall SHCopyKeyA(long str long long)
@@ -93,7 +93,7 @@
 @ stdcall SetProcessDpiAwareness(long)
 @ stdcall SetProcessReference(ptr)
 @ stdcall SubscribeFeatureStateChangeNotification(ptr ptr ptr)
-@ stub UnregisterScaleChangeEvent
+@ stdcall UnregisterScaleChangeEvent(int64)
 # @ stub UnsubscribeFeatureStateChangeNotification
 
 100 stub -noname SHManagedCreateStreamOnFile
@@ -173,12 +173,12 @@
 240 stub -noname RegisterScaleChangeSinkForWindow
 241 stub -noname ScaleAndMapRelativeRect
 242 stub -noname RelativeRectFromPhysicalRectWithScale
-244 stub -noname GetScaleFactorForWindow
-245 stub -noname RegisterScaleChangeNotificationsForWindow
-246 stub -noname RevokeScaleChangeNotificationsForWindow
-247 stub -noname GetOverrideScaleFactorForWindow
-248 stub -noname GetSystemScaleFactorForWindow
-249 stub -noname UpdateScalingInfoCache
+244 stdcall -noname GetScaleFactorForWindow(long ptr)
+245 stdcall -noname RegisterScaleChangeNotificationsForWindow(long long long ptr)
+246 stdcall -noname RevokeScaleChangeNotificationsForWindow(long long)
+247 stdcall -noname GetOverrideScaleFactorForWindow(long ptr)
+248 stdcall -noname GetSystemScaleFactorForWindow(long ptr)
+249 stdcall -noname UpdateScalingInfoCache()
 250 stub -noname RegisterCurrentWindowChangeListener
 251 stub -noname RegisterWindowMonitorChangeListener
 252 stub -noname UnregisterCurrentWindowChangeListener
@@ -187,6 +187,7 @@
 255 stub -noname GetCurrentWindow
 260 stub -noname PhysicalRectFromRelativeRectWithScales
 261 stub -noname RelativeRectFromPhysicalRectWithScales
+265 stdcall -noname GetScaleFactorForCoreWindow(ptr ptr)
 270 stub -noname SHCreateMemoryStreamOnSharedBuffer
 280 stub -noname _CreateDirectoryHelper
 281 stub -noname Win32CreateDirectory
