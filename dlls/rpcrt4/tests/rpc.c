@@ -1420,6 +1420,75 @@ done:
     return hr;
 }
 
+static void test_kernel_auth_info(void)
+{
+    static const char *protocols[] = { "ncalrpc", "ncacn_np", "ncacn_ip_tcp" };
+    RPC_SECURITY_QOS qos = {1, 0, RPC_C_QOS_IDENTITY_DYNAMIC, RPC_C_IMP_LEVEL_IMPERSONATE};
+    RPC_BINDING_HANDLE binding;
+    RPC_AUTH_IDENTITY_HANDLE identity;
+    ULONG protocol, wide, level, actual_level, service;
+    RPC_STATUS status;
+    RPC_CSTR text;
+
+    for (protocol = 0; protocol < ARRAY_SIZE(protocols); protocol++)
+    {
+        status = RpcStringBindingComposeA(NULL, (RPC_CSTR)protocols[protocol], NULL,
+                                          (RPC_CSTR)"linuxnt_kernel_auth_test", NULL, &text);
+        ok(!status, "compose %s returned %lu\n", protocols[protocol], status);
+        if (status) continue;
+        status = RpcBindingFromStringBindingA(text, &binding);
+        RpcStringFreeA(&text);
+        ok(!status, "binding %s returned %lu\n", protocols[protocol], status);
+        if (status) continue;
+
+        for (wide = 0; wide < 2; wide++)
+        {
+            for (level = RPC_C_AUTHN_LEVEL_DEFAULT; level <= RPC_C_AUTHN_LEVEL_PKT_PRIVACY + 1; level++)
+            {
+                status = wide ? RpcBindingSetAuthInfoExW(binding, NULL, level, RPC_C_AUTHN_KERNEL,
+                                                         NULL, RPC_C_AUTHZ_NONE, &qos) :
+                                RpcBindingSetAuthInfoExA(binding, NULL, level, RPC_C_AUTHN_KERNEL,
+                                                         NULL, RPC_C_AUTHZ_NONE, &qos);
+                if (protocol)
+                {
+                    ok(status == RPC_S_UNKNOWN_AUTHN_SERVICE,
+                       "%s wide %lu level %lu returned %lu\n", protocols[protocol], wide, level, status);
+                    continue;
+                }
+                if (level > RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
+                {
+                    ok(status == RPC_S_UNKNOWN_AUTHN_LEVEL, "wide %lu level %lu returned %lu\n",
+                       wide, level, status);
+                    continue;
+                }
+                ok(!status, "wide %lu level %lu returned %lu\n", wide, level, status);
+                actual_level = service = 0xdeadbeef;
+                identity = (void *)0xdeadbeef;
+                status = wide ? RpcBindingInqAuthInfoW(binding, NULL, &actual_level, &service, &identity, NULL) :
+                                RpcBindingInqAuthInfoA(binding, NULL, &actual_level, &service, &identity, NULL);
+                if (level == RPC_C_AUTHN_LEVEL_NONE)
+                    ok(status == RPC_S_BINDING_HAS_NO_AUTH, "wide %lu no auth returned %lu\n", wide, status);
+                else
+                {
+                    ok(!status, "wide %lu inquiry returned %lu\n", wide, status);
+                    ok(actual_level == RPC_C_AUTHN_LEVEL_PKT_PRIVACY, "got level %lu\n", actual_level);
+                    ok(service == RPC_C_AUTHN_WINNT, "got service %lu\n", service);
+                    ok(!identity, "got identity %p\n", identity);
+                }
+            }
+            status = wide ? RpcBindingSetAuthInfoW(binding, NULL, RPC_C_AUTHN_LEVEL_NONE,
+                                                   RPC_C_AUTHN_NONE, NULL, RPC_C_AUTHZ_NONE) :
+                            RpcBindingSetAuthInfoA(binding, NULL, RPC_C_AUTHN_LEVEL_NONE,
+                                                   RPC_C_AUTHN_NONE, NULL, RPC_C_AUTHZ_NONE);
+            ok(!status, "wide %lu clear returned %lu\n", wide, status);
+            status = RpcBindingInqAuthInfoA(binding, NULL, NULL, NULL, NULL, NULL);
+            ok(status == RPC_S_BINDING_HAS_NO_AUTH, "wide %lu cleared inquiry returned %lu\n", wide, status);
+        }
+        status = RpcBindingFree(&binding);
+        ok(!status, "free returned %lu\n", status);
+    }
+}
+
 START_TEST( rpc )
 {
     static unsigned char ncacn_np[] = "ncacn_np";
@@ -1454,6 +1523,7 @@ START_TEST( rpc )
     test_RpcIfInqId();
     test_RpcServerInqDefaultPrincName();
     test_RpcServerRegisterAuthInfo();
+    test_kernel_auth_info();
 
     if (firewall_enabled)
     {

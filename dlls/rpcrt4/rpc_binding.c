@@ -45,6 +45,7 @@
 #include "rpc_assoc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(rpc);
+WINE_DECLARE_DEBUG_CHANNEL(rpc_auth);
 
 LPSTR RPCRT4_strdupWtoA(LPCWSTR src)
 {
@@ -1833,6 +1834,21 @@ RpcBindingServerFromClient(RPC_BINDING_HANDLE ClientBinding, RPC_BINDING_HANDLE*
     return RPC_S_OK;
 }
 
+static RPC_STATUS normalize_kernel_auth_info(const RpcBinding *binding, ULONG *level, ULONG *service)
+{
+    if (*service != RPC_C_AUTHN_KERNEL) return RPC_S_OK;
+    if (strcmp(binding->Protseq, "ncalrpc")) return RPC_S_UNKNOWN_AUTHN_SERVICE;
+    if (*level > RPC_C_AUTHN_LEVEL_PKT_PRIVACY) return RPC_S_UNKNOWN_AUTHN_LEVEL;
+
+    TRACE_(rpc_auth)("kernel authentication binding %p protseq %s level %lu -> %u service %lu -> %u\n",
+          binding, debugstr_a(binding->Protseq), *level,
+          *level == RPC_C_AUTHN_LEVEL_NONE ? RPC_C_AUTHN_LEVEL_NONE : RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+          *service, RPC_C_AUTHN_WINNT);
+    if (*level != RPC_C_AUTHN_LEVEL_NONE) *level = RPC_C_AUTHN_LEVEL_PKT_PRIVACY;
+    *service = RPC_C_AUTHN_WINNT;
+    return RPC_S_OK;
+}
+
 static RPC_STATUS set_ncalrpc_auth_info(RpcBinding *binding, const WCHAR *server_principal_name,
                                         ULONG authn_level, ULONG authn_svc,
                                         RPC_AUTH_IDENTITY_HANDLE identity)
@@ -1878,9 +1894,12 @@ RpcBindingSetAuthInfoExA( RPC_BINDING_HANDLE Binding, RPC_CSTR ServerPrincName,
   ULONG i;
   PSecPkgInfoA packages;
   ULONG cbMaxToken;
+  RPC_STATUS status;
 
   TRACE("%p %s %lu %lu %p %lu %p\n", Binding, debugstr_a((const char*)ServerPrincName),
         AuthnLevel, AuthnSvc, AuthIdentity, AuthzSvr, SecurityQos);
+
+  if ((status = normalize_kernel_auth_info(bind, &AuthnLevel, &AuthnSvc))) return status;
 
   if (SecurityQos)
   {
@@ -2021,9 +2040,12 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
   ULONG i;
   PSecPkgInfoW packages;
   ULONG cbMaxToken;
+  RPC_STATUS status;
 
   TRACE("%p %s %lu %lu %p %lu %p\n", Binding, debugstr_w(ServerPrincName),
         AuthnLevel, AuthnSvc, AuthIdentity, AuthzSvr, SecurityQos);
+
+  if ((status = normalize_kernel_auth_info(bind, &AuthnLevel, &AuthnSvc))) return status;
 
   if (SecurityQos)
   {
