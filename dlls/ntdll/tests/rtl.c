@@ -153,6 +153,7 @@ static NTSTATUS  (WINAPI *pRtlGetAcesBufferSize)(PACL,PULONG);
 static NTSTATUS  (WINAPI *pRtlCreateServiceSid)(PUNICODE_STRING, PSID, PULONG);
 static NTSTATUS  (WINAPI *pRtlDeriveCapabilitySidsFromName)(UNICODE_STRING *, PSID, PSID);
 static NTSTATUS  (WINAPI *pRtlCapabilityCheck)(HANDLE, UNICODE_STRING *, BOOLEAN *);
+static NTSTATUS  (WINAPI *pRtlCheckTokenCapability)(HANDLE, PSID, BOOLEAN *);
 static NTSTATUS  (WINAPI *pRtlSidHashInitialize)(SID_AND_ATTRIBUTES *, ULONG, SID_AND_ATTRIBUTES_HASH *);
 static SID_AND_ATTRIBUTES * (WINAPI *pRtlSidHashLookup)(SID_AND_ATTRIBUTES_HASH *, PSID);
 static BOOLEAN   (WINAPI *pRtlTestProtectedAccess)(UCHAR, UCHAR);
@@ -242,6 +243,7 @@ static void InitFunctionPtrs(void)
         pRtlCreateServiceSid = (void *)GetProcAddress(hntdll, "RtlCreateServiceSid");
         pRtlDeriveCapabilitySidsFromName = (void *)GetProcAddress(hntdll, "RtlDeriveCapabilitySidsFromName");
         pRtlCapabilityCheck = (void *)GetProcAddress(hntdll, "RtlCapabilityCheck");
+        pRtlCheckTokenCapability = (void *)GetProcAddress(hntdll, "RtlCheckTokenCapability");
         pRtlSidHashInitialize = (void *)GetProcAddress(hntdll, "RtlSidHashInitialize");
         pRtlSidHashLookup = (void *)GetProcAddress(hntdll, "RtlSidHashLookup");
         pRtlTestProtectedAccess = (void *)GetProcAddress(hntdll, "RtlTestProtectedAccess");
@@ -6354,6 +6356,118 @@ static void test_RtlCapabilityCheck(void)
     CloseHandle( process_token );
 }
 
+static void test_RtlCheckTokenCapability(void)
+{
+    static const WCHAR *names[] = { L"muma", L"packageContents" };
+    struct { TOKEN_USER user; BYTE sid[SECURITY_MAX_SID_SIZE]; } user;
+    BYTE cap_group[SECURITY_MAX_SID_SIZE], cap_sid[SECURITY_MAX_SID_SIZE];
+    SID_IDENTIFIER_AUTHORITY world_authority = { SECURITY_WORLD_SID_AUTHORITY };
+    HANDLE process_token, token, restricted, no_query, reopened;
+    TOKEN_STATISTICS before, after;
+    SID_AND_ATTRIBUTES restriction;
+    UNICODE_STRING name;
+    BOOLEAN result;
+    NTSTATUS status;
+    PSID world_sid;
+    DWORD size;
+    BOOL ret;
+    unsigned int i, j;
+
+    if (!pRtlCheckTokenCapability || !pRtlDeriveCapabilitySidsFromName)
+    {
+        win_skip( "Token capability functions are unavailable.\n" );
+        return;
+    }
+    ret = OpenProcessToken( GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &process_token );
+    ok( ret, "OpenProcessToken failed, error %lu.\n", GetLastError() );
+    if (!ret) return;
+    ret = DuplicateTokenEx( process_token, TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_IMPERSONATE,
+                           NULL, SecurityImpersonation, TokenImpersonation, &token );
+    ok( ret, "DuplicateTokenEx failed, error %lu.\n", GetLastError() );
+    if (!ret) { CloseHandle( process_token ); return; }
+    ret = GetTokenInformation( token, TokenUser, &user, sizeof(user), &size );
+    ok( ret, "TokenUser failed, error %lu.\n", GetLastError() );
+    if (!ret) goto done;
+    ret = AllocateAndInitializeSid( &world_authority, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, &world_sid );
+    ok( ret, "AllocateAndInitializeSid failed.\n" );
+    if (!ret) goto done;
+
+    ret = GetTokenInformation( token, TokenStatistics, &before, sizeof(before), &size );
+    ok( ret, "TokenStatistics failed.\n" );
+    for (i = 0; i < ARRAY_SIZE(names); ++i)
+    {
+        RtlInitUnicodeString( &name, names[i] );
+        status = pRtlDeriveCapabilitySidsFromName( &name, cap_group, cap_sid );
+        ok( !status, "derive %s returned %#lx.\n", wine_dbgstr_w(names[i]), status );
+        result = 0xcc;
+        SetLastError( 0x13579bdf );
+        status = pRtlCheckTokenCapability( token, cap_sid, &result );
+        ok( status == STATUS_SUCCESS, "%s returned %#lx.\n", wine_dbgstr_w(names[i]), status );
+        ok( result == TRUE, "%s returned %u.\n", wine_dbgstr_w(names[i]), result );
+        ok( GetLastError() == 0x13579bdf, "got error %lu.\n", GetLastError() );
+        result = 0xcc;
+        status = pRtlCheckTokenCapability( NULL, cap_sid, &result );
+        ok( !status && result == TRUE, "effective token returned %#lx, %u.\n", status, result );
+    }
+    ret = GetTokenInformation( token, TokenStatistics, &after, sizeof(after), &size );
+    ok( ret, "TokenStatistics failed.\n" );
+    ok( before.GroupCount == after.GroupCount && before.ModifiedId.LowPart == after.ModifiedId.LowPart &&
+        before.ModifiedId.HighPart == after.ModifiedId.HighPart, "capability check mutated token state.\n" );
+
+    result = 0xcc;
+    status = pRtlCheckTokenCapability( process_token, cap_sid, &result );
+    ok( status == STATUS_NO_IMPERSONATION_TOKEN && result == FALSE, "primary token returned %#lx, %u.\n", status, result );
+    result = 0xcc;
+    status = pRtlCheckTokenCapability( (HANDLE)0xdead, cap_sid, &result );
+    ok( status == STATUS_INVALID_HANDLE && result == FALSE, "invalid handle returned %#lx, %u.\n", status, result );
+    result = 0xcc;
+    status = pRtlCheckTokenCapability( token, world_sid, &result );
+    ok( status == STATUS_INVALID_PARAMETER && result == FALSE, "non-capability SID returned %#lx, %u.\n", status, result );
+
+    ret = DuplicateHandle( GetCurrentProcess(), token, GetCurrentProcess(), &no_query, TOKEN_DUPLICATE, FALSE, 0 );
+    ok( ret, "DuplicateHandle failed.\n" );
+    if (ret)
+    {
+        result = 0xcc;
+        status = pRtlCheckTokenCapability( no_query, cap_sid, &result );
+        ok( status == STATUS_ACCESS_DENIED && result == FALSE, "unqueryable token returned %#lx, %u.\n", status, result );
+        CloseHandle( no_query );
+    }
+
+    /* The restricting set must authorize the same descriptor separately. */
+    for (j = 0; j < 3; ++j)
+    {
+        restriction.Sid = j == 0 ? world_sid : j == 1 ? user.user.User.Sid : (PSID)cap_sid;
+        restriction.Attributes = 0;
+        ret = CreateRestrictedToken( token, 0, 0, NULL, 0, NULL, 1, &restriction, &restricted );
+        ok( ret, "CreateRestrictedToken %u failed, error %lu.\n", j, GetLastError() );
+        if (!ret) continue;
+        result = 0xcc;
+        status = pRtlCheckTokenCapability( restricted, cap_sid, &result );
+        ok( status == STATUS_SUCCESS && result == (j != 0),
+            "restricted %u returned %#lx, %u.\n", j, status, result );
+        ret = SetThreadToken( NULL, restricted );
+        ok( ret, "SetThreadToken failed, error %lu.\n", GetLastError() );
+        if (ret)
+        {
+            status = NtOpenThreadToken( GetCurrentThread(), TOKEN_QUERY, TRUE, &reopened );
+            ok( status == STATUS_SUCCESS, "OpenAsSelf restricted %u returned %#lx.\n", j, status );
+            if (!status) CloseHandle( reopened );
+            result = 0xcc;
+            status = pRtlCheckTokenCapability( NULL, cap_sid, &result );
+            ok( status == STATUS_SUCCESS && result == (j != 0),
+                "effective restricted %u returned %#lx, %u.\n", j, status, result );
+            ret = SetThreadToken( NULL, NULL );
+            ok( ret, "reset thread token failed, error %lu.\n", GetLastError() );
+        }
+        CloseHandle( restricted );
+    }
+    FreeSid( world_sid );
+done:
+    CloseHandle( token );
+    CloseHandle( process_token );
+}
+
 static ULONG_PTR rotate_bits_right( ULONG_PTR v, ULONG count )
 {
     static const unsigned int bits = sizeof(v) * 8;
@@ -6537,5 +6651,6 @@ START_TEST(rtl)
     test_RtlCreateServiceSid();
     test_RtlDeriveCapabilitySidsFromName();
     test_RtlCapabilityCheck();
+    test_RtlCheckTokenCapability();
     test_pointer_encoding();
 }

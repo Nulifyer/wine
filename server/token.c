@@ -1646,8 +1646,17 @@ DECL_HANDLER(open_token)
                 if (!thread->token->primary && thread->token->impersonation_level <= SecurityAnonymous)
                     set_error( STATUS_CANT_OPEN_ANONYMOUS );
                 else
-                    reply->token = alloc_handle( current->process, thread->token,
+                {
+                    struct token *token = thread->token;
+                    struct token *saved_token = current->token;
+
+                    /* OpenAsSelf checks the token object's DACL as the process
+                     * principal, while the returned object is the thread token. */
+                    if (req->flags & OPEN_TOKEN_AS_SELF) current->token = NULL;
+                    reply->token = alloc_handle( current->process, token,
                                                  req->access, req->attributes );
+                    current->token = saved_token;
+                }
             }
             else
                 set_error( STATUS_NO_TOKEN );

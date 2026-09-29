@@ -2571,37 +2571,66 @@ NTSTATUS WINAPI RtlCapabilityCheck( HANDLE token, UNICODE_STRING *cap_name, BOOL
  */
 NTSTATUS WINAPI RtlCheckTokenCapability( HANDLE token, PSID capability_sid, BOOLEAN *has_capability )
 {
-    TOKEN_GROUPS *groups;
-    NTSTATUS status;
-    ULONG size, i;
+    static const SID_IDENTIFIER_AUTHORITY app_authority = { SECURITY_APP_PACKAGE_AUTHORITY };
+    GENERIC_MAPPING mapping = { 0x10001, 0x10001, 0x10001, 0x10001 };
+    struct { TOKEN_USER user; BYTE sid[SECURITY_MAX_SID_SIZE]; } user;
+    union { ACL acl; BYTE buffer[sizeof(ACL) + 2 * (offsetof(ACCESS_ALLOWED_ACE, SidStart) + SECURITY_MAX_SID_SIZE)]; } acl;
+    SECURITY_QUALITY_OF_SERVICE qos = { sizeof(qos), SecurityImpersonation, SECURITY_STATIC_TRACKING, FALSE };
+    SECURITY_DESCRIPTOR sd;
+    OBJECT_ATTRIBUTES attr;
+    PRIVILEGE_SET privileges;
+    HANDLE opened_token = NULL, process_token;
+    ULONG size, granted = 0;
+    NTSTATUS status, access_status;
 
     TRACE( "token %p, capability_sid %p, has_capability %p.\n",
            token, capability_sid, has_capability );
 
     if (!has_capability) return STATUS_ACCESS_VIOLATION;
     *has_capability = FALSE;
-    if (!RtlValidSid( capability_sid )) return STATUS_INVALID_SID;
+    if (!RtlValidSid( capability_sid ) || ((SID *)capability_sid)->SubAuthorityCount < 2 ||
+        memcmp( ((SID *)capability_sid)->IdentifierAuthority.Value, app_authority.Value, sizeof(app_authority.Value) ) ||
+        ((SID *)capability_sid)->SubAuthority[0] != SECURITY_CAPABILITY_BASE_RID)
+        return STATUS_INVALID_PARAMETER;
 
-    if (!token) token = GetCurrentThreadEffectiveToken();
-    status = NtQueryInformationToken( token, TokenGroups, NULL, 0, &size );
-    if (status != STATUS_BUFFER_TOO_SMALL) return status;
-    if (!(groups = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
-
-    status = NtQueryInformationToken( token, TokenGroups, groups, size, &size );
-    if (!status)
+    if (!token)
     {
-        for (i = 0; i < groups->GroupCount; ++i)
+        status = NtOpenThreadToken( NtCurrentThread(), TOKEN_QUERY, TRUE, &opened_token );
+        if (status == STATUS_NO_TOKEN)
         {
-            if ((groups->Groups[i].Attributes & SE_GROUP_ENABLED) &&
-                RtlEqualSid( groups->Groups[i].Sid, capability_sid ))
-            {
-                *has_capability = TRUE;
-                break;
-            }
+            status = NtOpenProcessToken( NtCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &process_token );
+            if (status) return status;
+            InitializeObjectAttributes( &attr, NULL, 0, NULL, NULL );
+            attr.SecurityQualityOfService = &qos;
+            status = NtDuplicateToken( process_token, TOKEN_QUERY, &attr, FALSE,
+                                       TokenImpersonation, &opened_token );
+            NtClose( process_token );
         }
+        if (status) return status;
+        token = opened_token;
     }
 
-    RtlFreeHeap( GetProcessHeap(), 0, groups );
+    status = NtQueryInformationToken( token, TokenUser, &user, sizeof(user), &size );
+    if (status) goto done;
+    RtlCreateSecurityDescriptor( &sd, SECURITY_DESCRIPTOR_REVISION );
+    RtlSetOwnerSecurityDescriptor( &sd, user.user.User.Sid, FALSE );
+    RtlSetGroupSecurityDescriptor( &sd, user.user.User.Sid, FALSE );
+    RtlCreateAcl( &acl.acl, sizeof(acl), ACL_REVISION );
+    RtlAddAccessAllowedAce( &acl.acl, ACL_REVISION, 0x10001, user.user.User.Sid );
+    RtlAddAccessAllowedAce( &acl.acl, ACL_REVISION, 0x10001, capability_sid );
+    RtlSetDaclSecurityDescriptor( &sd, TRUE, &acl.acl, FALSE );
+
+    /* Full-trust tokens use the user ACE. Restricted tokens must also pass
+     * their second access-check pass; capability membership alone is not the
+     * entire contract. Keep that authorization in the shared token owner. */
+    size = sizeof(privileges);
+    status = NtAccessCheck( &sd, token, 0x10001, &mapping,
+                            &privileges, &size, &granted, &access_status );
+    if (!status && !access_status && granted == 0x10001) *has_capability = TRUE;
+
+done:
+    if (opened_token) NtClose( opened_token );
+    TRACE( "status %#lx, has_capability %u.\n", status, *has_capability );
     return status;
 }
 
