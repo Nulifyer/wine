@@ -1,3 +1,6 @@
+@ stdcall IsInteractiveUserSession(long)
+@ stdcall QueryActiveSession(ptr)
+@ stdcall QueryUserToken(long ptr)
 @ stdcall WTSCloseServer(long)
 @ stdcall WTSConnectSessionA(long long ptr long)
 @ stdcall WTSConnectSessionW(long long ptr long)

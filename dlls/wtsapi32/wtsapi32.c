@@ -681,6 +681,51 @@ BOOL WINAPI WTSQueryUserToken(ULONG session_id, PHANDLE token)
 }
 
 /************************************************************
+ *                QueryUserToken (WTSAPI32.@)
+ */
+BOOL WINAPI QueryUserToken(ULONG session_id, PHANDLE token)
+{
+    return WTSQueryUserToken(session_id, token);
+}
+
+/************************************************************
+ *                QueryActiveSession (WTSAPI32.@)
+ */
+BOOL WINAPI QueryActiveSession(ULONG *session_id)
+{
+    HANDLE token;
+
+    TRACE("%p\n", session_id);
+
+    *session_id = WTS_ANY_SESSION;
+    if (RtlIsMultiSessionSku())
+    {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return FALSE;
+    }
+
+    if (!QueryUserToken(0, &token)) return FALSE;
+    CloseHandle(token);
+    *session_id = 0;
+    return TRUE;
+}
+
+/************************************************************
+ *                IsInteractiveUserSession (WTSAPI32.@)
+ */
+BOOL WINAPI IsInteractiveUserSession(ULONG session_id)
+{
+    ULONG active_session;
+
+    TRACE("%lu\n", session_id);
+
+    if (RtlIsMultiSessionSku())
+        return session_id != RtlGetCurrentServiceSessionId();
+
+    return QueryActiveSession(&active_session) && session_id == active_session;
+}
+
+/************************************************************
  *                WTSQueryUserConfigA (WTSAPI32.@)
  */
 BOOL WINAPI WTSQueryUserConfigA(LPSTR pServerName, LPSTR pUserName, WTS_CONFIG_CLASS WTSConfigClass, LPSTR *ppBuffer, DWORD *pBytesReturned)

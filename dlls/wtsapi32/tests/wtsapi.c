@@ -33,6 +33,9 @@
 
 static BOOL (WINAPI *pWTSEnumerateProcessesExW)(HANDLE server, DWORD *level, DWORD session, WCHAR **info, DWORD *count);
 static BOOL (WINAPI *pWTSFreeMemoryExW)(WTS_TYPE_CLASS class, void *memory, ULONG count);
+static BOOL (WINAPI *pIsInteractiveUserSession)(ULONG session);
+static BOOL (WINAPI *pQueryActiveSession)(ULONG *session);
+static BOOL (WINAPI *pQueryUserToken)(ULONG session, HANDLE *token);
 
 static const SYSTEM_PROCESS_INFORMATION *find_nt_process_info(const SYSTEM_PROCESS_INFORMATION *head, DWORD pid)
 {
@@ -403,6 +406,9 @@ static void test_WTSQueryUserToken(void)
 
     if (!winetest_platform_is_wine) return;
 
+    ok(!!pQueryUserToken, "QueryUserToken is not exported.\n");
+    if (!pQueryUserToken) return;
+
     ret = DuplicateTokenEx( GetCurrentProcessToken(), TOKEN_ALL_ACCESS, NULL,
                             SecurityImpersonation, TokenPrimary, &registered );
     ok(ret, "DuplicateTokenEx failed, error %lu.\n", GetLastError());
@@ -463,6 +469,22 @@ static void test_WTSQueryUserToken(void)
         queried = NULL;
     }
 
+    queried = NULL;
+    ret = pQueryUserToken( session, &queried );
+    ok(ret, "QueryUserToken failed, error %lu.\n", GetLastError());
+    ok(!!queried, "QueryUserToken returned no token.\n");
+    if (queried)
+    {
+        size = sizeof(session);
+        session = 0;
+        ret = GetTokenInformation( queried, TokenSessionId, &session, size, &size );
+        ok(ret, "GetTokenInformation(TokenSessionId) failed, error %lu.\n", GetLastError());
+        ok(session == (original_session == 0x7ffffffe ? 0x7ffffffd : 0x7ffffffe),
+           "got session %#lx.\n", session);
+        CloseHandle( queried );
+        queried = NULL;
+    }
+
     ret = DuplicateTokenEx( registered, TOKEN_ALL_ACCESS, NULL,
                             SecurityImpersonation, TokenPrimary, &descendant );
     ok(ret, "DuplicateTokenEx failed, error %lu.\n", GetLastError());
@@ -504,6 +526,46 @@ done:
     if (queried) CloseHandle( queried );
     if (descendant) CloseHandle( descendant );
     if (registered) CloseHandle( registered );
+}
+
+static void test_user_token_contract(void)
+{
+    ULONG active_session, service_session;
+    DWORD error;
+    BOOL ret;
+
+    if (!pIsInteractiveUserSession || !pQueryActiveSession || !pQueryUserToken)
+    {
+        win_skip("user-token API-set exports are unavailable.\n");
+        return;
+    }
+
+    ok(RtlIsMultiSessionSku(), "expected the Windows 11 Pro multi-session SKU policy.\n");
+    service_session = RtlGetCurrentServiceSessionId();
+
+    SetLastError(0xdeadbeef);
+    ret = pIsInteractiveUserSession(service_session);
+    error = GetLastError();
+    ok(!ret, "service session %lu is interactive.\n", service_session);
+    ok(error == 0xdeadbeef, "last error changed to %lu.\n", error);
+
+    SetLastError(0xdeadbeef);
+    ret = pIsInteractiveUserSession(service_session + 1);
+    error = GetLastError();
+    ok(ret, "session %lu is not interactive.\n", service_session + 1);
+    ok(error == 0xdeadbeef, "last error changed to %lu.\n", error);
+
+    active_session = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = pQueryActiveSession(&active_session);
+    ok(!ret, "QueryActiveSession unexpectedly succeeded.\n");
+    ok(active_session == WTS_ANY_SESSION, "got active session %#lx.\n", active_session);
+    ok(GetLastError() == ERROR_NOT_SUPPORTED, "got error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pQueryUserToken(WTS_CURRENT_SESSION, NULL);
+    ok(!ret, "QueryUserToken unexpectedly succeeded.\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu.\n", GetLastError());
 }
 
 static void test_WTSEnumerateSessions(void)
@@ -548,11 +610,17 @@ static void test_WTSEnumerateSessions(void)
 
 START_TEST (wtsapi)
 {
-    pWTSEnumerateProcessesExW = (void *)GetProcAddress(GetModuleHandleA("wtsapi32"), "WTSEnumerateProcessesExW");
-    pWTSFreeMemoryExW = (void *)GetProcAddress(GetModuleHandleA("wtsapi32"), "WTSFreeMemoryExW");
+    HMODULE wtsapi32 = GetModuleHandleA("wtsapi32");
+
+    pWTSEnumerateProcessesExW = (void *)GetProcAddress(wtsapi32, "WTSEnumerateProcessesExW");
+    pWTSFreeMemoryExW = (void *)GetProcAddress(wtsapi32, "WTSFreeMemoryExW");
+    pIsInteractiveUserSession = (void *)GetProcAddress(wtsapi32, "IsInteractiveUserSession");
+    pQueryActiveSession = (void *)GetProcAddress(wtsapi32, "QueryActiveSession");
+    pQueryUserToken = (void *)GetProcAddress(wtsapi32, "QueryUserToken");
 
     test_WTSEnumerateProcessesW();
     test_WTSQuerySessionInformation();
+    test_user_token_contract();
     test_WTSQueryUserToken();
     test_WTSEnumerateSessions();
 }
