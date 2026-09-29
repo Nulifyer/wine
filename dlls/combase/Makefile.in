@@ -9,6 +9,7 @@ SOURCES = \
 	combase.c \
 	dcom.idl \
 	errorinfo.c \
+	extensioncatalog.c \
 	git.c \
 	hglobalstream.c \
 	irpcss.idl \

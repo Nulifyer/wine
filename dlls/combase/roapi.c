@@ -84,6 +84,7 @@ static inline struct activation_factory_entry *impl_from_activation_factory_prov
 
 HRESULT package_get_class_path(const WCHAR *classid, WCHAR **path);
 BOOL WINAPI QuirkIsEnabled(void *quirk);
+HRESULT extension_catalog_get_factory(HSTRING classid, IActivationFactory **factory);
 
 /***********************************************************************
  *      IsErrorPropagationEnabled (combase.@)
@@ -1827,9 +1828,8 @@ void WINAPI CleanupTlsOleState(void *unknown)
  */
 HRESULT WINAPI DllGetActivationFactory(HSTRING classid, IActivationFactory **factory)
 {
-    FIXME("(%s, %p): stub\n", debugstr_hstring(classid), factory);
-
-    return REGDB_E_CLASSNOTREG;
+    TRACE("(%s, %p)\n", debugstr_hstring(classid), factory);
+    return extension_catalog_get_factory(classid, factory);
 }
 
 /***********************************************************************

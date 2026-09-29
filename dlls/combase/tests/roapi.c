@@ -33,6 +33,45 @@
 
 #include "wine/test.h"
 
+static const GUID IID_IExtensionCatalog =
+    {0x07cee0d8, 0xd555, 0x4d61, {0x9c, 0x37, 0x01, 0xc1, 0x94, 0xb0, 0xf2, 0x08}};
+static const GUID IID_IIterator_IExtensionRegistration =
+    {0xb4d4a79e, 0xfe15, 0x5272, {0x99, 0x88, 0x61, 0x7a, 0x34, 0xd8, 0x30, 0x0b}};
+
+typedef struct IExtensionCatalog IExtensionCatalog;
+typedef struct IExtensionCatalogVtbl
+{
+    BEGIN_INTERFACE
+    HRESULT (WINAPI *QueryInterface)(IExtensionCatalog *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(IExtensionCatalog *);
+    ULONG (WINAPI *Release)(IExtensionCatalog *);
+    HRESULT (WINAPI *GetIids)(IExtensionCatalog *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(IExtensionCatalog *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(IExtensionCatalog *, TrustLevel *);
+    HRESULT (WINAPI *QueryCatalog)(IExtensionCatalog *, HSTRING, void **);
+    HRESULT (WINAPI *QueryCatalogByPackageFamilyName)(IExtensionCatalog *, HSTRING, HSTRING, void **);
+    END_INTERFACE
+} IExtensionCatalogVtbl;
+struct IExtensionCatalog { const IExtensionCatalogVtbl *lpVtbl; };
+
+typedef struct IIterator_IExtensionRegistration IIterator_IExtensionRegistration;
+typedef struct IIterator_IExtensionRegistrationVtbl
+{
+    BEGIN_INTERFACE
+    HRESULT (WINAPI *QueryInterface)(IIterator_IExtensionRegistration *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(IIterator_IExtensionRegistration *);
+    ULONG (WINAPI *Release)(IIterator_IExtensionRegistration *);
+    HRESULT (WINAPI *GetIids)(IIterator_IExtensionRegistration *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(IIterator_IExtensionRegistration *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(IIterator_IExtensionRegistration *, TrustLevel *);
+    HRESULT (WINAPI *get_Current)(IIterator_IExtensionRegistration *, IInspectable **);
+    HRESULT (WINAPI *get_HasCurrent)(IIterator_IExtensionRegistration *, boolean *);
+    HRESULT (WINAPI *MoveNext)(IIterator_IExtensionRegistration *, boolean *);
+    HRESULT (WINAPI *GetMany)(IIterator_IExtensionRegistration *, UINT32, IInspectable **, UINT32 *);
+    END_INTERFACE
+} IIterator_IExtensionRegistrationVtbl;
+struct IIterator_IExtensionRegistration { const IIterator_IExtensionRegistrationVtbl *lpVtbl; };
+
 #define EXPECT_REF(obj,ref) _expect_ref((IUnknown*)obj, ref, __LINE__)
 static void _expect_ref(IUnknown* obj, ULONG ref, int line)
 {
@@ -1895,6 +1934,123 @@ static void test_language_exception_error_info(void)
     ok(propagation2.ref == 1, "Expected propagation refcount 1, got %ld.\n", propagation2.ref);
 }
 
+static void test_extension_catalog(void)
+{
+    static const WCHAR class_name[] = L"Windows.Foundation.ExtensionCatalog";
+    static const WCHAR contract_name[] = L"Windows.BackgroundTasks";
+    static const WCHAR family_name[] = L"Microsoft.Windows.ShellExperienceHost_cw5n1h2txyewy";
+    PFNGETACTIVATIONFACTORY get_factory;
+    IIterator_IExtensionRegistration *iterator = NULL, *iterator2 = NULL;
+    IExtensionCatalog *catalog = NULL;
+    IActivationFactory *factory = NULL;
+    IInspectable *instance = NULL, *current = (IInspectable *)0xdeadbeef;
+    IInspectable *items[1] = {(IInspectable *)0xdeadbeef};
+    HSTRING classid = NULL, contract = NULL, family = NULL, runtime_name = NULL;
+    IID *iids = NULL;
+    ULONG iid_count;
+    UINT32 count;
+    boolean value;
+    HRESULT hr;
+
+    get_factory = (void *)GetProcAddress(GetModuleHandleW(L"combase.dll"), "DllGetActivationFactory");
+    ok(!!get_factory, "DllGetActivationFactory is unavailable.\n");
+    if (!get_factory) return;
+
+    hr = WindowsCreateString(L"Windows.Foundation.DoesNotExist",
+                             ARRAY_SIZE(L"Windows.Foundation.DoesNotExist") - 1, &classid);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    hr = get_factory(classid, &factory);
+    ok(hr == REGDB_E_CLASSNOTREG, "DllGetActivationFactory returned %#lx.\n", hr);
+    ok(!factory, "Expected no factory, got %p.\n", factory);
+    WindowsDeleteString(classid);
+    classid = NULL;
+
+    hr = WindowsCreateString(class_name, ARRAY_SIZE(class_name) - 1, &classid);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    hr = get_factory(classid, &factory);
+    ok(hr == S_OK, "DllGetActivationFactory returned %#lx.\n", hr);
+    ok(!!factory, "Expected an activation factory.\n");
+    if (!factory) goto done;
+
+    iid_count = 0xdeadbeef;
+    hr = IActivationFactory_GetIids(factory, &iid_count, &iids);
+    ok(hr == S_OK, "factory GetIids returned %#lx.\n", hr);
+    ok(iid_count == 1, "Expected one factory IID, got %lu.\n", iid_count);
+    ok(iids && IsEqualIID(iids, &IID_IActivationFactory), "Unexpected factory IID.\n");
+    CoTaskMemFree(iids);
+    iids = NULL;
+    hr = IActivationFactory_GetRuntimeClassName(factory, &runtime_name);
+    ok(hr == S_OK, "factory GetRuntimeClassName returned %#lx.\n", hr);
+    ok(!wcscmp(WindowsGetStringRawBuffer(runtime_name, NULL), class_name),
+       "Unexpected runtime class %s.\n", debugstr_hstring(runtime_name));
+    WindowsDeleteString(runtime_name);
+    runtime_name = NULL;
+
+    hr = IActivationFactory_ActivateInstance(factory, &instance);
+    ok(hr == S_OK, "ActivateInstance returned %#lx.\n", hr);
+    ok(!!instance, "Expected an ExtensionCatalog instance.\n");
+    if (!instance) goto done;
+
+    hr = IInspectable_QueryInterface(instance, &IID_IExtensionCatalog, (void **)&catalog);
+    ok(hr == S_OK, "QueryInterface(IExtensionCatalog) returned %#lx.\n", hr);
+    ok(!!catalog, "Expected IExtensionCatalog.\n");
+    if (!catalog) goto done;
+
+    hr = WindowsCreateString(contract_name, ARRAY_SIZE(contract_name) - 1, &contract);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    hr = catalog->lpVtbl->QueryCatalog(catalog, contract, (void **)&iterator);
+    ok(hr == S_OK, "QueryCatalog returned %#lx.\n", hr);
+    ok(!!iterator, "Expected an iterator.\n");
+    if (iterator)
+    {
+        hr = iterator->lpVtbl->QueryInterface(iterator, &IID_IIterator_IExtensionRegistration,
+                                              (void **)&iterator2);
+        ok(hr == S_OK, "QueryInterface(IIterator<IExtensionRegistration>) returned %#lx.\n", hr);
+        ok(iterator2 == iterator, "Expected iterator identity %p, got %p.\n", iterator, iterator2);
+        if (iterator2) iterator2->lpVtbl->Release(iterator2);
+
+        value = TRUE;
+        hr = iterator->lpVtbl->get_HasCurrent(iterator, &value);
+        ok(hr == S_OK, "get_HasCurrent returned %#lx.\n", hr);
+        ok(!value, "Expected an empty iterator.\n");
+        hr = iterator->lpVtbl->get_Current(iterator, &current);
+        ok(hr == E_BOUNDS, "get_Current returned %#lx.\n", hr);
+        ok(!current, "Expected no current item, got %p.\n", current);
+        value = TRUE;
+        hr = iterator->lpVtbl->MoveNext(iterator, &value);
+        ok(hr == E_BOUNDS, "MoveNext returned %#lx.\n", hr);
+        ok(!value, "Expected no next item.\n");
+        count = 0xdeadbeef;
+        hr = iterator->lpVtbl->GetMany(iterator, ARRAY_SIZE(items), items, &count);
+        ok(hr == S_OK, "GetMany returned %#lx.\n", hr);
+        ok(!count, "Expected no items, got %u.\n", count);
+    }
+
+    hr = WindowsCreateString(family_name, ARRAY_SIZE(family_name) - 1, &family);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    hr = catalog->lpVtbl->QueryCatalogByPackageFamilyName(catalog, contract, family, (void **)&iterator2);
+    ok(hr == S_OK, "QueryCatalogByPackageFamilyName returned %#lx.\n", hr);
+    ok(!!iterator2, "Expected a package-filtered iterator.\n");
+    if (iterator2) iterator2->lpVtbl->Release(iterator2);
+    iterator2 = NULL;
+
+    hr = catalog->lpVtbl->QueryCatalog(catalog, NULL, (void **)&iterator2);
+    ok(hr == E_INVALIDARG, "QueryCatalog(NULL) returned %#lx.\n", hr);
+    ok(!iterator2, "Expected no iterator, got %p.\n", iterator2);
+    hr = catalog->lpVtbl->QueryCatalog(catalog, contract, NULL);
+    ok(hr == E_POINTER, "QueryCatalog(..., NULL) returned %#lx.\n", hr);
+
+done:
+    if (iterator) iterator->lpVtbl->Release(iterator);
+    if (catalog) catalog->lpVtbl->Release(catalog);
+    if (instance) IInspectable_Release(instance);
+    if (factory) IActivationFactory_Release(factory);
+    WindowsDeleteString(family);
+    WindowsDeleteString(contract);
+    WindowsDeleteString(classid);
+    WindowsDeleteString(runtime_name);
+}
+
 START_TEST(roapi)
 {
     char **argv;
@@ -1921,6 +2077,7 @@ START_TEST(roapi)
     test_SetRestrictedErrorInfo();
     test_error_reporting();
     test_language_exception_error_info();
+    test_extension_catalog();
 
     SetLastError(0xdeadbeef);
     ret = DeleteFileW(L"wine.combase.test.dll");
