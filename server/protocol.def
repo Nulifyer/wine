@@ -3777,9 +3777,11 @@ enum caret_state
 @END
 
 @REQ(access_check)
-    obj_handle_t    handle; /* handle to the token */
-    unsigned int    desired_access; /* desired access to the object */
-    struct generic_map mapping;     /* mapping to specific rights */
+    obj_handle_t    handle;              /* handle to the token */
+    unsigned int    desired_access;      /* desired access to the object */
+    data_size_t     principal_self_size; /* size of the principal-self SID */
+    struct generic_map mapping;          /* mapping to specific rights */
+    VARARG(principal_self,sid,principal_self_size); /* replacement for S-1-5-10 */
     VARARG(sd,security_descriptor); /* security descriptor to check */
 @REPLY
     unsigned int    access_granted; /* access rights actually granted */

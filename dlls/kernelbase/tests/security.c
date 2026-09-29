@@ -36,9 +36,145 @@ static HRESULT (WINAPI *pAppContainerLookupDisplayNameMrtReference)(PSID, WCHAR 
 static HRESULT (WINAPI *pAppContainerRegisterSid)(PSID, const WCHAR *, const WCHAR *);
 static HRESULT (WINAPI *pAppContainerUnregisterSid)(PSID);
 static void (WINAPI *pAppContainerFreeMemory)(void *);
+static BOOL (WINAPI *pAccessCheckByType)(PSECURITY_DESCRIPTOR, PSID, HANDLE, DWORD,
+                                        POBJECT_TYPE_LIST, DWORD, PGENERIC_MAPPING,
+                                        PPRIVILEGE_SET, LPDWORD, LPDWORD, LPBOOL);
 static BOOL (WINAPI *pCheckTokenMembershipEx)(HANDLE, PSID, DWORD, PBOOL);
 
 static NTSTATUS (WINAPI *pRtlDeriveCapabilitySidsFromName)(UNICODE_STRING *, PSID, PSID);
+
+static void check_access_by_type(PSECURITY_DESCRIPTOR descriptor, PSID principal_self,
+                                 HANDLE token, BOOL expected, const char *context)
+{
+    GENERIC_MAPPING mapping = { 1, 1, 1, 1 };
+    PRIVILEGE_SET privileges;
+    DWORD privileges_size = sizeof(privileges), granted = 0xdeadbeef;
+    BOOL access = !expected, ret;
+
+    SetLastError(0xdeadbeef);
+    ret = pAccessCheckByType(descriptor, principal_self, token, 1, NULL, 0, &mapping,
+                             &privileges, &privileges_size, &granted, &access);
+    ok(ret, "%s: AccessCheckByType failed, error %lu.\n", context, GetLastError());
+    ok(access == expected, "%s: got access %d.\n", context, access);
+    ok(granted == (expected ? 1 : 0), "%s: got granted access %#lx.\n", context, granted);
+}
+
+static void test_AccessCheckByType(void)
+{
+    static SID world_sid = { SID_REVISION, 1, { SECURITY_WORLD_SID_AUTHORITY }, { SECURITY_WORLD_RID } };
+    static SID principal_self_sid = { SID_REVISION, 1, { SECURITY_NT_AUTHORITY },
+                                      { SECURITY_PRINCIPAL_SELF_RID } };
+    static SID other_sid = { SID_REVISION, 1, { SECURITY_NT_AUTHORITY },
+                             { SECURITY_LOCAL_SERVICE_RID } };
+    BYTE acl_buffer[sizeof(ACL) + 2 * (sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) +
+                                      SECURITY_MAX_SID_SIZE)];
+    SECURITY_DESCRIPTOR descriptor;
+    SID_AND_ATTRIBUTES restriction;
+    TOKEN_USER *user;
+    DWORD user_size;
+    HANDLE process_token, token, restricted_primary, restricted_token;
+    BOOL ret;
+
+    if (!pAccessCheckByType)
+    {
+        win_skip("AccessCheckByType is not available.\n");
+        return;
+    }
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &process_token);
+    ok(ret, "OpenProcessToken failed, error %lu.\n", GetLastError());
+    if (!ret) return;
+    user_size = 0;
+    ret = GetTokenInformation(process_token, TokenUser, NULL, 0, &user_size);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "GetTokenInformation returned %d, error %lu.\n", ret, GetLastError());
+    user = malloc(user_size);
+    ok(!!user, "Failed to allocate user buffer.\n");
+    if (!user)
+    {
+        CloseHandle(process_token);
+        return;
+    }
+    ret = GetTokenInformation(process_token, TokenUser, user, user_size, &user_size);
+    ok(ret, "GetTokenInformation failed, error %lu.\n", GetLastError());
+
+    ret = DuplicateToken(process_token, SecurityImpersonation, &token);
+    ok(ret, "DuplicateToken failed, error %lu.\n", GetLastError());
+    if (!ret)
+    {
+        CloseHandle(process_token);
+        free(user);
+        return;
+    }
+
+    ret = InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION);
+    ok(ret, "InitializeSecurityDescriptor failed, error %lu.\n", GetLastError());
+    ret = SetSecurityDescriptorOwner(&descriptor, &world_sid, FALSE);
+    ok(ret, "SetSecurityDescriptorOwner failed, error %lu.\n", GetLastError());
+    ret = SetSecurityDescriptorGroup(&descriptor, &world_sid, FALSE);
+    ok(ret, "SetSecurityDescriptorGroup failed, error %lu.\n", GetLastError());
+    ret = InitializeAcl((ACL *)acl_buffer, sizeof(acl_buffer), ACL_REVISION);
+    ok(ret, "InitializeAcl failed, error %lu.\n", GetLastError());
+    ret = AddAccessAllowedAce((ACL *)acl_buffer, ACL_REVISION, 1, &principal_self_sid);
+    ok(ret, "AddAccessAllowedAce failed, error %lu.\n", GetLastError());
+    ret = SetSecurityDescriptorDacl(&descriptor, TRUE, (ACL *)acl_buffer, FALSE);
+    ok(ret, "SetSecurityDescriptorDacl failed, error %lu.\n", GetLastError());
+
+    check_access_by_type(&descriptor, user->User.Sid, token, TRUE, "matching principal");
+    check_access_by_type(&descriptor, &other_sid, token, FALSE, "nonmatching principal");
+    check_access_by_type(&descriptor, NULL, token, FALSE, "null principal");
+
+    restriction.Attributes = 0;
+    restriction.Sid = user->User.Sid;
+    ret = CreateRestrictedToken(process_token, 0, 0, NULL, 0, NULL, 1, &restriction,
+                                &restricted_primary);
+    ok(ret, "CreateRestrictedToken failed, error %lu.\n", GetLastError());
+    if (ret)
+    {
+        ret = DuplicateToken(restricted_primary, SecurityImpersonation, &restricted_token);
+        ok(ret, "DuplicateToken failed, error %lu.\n", GetLastError());
+        if (ret)
+        {
+            check_access_by_type(&descriptor, user->User.Sid, restricted_token, TRUE,
+                                 "matching restricted principal");
+            CloseHandle(restricted_token);
+        }
+        CloseHandle(restricted_primary);
+    }
+
+    restriction.Sid = &world_sid;
+    ret = CreateRestrictedToken(process_token, 0, 0, NULL, 0, NULL, 1, &restriction,
+                                &restricted_primary);
+    ok(ret, "CreateRestrictedToken failed, error %lu.\n", GetLastError());
+    if (ret)
+    {
+        ret = DuplicateToken(restricted_primary, SecurityImpersonation, &restricted_token);
+        ok(ret, "DuplicateToken failed, error %lu.\n", GetLastError());
+        if (ret)
+        {
+            check_access_by_type(&descriptor, user->User.Sid, restricted_token, FALSE,
+                                 "principal absent from restricting SIDs");
+            CloseHandle(restricted_token);
+        }
+        CloseHandle(restricted_primary);
+    }
+
+    ret = InitializeAcl((ACL *)acl_buffer, sizeof(acl_buffer), ACL_REVISION);
+    ok(ret, "InitializeAcl failed, error %lu.\n", GetLastError());
+    ret = AddAccessDeniedAce((ACL *)acl_buffer, ACL_REVISION, 1, &principal_self_sid);
+    ok(ret, "AddAccessDeniedAce failed, error %lu.\n", GetLastError());
+    ret = AddAccessAllowedAce((ACL *)acl_buffer, ACL_REVISION, 1, &world_sid);
+    ok(ret, "AddAccessAllowedAce failed, error %lu.\n", GetLastError());
+    ret = SetSecurityDescriptorDacl(&descriptor, TRUE, (ACL *)acl_buffer, FALSE);
+    ok(ret, "SetSecurityDescriptorDacl failed, error %lu.\n", GetLastError());
+
+    check_access_by_type(&descriptor, user->User.Sid, token, FALSE, "matching deny principal");
+    check_access_by_type(&descriptor, &other_sid, token, TRUE, "nonmatching deny principal");
+
+    CloseHandle(process_token);
+    CloseHandle(token);
+    free(user);
+}
 
 static void test_CheckTokenMembershipEx(void)
 {
@@ -318,12 +454,14 @@ START_TEST(security)
     pAppContainerRegisterSid = (void *)GetProcAddress(hmod, "AppContainerRegisterSid");
     pAppContainerUnregisterSid = (void *)GetProcAddress(hmod, "AppContainerUnregisterSid");
     pAppContainerFreeMemory = (void *)GetProcAddress(hmod, "AppContainerFreeMemory");
+    pAccessCheckByType = (void *)GetProcAddress(hmod, "AccessCheckByType");
     pCheckTokenMembershipEx = (void *)GetProcAddress(hmod, "CheckTokenMembershipEx");
 
     hmod = LoadLibraryA("ntdll.dll");
     pRtlDeriveCapabilitySidsFromName = (void *)GetProcAddress(hmod, "RtlDeriveCapabilitySidsFromName");
 
     test_DeriveCapabilitySidsFromName();
+    test_AccessCheckByType();
     test_CheckTokenMembershipEx();
     test_AppContainerDeriveSidFromMoniker();
     test_AppContainerLookupMoniker();

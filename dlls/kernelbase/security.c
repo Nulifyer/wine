@@ -1570,9 +1570,16 @@ BOOL WINAPI AccessCheckByType( PSECURITY_DESCRIPTOR descr, PSID sid, HANDLE toke
                                POBJECT_TYPE_LIST types, DWORD types_len, PGENERIC_MAPPING mapping,
                                PPRIVILEGE_SET priv, LPDWORD priv_len, LPDWORD granted, LPBOOL status )
 {
-    FIXME("stub\n");
-    *status = TRUE;
-    return !*status;
+    NTSTATUS access_status;
+    BOOL ret;
+
+    TRACE("(%p %s %p %#lx %p %lu %p %p %p %p %p)\n", descr, debugstr_sid(sid), token,
+          access, types, types_len, mapping, priv, priv_len, granted, status);
+
+    ret = set_ntstatus( NtAccessCheckByType( descr, sid, token, access, types, types_len,
+                                             mapping, priv, priv_len, granted, &access_status ));
+    if (ret) *status = set_ntstatus( access_status );
+    return ret;
 }
 
 /******************************************************************************

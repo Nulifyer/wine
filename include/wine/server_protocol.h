@@ -5296,9 +5296,10 @@ struct access_check_request
     struct request_header __header;
     obj_handle_t    handle;
     unsigned int    desired_access;
+    data_size_t     principal_self_size;
     struct generic_map mapping;
+    /* VARARG(principal_self,sid,principal_self_size); */
     /* VARARG(sd,security_descriptor); */
-    char __pad_36[4];
 };
 struct access_check_reply
 {
@@ -9543,6 +9544,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1076
+#define SERVER_PROTOCOL_VERSION 1077
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

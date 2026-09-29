@@ -1234,23 +1234,27 @@ NTSTATUS WINAPI NtImpersonateAnonymousToken( HANDLE thread )
 }
 
 
-/***********************************************************************
- *             NtAccessCheck  (NTDLL.@)
- */
-NTSTATUS WINAPI NtAccessCheck( PSECURITY_DESCRIPTOR descr, HANDLE token, ACCESS_MASK access,
-                               GENERIC_MAPPING *mapping, PRIVILEGE_SET *privs, ULONG *retlen,
-                               ULONG *access_granted, NTSTATUS *access_status)
+static NTSTATUS access_check( PSECURITY_DESCRIPTOR descr, PSID principal_self, HANDLE token,
+                              ACCESS_MASK access, GENERIC_MAPPING *mapping,
+                              PRIVILEGE_SET *privs, ULONG *retlen,
+                              ULONG *access_granted, NTSTATUS *access_status )
 {
+    SID *principal_self_sid = principal_self;
     struct object_attributes *objattr;
+    data_size_t principal_self_size = 0;
     data_size_t len;
     OBJECT_ATTRIBUTES attr;
     unsigned int status;
     ULONG priv_len;
 
-    TRACE( "(%p, %p, %08x, %p, %p, %p, %p, %p)\n",
-           descr, token, access, mapping, privs, retlen, access_granted, access_status );
-
     if (!privs || !retlen) return STATUS_ACCESS_VIOLATION;
+    if (principal_self)
+    {
+        if (principal_self_sid->Revision != SID_REVISION ||
+            principal_self_sid->SubAuthorityCount > SID_MAX_SUB_AUTHORITIES)
+            return STATUS_INVALID_SID;
+        principal_self_size = offsetof( SID, SubAuthority[principal_self_sid->SubAuthorityCount] );
+    }
     priv_len = *retlen;
 
     /* reuse the object attribute SD marshalling */
@@ -1261,10 +1265,12 @@ NTSTATUS WINAPI NtAccessCheck( PSECURITY_DESCRIPTOR descr, HANDLE token, ACCESS_
     {
         req->handle = wine_server_obj_handle( token );
         req->desired_access = access;
+        req->principal_self_size = principal_self_size;
         req->mapping.read = mapping->GenericRead;
         req->mapping.write = mapping->GenericWrite;
         req->mapping.exec = mapping->GenericExecute;
         req->mapping.all = mapping->GenericAll;
+        if (principal_self_size) wine_server_add_data( req, principal_self, principal_self_size );
         wine_server_add_data( req, objattr + 1, objattr->sd_len );
         wine_server_set_reply( req, privs->Privilege, priv_len - offsetof( PRIVILEGE_SET, Privilege ) );
 
@@ -1285,6 +1291,41 @@ NTSTATUS WINAPI NtAccessCheck( PSECURITY_DESCRIPTOR descr, HANDLE token, ACCESS_
     SERVER_END_REQ;
     free( objattr );
     return status;
+}
+
+
+/***********************************************************************
+ *             NtAccessCheck  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtAccessCheck( PSECURITY_DESCRIPTOR descr, HANDLE token, ACCESS_MASK access,
+                               GENERIC_MAPPING *mapping, PRIVILEGE_SET *privs, ULONG *retlen,
+                               ULONG *access_granted, NTSTATUS *access_status )
+{
+    TRACE( "(%p, %p, %08x, %p, %p, %p, %p, %p)\n",
+           descr, token, access, mapping, privs, retlen, access_granted, access_status );
+
+    return access_check( descr, NULL, token, access, mapping, privs, retlen,
+                         access_granted, access_status );
+}
+
+
+/***********************************************************************
+ *             NtAccessCheckByType  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtAccessCheckByType( PSECURITY_DESCRIPTOR descr, PSID principal_self,
+                                     HANDLE token, ACCESS_MASK access,
+                                     OBJECT_TYPE_LIST *types, ULONG types_len,
+                                     GENERIC_MAPPING *mapping, PRIVILEGE_SET *privs,
+                                     ULONG *retlen, ULONG *access_granted,
+                                     NTSTATUS *access_status )
+{
+    TRACE( "(%p, %p, %p, %08x, %p, %u, %p, %p, %p, %p, %p)\n",
+           descr, principal_self, token, access, types, types_len, mapping, privs,
+           retlen, access_granted, access_status );
+
+    if (types || types_len) return STATUS_NOT_IMPLEMENTED;
+    return access_check( descr, principal_self, token, access, mapping, privs, retlen,
+                         access_granted, access_status );
 }
 
 

@@ -80,6 +80,7 @@ static const struct sid local_sid = { SID_REVISION, 1, SECURITY_LOCAL_SID_AUTHOR
 static const struct sid interactive_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_INTERACTIVE_RID } };
 static const struct sid anonymous_logon_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_ANONYMOUS_LOGON_RID } };
 static const struct sid authenticated_user_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_AUTHENTICATED_USER_RID } };
+static const struct sid principal_self_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_PRINCIPAL_SELF_RID } };
 static const struct sid high_label_sid = { SID_REVISION, 1, SECURITY_MANDATORY_LABEL_AUTHORITY, { SECURITY_MANDATORY_HIGH_RID } };
 
 static struct luid prev_luid_value = { 1000, 0 };
@@ -1182,9 +1183,12 @@ int token_sid_present( struct token *token, const struct sid *sid, int deny )
  *
  * If both returned value and 'status' are STATUS_SUCCESS then access is granted.
  */
-static int access_sid_present( struct token *token, const struct sid *sid, int deny, int restricted )
+static int access_sid_present( struct token *token, const struct sid *sid,
+                               const struct sid *principal_self, int deny, int restricted )
 {
     struct group *group;
+
+    if (principal_self && equal_sid( sid, &principal_self_sid )) sid = principal_self;
     if (!restricted) return token_sid_present( token, sid, deny );
     LIST_FOR_EACH_ENTRY( group, &token->restricting, struct group, entry )
         if (equal_sid( &group->sid, sid )) return TRUE;
@@ -1197,6 +1201,7 @@ static unsigned int token_access_check_pass( struct token *token, int restricted
                                  struct luid_attr *privs,
                                  unsigned int *priv_count,
                                  const struct generic_map *mapping,
+                                 const struct sid *principal_self,
                                  unsigned int *granted_access,
                                  unsigned int *status,
                                  int require_owner_group )
@@ -1281,7 +1286,7 @@ static unsigned int token_access_check_pass( struct token *token, int restricted
     /* NOTE: SeTakeOwnershipPrivilege is not checked for here - it is instead
      * checked when a "set owner" call is made, overriding the access rights
      * determined here. */
-    if (owner && access_sid_present( token, owner, FALSE, restricted ))
+    if (owner && access_sid_present( token, owner, NULL, FALSE, restricted ))
     {
         owner_access = READ_CONTROL | WRITE_DAC;
         current_access |= owner_access;
@@ -1302,7 +1307,7 @@ static unsigned int token_access_check_pass( struct token *token, int restricted
         switch (ace->type)
         {
         case ACCESS_DENIED_ACE_TYPE:
-            if (access_sid_present( token, sid, TRUE, restricted ))
+            if (access_sid_present( token, sid, principal_self, TRUE, restricted ))
             {
                 unsigned int access = map_access( ace->mask, mapping );
                 if (desired_access & MAXIMUM_ALLOWED)
@@ -1315,7 +1320,7 @@ static unsigned int token_access_check_pass( struct token *token, int restricted
             }
             break;
         case ACCESS_ALLOWED_ACE_TYPE:
-            if (access_sid_present( token, sid, FALSE, restricted ))
+            if (access_sid_present( token, sid, principal_self, FALSE, restricted ))
             {
                 unsigned int access = map_access( ace->mask, mapping );
                 if (desired_access & MAXIMUM_ALLOWED)
@@ -1347,13 +1352,15 @@ done:
 
 static unsigned int token_access_check( struct token *token, const struct security_descriptor *sd,
     unsigned int desired, struct luid_attr *privs, unsigned int *priv_count,
-    const struct generic_map *mapping, unsigned int *granted, unsigned int *status )
+    const struct generic_map *mapping, const struct sid *principal_self,
+    unsigned int *granted, unsigned int *status )
 {
     unsigned int ret, restricted_access, restricted_status;
-    ret = token_access_check_pass( token, 0, sd, desired, privs, priv_count, mapping, granted, status, TRUE );
+    ret = token_access_check_pass( token, 0, sd, desired, privs, priv_count, mapping,
+                                   principal_self, granted, status, TRUE );
     if (ret || *status || !token->restricted) return ret;
     ret = token_access_check_pass( token, 1, sd, desired, NULL, NULL, mapping,
-                                  &restricted_access, &restricted_status, TRUE );
+                                   principal_self, &restricted_access, &restricted_status, TRUE );
     if (ret) return ret;
     *granted &= restricted_access;
     if (restricted_status || !*granted) *status = STATUS_ACCESS_DENIED;
@@ -1372,12 +1379,12 @@ int token_check_security_descriptor_access( struct token *token,
     unsigned int ret;
 
     ret = token_access_check_pass( token, FALSE, sd, desired, NULL, NULL, mapping,
-                                   &granted, &status, FALSE );
+                                   NULL, &granted, &status, FALSE );
     if (ret || status) return FALSE;
     if (!token->restricted) return TRUE;
 
     ret = token_access_check_pass( token, TRUE, sd, desired, NULL, NULL, mapping,
-                                   &restricted_granted, &restricted_status, FALSE );
+                                   NULL, &restricted_granted, &restricted_status, FALSE );
     return !ret && !restricted_status && (granted & restricted_granted) == desired;
 }
 
@@ -1504,7 +1511,7 @@ int check_object_access(struct token *token, struct object *obj, unsigned int *a
     mapping.exec  = map_obj_access( obj, GENERIC_EXECUTE );
 
     res = token_access_check( token, obj->sd, *access, NULL, NULL,
-                              &mapping, access, &status ) == STATUS_SUCCESS &&
+                              &mapping, NULL, access, &status ) == STATUS_SUCCESS &&
           status == STATUS_SUCCESS;
 
     if (res)
@@ -1946,7 +1953,7 @@ DECL_HANDLER(filter_token)
                 token->restricted = 1;
                 for (i = 0, sid = restrict_sids; i < restrict_count; i++, sid = (const struct sid *)((const char *)sid + sid_len( sid )))
                 {
-                    if (src_token->restricted && !access_sid_present( src_token, sid, FALSE, 1 )) continue;
+                    if (src_token->restricted && !access_sid_present( src_token, sid, NULL, FALSE, 1 )) continue;
                     if (!(group = mem_alloc( offsetof( struct group, sid ) + sid_len( sid )))) break;
                     group->attrs = SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED;
                     memcpy( &group->sid, sid, sid_len( sid ));
@@ -1994,10 +2001,23 @@ DECL_HANDLER(check_token_privileges)
  * represented by a security descriptor */
 DECL_HANDLER(access_check)
 {
-    data_size_t sd_size = get_req_data_size();
-    const struct security_descriptor *sd = get_req_data();
+    data_size_t data_size = get_req_data_size();
+    const struct sid *principal_self = get_req_data();
+    const struct security_descriptor *sd;
+    data_size_t sd_size;
     struct token *token;
 
+    if (req->principal_self_size > data_size ||
+        (req->principal_self_size &&
+         (!sid_valid_size( principal_self, req->principal_self_size ) ||
+          sid_len( principal_self ) != req->principal_self_size ||
+          principal_self->revision != SID_REVISION)))
+    {
+        set_error( STATUS_INVALID_SID );
+        return;
+    }
+    sd = (const struct security_descriptor *)((const char *)principal_self + req->principal_self_size);
+    sd_size = data_size - req->principal_self_size;
     if (!sd_is_valid( sd, sd_size ))
     {
         set_error( STATUS_ACCESS_VIOLATION );
@@ -2030,6 +2050,7 @@ DECL_HANDLER(access_check)
         }
 
         status = token_access_check( token, sd, req->desired_access, &priv, &priv_count, &req->mapping,
+                                     req->principal_self_size ? principal_self : NULL,
                                      &reply->access_granted, &reply->access_status );
 
         reply->privileges_len = priv_count*sizeof(struct luid_attr);

@@ -143,7 +143,7 @@
 @ stdcall -syscall=0x0002 NtAcceptConnectPort(ptr long ptr long ptr ptr)
 @ stdcall -syscall=0x0000 NtAccessCheck(ptr long long ptr ptr ptr ptr ptr)
 @ stdcall -syscall=0x0029 NtAccessCheckAndAuditAlarm(ptr long ptr ptr ptr long ptr long ptr ptr ptr)
-# @ stub NtAccessCheckByType
+@ stdcall -syscall NtAccessCheckByType(ptr ptr long long ptr long ptr ptr ptr ptr ptr)
 @ stdcall -syscall=0x0059 NtAccessCheckByTypeAndAuditAlarm(ptr long ptr ptr ptr ptr long long long ptr long ptr long ptr ptr ptr)
 # @ stub NtAccessCheckByTypeResultList
 # @ stub NtAccessCheckByTypeResultListAndAuditAlarm

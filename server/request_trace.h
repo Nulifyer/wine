@@ -2886,7 +2886,9 @@ static void dump_access_check_request( const struct access_check_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", desired_access=%08x", req->desired_access );
+    fprintf( stderr, ", principal_self_size=%u", req->principal_self_size );
     dump_generic_map( ", mapping=", &req->mapping );
+    dump_varargs_sid( ", principal_self=", min( cur_size, req->principal_self_size ));
     dump_varargs_security_descriptor( ", sd=", cur_size );
 }
 
