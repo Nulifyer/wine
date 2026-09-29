@@ -4060,12 +4060,6 @@ HRESULT WINAPI CoRegisterClassObject(REFCLSID rclsid, IUnknown *object, DWORD cl
     newclass->object = object;
     IUnknown_AddRef(newclass->object);
 
-    EnterCriticalSection(&registered_classes_cs);
-    list_add_tail(&registered_classes, &newclass->entry);
-    LeaveCriticalSection(&registered_classes_cs);
-
-    *cookie = newclass->cookie;
-
     if (clscontext & CLSCTX_LOCAL_SERVER)
     {
         IStream *marshal_stream;
@@ -4073,14 +4067,27 @@ HRESULT WINAPI CoRegisterClassObject(REFCLSID rclsid, IUnknown *object, DWORD cl
         hr = apartment_get_local_server_stream(apt, &marshal_stream);
         if(FAILED(hr))
         {
+            IUnknown_Release(newclass->object);
+            free(newclass);
             apartment_release(apt);
             return hr;
         }
 
         hr = rpc_register_local_server(&newclass->clsid, marshal_stream, flags, &newclass->rpcss_cookie);
         IStream_Release(marshal_stream);
+        if (FAILED(hr))
+        {
+            IUnknown_Release(newclass->object);
+            free(newclass);
+            apartment_release(apt);
+            return hr;
+        }
     }
 
+    EnterCriticalSection(&registered_classes_cs);
+    list_add_tail(&registered_classes, &newclass->entry);
+    LeaveCriticalSection(&registered_classes_cs);
+    *cookie = newclass->cookie;
     apartment_release(apt);
     return S_OK;
 }

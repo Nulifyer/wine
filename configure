@@ -23210,6 +23210,7 @@ wine_fn_config_makefile programs/regsvcs enable_regsvcs
 wine_fn_config_makefile programs/regsvr32 enable_regsvr32
 wine_fn_config_makefile programs/robocopy enable_robocopy
 wine_fn_config_makefile programs/rpcss enable_rpcss
+wine_fn_config_makefile programs/rpcss/tests enable_tests
 wine_fn_config_makefile programs/runas enable_runas
 wine_fn_config_makefile programs/rundll.exe16 enable_win16
 wine_fn_config_makefile programs/rundll32 enable_rundll32

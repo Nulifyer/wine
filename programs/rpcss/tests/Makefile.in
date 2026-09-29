@@ -1,0 +1,6 @@
+TESTDLL = rpcss.exe
+IMPORTS = rpcrt4 ole32 advapi32 uuid
+
+SOURCES = \
+	irpcss.idl \
+	registration.c
