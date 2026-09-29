@@ -2970,6 +2970,7 @@ DECL_HANDLER(alpc_impersonate_client)
     }
     if (current->token) release_object( current->token );
     current->token = token;
+    current->token_copy_on_open = !!token;
 done:
     release_object( port );
 }

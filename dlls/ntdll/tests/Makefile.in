@@ -4,6 +4,7 @@ IMPORTS   = user32 advapi32
 SOURCES = \
 	access_audit.c \
 	alpc.c \
+	alpc_token.c \
 	atom.c \
 	boot_status.c \
 	critical.c \

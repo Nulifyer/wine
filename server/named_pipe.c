@@ -1524,7 +1524,7 @@ static void pipe_server_ioctl( struct fd *fd, ioctl_code_t code, struct async *a
             if (!(token = token_duplicate_impersonation( server->pipe_end.client_token,
                                                          server->pipe_end.impersonation_level, FALSE )))
                 return;
-            security_assign_thread_token( current, token );
+            if (security_assign_thread_token( current, token )) current->token_copy_on_open = true;
             release_object( token );
         }
         return;

@@ -383,6 +383,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->is_system       = 0;
     thread->desktop_users   = 0;
     thread->token           = NULL;
+    thread->token_copy_on_open = false;
     thread->desc            = NULL;
     thread->desc_len        = 0;
 

@@ -204,6 +204,7 @@ int security_assign_thread_token( struct thread *thread, struct token *source )
     }
     if (thread->token) release_object( thread->token );
     thread->token = token;
+    thread->token_copy_on_open = false;
     return 1;
 }
 
@@ -1633,6 +1634,44 @@ DECL_HANDLER(create_token)
 }
 
 
+/* IPC impersonation retains a captured client token until its first open.
+ * The opened copy belongs to the recipient thread and admits both principals;
+ * it must not rewrite the client token or the token used by another recipient. */
+static struct token *copy_thread_token_for_open( struct thread *thread, struct token *source )
+{
+    static const struct sid restricted_code_sid =
+        { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_RESTRICTED_CODE_RID } };
+    struct token *primary = thread->process->token, *copy;
+    const struct sid *sids[] = { source->user, primary->user, &builtin_admins_sid,
+                                &local_system_sid, &restricted_code_sid };
+    unsigned int count = 4 + !!(source->restricted || primary->restricted), size, i;
+    struct security_descriptor *sd;
+    struct acl *dacl;
+    struct ace *ace;
+
+    size = sizeof(*dacl);
+    for (i = 0; i < count; i++) size += sizeof(*ace) + sid_len( sids[i] );
+    if (!(sd = mem_alloc( sizeof(*sd) + size ))) return NULL;
+    sd->control = SE_DACL_PRESENT;
+    sd->owner_len = sd->group_len = sd->sacl_len = 0;
+    sd->dacl_len = size;
+    dacl = (struct acl *)(sd + 1);
+    dacl->revision = ACL_REVISION;
+    dacl->pad1 = dacl->pad2 = 0;
+    dacl->size = size;
+    dacl->count = count;
+    ace = ace_first( dacl );
+    for (i = 0; i < count; i++)
+    {
+        set_ace( ace, sids[i], ACCESS_ALLOWED_ACE_TYPE, 0, GENERIC_ALL );
+        ace = ace_next( ace );
+    }
+    assert( sd_is_valid( sd, sizeof(*sd) + size ) );
+    copy = token_duplicate( source, FALSE, source->impersonation_level, sd, NULL, 0, NULL, 0 );
+    free( sd );
+    return copy;
+}
+
 /* open a security token */
 DECL_HANDLER(open_token)
 {
@@ -1653,8 +1692,36 @@ DECL_HANDLER(open_token)
                     /* OpenAsSelf checks the token object's DACL as the process
                      * principal, while the returned object is the thread token. */
                     if (req->flags & OPEN_TOKEN_AS_SELF) current->token = NULL;
-                    reply->token = alloc_handle( current->process, token,
-                                                 req->access, req->attributes );
+                    if (thread->token_copy_on_open)
+                    {
+                        struct thread *authorized;
+                        struct token *copy;
+
+                        /* Creation access applies only to the private copy and
+                         * requires authority over the target thread. */
+                        if ((authorized = get_thread_from_handle( req->handle, THREAD_QUERY_INFORMATION )))
+                        {
+                            if ((req->access & ACCESS_SYSTEM_SECURITY) &&
+                                !thread_single_check_privilege( current, SeSecurityPrivilege ))
+                                set_error( STATUS_PRIVILEGE_NOT_HELD );
+                            else if ((copy = copy_thread_token_for_open( thread, token )))
+                            {
+                                reply->token = alloc_handle_no_access_check( current->process, copy,
+                                                                            req->access, req->attributes );
+                                if (reply->token)
+                                {
+                                    thread->token = copy;
+                                    thread->token_copy_on_open = false;
+                                    if (thread == current) saved_token = copy;
+                                    release_object( token );
+                                }
+                                else release_object( copy );
+                            }
+                            release_object( authorized );
+                        }
+                    }
+                    else reply->token = alloc_handle( current->process, token,
+                                                       req->access, req->attributes );
                     current->token = saved_token;
                 }
             }
