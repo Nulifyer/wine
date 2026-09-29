@@ -138,7 +138,7 @@
 
 2627 stub -noname SetBridgeWindowChild  # NtUserSetBridgeWindowChild
 
-2633 stdcall -noname CreateActivationObject(long ptr ptr)  # NtUserCreateActivationObject
+2633 stdcall -noname CreateActivationObject(long ptr ptr) NtUserCreateActivationObject
 2634 stub -noname SetTSFEventState  # NtUserSetTSFEventState
 2635 stdcall -noname IsWindowGdiScaledX(long)
 2636 stdcall -noname GetCurrentDpiInfoForWindow(long ptr) NtUserGetCurrentDpiInfoForWindow
@@ -152,8 +152,8 @@
 2644 stub -noname DeferWindowDpiChanges  # NtUserDeferWindowDpiChanges
 2645 stub @
 
-2647 stub -noname ConfigureActivationObject  # NtUserConfigureActivationObject
-2648 stub -noname DestroyActivationObject  # NtUserDestroyActivationObject
+2647 stdcall -noname ConfigureActivationObject(ptr long long long long) NtUserConfigureActivationObject
+2648 stdcall -noname DestroyActivationObject(ptr) NtUserDestroyActivationObject
 2649 stub -noname SetForegroundWindowForApplication  # NtUserSetForegroundWindowForApplication
 2650 stub -noname GetInputContainerId  # NtUserGetInputContainerId
 2651 stub -noname DownlevelTouchpad  # NtUserDownlevelTouchpad
@@ -1048,7 +1048,7 @@
 @ stdcall SetDoubleClickTime(long)
 # @ stub SetFeatureReportResponse
 @ stdcall SetFocus(long) NtUserSetFocus
-# @ stub SetForegroundRedirectionForActivationObject
+@ stdcall SetForegroundRedirectionForActivationObject(ptr ptr) NtUserSetForegroundRedirectionForActivationObject
 @ stdcall SetForegroundWindow(long) NtUserSetForegroundWindow
 # @ stub SetFullscreenMagnifierOffsetsDWMUpdated
 @ stdcall SetGestureConfig(ptr long long ptr long)

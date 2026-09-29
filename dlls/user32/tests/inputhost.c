@@ -16,35 +16,212 @@
 
 #include "wine/test.h"
 
-typedef BOOL (WINAPI *create_activation_object_fn)(UINT, const ULONGLONG *, ULONGLONG *);
+struct activation_object_data
+{
+    LUID luid;
+    HWND hwnd;
+    ULONGLONG cookie;
+    UINT state;
+    DWORD process_id;
+    DWORD thread_id;
+};
+
+typedef BOOL (WINAPI *configure_activation_object_fn)(const LUID *, UINT, UINT, UINT, UINT);
+typedef BOOL (WINAPI *create_activation_object_fn)(HWND, const ULONGLONG *, LUID *);
+typedef BOOL (WINAPI *destroy_activation_object_fn)(const LUID *);
+typedef BOOL (WINAPI *query_activation_object_fn)(const LUID *, struct activation_object_data *);
+typedef BOOL (WINAPI *set_activation_object_redirection_fn)(const LUID *, const LUID *);
 typedef BOOL (WINAPI *enable_mouse_in_pointer_for_window_fn)(HWND, BOOL);
 typedef BOOL (WINAPI *enable_resize_layout_synchronization_fn)(HWND, BOOL);
 typedef BOOL (WINAPI *is_resize_layout_synchronization_enabled_fn)(HWND);
 typedef BOOL (WINAPI *internal_clip_cursor_fn)(HWND, BOOL);
 
-static void test_create_activation_object(HMODULE module)
+static BOOL luid_equal(const LUID *left, const LUID *right)
 {
-    create_activation_object_fn create_activation_object;
-    ULONGLONG identity = 0x123456789abcdef0, activation_object = 0;
+    return left->LowPart == right->LowPart && left->HighPart == right->HighPart;
+}
+
+struct activation_thread_context
+{
+    create_activation_object_fn create;
+    ULONGLONG cookie;
+    LUID luid;
+    BOOL ret;
+};
+
+struct activation_destroy_context
+{
+    destroy_activation_object_fn destroy;
+    LUID luid;
+    BOOL ret;
+    DWORD error;
+};
+
+static DWORD WINAPI create_activation_object_thread(void *arg)
+{
+    struct activation_thread_context *context = arg;
+    HWND hwnd;
+
+    hwnd = CreateWindowExW(0, L"static", L"activation-thread", WS_OVERLAPPED,
+                           0, 0, 100, 100, NULL, NULL, NULL, NULL);
+    context->ret = context->create(hwnd, &context->cookie, &context->luid);
+    DestroyWindow(hwnd);
+    return 0;
+}
+
+static DWORD WINAPI destroy_activation_object_thread(void *arg)
+{
+    struct activation_destroy_context *context = arg;
+
+    SetLastError(0xdeadbeef);
+    context->ret = context->destroy(&context->luid);
+    context->error = GetLastError();
+    return 0;
+}
+
+static void test_activation_objects(HMODULE module)
+{
+    configure_activation_object_fn configure;
+    create_activation_object_fn create;
+    destroy_activation_object_fn destroy;
+    query_activation_object_fn query;
+    set_activation_object_redirection_fn set_redirection;
+    struct activation_thread_context thread_context = {0};
+    struct activation_destroy_context destroy_context = {0};
+    struct activation_object_data data;
+    ULONGLONG cookie = 0x123456789abcdef0;
+    LUID cookie_luid = {0x9abcdef0, 0x12345678};
+    LUID first = {0}, second = {0}, missing = {0xdeadbeef, 0x12345678}, zero = {0};
+    HANDLE thread;
+    HWND hwnd;
     BOOL ret;
 
-    create_activation_object = (void *)GetProcAddress(module, (const char *)2633);
-    ok(!!create_activation_object, "CreateActivationObject ordinal is unavailable.\n");
-    if (!create_activation_object) return;
+    create = (void *)GetProcAddress(module, (const char *)2633);
+    configure = (void *)GetProcAddress(module, (const char *)2647);
+    destroy = (void *)GetProcAddress(module, (const char *)2648);
+    set_redirection = (void *)GetProcAddress(module, "SetForegroundRedirectionForActivationObject");
+    query = (void *)GetProcAddress(GetModuleHandleW(L"win32u.dll"), "NtUserQueryActivationObject");
+    ok(!!create, "CreateActivationObject ordinal is unavailable.\n");
+    ok(!!configure, "ConfigureActivationObject ordinal is unavailable.\n");
+    ok(!!destroy, "DestroyActivationObject ordinal is unavailable.\n");
+    ok(!!set_redirection, "SetForegroundRedirectionForActivationObject is unavailable.\n");
+    ok(!!query, "NtUserQueryActivationObject is unavailable.\n");
+    if (!create || !configure || !destroy || !set_redirection || !query) return;
 
-    ret = create_activation_object(1, &identity, &activation_object);
+    hwnd = CreateWindowExW(0, L"static", L"activation-owner", WS_OVERLAPPED,
+                           0, 0, 100, 100, NULL, NULL, NULL, NULL);
+    ok(!!hwnd, "CreateWindowExW failed, error %lu.\n", GetLastError());
+    if (!hwnd) return;
+
+    SetLastError(0xdeadbeef);
+    ret = create(hwnd, &cookie, &first);
     ok(ret, "CreateActivationObject failed, error %lu.\n", GetLastError());
-    ok(activation_object == identity, "got activation object %#I64x.\n", activation_object);
+    ok(GetLastError() == 0xdeadbeef, "success changed error to %lu.\n", GetLastError());
+    ok(first.LowPart || first.HighPart, "CreateActivationObject returned a zero LUID.\n");
+    ok(!luid_equal(&first, &cookie_luid), "activation LUID copied the cookie.\n");
 
-    SetLastError(0xdeadbeef);
-    ret = create_activation_object(1, NULL, &activation_object);
+    memset(&data, 0xcc, sizeof(data));
+    ret = query(&first, &data);
+    ok(ret, "query failed, error %lu.\n", GetLastError());
+    ok(luid_equal(&data.luid, &first), "query returned a different LUID.\n");
+    ok(data.hwnd == hwnd, "query returned hwnd %p, expected %p.\n", data.hwnd, hwnd);
+    ok(data.cookie == cookie, "query returned cookie %#I64x.\n", data.cookie);
+    ok(data.state == 1, "initial state is %#x.\n", data.state);
+    ok(data.process_id == GetCurrentProcessId(), "query returned process %lu.\n", data.process_id);
+    ok(data.thread_id == GetCurrentThreadId(), "query returned thread %lu.\n", data.thread_id);
+
+    ret = create(hwnd, &cookie, &second);
+    ok(ret, "second create failed, error %lu.\n", GetLastError());
+    ok(!luid_equal(&first, &second), "separate activation objects reused one LUID.\n");
+
+    ret = configure(&first, 0, 0, 2, 2);
+    ok(ret, "setting suppress-spatial failed, error %lu.\n", GetLastError());
+    ret = configure(&first, 0, 1, 2, 2);
+    ok(ret, "foreground-authorized configuration failed, error %lu.\n", GetLastError());
+    ret = query(&first, &data);
+    ok(ret && data.state == 3, "state after configure is %#x, error %lu.\n", data.state, GetLastError());
+    ret = configure(&first, 2, 0, 1, 1);
     ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-       "null identity returned %d, error %lu.\n", ret, GetLastError());
+       "invalid reason returned %d, error %lu.\n", ret, GetLastError());
+    ret = configure(&first, 0, 2, 1, 1);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "invalid behavior returned %d, error %lu.\n", ret, GetLastError());
+    ret = configure(&first, 1, 0, 1, 1);
+    ok(!ret && GetLastError() == ERROR_ACCESS_DENIED,
+       "ordinary DWM reason returned %d, error %lu.\n", ret, GetLastError());
+
+    ret = configure(&first, 0, 0, 1, 0);
+    ok(ret, "disabling failed, error %lu.\n", GetLastError());
+    ret = configure(&first, 0, 0, 4, 4);
+    ok(!ret, "disabled object became foreground.\n");
+    ret = configure(&first, 0, 0, 7, 5);
+    ok(ret, "enabling foreground failed, error %lu.\n", GetLastError());
+    ret = query(&first, &data);
+    ok(ret && data.state == 5, "foreground state is %#x, error %lu.\n", data.state, GetLastError());
+
+    ret = set_redirection(&first, &second);
+    ok(ret, "foreground redirection failed, error %lu.\n", GetLastError());
+    ret = query(&first, &data);
+    ok(ret && !(data.state & 4), "redirected source remained foreground, state %#x.\n", data.state);
+    ret = query(&second, &data);
+    ok(ret && (data.state & 4), "redirect target did not become foreground, state %#x.\n", data.state);
+    ret = set_redirection(&first, &zero);
+    ok(ret, "clearing foreground redirection failed, error %lu.\n", GetLastError());
+    ret = set_redirection(&first, &missing);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "missing redirect target returned %d, error %lu.\n", ret, GetLastError());
+
+    destroy_context.destroy = destroy;
+    destroy_context.luid = first;
+    thread = CreateThread(NULL, 0, destroy_activation_object_thread, &destroy_context, 0, NULL);
+    ok(!!thread, "CreateThread failed, error %lu.\n", GetLastError());
+    if (thread)
+    {
+        WaitForSingleObject(thread, INFINITE);
+        CloseHandle(thread);
+        ok(!destroy_context.ret && destroy_context.error == ERROR_ACCESS_DENIED,
+           "cross-thread destroy returned %d, error %lu.\n",
+           destroy_context.ret, destroy_context.error);
+        ret = query(&first, &data);
+        ok(ret, "cross-thread destroy removed the object, error %lu.\n", GetLastError());
+    }
+
+    thread_context.create = create;
+    thread_context.cookie = cookie + 1;
+    thread = CreateThread(NULL, 0, create_activation_object_thread, &thread_context, 0, NULL);
+    ok(!!thread, "CreateThread failed, error %lu.\n", GetLastError());
+    if (thread)
+    {
+        WaitForSingleObject(thread, INFINITE);
+        CloseHandle(thread);
+        ok(thread_context.ret, "worker CreateActivationObject failed.\n");
+        ret = query(&thread_context.luid, &data);
+        ok(!ret && GetLastError() == ERROR_NOT_FOUND,
+           "thread-owned object survived thread exit, ret %d error %lu.\n", ret, GetLastError());
+        ret = destroy(&thread_context.luid);
+        ok(ret, "destroying an already-cleaned object failed, error %lu.\n", GetLastError());
+    }
 
     SetLastError(0xdeadbeef);
-    ret = create_activation_object(1, &identity, NULL);
+    ret = create(hwnd, NULL, &first);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "null cookie returned %d, error %lu.\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = create(hwnd, &cookie, NULL);
     ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
        "null output returned %d, error %lu.\n", ret, GetLastError());
+
+    ret = destroy(&second);
+    ok(ret, "destroying second object failed, error %lu.\n", GetLastError());
+    ret = destroy(&second);
+    ok(ret, "repeated destroy failed, error %lu.\n", GetLastError());
+    ret = configure(&second, 0, 0, 1, 1);
+    ok(!ret && GetLastError() == ERROR_NOT_FOUND,
+       "configure after destroy returned %d, error %lu.\n", ret, GetLastError());
+    ret = destroy(&first);
+    ok(ret, "destroying first object failed, error %lu.\n", GetLastError());
+    DestroyWindow(hwnd);
 }
 
 static void test_window_helpers(HMODULE module)
@@ -106,6 +283,6 @@ START_TEST(inputhost)
     }
     ok(!!module, "user32.dll is not loaded.\n");
     if (!module) return;
-    test_create_activation_object(module);
+    test_activation_objects(module);
     test_window_helpers(module);
 }

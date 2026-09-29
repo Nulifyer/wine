@@ -438,6 +438,11 @@ DECL_HANDLER(get_dcomp_surface_state);
 DECL_HANDLER(open_dcomp_surface_dirty_region);
 DECL_HANDLER(report_inertia);
 DECL_HANDLER(lock_winstation);
+DECL_HANDLER(create_activation_object);
+DECL_HANDLER(configure_activation_object);
+DECL_HANDLER(destroy_activation_object);
+DECL_HANDLER(query_activation_object);
+DECL_HANDLER(set_activation_object_redirection);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -873,6 +878,11 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_open_dcomp_surface_dirty_region,
     (req_handler)req_report_inertia,
     (req_handler)req_lock_winstation,
+    (req_handler)req_create_activation_object,
+    (req_handler)req_configure_activation_object,
+    (req_handler)req_destroy_activation_object,
+    (req_handler)req_query_activation_object,
+    (req_handler)req_set_activation_object_redirection,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -3270,3 +3280,27 @@ C_ASSERT( sizeof(struct report_inertia_request) == 32 );
 C_ASSERT( offsetof(struct lock_winstation_request, handle) == 12 );
 C_ASSERT( offsetof(struct lock_winstation_request, lock) == 16 );
 C_ASSERT( sizeof(struct lock_winstation_request) == 24 );
+C_ASSERT( offsetof(struct create_activation_object_request, window) == 12 );
+C_ASSERT( offsetof(struct create_activation_object_request, cookie) == 16 );
+C_ASSERT( sizeof(struct create_activation_object_request) == 24 );
+C_ASSERT( offsetof(struct create_activation_object_reply, luid) == 8 );
+C_ASSERT( sizeof(struct create_activation_object_reply) == 16 );
+C_ASSERT( offsetof(struct configure_activation_object_request, luid) == 12 );
+C_ASSERT( offsetof(struct configure_activation_object_request, reason) == 20 );
+C_ASSERT( offsetof(struct configure_activation_object_request, behavior) == 24 );
+C_ASSERT( offsetof(struct configure_activation_object_request, mask) == 28 );
+C_ASSERT( offsetof(struct configure_activation_object_request, state) == 32 );
+C_ASSERT( sizeof(struct configure_activation_object_request) == 40 );
+C_ASSERT( offsetof(struct destroy_activation_object_request, luid) == 12 );
+C_ASSERT( sizeof(struct destroy_activation_object_request) == 24 );
+C_ASSERT( offsetof(struct query_activation_object_request, luid) == 12 );
+C_ASSERT( sizeof(struct query_activation_object_request) == 24 );
+C_ASSERT( offsetof(struct query_activation_object_reply, window) == 8 );
+C_ASSERT( offsetof(struct query_activation_object_reply, cookie) == 16 );
+C_ASSERT( offsetof(struct query_activation_object_reply, state) == 24 );
+C_ASSERT( offsetof(struct query_activation_object_reply, pid) == 28 );
+C_ASSERT( offsetof(struct query_activation_object_reply, tid) == 32 );
+C_ASSERT( sizeof(struct query_activation_object_reply) == 40 );
+C_ASSERT( offsetof(struct set_activation_object_redirection_request, source) == 12 );
+C_ASSERT( offsetof(struct set_activation_object_redirection_request, target) == 20 );
+C_ASSERT( sizeof(struct set_activation_object_redirection_request) == 32 );

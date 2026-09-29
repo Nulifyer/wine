@@ -945,9 +945,21 @@ W32KAPI BOOL    WINAPI NtUserClipCursor( const RECT *rect );
 W32KAPI BOOL    WINAPI NtUserCloseClipboard(void);
 W32KAPI BOOL    WINAPI NtUserCloseDesktop( HDESK handle );
 W32KAPI BOOL    WINAPI NtUserCloseWindowStation( HWINSTA handle );
+struct activation_object_data
+{
+    LUID luid;
+    HWND hwnd;
+    ULONGLONG cookie;
+    UINT state;
+    DWORD process_id;
+    DWORD thread_id;
+};
+W32KAPI BOOL    WINAPI NtUserConfigureActivationObject( const LUID *luid, UINT reason,
+                                                        UINT behavior, UINT mask, UINT state );
 W32KAPI INT     WINAPI NtUserCopyAcceleratorTable( HACCEL src, ACCEL *dst, INT count );
 W32KAPI INT     WINAPI NtUserCountClipboardFormats(void);
 W32KAPI HACCEL  WINAPI NtUserCreateAcceleratorTable( ACCEL *table, INT count );
+W32KAPI BOOL    WINAPI NtUserCreateActivationObject( HWND hwnd, const ULONGLONG *cookie, LUID *luid );
 W32KAPI BOOL    WINAPI NtUserCreateCaret( HWND hwnd, HBITMAP bitmap, int width, int height );
 W32KAPI HDESK   WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *device,
                                               DEVMODEW *devmode, DWORD flags, ACCESS_MASK access,
@@ -969,12 +981,15 @@ W32KAPI HDWP    WINAPI NtUserDeferWindowPosAndBand( HDWP hdwp, HWND hwnd, HWND a
                                                     INT cx, INT cy, UINT flags, UINT unk1, UINT unk2 );
 W32KAPI BOOL    WINAPI NtUserDeleteMenu( HMENU menu, UINT id, UINT flags );
 W32KAPI BOOL    WINAPI NtUserDestroyAcceleratorTable( HACCEL handle );
+W32KAPI BOOL    WINAPI NtUserDestroyActivationObject( const LUID *luid );
 W32KAPI BOOL    WINAPI NtUserDestroyCaret(void);
 W32KAPI BOOL    WINAPI NtUserDestroyCursor( HCURSOR cursor, ULONG arg );
 W32KAPI BOOL    WINAPI NtUserDestroyDCompositionHwndTarget( HWND hwnd, UINT type );
 W32KAPI BOOL    WINAPI NtUserDestroyInputContext( HIMC handle );
 W32KAPI BOOL    WINAPI NtUserDestroyMenu( HMENU menu );
 W32KAPI BOOL    WINAPI NtUserDestroyWindow( HWND hwnd );
+W32KAPI BOOL    WINAPI NtUserQueryActivationObject( const LUID *luid,
+                                                    struct activation_object_data *data );
 W32KAPI BOOL    WINAPI NtUserDisableThreadIme( DWORD thread_id );
 W32KAPI LRESULT WINAPI NtUserDispatchMessage( const MSG *msg );
 W32KAPI NTSTATUS WINAPI NtUserDisplayConfigGetDeviceInfo( DISPLAYCONFIG_DEVICE_INFO_HEADER *packet );
@@ -1226,6 +1241,8 @@ W32KAPI BOOL    WINAPI NtUserSetCursorIconData( HCURSOR cursor, UNICODE_STRING *
 W32KAPI BOOL    WINAPI NtUserSetCursorPos( INT x, INT y );
 W32KAPI HWND    WINAPI NtUserSetFocus( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserSetForegroundWindow( HWND hwnd );
+W32KAPI BOOL    WINAPI NtUserSetForegroundRedirectionForActivationObject( const LUID *source,
+                                                                          const LUID *target );
 W32KAPI void    WINAPI NtUserSetInternalWindowPos( HWND hwnd, UINT cmd, RECT *rect, POINT *pt );
 W32KAPI BOOL    WINAPI NtUserSetKeyboardState( BYTE *state );
 W32KAPI BOOL    WINAPI NtUserSetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags );

@@ -853,7 +853,7 @@
 @ stdcall -syscall NtUserCloseWindowStation(long)
 @ stub -syscall NtUserCompositionInputSinkLuidFromPoint
 @ stub -syscall NtUserCompositionInputSinkViewInstanceIdFromPoint
-@ stub -syscall NtUserConfigureActivationObject
+@ stdcall -syscall NtUserConfigureActivationObject(ptr long long long long)
 @ stub -syscall NtUserConfirmResizeCommit
 @ stub -syscall NtUserConsoleControl
 @ stub -syscall NtUserConvertMemHandle
@@ -861,7 +861,7 @@
 @ stdcall -syscall NtUserCountClipboardFormats()
 @ stdcall -syscall NtUserCreateAcceleratorTable(ptr long)
 @ stub -syscall NtUserCreateActivationGroup
-@ stub -syscall NtUserCreateActivationObject
+@ stdcall -syscall NtUserCreateActivationObject(long ptr ptr)
 @ stub -syscall NtUserCreateBaseWindow
 @ stdcall -syscall NtUserCreateCaret(long long long long)
 @ stdcall -syscall NtUserCreateDCompositionHwndTarget(long long ptr)
@@ -892,7 +892,7 @@
 @ stub -syscall NtUserDeregisterShellHookWindow
 @ stdcall -syscall NtUserDestroyAcceleratorTable(long)
 @ stub -syscall NtUserDestroyActivationGroup
-@ stub -syscall NtUserDestroyActivationObject
+@ stdcall -syscall NtUserDestroyActivationObject(ptr)
 @ stdcall -syscall NtUserDestroyCaret()
 @ stdcall -syscall NtUserDestroyCursor(long long)
 @ stdcall -syscall NtUserDestroyDCompositionHwndTarget(long long)
@@ -1240,7 +1240,7 @@
 @ stub -syscall NtUserProcessInkFeedbackCommand
 @ stub -syscall NtUserPromoteMouseInPointer
 @ stub -syscall NtUserPromotePointer
-@ stub -syscall NtUserQueryActivationObject
+@ stdcall -syscall NtUserQueryActivationObject(ptr ptr)
 @ stdcall -syscall NtUserQueryBSDRWindow()
 @ stdcall -syscall NtUserQueryDisplayConfig(long ptr ptr ptr ptr ptr)
 @ stub -syscall NtUserQueryInformationThread
@@ -1367,7 +1367,7 @@
 @ stub -syscall NtUserSetFallbackForeground
 @ stub -syscall NtUserSetFeatureReportResponse
 @ stdcall -syscall NtUserSetFocus(long)
-@ stub -syscall NtUserSetForegroundRedirectionForActivationObject
+@ stdcall -syscall NtUserSetForegroundRedirectionForActivationObject(ptr ptr)
 @ stdcall -syscall NtUserSetForegroundWindow(long)
 @ stub -syscall NtUserSetForegroundWindowForApplication
 @ stub -syscall NtUserSetFullscreenMagnifierOffsetsDWMUpdated

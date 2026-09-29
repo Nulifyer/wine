@@ -8127,6 +8127,80 @@ struct lock_winstation_reply
     struct reply_header __header;
 };
 
+/* Create a session activation object owned by the current thread.  Keep new
+ * LinuxNT protocol requests append-only so existing request ids stay stable. */
+struct create_activation_object_request
+{
+    struct request_header __header;
+    user_handle_t  window;
+    unsigned __int64 cookie;
+};
+struct create_activation_object_reply
+{
+    struct reply_header __header;
+    struct luid    luid;
+};
+
+
+struct configure_activation_object_request
+{
+    struct request_header __header;
+    struct luid    luid;
+    unsigned int   reason;
+    unsigned int   behavior;
+    unsigned int   mask;
+    unsigned int   state;
+    char __pad_36[4];
+};
+struct configure_activation_object_reply
+{
+    struct reply_header __header;
+};
+
+
+struct destroy_activation_object_request
+{
+    struct request_header __header;
+    struct luid    luid;
+    char __pad_20[4];
+};
+struct destroy_activation_object_reply
+{
+    struct reply_header __header;
+};
+
+
+struct query_activation_object_request
+{
+    struct request_header __header;
+    struct luid    luid;
+    char __pad_20[4];
+};
+struct query_activation_object_reply
+{
+    struct reply_header __header;
+    user_handle_t  window;
+    char __pad_12[4];
+    unsigned __int64 cookie;
+    unsigned int   state;
+    process_id_t   pid;
+    thread_id_t    tid;
+    char __pad_36[4];
+};
+
+
+struct set_activation_object_redirection_request
+{
+    struct request_header __header;
+    struct luid    source;
+    struct luid    target;
+    char __pad_28[4];
+};
+struct set_activation_object_redirection_reply
+{
+    struct reply_header __header;
+};
+
 
 enum request
 {
@@ -8561,6 +8635,11 @@ enum request
     REQ_open_dcomp_surface_dirty_region,
     REQ_report_inertia,
     REQ_lock_winstation,
+    REQ_create_activation_object,
+    REQ_configure_activation_object,
+    REQ_destroy_activation_object,
+    REQ_query_activation_object,
+    REQ_set_activation_object_redirection,
     REQ_NB_REQUESTS
 };
 
@@ -8999,6 +9078,11 @@ union generic_request
     struct open_dcomp_surface_dirty_region_request open_dcomp_surface_dirty_region_request;
     struct report_inertia_request report_inertia_request;
     struct lock_winstation_request lock_winstation_request;
+    struct create_activation_object_request create_activation_object_request;
+    struct configure_activation_object_request configure_activation_object_request;
+    struct destroy_activation_object_request destroy_activation_object_request;
+    struct query_activation_object_request query_activation_object_request;
+    struct set_activation_object_redirection_request set_activation_object_redirection_request;
 };
 union generic_reply
 {
@@ -9435,8 +9519,13 @@ union generic_reply
     struct open_dcomp_surface_dirty_region_reply open_dcomp_surface_dirty_region_reply;
     struct report_inertia_reply report_inertia_reply;
     struct lock_winstation_reply lock_winstation_reply;
+    struct create_activation_object_reply create_activation_object_reply;
+    struct configure_activation_object_reply configure_activation_object_reply;
+    struct destroy_activation_object_reply destroy_activation_object_reply;
+    struct query_activation_object_reply query_activation_object_reply;
+    struct set_activation_object_redirection_reply set_activation_object_redirection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1068
+#define SERVER_PROTOCOL_VERSION 1069
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

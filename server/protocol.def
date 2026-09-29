@@ -5423,3 +5423,43 @@ struct alpc_message_info
     obj_handle_t handle;          /* handle to the window station */
     int          lock;            /* whether to lock desktop switching */
 @END
+
+/* Create a session activation object owned by the current thread.  Keep new
+ * LinuxNT protocol requests append-only so existing request ids stay stable. */
+@REQ(create_activation_object)
+    user_handle_t  window;        /* window associated with the object */
+    unsigned __int64 cookie;      /* caller-defined identity cookie */
+@REPLY
+    struct luid    luid;          /* generated activation object identity */
+@END
+
+/* Change activation object state bits and foreground ownership. */
+@REQ(configure_activation_object)
+    struct luid    luid;          /* activation object identity */
+    unsigned int   reason;        /* ACTIVATIONOBJECTSTATECHANGE_REASON */
+    unsigned int   behavior;      /* ACTIVATION_OBJECT_CONFIG_BEHAVIOR */
+    unsigned int   mask;          /* state bits to change */
+    unsigned int   state;         /* new values for masked state bits */
+@END
+
+/* Destroy a session activation object. */
+@REQ(destroy_activation_object)
+    struct luid    luid;          /* activation object identity */
+@END
+
+/* Retrieve the state projected by a session activation object. */
+@REQ(query_activation_object)
+    struct luid    luid;          /* activation object identity */
+@REPLY
+    user_handle_t  window;        /* associated window */
+    unsigned __int64 cookie;      /* caller-defined identity cookie */
+    unsigned int   state;         /* ACTIVATION_OBJECT_STATE bits */
+    process_id_t   pid;           /* creating process */
+    thread_id_t    tid;           /* creating thread */
+@END
+
+/* Set or clear foreground redirection between activation objects. */
+@REQ(set_activation_object_redirection)
+    struct luid    source;        /* source activation object */
+    struct luid    target;        /* target activation object, or zero */
+@END

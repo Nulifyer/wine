@@ -2100,7 +2100,7 @@ static struct thread *get_foreground_thread( struct desktop *desktop, user_handl
     return NULL;
 }
 
-static int is_current_process_foreground( struct desktop *desktop )
+int is_current_process_foreground( struct desktop *desktop )
 {
     return !desktop->foreground_pid || desktop->foreground_pid == current->process->id ||
            desktop->foreground_pid == current->process->parent_id;

@@ -855,7 +855,7 @@
     SYSCALL_ENTRY( 0x1353, NtUserCloseWindowStation, 4 ) \
     SYSCALL_ENTRY( 0x1354, NtUserCompositionInputSinkLuidFromPoint, 0 ) \
     SYSCALL_ENTRY( 0x1355, NtUserCompositionInputSinkViewInstanceIdFromPoint, 0 ) \
-    SYSCALL_ENTRY( 0x1356, NtUserConfigureActivationObject, 0 ) \
+    SYSCALL_ENTRY( 0x1356, NtUserConfigureActivationObject, 20 ) \
     SYSCALL_ENTRY( 0x1357, NtUserConfirmResizeCommit, 0 ) \
     SYSCALL_ENTRY( 0x1358, NtUserConsoleControl, 0 ) \
     SYSCALL_ENTRY( 0x1359, NtUserConvertMemHandle, 0 ) \
@@ -863,7 +863,7 @@
     SYSCALL_ENTRY( 0x135b, NtUserCountClipboardFormats, 0 ) \
     SYSCALL_ENTRY( 0x135c, NtUserCreateAcceleratorTable, 8 ) \
     SYSCALL_ENTRY( 0x135d, NtUserCreateActivationGroup, 0 ) \
-    SYSCALL_ENTRY( 0x135e, NtUserCreateActivationObject, 0 ) \
+    SYSCALL_ENTRY( 0x135e, NtUserCreateActivationObject, 12 ) \
     SYSCALL_ENTRY( 0x135f, NtUserCreateBaseWindow, 0 ) \
     SYSCALL_ENTRY( 0x1360, NtUserCreateCaret, 16 ) \
     SYSCALL_ENTRY( 0x1361, NtUserCreateDCompositionHwndTarget, 12 ) \
@@ -894,7 +894,7 @@
     SYSCALL_ENTRY( 0x137a, NtUserDeregisterShellHookWindow, 0 ) \
     SYSCALL_ENTRY( 0x137b, NtUserDestroyAcceleratorTable, 4 ) \
     SYSCALL_ENTRY( 0x137c, NtUserDestroyActivationGroup, 0 ) \
-    SYSCALL_ENTRY( 0x137d, NtUserDestroyActivationObject, 0 ) \
+    SYSCALL_ENTRY( 0x137d, NtUserDestroyActivationObject, 4 ) \
     SYSCALL_ENTRY( 0x137e, NtUserDestroyCaret, 0 ) \
     SYSCALL_ENTRY( 0x137f, NtUserDestroyCursor, 8 ) \
     SYSCALL_ENTRY( 0x1380, NtUserDestroyDCompositionHwndTarget, 8 ) \
@@ -1242,7 +1242,7 @@
     SYSCALL_ENTRY( 0x14d6, NtUserProcessInkFeedbackCommand, 0 ) \
     SYSCALL_ENTRY( 0x14d7, NtUserPromoteMouseInPointer, 0 ) \
     SYSCALL_ENTRY( 0x14d8, NtUserPromotePointer, 0 ) \
-    SYSCALL_ENTRY( 0x14d9, NtUserQueryActivationObject, 0 ) \
+    SYSCALL_ENTRY( 0x14d9, NtUserQueryActivationObject, 8 ) \
     SYSCALL_ENTRY( 0x14da, NtUserQueryBSDRWindow, 0 ) \
     SYSCALL_ENTRY( 0x14db, NtUserQueryDisplayConfig, 24 ) \
     SYSCALL_ENTRY( 0x14dc, NtUserQueryInformationThread, 0 ) \
@@ -1369,7 +1369,7 @@
     SYSCALL_ENTRY( 0x1555, NtUserSetFallbackForeground, 0 ) \
     SYSCALL_ENTRY( 0x1556, NtUserSetFeatureReportResponse, 0 ) \
     SYSCALL_ENTRY( 0x1557, NtUserSetFocus, 4 ) \
-    SYSCALL_ENTRY( 0x1558, NtUserSetForegroundRedirectionForActivationObject, 0 ) \
+    SYSCALL_ENTRY( 0x1558, NtUserSetForegroundRedirectionForActivationObject, 8 ) \
     SYSCALL_ENTRY( 0x1559, NtUserSetForegroundWindow, 4 ) \
     SYSCALL_ENTRY( 0x155a, NtUserSetForegroundWindowForApplication, 0 ) \
     SYSCALL_ENTRY( 0x155b, NtUserSetFullscreenMagnifierOffsetsDWMUpdated, 0 ) \
@@ -2397,7 +2397,7 @@
     SYSCALL_ENTRY( 0x1353, NtUserCloseWindowStation, 8 ) \
     SYSCALL_ENTRY( 0x1354, NtUserCompositionInputSinkLuidFromPoint, 0 ) \
     SYSCALL_ENTRY( 0x1355, NtUserCompositionInputSinkViewInstanceIdFromPoint, 0 ) \
-    SYSCALL_ENTRY( 0x1356, NtUserConfigureActivationObject, 0 ) \
+    SYSCALL_ENTRY( 0x1356, NtUserConfigureActivationObject, 40 ) \
     SYSCALL_ENTRY( 0x1357, NtUserConfirmResizeCommit, 0 ) \
     SYSCALL_ENTRY( 0x1358, NtUserConsoleControl, 0 ) \
     SYSCALL_ENTRY( 0x1359, NtUserConvertMemHandle, 0 ) \
@@ -2405,7 +2405,7 @@
     SYSCALL_ENTRY( 0x135b, NtUserCountClipboardFormats, 0 ) \
     SYSCALL_ENTRY( 0x135c, NtUserCreateAcceleratorTable, 16 ) \
     SYSCALL_ENTRY( 0x135d, NtUserCreateActivationGroup, 0 ) \
-    SYSCALL_ENTRY( 0x135e, NtUserCreateActivationObject, 0 ) \
+    SYSCALL_ENTRY( 0x135e, NtUserCreateActivationObject, 24 ) \
     SYSCALL_ENTRY( 0x135f, NtUserCreateBaseWindow, 0 ) \
     SYSCALL_ENTRY( 0x1360, NtUserCreateCaret, 32 ) \
     SYSCALL_ENTRY( 0x1361, NtUserCreateDCompositionHwndTarget, 24 ) \
@@ -2436,7 +2436,7 @@
     SYSCALL_ENTRY( 0x137a, NtUserDeregisterShellHookWindow, 0 ) \
     SYSCALL_ENTRY( 0x137b, NtUserDestroyAcceleratorTable, 8 ) \
     SYSCALL_ENTRY( 0x137c, NtUserDestroyActivationGroup, 0 ) \
-    SYSCALL_ENTRY( 0x137d, NtUserDestroyActivationObject, 0 ) \
+    SYSCALL_ENTRY( 0x137d, NtUserDestroyActivationObject, 8 ) \
     SYSCALL_ENTRY( 0x137e, NtUserDestroyCaret, 0 ) \
     SYSCALL_ENTRY( 0x137f, NtUserDestroyCursor, 16 ) \
     SYSCALL_ENTRY( 0x1380, NtUserDestroyDCompositionHwndTarget, 16 ) \
@@ -2784,7 +2784,7 @@
     SYSCALL_ENTRY( 0x14d6, NtUserProcessInkFeedbackCommand, 0 ) \
     SYSCALL_ENTRY( 0x14d7, NtUserPromoteMouseInPointer, 0 ) \
     SYSCALL_ENTRY( 0x14d8, NtUserPromotePointer, 0 ) \
-    SYSCALL_ENTRY( 0x14d9, NtUserQueryActivationObject, 0 ) \
+    SYSCALL_ENTRY( 0x14d9, NtUserQueryActivationObject, 16 ) \
     SYSCALL_ENTRY( 0x14da, NtUserQueryBSDRWindow, 0 ) \
     SYSCALL_ENTRY( 0x14db, NtUserQueryDisplayConfig, 48 ) \
     SYSCALL_ENTRY( 0x14dc, NtUserQueryInformationThread, 0 ) \
@@ -2911,7 +2911,7 @@
     SYSCALL_ENTRY( 0x1555, NtUserSetFallbackForeground, 0 ) \
     SYSCALL_ENTRY( 0x1556, NtUserSetFeatureReportResponse, 0 ) \
     SYSCALL_ENTRY( 0x1557, NtUserSetFocus, 8 ) \
-    SYSCALL_ENTRY( 0x1558, NtUserSetForegroundRedirectionForActivationObject, 0 ) \
+    SYSCALL_ENTRY( 0x1558, NtUserSetForegroundRedirectionForActivationObject, 16 ) \
     SYSCALL_ENTRY( 0x1559, NtUserSetForegroundWindow, 8 ) \
     SYSCALL_ENTRY( 0x155a, NtUserSetForegroundWindowForApplication, 0 ) \
     SYSCALL_ENTRY( 0x155b, NtUserSetFullscreenMagnifierOffsetsDWMUpdated, 0 ) \
@@ -3646,12 +3646,10 @@
     SYSCALL_STUB( NtUserClearWindowState ) \
     SYSCALL_STUB( NtUserCompositionInputSinkLuidFromPoint ) \
     SYSCALL_STUB( NtUserCompositionInputSinkViewInstanceIdFromPoint ) \
-    SYSCALL_STUB( NtUserConfigureActivationObject ) \
     SYSCALL_STUB( NtUserConfirmResizeCommit ) \
     SYSCALL_STUB( NtUserConsoleControl ) \
     SYSCALL_STUB( NtUserConvertMemHandle ) \
     SYSCALL_STUB( NtUserCreateActivationGroup ) \
-    SYSCALL_STUB( NtUserCreateActivationObject ) \
     SYSCALL_STUB( NtUserCreateBaseWindow ) \
     SYSCALL_STUB( NtUserCreateEmptyCursorObject ) \
     SYSCALL_STUB( NtUserCreateLocalMemHandle ) \
@@ -3670,7 +3668,6 @@
     SYSCALL_STUB( NtUserDeleteWindowGroup ) \
     SYSCALL_STUB( NtUserDeregisterShellHookWindow ) \
     SYSCALL_STUB( NtUserDestroyActivationGroup ) \
-    SYSCALL_STUB( NtUserDestroyActivationObject ) \
     SYSCALL_STUB( NtUserDestroyPalmRejectionDelayZone ) \
     SYSCALL_STUB( NtUserDirectedYield ) \
     SYSCALL_STUB( NtUserDisableImmersiveOwner ) \
@@ -3857,7 +3854,6 @@
     SYSCALL_STUB( NtUserProcessInkFeedbackCommand ) \
     SYSCALL_STUB( NtUserPromoteMouseInPointer ) \
     SYSCALL_STUB( NtUserPromotePointer ) \
-    SYSCALL_STUB( NtUserQueryActivationObject ) \
     SYSCALL_STUB( NtUserQueryInformationThread ) \
     SYSCALL_STUB( NtUserQuerySendMessage ) \
     SYSCALL_STUB( NtUserRaiseLowerShellWindow ) \
@@ -3937,7 +3933,6 @@
     SYSCALL_STUB( NtUserSetDpiForWindow ) \
     SYSCALL_STUB( NtUserSetFallbackForeground ) \
     SYSCALL_STUB( NtUserSetFeatureReportResponse ) \
-    SYSCALL_STUB( NtUserSetForegroundRedirectionForActivationObject ) \
     SYSCALL_STUB( NtUserSetForegroundWindowForApplication ) \
     SYSCALL_STUB( NtUserSetFullscreenMagnifierOffsetsDWMUpdated ) \
     SYSCALL_STUB( NtUserSetGestureConfig ) \

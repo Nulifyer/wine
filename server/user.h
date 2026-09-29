@@ -134,6 +134,7 @@ extern void add_desktop_hook_count( struct desktop *desktop, struct thread *thre
 /* queue functions */
 
 extern void free_msg_queue( struct thread *thread );
+extern int is_current_process_foreground( struct desktop *desktop );
 extern struct hook_table *get_queue_hooks( struct thread *thread );
 extern void set_queue_hooks( struct thread *thread, struct hook_table *hooks );
 extern void add_queue_hook_count( struct thread *thread, unsigned int index, int count );
@@ -197,6 +198,7 @@ extern void post_desktop_message( struct desktop *desktop, unsigned int message,
 extern void broadcast_desktop_message( struct desktop *desktop, unsigned int message,
                                        lparam_t wparam, lparam_t lparam );
 extern void free_window_handle( struct window *win );
+extern void cleanup_thread_activation_objects( struct thread *thread );
 extern void destroy_thread_windows( struct thread *thread );
 extern struct thread *get_window_input_delegate( user_handle_t handle, unsigned int message_mask,
                                                  client_ptr_t *callback, client_ptr_t *context );

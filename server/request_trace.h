@@ -4758,6 +4758,51 @@ static void dump_lock_winstation_request( const struct lock_winstation_request *
     fprintf( stderr, ", lock=%d", req->lock );
 }
 
+static void dump_create_activation_object_request( const struct create_activation_object_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
+    dump_uint64( ", cookie=", &req->cookie );
+}
+
+static void dump_create_activation_object_reply( const struct create_activation_object_reply *req )
+{
+    dump_luid( " luid=", &req->luid );
+}
+
+static void dump_configure_activation_object_request( const struct configure_activation_object_request *req )
+{
+    dump_luid( " luid=", &req->luid );
+    fprintf( stderr, ", reason=%08x", req->reason );
+    fprintf( stderr, ", behavior=%08x", req->behavior );
+    fprintf( stderr, ", mask=%08x", req->mask );
+    fprintf( stderr, ", state=%08x", req->state );
+}
+
+static void dump_destroy_activation_object_request( const struct destroy_activation_object_request *req )
+{
+    dump_luid( " luid=", &req->luid );
+}
+
+static void dump_query_activation_object_request( const struct query_activation_object_request *req )
+{
+    dump_luid( " luid=", &req->luid );
+}
+
+static void dump_query_activation_object_reply( const struct query_activation_object_reply *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
+    dump_uint64( ", cookie=", &req->cookie );
+    fprintf( stderr, ", state=%08x", req->state );
+    fprintf( stderr, ", pid=%04x", req->pid );
+    fprintf( stderr, ", tid=%04x", req->tid );
+}
+
+static void dump_set_activation_object_redirection_request( const struct set_activation_object_redirection_request *req )
+{
+    dump_luid( " source=", &req->source );
+    dump_luid( ", target=", &req->target );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -5193,6 +5238,11 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_open_dcomp_surface_dirty_region_request,
     (dump_func)dump_report_inertia_request,
     (dump_func)dump_lock_winstation_request,
+    (dump_func)dump_create_activation_object_request,
+    (dump_func)dump_configure_activation_object_request,
+    (dump_func)dump_destroy_activation_object_request,
+    (dump_func)dump_query_activation_object_request,
+    (dump_func)dump_set_activation_object_redirection_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5627,6 +5677,11 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_dcomp_surface_state_reply,
     (dump_func)dump_open_dcomp_surface_dirty_region_reply,
     NULL,
+    NULL,
+    (dump_func)dump_create_activation_object_reply,
+    NULL,
+    NULL,
+    (dump_func)dump_query_activation_object_reply,
     NULL,
 };
 
@@ -6063,6 +6118,11 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "open_dcomp_surface_dirty_region",
     "report_inertia",
     "lock_winstation",
+    "create_activation_object",
+    "configure_activation_object",
+    "destroy_activation_object",
+    "query_activation_object",
+    "set_activation_object_redirection",
 };
 
 static const struct

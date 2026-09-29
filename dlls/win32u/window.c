@@ -41,6 +41,129 @@ static const struct ratio no_dpi;
 
 static void *client_objects[MAX_USER_HANDLES];
 
+static void server_luid_from_luid( struct luid *dst, const LUID *src )
+{
+    dst->low_part = src->LowPart;
+    dst->high_part = src->HighPart;
+}
+
+static void luid_from_server_luid( LUID *dst, const struct luid *src )
+{
+    dst->LowPart = src->low_part;
+    dst->HighPart = src->high_part;
+}
+
+BOOL WINAPI NtUserCreateActivationObject( HWND hwnd, const ULONGLONG *cookie, LUID *luid )
+{
+    BOOL ret = FALSE;
+
+    if (!hwnd || !cookie || !luid)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    SERVER_START_REQ( create_activation_object )
+    {
+        req->window = wine_server_user_handle( hwnd );
+        req->cookie = *cookie;
+        if (!wine_server_call_err( req ))
+        {
+            luid_from_server_luid( luid, &reply->luid );
+            ret = TRUE;
+        }
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+BOOL WINAPI NtUserConfigureActivationObject( const LUID *luid, UINT reason,
+                                              UINT behavior, UINT mask, UINT state )
+{
+    BOOL ret;
+
+    if (!luid)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    SERVER_START_REQ( configure_activation_object )
+    {
+        server_luid_from_luid( &req->luid, luid );
+        req->reason = reason;
+        req->behavior = behavior;
+        req->mask = mask;
+        req->state = state;
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+BOOL WINAPI NtUserDestroyActivationObject( const LUID *luid )
+{
+    BOOL ret;
+
+    if (!luid)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    SERVER_START_REQ( destroy_activation_object )
+    {
+        server_luid_from_luid( &req->luid, luid );
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+BOOL WINAPI NtUserQueryActivationObject( const LUID *luid, struct activation_object_data *data )
+{
+    BOOL ret = FALSE;
+
+    if (!luid || !data)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    SERVER_START_REQ( query_activation_object )
+    {
+        server_luid_from_luid( &req->luid, luid );
+        if (!wine_server_call_err( req ))
+        {
+            data->luid = *luid;
+            data->hwnd = wine_server_ptr_handle( reply->window );
+            data->cookie = reply->cookie;
+            data->state = reply->state;
+            data->process_id = reply->pid;
+            data->thread_id = reply->tid;
+            ret = TRUE;
+        }
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+BOOL WINAPI NtUserSetForegroundRedirectionForActivationObject( const LUID *source,
+                                                                const LUID *target )
+{
+    BOOL ret;
+
+    if (!source || !target)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    SERVER_START_REQ( set_activation_object_redirection )
+    {
+        server_luid_from_luid( &req->source, source );
+        server_luid_from_luid( &req->target, target );
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
 #define SWP_AGG_NOGEOMETRYCHANGE \
     (SWP_NOSIZE | SWP_NOCLIENTSIZE | SWP_NOZORDER)
 #define SWP_AGG_NOPOSCHANGE \

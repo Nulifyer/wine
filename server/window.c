@@ -141,6 +141,64 @@ struct logical_surface
 static struct list logical_surfaces = LIST_INIT(logical_surfaces);
 static unsigned int next_logical_surface_id = 0x70000001;
 
+#define ACTIVATION_OBJECT_ENABLED          0x01
+#define ACTIVATION_OBJECT_SUPPRESS_SPATIAL 0x02
+#define ACTIVATION_OBJECT_FOREGROUND       0x04
+
+struct activation_object
+{
+    struct list entry;
+    struct thread *thread;       /* weak reference, removed during thread cleanup */
+    unsigned int session_id;
+    struct luid luid;
+    struct luid redirect;
+    user_handle_t window;
+    unsigned __int64 cookie;
+    unsigned int state;
+};
+
+static struct list activation_objects = LIST_INIT(activation_objects);
+static unsigned __int64 next_activation_luid = 1;
+
+static int luid_equal( const struct luid *left, const struct luid *right )
+{
+    return left->low_part == right->low_part && left->high_part == right->high_part;
+}
+
+static int luid_is_zero( const struct luid *luid )
+{
+    return !luid->low_part && !luid->high_part;
+}
+
+static struct activation_object *find_activation_object( const struct luid *luid,
+                                                         unsigned int session_id )
+{
+    struct activation_object *object;
+
+    LIST_FOR_EACH_ENTRY( object, &activation_objects, struct activation_object, entry )
+        if (object->session_id == session_id && luid_equal( &object->luid, luid )) return object;
+    return NULL;
+}
+
+static void set_foreground_activation_object( unsigned int session_id,
+                                              struct activation_object *object )
+{
+    struct activation_object *current_object;
+
+    LIST_FOR_EACH_ENTRY( current_object, &activation_objects, struct activation_object, entry )
+        if (current_object->session_id == session_id)
+            current_object->state &= ~ACTIVATION_OBJECT_FOREGROUND;
+    if (object) object->state |= ACTIVATION_OBJECT_FOREGROUND;
+}
+
+static void free_activation_object( struct activation_object *object )
+{
+    if (object->state & ACTIVATION_OBJECT_FOREGROUND)
+        set_foreground_activation_object( object->session_id, NULL );
+    list_remove( &object->entry );
+    free( object );
+}
+
 static struct logical_surface *find_logical_surface( unsigned int id )
 {
     struct logical_surface *surface;
@@ -166,6 +224,14 @@ static void detach_logical_surface( struct window *win )
     if (!win->logical_surface) return;
     win->logical_surface->producer = NULL;
     win->logical_surface = NULL;
+}
+
+void cleanup_thread_activation_objects( struct thread *thread )
+{
+    struct activation_object *object, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE( object, next, &activation_objects, struct activation_object, entry )
+        if (object->thread == thread) free_activation_object( object );
 }
 
 void cleanup_dwm_logical_surfaces( unsigned int generation )
@@ -2698,6 +2764,164 @@ static void set_window_ex_style( struct window *win, unsigned int ex_style )
     if (!win->is_linked) win->ex_style = ex_style;
     else win->ex_style = (ex_style & ~WS_EX_TOPMOST) | (win->ex_style & WS_EX_TOPMOST);
     if (!(win->ex_style & WS_EX_LAYERED)) win->is_layered = 0;
+}
+
+DECL_HANDLER(create_activation_object)
+{
+    struct activation_object *object;
+    struct window *win;
+    unsigned __int64 value;
+
+    if (!(win = get_window( req->window )) || win->thread != current)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(object = mem_alloc( sizeof(*object) ))) return;
+
+    do
+    {
+        value = next_activation_luid++;
+        object->luid.low_part = value;
+        object->luid.high_part = value >> 32;
+    } while (!value || find_activation_object( &object->luid, current->process->session_id ));
+
+    object->thread = current;
+    object->session_id = current->process->session_id;
+    object->redirect.low_part = 0;
+    object->redirect.high_part = 0;
+    object->window = win->handle;
+    object->cookie = req->cookie;
+    object->state = ACTIVATION_OBJECT_ENABLED;
+    list_add_tail( &activation_objects, &object->entry );
+    reply->luid = object->luid;
+}
+
+DECL_HANDLER(configure_activation_object)
+{
+    struct activation_object *object, *target;
+    struct window *win;
+    unsigned int changed, state;
+
+    if (req->reason > 1 || req->behavior > 1)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (req->reason == 1 && !current->process->native_dwm_owner)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!(object = find_activation_object( &req->luid, current->process->session_id )))
+    {
+        set_error( STATUS_NOT_FOUND );
+        return;
+    }
+    if (req->reason == 0 && req->behavior == 1)
+    {
+        if (object->thread->process != current->process)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            return;
+        }
+        if (!(win = get_window( object->window )))
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
+        if (!win->owner && !is_current_process_foreground( win->desktop ))
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            return;
+        }
+    }
+
+    state = object->state;
+    changed = ((state & ~req->mask) | (req->state & req->mask)) ^ state;
+    if (changed & ACTIVATION_OBJECT_ENABLED) object->state ^= ACTIVATION_OBJECT_ENABLED;
+    if (changed & ACTIVATION_OBJECT_SUPPRESS_SPATIAL) object->state ^= ACTIVATION_OBJECT_SUPPRESS_SPATIAL;
+
+    if (!(changed & ACTIVATION_OBJECT_FOREGROUND)) return;
+    if (state & ACTIVATION_OBJECT_FOREGROUND)
+    {
+        set_foreground_activation_object( object->session_id, NULL );
+        return;
+    }
+
+    target = object;
+    if (!luid_is_zero( &object->redirect ))
+    {
+        if (!(target = find_activation_object( &object->redirect, object->session_id )))
+        {
+            object->redirect.low_part = 0;
+            object->redirect.high_part = 0;
+            target = object;
+        }
+    }
+    if ((target->state & ACTIVATION_OBJECT_FOREGROUND) ||
+        (req->reason == 1 && (target->state & ACTIVATION_OBJECT_SUPPRESS_SPATIAL)) ||
+        !(target->state & ACTIVATION_OBJECT_ENABLED))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    set_foreground_activation_object( object->session_id, target );
+}
+
+DECL_HANDLER(destroy_activation_object)
+{
+    struct activation_object *object;
+
+    if (!(object = find_activation_object( &req->luid, current->process->session_id ))) return;
+    if (object->thread != current)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    free_activation_object( object );
+}
+
+DECL_HANDLER(query_activation_object)
+{
+    struct activation_object *object;
+
+    if (!(object = find_activation_object( &req->luid, current->process->session_id )))
+    {
+        set_error( STATUS_NOT_FOUND );
+        return;
+    }
+    reply->window = object->window;
+    reply->cookie = object->cookie;
+    reply->state = object->state;
+    reply->pid = get_process_id( object->thread->process );
+    reply->tid = get_thread_id( object->thread );
+}
+
+DECL_HANDLER(set_activation_object_redirection)
+{
+    struct activation_object *source, *target;
+
+    if (!(source = find_activation_object( &req->source, current->process->session_id )))
+    {
+        set_error( STATUS_NOT_FOUND );
+        return;
+    }
+    if (luid_is_zero( &req->target ))
+    {
+        source->redirect = req->target;
+        return;
+    }
+    if (!(target = find_activation_object( &req->target, current->process->session_id )))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+
+    source->redirect = req->target;
+    if ((source->state & ACTIVATION_OBJECT_FOREGROUND) &&
+        (target->state & ACTIVATION_OBJECT_ENABLED))
+        set_foreground_activation_object( source->session_id, target );
 }
 
 
