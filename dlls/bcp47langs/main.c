@@ -17,15 +17,72 @@
  */
 
 #include <stdarg.h>
+#include <stdint.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
 #include "winstring.h"
 
+#include "icu.h"
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(bcp47langs);
+
+HRESULT WINAPI Bcp47GetDirectionality(HSTRING language, INT *direction)
+{
+    UScriptCode scripts[8];
+    char language_tag[LOCALE_NAME_MAX_LENGTH * 3];
+    char locale_name[LOCALE_NAME_MAX_LENGTH * 3];
+    const WCHAR *locale;
+    BOOL embedded_null;
+    UErrorCode status = U_ZERO_ERROR;
+    UINT32 length;
+    HRESULT hr;
+    INT bytes, count, i, parsed;
+
+    TRACE("language %s, direction %p\n", debugstr_hstring(language), direction);
+
+    *direction = -1;
+    if (FAILED(hr = WindowsStringHasEmbeddedNull(language, &embedded_null))) return hr;
+    locale = WindowsGetStringRawBuffer(language, &length);
+    if (!length || length >= LOCALE_NAME_MAX_LENGTH || embedded_null) return E_INVALIDARG;
+    if (!(bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, locale, length, language_tag,
+                                      ARRAY_SIZE(language_tag) - 1, NULL, NULL)))
+        return HRESULT_FROM_WIN32(GetLastError());
+    language_tag[bytes] = 0;
+
+    parsed = 0;
+    uloc_forLanguageTag(language_tag, locale_name, ARRAY_SIZE(locale_name), &parsed, &status);
+    if (status > U_ZERO_ERROR || parsed != bytes) return E_INVALIDARG;
+
+    count = uscript_getCode(locale_name, scripts, ARRAY_SIZE(scripts), &status);
+    if (status > U_ZERO_ERROR) return E_INVALIDARG;
+
+    for (i = 0; i < count; ++i)
+        if (scripts[i] == USCRIPT_MONGOLIAN || scripts[i] == USCRIPT_PHAGS_PA)
+        {
+            *direction = 2;
+            return S_OK;
+        }
+    for (i = 0; i < count; ++i)
+        if (scripts[i] == USCRIPT_KHITAN_SMALL_SCRIPT ||
+            scripts[i] == USCRIPT_MEROITIC_HIEROGLYPHS)
+        {
+            *direction = 3;
+            return S_OK;
+        }
+    for (i = 0; i < count; ++i)
+        if (uscript_isRightToLeft(scripts[i]))
+        {
+            *direction = 1;
+            return S_OK;
+        }
+
+    *direction = 0;
+    return S_OK;
+}
 
 HRESULT WINAPI GetFontFallbackLanguageList(const WCHAR *lang, size_t buffer_length, WCHAR *buffer,
                                            size_t *required_buffer_length)

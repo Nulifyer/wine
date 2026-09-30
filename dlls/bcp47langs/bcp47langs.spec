@@ -8,7 +8,7 @@
 @ stub Bcp47FromHkl
 @ stub Bcp47FromLcid
 @ stub Bcp47GetAbbreviation
-@ stub Bcp47GetDirectionality
+@ stdcall Bcp47GetDirectionality(ptr ptr)
 @ stub Bcp47GetDistance
 @ stub Bcp47GetExtensionSingletons
 @ stub Bcp47GetExtensionSubstring

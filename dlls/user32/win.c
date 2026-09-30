@@ -121,29 +121,6 @@ HWND WIN_IsCurrentProcess( HWND hwnd )
 }
 
 /*************************************************************************
- *              CreateActivationObject   (USER32.2633)
- *
- * The native syscall creates a win32k-side identity used to associate an
- * InputHost instance with its CoreMessaging activation.  Wine has no
- * separate win32k object for that association, so preserve the caller's
- * stable 64-bit identity as the activation token.
- */
-BOOL WINAPI CreateActivationObject( UINT type, const ULONGLONG *identity,
-                                    ULONGLONG *activation_object )
-{
-    TRACE( "type %u, identity %p, activation_object %p\n", type, identity, activation_object );
-
-    if (!identity || !activation_object)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return FALSE;
-    }
-
-    *activation_object = *identity;
-    return TRUE;
-}
-
-/*************************************************************************
  *              InternalClipCursor   (USER32.2534)
  *
  * InputHost uses this private helper to confine the pointer to its window
@@ -578,6 +555,15 @@ static BOOL is_local_system_process(void)
     return EqualSid( user->User.Sid, local_system );
 }
 
+static BOOL is_shell_process(void)
+{
+    DWORD process_id;
+    HWND shell = GetShellWindow();
+
+    return shell && GetWindowThreadProcessId( shell, &process_id ) &&
+           process_id == GetCurrentProcessId();
+}
+
 /***********************************************************************
  *              CreateWindowInBandEx (USER32.@)
  */
@@ -596,7 +582,8 @@ HWND WINAPI CreateWindowInBandEx( DWORD ex_style, LPCWSTR class_name, LPCWSTR wi
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
     }
-    if ((band > 1 || type_flags) && !is_local_system_process())
+    if ((band > 1 || type_flags) && !is_local_system_process() &&
+        !NtUserGetThreadInfo()->iam_access && !is_shell_process())
     {
         SetLastError( ERROR_ACCESS_DENIED );
         return 0;
@@ -1419,6 +1406,22 @@ BOOL WINAPI IsWindow( HWND hwnd )
 BOOL WINAPI IsCoreWindow( HWND hwnd )
 {
     return NtUserIsCoreWindow( hwnd );
+}
+
+
+/*******************************************************************
+ *           IsShellManagedWindow   (USER32.2574)
+ */
+BOOL WINAPI IsShellManagedWindow( HWND hwnd )
+{
+    if (!NtUserIsWindow( hwnd ))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    /* Wine does not yet maintain native shell-window-management state. */
+    return FALSE;
 }
 
 

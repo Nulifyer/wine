@@ -146,6 +146,7 @@ static int set_timer( struct timer *timer, timeout_t expire, unsigned int period
                       client_ptr_t callback, client_ptr_t arg )
 {
     int signaled = cancel_timer( timer );
+
     if (timer->manual)
     {
         period = 0;  /* period doesn't make any sense for a manual timer */

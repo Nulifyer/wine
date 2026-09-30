@@ -1,0 +1,5 @@
+TESTDLL = profapi.dll
+IMPORTS = advapi32
+
+SOURCES = \
+	profapi.c

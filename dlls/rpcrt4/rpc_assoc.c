@@ -48,6 +48,16 @@ static struct list server_assoc_list = LIST_INIT(server_assoc_list);
 
 static LONG last_assoc_group_id;
 
+static const UUID linuxnt_usermgr_interface =
+    {0xb18fbab6, 0x56f8, 0x4702, {0x84, 0xe0, 0x41, 0x05, 0x32, 0x93, 0xa8, 0x69}};
+
+static BOOL is_linuxnt_usermgr_interface(const RPC_SYNTAX_IDENTIFIER *interface_id)
+{
+    return interface_id &&
+           !memcmp(&interface_id->SyntaxGUID, &linuxnt_usermgr_interface,
+                   sizeof(linuxnt_usermgr_interface));
+}
+
 typedef struct _RpcContextHandle
 {
     struct list entry;
@@ -395,6 +405,7 @@ RPC_STATUS RpcAssoc_GetClientConnection(RpcAssoc *assoc,
 {
     RpcConnection *NewConnection;
     RPC_STATUS status;
+    BOOL trace_usermgr = is_linuxnt_usermgr_interface(InterfaceId);
 
     *Connection = RpcAssoc_GetIdleConnection(assoc, InterfaceId, TransferSyntax, AuthInfo, QOS);
     if (*Connection) {
@@ -412,14 +423,21 @@ RPC_STATUS RpcAssoc_GetClientConnection(RpcAssoc *assoc,
         return status;
 
     NewConnection->assoc = assoc;
+    if (trace_usermgr)
+        ERR("linuxnt-usermgr-assoc endpoint=%s open begin\n", debugstr_a(assoc->Endpoint));
     status = RPCRT4_OpenClientConnection(NewConnection);
+    if (trace_usermgr)
+        ERR("linuxnt-usermgr-assoc endpoint=%s open end status=%ld\n",
+            debugstr_a(assoc->Endpoint), status);
     if (status != RPC_S_OK)
     {
         RPCRT4_ReleaseConnection(NewConnection);
         return status;
     }
 
+    if (trace_usermgr) ERR("linuxnt-usermgr-assoc bind begin\n");
     status = RpcAssoc_BindConnection(assoc, NewConnection, InterfaceId, TransferSyntax);
+    if (trace_usermgr) ERR("linuxnt-usermgr-assoc bind end status=%ld\n", status);
     if (status != RPC_S_OK)
     {
         RPCRT4_ReleaseConnection(NewConnection);

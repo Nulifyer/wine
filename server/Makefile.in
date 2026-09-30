@@ -10,8 +10,8 @@ SOURCES = \
 	completion.c \
 	console.c \
 	d3d11_fence.c \
-	dcomp.c \
 	d3dkmt.c \
+	dcomp.c \
 	debugger.c \
 	device.c \
 	directory.c \
@@ -50,11 +50,11 @@ SOURCES = \
 	unicode.c \
 	user.c \
 	window.c \
-	wnf.c \
 	wineserver.de.UTF-8.man.in \
 	wineserver.fr.UTF-8.man.in \
 	wineserver.man.in \
-	winstation.c
+	winstation.c \
+	wnf.c
 
 UNIX_CFLAGS = $(INOTIFY_CFLAGS)
 UNIX_LIBS   = $(LDEXECFLAGS) $(RT_LIBS) $(INOTIFY_LIBS) $(PROCSTAT_LIBS)

@@ -21,15 +21,32 @@
 #include <assert.h>
 #include <stdarg.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #define WINADVAPI
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "sddl.h"
 #include "iads.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(security);
+
+/******************************************************************************
+ * CapabilityCheck (SECHOST.@)
+ */
+NTSTATUS WINAPI CapabilityCheck( HANDLE token, const WCHAR *name, BOOLEAN *has_capability )
+{
+    UNICODE_STRING name_string;
+
+    if (!name || !has_capability) return STATUS_INVALID_PARAMETER;
+    if (wcsnlen( name, 0x7fff ) == 0x7fff) return STATUS_INVALID_PARAMETER;
+
+    RtlInitUnicodeString( &name_string, name );
+    return RtlCapabilityCheck( token, &name_string, has_capability );
+}
 
 static const struct
 {

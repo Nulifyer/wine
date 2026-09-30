@@ -20,6 +20,7 @@
 
 static NTSTATUS (WINAPI *pRtlGetAppContainerNamedObjectPath)(HANDLE, PSID, BOOLEAN, UNICODE_STRING *);
 static NTSTATUS (WINAPI *pRtlGetAppContainerSidType)(PSID, ULONG *);
+static NTSTATUS (WINAPI *pRtlCheckSandboxedToken)(HANDLE, BOOLEAN *);
 static NTSTATUS (WINAPI *pNtSetUuidSeed)(UCHAR *);
 
 struct token_security_attributes_information
@@ -760,12 +761,42 @@ static void test_set_uuid_seed(void)
     ok( status == STATUS_ACCESS_DENIED, "NtSetUuidSeed(NULL) returned %#lx.\n", status );
 }
 
+static void test_sandboxed_token(void)
+{
+    BOOLEAN sandboxed = 0xcc;
+    DWORD value = 0xcccccccc;
+    ULONG size = 0;
+    NTSTATUS status;
+
+    if (!pRtlCheckSandboxedToken)
+    {
+        win_skip( "RtlCheckSandboxedToken is unavailable.\n" );
+        return;
+    }
+
+    status = pRtlCheckSandboxedToken( NULL, &sandboxed );
+    ok( status == STATUS_SUCCESS, "RtlCheckSandboxedToken returned %#lx.\n", status );
+    ok( !sandboxed, "current token reported sandboxed.\n" );
+
+    status = NtQueryInformationToken( GetCurrentProcessToken(), TokenIsSandboxed,
+                                      &value, sizeof(value), &size );
+    ok( status == STATUS_SUCCESS, "TokenIsSandboxed returned %#lx.\n", status );
+    ok( size == sizeof(value), "got size %lu.\n", size );
+    ok( !value, "current token reported sandboxed.\n" );
+
+    sandboxed = 0xcc;
+    status = pRtlCheckSandboxedToken( (HANDLE)0xdeadbeef, &sandboxed );
+    ok( status == STATUS_INVALID_HANDLE, "invalid token returned %#lx.\n", status );
+    ok( !sandboxed, "invalid token left sandboxed set.\n" );
+}
+
 START_TEST(token)
 {
     HMODULE ntdll = GetModuleHandleA( "ntdll.dll" );
 
     pRtlGetAppContainerNamedObjectPath = (void *)GetProcAddress( ntdll, "RtlGetAppContainerNamedObjectPath" );
     pRtlGetAppContainerSidType = (void *)GetProcAddress( ntdll, "RtlGetAppContainerSidType" );
+    pRtlCheckSandboxedToken = (void *)GetProcAddress( ntdll, "RtlCheckSandboxedToken" );
     pNtSetUuidSeed = (void *)GetProcAddress( ntdll, "NtSetUuidSeed" );
 
     test_ksec_duplicate_handle();
@@ -777,5 +808,6 @@ START_TEST(token)
     test_adjust_groups();
     test_appcontainer_named_object_path();
     test_appcontainer_sid_type();
+    test_sandboxed_token();
     test_set_uuid_seed();
 }

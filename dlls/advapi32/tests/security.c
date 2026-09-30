@@ -2114,6 +2114,20 @@ static void test_CreateWellKnownSid(void)
            "Expected default account RID, got %lu\n", *GetSidSubAuthority(sid_buffer, 6));
     }
 
+    {
+        char sid_buffer[SECURITY_MAX_SID_SIZE];
+        DWORD cb = sizeof(sid_buffer);
+
+        ret = CreateWellKnownSid(WinBuiltinDefaultSystemManagedGroupSid, NULL, sid_buffer, &cb);
+        ok(ret, "Couldn't create default system managed group SID, error %lu\n", GetLastError());
+        ok(*GetSidSubAuthorityCount(sid_buffer) == 2, "Unexpected subauthority count %u\n",
+           *GetSidSubAuthorityCount(sid_buffer));
+        ok(*GetSidSubAuthority(sid_buffer, 0) == SECURITY_BUILTIN_DOMAIN_RID,
+           "Expected builtin domain RID, got %lu\n", *GetSidSubAuthority(sid_buffer, 0));
+        ok(*GetSidSubAuthority(sid_buffer, 1) == DOMAIN_ALIAS_RID_DEFAULT_ACCOUNT,
+           "Expected default account group RID, got %lu\n", *GetSidSubAuthority(sid_buffer, 1));
+    }
+
     for (i = 0; i < ARRAY_SIZE(well_known_sid_values); i++)
     {
         const struct well_known_sid_value *value = &well_known_sid_values[i];
@@ -8737,6 +8751,55 @@ static void test_window_security(void)
     LocalFree(sd);
 }
 
+static void test_CapabilityCheck(void)
+{
+    NTSTATUS (WINAPI *pCapabilityCheck)(HANDLE, const WCHAR *, BOOLEAN *);
+    HANDLE process_token, impersonation_token;
+    HMODULE module;
+    NTSTATUS status;
+    BOOLEAN result;
+    BOOL ret;
+
+    module = LoadLibraryW(L"sechost.dll");
+    ok(!!module, "LoadLibraryW failed, error %lu.\n", GetLastError());
+    if (!module) return;
+
+    pCapabilityCheck = (void *)GetProcAddress(module, "CapabilityCheck");
+    if (!pCapabilityCheck)
+    {
+        win_skip("CapabilityCheck is not available.\n");
+        FreeLibrary(module);
+        return;
+    }
+
+    result = 0xcc;
+    status = pCapabilityCheck(NULL, NULL, &result);
+    ok(status == STATUS_INVALID_PARAMETER, "got %#lx.\n", status);
+    ok(result == 0xcc, "got %u.\n", result);
+
+    status = pCapabilityCheck(NULL, L"ID_CAP_SYSTEM_REGISTRAR", NULL);
+    ok(status == STATUS_INVALID_PARAMETER, "got %#lx.\n", status);
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &process_token);
+    ok(ret, "OpenProcessToken failed, error %lu.\n", GetLastError());
+    if (ret)
+    {
+        ret = DuplicateToken(process_token, SecurityImpersonation, &impersonation_token);
+        ok(ret, "DuplicateToken failed, error %lu.\n", GetLastError());
+        if (ret)
+        {
+            result = 0xcc;
+            status = pCapabilityCheck(impersonation_token, L"ID_CAP_SYSTEM_REGISTRAR", &result);
+            ok(status == STATUS_SUCCESS, "got %#lx.\n", status);
+            ok(result == TRUE, "got %u.\n", result);
+            CloseHandle(impersonation_token);
+        }
+        CloseHandle(process_token);
+    }
+
+    FreeLibrary(module);
+}
+
 START_TEST(security)
 {
     init();
@@ -8809,6 +8872,7 @@ START_TEST(security)
     test_group_as_file_owner();
     test_IsValidSecurityDescriptor();
     test_window_security();
+    test_CapabilityCheck();
 
     /* Must be the last test, modifies process token */
     test_token_security_descriptor();

@@ -152,6 +152,35 @@ struct ntuser_thread_info
     UINT           dpi_context;       /* DPI awareness context */
     UINT64         client_imm;        /* client IMM thread info */
     UINT64         wmchar_data;       /* client data for WM_CHAR mappings */
+    BOOL           iam_access;        /* private IAM access for this thread */
+};
+
+typedef enum _USERTHREADINFOCLASS
+{
+    UserThreadShutdownInformation,
+    UserThreadFlags,
+    UserThreadTaskName,
+    UserThreadWOWInformation,
+    UserThreadHungStatus,
+    UserThreadInitiateShutdown,
+    UserThreadEndShutdown,
+    UserThreadUseActiveDesktop,
+    UserThreadUseDesktop,
+    UserThreadRestoreDesktop,
+    UserThreadCsrApiPort,
+    UserThreadSetWinlogonWindow = 12,
+    UserThreadConsoleShutdown,
+    UserThreadConsoleEndShutdown,
+    UserThreadConvertibleState,
+    UserThreadDockState,
+    UserThreadBroadcastShellHook,
+} USERTHREADINFOCLASS;
+
+struct ntuser_thread_desktop_state
+{
+    HANDLE thread;
+    HDESK desktop;
+    HDESK target;
 };
 
 #ifndef WINE_UNIX_LIB
@@ -881,6 +910,14 @@ struct dcomposition_token_surface_update
 };
 W32KAPI NTSTATUS WINAPI NtCreateCompositionSurfaceHandle( const OBJECT_ATTRIBUTES *attributes,
                                                            ACCESS_MASK access, HANDLE *surface );
+W32KAPI NTSTATUS WINAPI NtCloseCompositionInputSink( HANDLE sink );
+W32KAPI NTSTATUS WINAPI NtCompositionSetDropTarget( HANDLE sink, const void *queue, LUID *luid );
+W32KAPI NTSTATUS WINAPI NtCreateCompositionInputSink( const void *descriptor, HANDLE *sink );
+W32KAPI NTSTATUS WINAPI NtCreateImplicitCompositionInputSink( const void *descriptor, HANDLE *sink );
+W32KAPI NTSTATUS WINAPI NtDuplicateCompositionInputSink(void);
+W32KAPI NTSTATUS WINAPI NtQueryCompositionInputSink( HANDLE sink, void *query );
+W32KAPI NTSTATUS WINAPI NtQueryCompositionInputSinkLuid( HANDLE sink, LUID *luid );
+W32KAPI NTSTATUS WINAPI NtQueryCompositionInputSinkViewId( HANDLE sink, UINT *view_id );
 W32KAPI NTSTATUS WINAPI NtBindCompositionSurface( HANDLE surface, BOOL enable, UINT flags,
                                                    BOOL shared, const void *buffer_info,
                                                    UINT64 *binding_id );
@@ -915,6 +952,7 @@ struct token_manager_thread_info
 };
 W32KAPI NTSTATUS WINAPI NtTokenManagerThread( const struct token_manager_thread_info *info );
 
+W32KAPI BOOL    WINAPI NtUserAcquireIAMKey( ULONGLONG *key );
 W32KAPI HKL     WINAPI NtUserActivateKeyboardLayout( HKL layout, UINT flags );
 W32KAPI BOOL    WINAPI NtUserAddClipboardFormatListener( HWND hwnd );
 W32KAPI ULONG   WINAPI NtUserAlterWindowStyle( HWND hwnd, UINT mask, UINT style );
@@ -941,6 +979,8 @@ W32KAPI LONG    WINAPI NtUserChangeDisplaySettings( UNICODE_STRING *devname, DEV
                                                     DWORD flags, void *lparam );
 W32KAPI DWORD   WINAPI NtUserCheckMenuItem( HMENU handle, UINT id, UINT flags );
 W32KAPI HWND    WINAPI NtUserChildWindowFromPointEx( HWND parent, LONG x, LONG y, UINT flags );
+W32KAPI HWND    WINAPI NtUserGhostWindowFromHungWindow( HWND hwnd );
+W32KAPI HWND    WINAPI NtUserHungWindowFromGhostWindow( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserClipCursor( const RECT *rect );
 W32KAPI BOOL    WINAPI NtUserCloseClipboard(void);
 W32KAPI BOOL    WINAPI NtUserCloseDesktop( HDESK handle );
@@ -1010,6 +1050,7 @@ W32KAPI BOOL     WINAPI NtUserDwmKernelStartup(void);
 W32KAPI BOOL     WINAPI NtUserDwmKernelShutdown(void);
 W32KAPI NTSTATUS WINAPI NtUserCitSetInfo( UINT flags, const void *info );
 W32KAPI BOOL    WINAPI NtUserEmptyClipboard(void);
+W32KAPI BOOL    WINAPI NtUserEnableIAMAccess( const ULONGLONG *key, BOOL enable );
 W32KAPI BOOL    WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointer( BOOL );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointerForThread(void);
@@ -1130,6 +1171,11 @@ W32KAPI BOOL    WINAPI NtUserHideCaret( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserHiliteMenuItem( HWND hwnd, HMENU handle, UINT item, UINT hilite );
 W32KAPI NTSTATUS WINAPI NtUserInitialize( HANDLE power_request_event, HANDLE media_request_event );
 W32KAPI NTSTATUS WINAPI NtUserRemoteConnect( void *connect_info, ULONG operation, void *output );
+W32KAPI UINT    WINAPI NtUserRemoteConnectState(void);
+W32KAPI NTSTATUS WINAPI NtUserRemoteDisconnect(void);
+W32KAPI NTSTATUS WINAPI NtUserRemoteNotify( const UINT *notification );
+W32KAPI NTSTATUS WINAPI NtUserRemotePassthruDisable(void);
+W32KAPI NTSTATUS WINAPI NtUserRemotePassthruEnable(void);
 W32KAPI NTSTATUS WINAPI NtUserInitializeClientPfnArrays( const ntuser_client_func_ptr *client_procsA,
                                                          const ntuser_client_func_ptr *client_procsW,
                                                          const ntuser_client_func_ptr *client_workers, HINSTANCE user_module );
@@ -1264,6 +1310,8 @@ W32KAPI BOOL    WINAPI NtUserSetSysColors( INT count, const INT *colors, const C
 W32KAPI BOOL    WINAPI NtUserSetSystemMenu( HWND hwnd, HMENU menu );
 W32KAPI UINT_PTR WINAPI NtUserSetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout );
 W32KAPI HWND    WINAPI NtUserSetTaskmanWindow( HWND hwnd );
+W32KAPI NTSTATUS WINAPI NtUserSetInformationThread( HANDLE thread, USERTHREADINFOCLASS info_class,
+                                                     void *info, ULONG length );
 W32KAPI BOOL    WINAPI NtUserSetThreadDesktop( HDESK handle );
 W32KAPI UINT_PTR WINAPI NtUserSetTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc, ULONG tolerance );
 W32KAPI BOOL    WINAPI NtUserSetWindowContextHelpId( HWND hwnd, DWORD id );

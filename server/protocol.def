@@ -3346,7 +3346,6 @@ enum coords_relative
     int          previous;        /* previous state for the current thread */
 @END
 
-
 /* Retrieve queue keyboard state for current thread or global async state */
 @REQ(get_key_state)
     int            async;         /* whether to query the async state */
@@ -5425,6 +5424,14 @@ struct alpc_message_info
 @REQ(lock_winstation)
     obj_handle_t handle;          /* handle to the window station */
     int          lock;            /* whether to lock desktop switching */
+@END
+
+/* Open a thread's current desktop in the calling process. */
+@REQ(open_thread_desktop)
+    thread_id_t  tid;             /* thread id */
+    unsigned int access;          /* wanted access rights */
+@REPLY
+    obj_handle_t handle;          /* handle to the desktop */
 @END
 
 /* Create a session activation object owned by the current thread.  Keep new

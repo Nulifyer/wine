@@ -26,6 +26,16 @@ WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 #define KERB_INTERACTIVE_LOGON_MESSAGE 2
 #define KERB_WORKSTATION_UNLOCK_LOGON_MESSAGE 7
 #define MSV1_0_INTERACTIVE_PROFILE_MESSAGE 2
+#define SSPIEX_LOGON_USER_MESSAGE 0x8001
+
+struct sspiex_logon_user
+{
+    ULONG message_type;
+    ULONG flags;
+    ULONG auth_len;
+    ULONG reserved;
+    void *client_auth_base;
+};
 
 struct kerb_interactive_logon
 {
@@ -60,8 +70,14 @@ static BOOL caller_has_tcb_privilege( handle_t binding )
     PRIVILEGE_SET privileges;
     HANDLE token;
     BOOL allowed = FALSE;
+    RPC_STATUS rpc_status;
+    DWORD error = ERROR_SUCCESS;
 
-    if (RpcImpersonateClient( binding ) != RPC_S_OK) return FALSE;
+    if ((rpc_status = RpcImpersonateClient( binding )) != RPC_S_OK)
+    {
+        ERR( "linuxnt-lsa-tcb impersonate status=%lu\n", rpc_status );
+        return FALSE;
+    }
     if (OpenThreadToken( GetCurrentThread(), TOKEN_QUERY, TRUE, &token ))
     {
         privileges.PrivilegeCount = 1;
@@ -71,6 +87,8 @@ static BOOL caller_has_tcb_privilege( handle_t binding )
             PrivilegeCheck( token, &privileges, &allowed );
         CloseHandle( token );
     }
+    else error = GetLastError();
+    ERR( "linuxnt-lsa-tcb open_error=%lu allowed=%u\n", error, allowed );
     RpcRevertToSelf();
     return allowed;
 }
@@ -96,21 +114,32 @@ NTSTATUS __cdecl register_logon_process( handle_t binding, DWORD thread_id, BYTE
     struct lsass_logon_context *context;
     CLIENT_ID cid;
     NTSTATUS status;
-    DWORD process_id;
+    DWORD process_id = 0;
 
     if (!security_mode || !handle || (!name && name_len) || name_len >= sizeof(context->name))
         return STATUS_INVALID_PARAMETER;
     *security_mode = 0;
     *handle = NULL;
-    if (!caller_has_tcb_privilege( binding )) return STATUS_PRIVILEGE_NOT_HELD;
-    if (I_RpcBindingInqLocalClientPID( binding, &process_id ) != RPC_S_OK || !process_id)
+    if (!caller_has_tcb_privilege( binding ))
+    {
+        ERR( "linuxnt-lsa-register-server privilege-not-held tid=%lu\n", thread_id );
+        return STATUS_PRIVILEGE_NOT_HELD;
+    }
+    status = I_RpcBindingInqLocalClientPID( binding, &process_id );
+    if (status != RPC_S_OK || !process_id)
+    {
+        ERR( "linuxnt-lsa-register-server pid-status=%#lx pid=%lu tid=%lu\n",
+             status, process_id, thread_id );
         return STATUS_ACCESS_DENIED;
+    }
     if (!(context = calloc( 1, sizeof(*context) ))) return STATUS_NO_MEMORY;
     cid.UniqueProcess = ULongToHandle( process_id );
     cid.UniqueThread = NULL;
     status = NtOpenProcess( &context->process, PROCESS_QUERY_LIMITED_INFORMATION, NULL, &cid );
     if (status)
     {
+        ERR( "linuxnt-lsa-register-server open-process pid=%lu status=%#lx\n",
+             process_id, status );
         free( context );
         return status;
     }
@@ -200,7 +229,30 @@ static NTSTATUS initialize_sid( SID *sid, const SID_IDENTIFIER_AUTHORITY *author
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS create_local_token( const struct lsa_local_account *account, DWORD client_process_id,
+static NTSTATUS get_client_session_id( handle_t binding, DWORD *session_id )
+{
+    HANDLE token;
+    RPC_STATUS rpc_status;
+    NTSTATUS status;
+
+    if ((rpc_status = RpcImpersonateClient( binding )) != RPC_S_OK)
+    {
+        WARN( "could not impersonate the logon client, status %lu\n", rpc_status );
+        return STATUS_ACCESS_DENIED;
+    }
+
+    status = NtOpenThreadToken( GetCurrentThread(), TOKEN_QUERY, TRUE, &token );
+    if (!status)
+    {
+        status = NtQueryInformationToken( token, TokenSessionId, session_id,
+                                          sizeof(*session_id), NULL );
+        NtClose( token );
+    }
+    if (RpcRevertToSelfEx( binding ) != RPC_S_OK && !status) status = STATUS_ACCESS_DENIED;
+    return status;
+}
+
+static NTSTATUS create_local_token( const struct lsa_local_account *account, DWORD session_id,
                                     const BYTE source_name[8], const LUID *source_id,
                                     const LSASS_TOKEN_GROUP *extra_groups, ULONG extra_count,
                                     LUID *logon_id, HANDLE *token )
@@ -233,7 +285,6 @@ static NTSTATUS create_local_token( const struct lsa_local_account *account, DWO
     OBJECT_ATTRIBUTES attributes;
     LARGE_INTEGER expiration;
     SID *user_sid;
-    DWORD session_id;
     ULONG group_count, i;
     BOOL have_logon_id = FALSE;
     NTSTATUS status;
@@ -334,10 +385,7 @@ static NTSTATUS create_local_token( const struct lsa_local_account *account, DWO
                             &default_dacl, &source );
     TRACE( "NtCreateToken returned %#lx for %lu groups\n", status, group_count );
     if (status) goto done;
-    if (!ProcessIdToSessionId( client_process_id, &session_id ))
-        status = STATUS_UNSUCCESSFUL;
-    else
-        status = NtSetInformationToken( *token, TokenSessionId, &session_id, sizeof(session_id) );
+    status = NtSetInformationToken( *token, TokenSessionId, &session_id, sizeof(session_id) );
     if (status)
     {
         NtClose( *token );
@@ -400,7 +448,7 @@ NTSTATUS __cdecl logon_user( handle_t binding, DWORD thread_id, LSASS_LOGON_HAND
     struct lsa_local_account account;
     WCHAR *domain = NULL, *user = NULL, *password = NULL;
     HANDLE local_token = NULL, remote_token = NULL;
-    DWORD process_id;
+    DWORD process_id, session_id;
     NTSTATUS status;
 
     TRACE( "handle %p, type %lu, package %lu, auth length %lu, local groups %lu\n",
@@ -421,6 +469,19 @@ NTSTATUS __cdecl logon_user( handle_t binding, DWORD thread_id, LSASS_LOGON_HAND
         return STATUS_ACCESS_DENIED;
     if (logon_type != Interactive && logon_type != Unlock) return STATUS_INVALID_LOGON_TYPE;
     if (!lsa_package_supports_local_interactive( package_id )) return STATUS_NO_SUCH_PACKAGE;
+
+    if (auth_len >= sizeof(struct sspiex_logon_user) &&
+        *(const ULONG *)auth_buf == SSPIEX_LOGON_USER_MESSAGE)
+    {
+        const struct sspiex_logon_user *request = (const struct sspiex_logon_user *)auth_buf;
+
+        if (request->auth_len > auth_len - sizeof(*request)) return STATUS_INVALID_PARAMETER;
+        client_auth_base = request->client_auth_base;
+        auth_buf += sizeof(*request);
+        auth_len = request->auth_len;
+        TRACE( "unwrapped SspiEx logon flags %#lx, auth base %p, auth length %lu\n",
+               request->flags, client_auth_base, auth_len );
+    }
     if (auth_len < sizeof(*logon)) return STATUS_INVALID_PARAMETER;
 
     logon = (const struct kerb_interactive_logon *)auth_buf;
@@ -446,7 +507,8 @@ NTSTATUS __cdecl logon_user( handle_t binding, DWORD thread_id, LSASS_LOGON_HAND
            status, *substatus, debugstr_w(account.name) );
     if (status) goto done;
     if ((status = create_profile( account.name, profile ))) goto done;
-    if ((status = create_local_token( &account, process_id, source_name, &source_id,
+    if ((status = get_client_session_id( binding, &session_id ))) goto done;
+    if ((status = create_local_token( &account, session_id, source_name, &source_id,
                                       local_groups, local_group_count,
                                       logon_id, &local_token )))
     {

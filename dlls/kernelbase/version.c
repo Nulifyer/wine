@@ -40,6 +40,7 @@
 #include "appmodel.h"
 
 #include "kernelbase.h"
+#include "package_catalog.h"
 #include "package_graph.h"
 #include "wine/debug.h"
 
@@ -1711,12 +1712,65 @@ LONG WINAPI DECLSPEC_HOTPATCH GetPackagesByPackageFamily(const WCHAR *family_nam
  */
 LONG WINAPI GetPackagePathByFullName(const WCHAR *name, UINT32 *len, WCHAR *path)
 {
-    if (!len || !name)
+    return GetPackagePathByFullName2(name, PackagePathType_Install, len, path);
+}
+
+static LONG get_package_path(const WCHAR *name, PackagePathType type, UINT32 *len,
+                             WCHAR *path, BOOL registered)
+{
+    struct package_catalog_entry *entry = NULL;
+    UINT32 supplied, required;
+    HRESULT hr;
+    LONG ret;
+
+    TRACE("(%s %u %p %p %u)\n", debugstr_w(name), type, len, path, registered);
+    if (!name || !len || (*len && !path)) return ERROR_INVALID_PARAMETER;
+    if (type < PackagePathType_Install || type > PackagePathType_EffectiveExternal)
         return ERROR_INVALID_PARAMETER;
+    /* The selected catalog exposes the install location. Effective falls back
+     * to it when no mutable or external projection is recorded. */
+    if (type != PackagePathType_Install && type != PackagePathType_Effective)
+        return ERROR_NOT_SUPPORTED;
+    supplied = *len;
+    hr = package_catalog_full_name(name, registered, &entry);
+    if (hr == S_FALSE) return ERROR_NOT_FOUND;
+    if (FAILED(hr)) return HRESULT_CODE(hr);
+    required = wcslen(entry->path) + 1;
+    *len = required;
+    if (supplied < required) ret = ERROR_INSUFFICIENT_BUFFER;
+    else
+    {
+        memcpy(path, entry->path, required * sizeof(*path));
+        ret = ERROR_SUCCESS;
+    }
+    package_catalog_free(entry);
+    return ret;
+}
 
-    FIXME( "(%s %p %p): stub\n", debugstr_w(name), len, path );
+/***********************************************************************
+ *         GetPackagePathByFullName2   (kernelbase.@)
+ */
+LONG WINAPI GetPackagePathByFullName2(const WCHAR *name, PackagePathType type,
+                                      UINT32 *len, WCHAR *path)
+{
+    return get_package_path(name, type, len, path, TRUE);
+}
 
-    return APPMODEL_ERROR_NO_PACKAGE;
+/***********************************************************************
+ *         GetStagedPackagePathByFullName   (kernelbase.@)
+ */
+LONG WINAPI GetStagedPackagePathByFullName(const WCHAR *name, UINT32 *len, WCHAR *path)
+{
+    return GetStagedPackagePathByFullName2(name, PackagePathType_Install, len, path);
+}
+
+/***********************************************************************
+ *         GetStagedPackagePathByFullName2   (kernelbase.@)
+ */
+LONG WINAPI GetStagedPackagePathByFullName2(const WCHAR *name, PackagePathType type,
+                                            UINT32 *len, WCHAR *path)
+{
+    return get_package_path(name, type, len, path, FALSE);
 }
 
 /***********************************************************************
@@ -2065,6 +2119,47 @@ LONG WINAPI FormatApplicationUserModelId(const WCHAR *family, const WCHAR *relat
     buffer[family_size] = L'!';
     memcpy(buffer + family_size + 1, relative, (relative_size + 1) * sizeof(*buffer));
     memcpy(id, buffer, required * sizeof(*id));
+    *length = required;
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *         PackageFamilyNameFromId   (kernelbase.@)
+ */
+LONG WINAPI PackageFamilyNameFromId(const PACKAGE_ID *id, UINT32 *length, WCHAR *buffer)
+{
+    const WCHAR *p;
+    UINT32 name_length, required;
+
+    TRACE("id %p, length %p, buffer %p.\n", id, length, buffer);
+    if (!id || !length || (*length && !buffer) || !id->name)
+        return ERROR_INVALID_PARAMETER;
+
+    name_length = wcslen(id->name);
+    if (name_length < PACKAGE_NAME_MIN_LENGTH || name_length > PACKAGE_NAME_MAX_LENGTH)
+        return ERROR_INVALID_PARAMETER;
+    for (p = id->name; *p; ++p)
+        if (!is_package_name_char(*p)) return ERROR_INVALID_PARAMETER;
+
+    /* Native derives this 13-character identifier from publisher when it is
+     * absent. The reached package records already carry publisherId; do not
+     * substitute a fabricated hash for the unsupported branch. */
+    if (!id->publisherId || wcslen(id->publisherId) != PACKAGE_PUBLISHERID_MAX_LENGTH)
+        return ERROR_NOT_SUPPORTED;
+    for (p = id->publisherId; *p; ++p)
+        if (!is_publisher_id_char(*p)) return ERROR_INVALID_PARAMETER;
+
+    required = name_length + 1 + PACKAGE_PUBLISHERID_MAX_LENGTH + 1;
+    if (*length < required)
+    {
+        *length = required;
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
+
+    memcpy(buffer, id->name, name_length * sizeof(*buffer));
+    buffer[name_length] = L'_';
+    memcpy(buffer + name_length + 1, id->publisherId,
+           (PACKAGE_PUBLISHERID_MAX_LENGTH + 1) * sizeof(*buffer));
     *length = required;
     return ERROR_SUCCESS;
 }

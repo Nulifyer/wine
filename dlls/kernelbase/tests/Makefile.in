@@ -16,6 +16,7 @@ SOURCES = \
 	rsrc.rc \
 	security.c \
 	state_helpers.c \
+	state_space.c \
 	sync.c \
 	timezone.c \
 	ui_language.c

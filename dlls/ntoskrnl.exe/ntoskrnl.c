@@ -4356,6 +4356,50 @@ static BOOLEAN get_drv_name( UNICODE_STRING *drv_name, const UNICODE_STRING *ser
 }
 
 /***********************************************************************
+ *           __wine_load_driver   (Not a Windows API)
+ *
+ * Load a built-in driver without consulting the service manager.  This is
+ * used by standalone winedevice hosts which provide Wine devices to a native
+ * Windows service stack.
+ */
+NTSTATUS CDECL __wine_load_driver( const WCHAR *driver_name )
+{
+    static const WCHAR driverW[] = L"\\Driver\\";
+    struct wine_rb_entry *entry;
+    UNICODE_STRING drv_name;
+    NTSTATUS status;
+    WCHAR *name;
+
+    if (!driver_name || !driver_name[0] || wcschr( driver_name, '\\' ))
+        return STATUS_INVALID_PARAMETER;
+
+    if (!(name = malloc( sizeof(driverW) + wcslen(driver_name) * sizeof(WCHAR) )))
+        return STATUS_NO_MEMORY;
+    wcscpy( name, driverW );
+    wcscat( name, driver_name );
+    RtlInitUnicodeString( &drv_name, name );
+
+    if (wine_rb_get( &wine_drivers, &drv_name ))
+    {
+        free( name );
+        return STATUS_IMAGE_ALREADY_LOADED;
+    }
+
+    status = IoCreateDriver( &drv_name, init_driver );
+    entry = wine_rb_get( &wine_drivers, &drv_name );
+    free( name );
+    if (status != STATUS_SUCCESS)
+    {
+        ERR( "failed to create standalone driver %s: %08lx\n", debugstr_w(driver_name), status );
+        return status;
+    }
+    if (!entry) return STATUS_UNSUCCESSFUL;
+
+    wine_enumerate_root_devices( driver_name );
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
  *           ZwLoadDriver (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI ZwLoadDriver( const UNICODE_STRING *service_name )

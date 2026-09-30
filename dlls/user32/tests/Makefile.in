@@ -5,8 +5,8 @@ EXTRADLLFLAGS = -Wl,--subsystem,console:5.2
 testdll_IMPORTS = user32
 
 SOURCES = \
-	bsdr.c \
 	broadcast.c \
+	bsdr.c \
 	class.c \
 	clipboard.c \
 	combo.c \
@@ -35,8 +35,8 @@ SOURCES = \
 	testdll.spec \
 	text.c \
 	uitools.c \
+	win.c \
 	window_band.c \
 	window_lifecycle.c \
-	win.c \
 	winstation.c \
 	wsprintf.c

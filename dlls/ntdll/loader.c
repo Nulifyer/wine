@@ -5177,6 +5177,7 @@ NTSTATUS WINAPI ApiSetQueryApiSetPresence( const UNICODE_STRING *name, BOOLEAN *
 
     *present = (!get_apiset_entry( map, name->Buffer, name->Length / sizeof(WCHAR), &entry ) &&
                 !get_apiset_target( map, entry, NULL, &str ));
+    TRACE( "%s -> %u\n", debugstr_us(name), *present );
     return STATUS_SUCCESS;
 }
 

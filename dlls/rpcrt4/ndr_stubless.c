@@ -50,6 +50,19 @@ WINE_DEFAULT_DEBUG_CHANNEL(rpc);
 
 #define NDR_TABLE_MASK 127
 
+static const UUID linuxnt_usermgr_interface =
+    {0xb18fbab6, 0x56f8, 0x4702, {0x84, 0xe0, 0x41, 0x05, 0x32, 0x93, 0xa8, 0x69}};
+static const UUID linuxnt_mpnotify_interface =
+    {0x3ca78105, 0xa3a3, 0x4a68, {0xb4, 0x58, 0x1a, 0x60, 0x6b, 0xab, 0x8f, 0xd6}};
+
+static BOOL is_linuxnt_usermgr_call(const MIDL_STUB_DESC *stub_desc, unsigned short procedure_number)
+{
+    const RPC_CLIENT_INTERFACE *client_if = stub_desc->RpcInterfaceInformation;
+
+    return procedure_number == 11 && client_if &&
+           IsEqualGUID(&client_if->InterfaceId.SyntaxGUID, &linuxnt_usermgr_interface);
+}
+
 static inline BOOL is_oicf_stubdesc(const PMIDL_STUB_DESC pStubDesc)
 {
     return pStubDesc->Version >= 0x20000;
@@ -149,6 +162,16 @@ static inline void call_freer(PMIDL_STUB_MESSAGE pStubMsg, unsigned char *pMemor
     if (m) m(pStubMsg, pMemory, pFormat);
 }
 
+static const unsigned char *resolve_type_format(const unsigned char *format)
+{
+    while (*format == FC_SUPPLEMENT)
+    {
+        format += 2;
+        format += *(const SHORT *)format;
+    }
+    return format;
+}
+
 static SIZE_T calc_arg_size(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
 {
     SIZE_T size;
@@ -221,6 +244,12 @@ static SIZE_T calc_arg_size(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
     }
     case FC_BYTE_COUNT_POINTER:
         ComputeConformanceOrVariance(pStubMsg, NULL, pFormat + 2, 0, &size);
+        break;
+    case FC_SUPPLEMENT:
+        size = calc_arg_size(pStubMsg, (PFORMAT_STRING)resolve_type_format(pFormat));
+        break;
+    case FC_BIND_CONTEXT:
+        size = sizeof(void *);
         break;
     default:
         FIXME("Unhandled type %02x\n", *pFormat);
@@ -714,6 +743,7 @@ static LONG_PTR ndr_client_call( const MIDL_STUB_DESC *stub_desc, const PFORMAT_
 {
     struct ndr_client_call_ctx finally_ctx;
     RPC_MESSAGE rpc_msg;
+    BOOL linuxnt_usermgr = is_linuxnt_usermgr_call(stub_desc, procedure_number);
     handle_t hbinding = NULL;
     /* the value to return to the client from the remote procedure */
     LONG_PTR retval = 0;
@@ -751,6 +781,7 @@ static LONG_PTR ndr_client_call( const MIDL_STUB_DESC *stub_desc, const PFORMAT_
         /* we only need a handle if this isn't an object method */
         if (!(proc_header->Oi_flags & Oi_OBJECT_PROC))
             hbinding = client_get_handle(stub_msg, proc_header, handle_format);
+        if (linuxnt_usermgr) ERR("linuxnt-usermgr-ndr handle=%p\n", hbinding);
 
         stub_msg->BufferLength = 0;
 
@@ -799,6 +830,7 @@ static LONG_PTR ndr_client_call( const MIDL_STUB_DESC *stub_desc, const PFORMAT_
         TRACE( "CALCSIZE\n" );
         client_do_args(stub_msg, format, STUBLESS_CALCSIZE, fpu_args,
                        number_of_params, (unsigned char *)&retval);
+        if (linuxnt_usermgr) ERR("linuxnt-usermgr-ndr calcsize=%lu\n", stub_msg->BufferLength);
 
         /* 3. GETBUFFER */
         TRACE( "GETBUFFER\n" );
@@ -813,7 +845,11 @@ static LONG_PTR ndr_client_call( const MIDL_STUB_DESC *stub_desc, const PFORMAT_
             FIXME("using auto handle - call NdrNsGetBuffer when it gets implemented\n");
 #endif
         else
+        {
+            if (linuxnt_usermgr) ERR("linuxnt-usermgr-ndr getbuffer begin\n");
             NdrGetBuffer(stub_msg, stub_msg->BufferLength, hbinding);
+            if (linuxnt_usermgr) ERR("linuxnt-usermgr-ndr getbuffer end\n");
+        }
 
         /* 4. MARSHAL */
         TRACE( "MARSHAL\n" );
@@ -834,7 +870,12 @@ static LONG_PTR ndr_client_call( const MIDL_STUB_DESC *stub_desc, const PFORMAT_
             FIXME("using auto handle - call NdrNsSendReceive when it gets implemented\n");
 #endif
         else
+        {
+            if (linuxnt_usermgr) ERR("linuxnt-usermgr-ndr sendreceive begin\n");
             NdrSendReceive(stub_msg, stub_msg->Buffer);
+            if (linuxnt_usermgr) ERR("linuxnt-usermgr-ndr sendreceive end length=%u\n",
+                                     stub_msg->RpcMsg->BufferLength);
+        }
 
         /* convert strings, floating point values and endianness into our
          * preferred format */
@@ -1153,6 +1194,7 @@ static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
     {
         unsigned char *pArg = pStubMsg->StackTop + params[i].stack_offset;
         const unsigned char *pTypeFormat = &pStubMsg->StubDesc->pFormatTypes[params[i].u.type_offset];
+        const unsigned char *pResolvedTypeFormat = resolve_type_format(pTypeFormat);
 
         TRACE("param[%d]: %p -> %p type %02x %s\n", i,
               pArg, *(unsigned char **)pArg,
@@ -1179,15 +1221,15 @@ static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
             else if (param_needs_alloc(params[i].attr) &&
                      (!params[i].attr.MustFree || params[i].attr.IsSimpleRef))
             {
-                if (*pTypeFormat != FC_BIND_CONTEXT) pStubMsg->pfnFree(*(void **)pArg);
+                if (*pResolvedTypeFormat != FC_BIND_CONTEXT) pStubMsg->pfnFree(*(void **)pArg);
             }
             break;
         case STUBLESS_INITOUT:
             if (param_needs_alloc(params[i].attr) && !params[i].attr.ServerAllocSize)
             {
-                if (*pTypeFormat == FC_BIND_CONTEXT)
+                if (*pResolvedTypeFormat == FC_BIND_CONTEXT)
                 {
-                    NDR_SCONTEXT ctxt = NdrContextHandleInitialize(pStubMsg, pTypeFormat);
+                    NDR_SCONTEXT ctxt = NdrContextHandleInitialize(pStubMsg, (PFORMAT_STRING)pResolvedTypeFormat);
                     *(void **)pArg = NDRSContextValue(ctxt);
                     if (params[i].attr.IsReturn) retval_ptr = (LONG_PTR *)NDRSContextValue(ctxt);
                 }
@@ -2378,6 +2420,7 @@ RPC_STATUS NdrpAbortAsyncServerCall(RPC_ASYNC_STATE *pAsync, ULONG exception_cod
 LONG_PTR CDECL ndr64_client_call( MIDL_STUBLESS_PROXY_INFO *info,
         ULONG proc, void *retval, void **stack_top )
 {
+    const RPC_CLIENT_INTERFACE *client_if = info->pStubDesc->RpcInterfaceInformation;
     ULONG_PTR i;
 
     TRACE("info %p, proc %lu, retval %p, stack_top %p\n", info, proc, retval, stack_top);
@@ -2391,11 +2434,22 @@ LONG_PTR CDECL ndr64_client_call( MIDL_STUBLESS_PROXY_INFO *info,
                 id->SyntaxVersion.MajorVersion, id->SyntaxVersion.MinorVersion);
         if (!memcmp(id, &ndr_syntax_id, sizeof(RPC_SYNTAX_IDENTIFIER)))
         {
+            LONG_PTR result;
+
             if (retval)
                 FIXME("Complex return types are not supported.\n");
 
-            return NdrpClientCall2( info->pStubDesc,
+            if (IsEqualGUID(&client_if->InterfaceId.SyntaxGUID, &linuxnt_usermgr_interface))
+                ERR("linuxnt-usermgr-client proc=%lu begin\n", proc);
+            if (IsEqualGUID(&client_if->InterfaceId.SyntaxGUID, &linuxnt_mpnotify_interface))
+                ERR("linuxnt-mpnotify-client proc=%lu begin\n", proc);
+            result = NdrpClientCall2( info->pStubDesc,
                     syntax_info->ProcString + syntax_info->FmtStringOffset[proc], stack_top, FALSE );
+            if (IsEqualGUID(&client_if->InterfaceId.SyntaxGUID, &linuxnt_usermgr_interface))
+                ERR("linuxnt-usermgr-client proc=%lu result=%#Ix\n", proc, result);
+            if (IsEqualGUID(&client_if->InterfaceId.SyntaxGUID, &linuxnt_mpnotify_interface))
+                ERR("linuxnt-mpnotify-client proc=%lu result=%#Ix\n", proc, result);
+            return result;
         }
     }
 

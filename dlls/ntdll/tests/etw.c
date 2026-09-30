@@ -15,6 +15,7 @@
 #include "winbase.h"
 #include "winternl.h"
 #include "wmistr.h"
+#include "evntprov.h"
 
 #include "wine/test.h"
 
@@ -75,7 +76,39 @@ static void test_private_logger_request(void)
         request.logger.BufferSize );
 }
 
+static void test_event_write_no_registration(void)
+{
+    static const GUID provider =
+        {0x57696e65, 0x4554, 0x5700, {0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x01}};
+    ULONG (WINAPI *write_no_registration)(const GUID *, const EVENT_DESCRIPTOR *, ULONG,
+                                          EVENT_DATA_DESCRIPTOR *);
+    EVENT_DESCRIPTOR descriptor = {0};
+    EVENT_DATA_DESCRIPTOR data;
+    HMODULE ntdll = GetModuleHandleA( "ntdll.dll" );
+    ULONG value = 0x12345678, ret;
+
+    write_no_registration = (void *)GetProcAddress( ntdll, "EtwEventWriteNoRegistration" );
+    ok( !!write_no_registration, "EtwEventWriteNoRegistration is unavailable\n" );
+    if (!write_no_registration) return;
+
+    descriptor.Id = 1;
+    descriptor.Level = 4;
+    data.Ptr = (ULONGLONG)(ULONG_PTR)&value;
+    data.Size = sizeof(value);
+    data.Reserved = 0;
+
+    ret = write_no_registration( NULL, &descriptor, 1, &data );
+    ok( ret == ERROR_INVALID_PARAMETER, "null provider returned %lu\n", ret );
+    ret = write_no_registration( &provider, NULL, 1, &data );
+    ok( ret == ERROR_INVALID_PARAMETER, "null descriptor returned %lu\n", ret );
+    ret = write_no_registration( &provider, &descriptor, 1, NULL );
+    ok( ret == ERROR_INVALID_PARAMETER, "null data returned %lu\n", ret );
+    ret = write_no_registration( &provider, &descriptor, 1, &data );
+    ok( ret == ERROR_SUCCESS, "valid event returned %lu\n", ret );
+}
+
 START_TEST(etw)
 {
     test_private_logger_request();
+    test_event_write_no_registration();
 }

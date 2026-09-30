@@ -336,6 +336,33 @@ NTSTATUS WINAPI wow64_NtUserRemoteConnect( UINT *args )
     return NtUserRemoteConnect( connect_info, operation, output );
 }
 
+NTSTATUS WINAPI wow64_NtUserRemoteConnectState( UINT *args )
+{
+    return NtUserRemoteConnectState();
+}
+
+NTSTATUS WINAPI wow64_NtUserRemoteDisconnect( UINT *args )
+{
+    return NtUserRemoteDisconnect();
+}
+
+NTSTATUS WINAPI wow64_NtUserRemoteNotify( UINT *args )
+{
+    const UINT *notification = get_ptr( &args );
+
+    return NtUserRemoteNotify( notification );
+}
+
+NTSTATUS WINAPI wow64_NtUserRemotePassthruDisable( UINT *args )
+{
+    return NtUserRemotePassthruDisable();
+}
+
+NTSTATUS WINAPI wow64_NtUserRemotePassthruEnable( UINT *args )
+{
+    return NtUserRemotePassthruEnable();
+}
+
 NTSTATUS WINAPI wow64_NtUserSetCoreWindow( UINT *args )
 {
     HWND hwnd = get_handle( &args );

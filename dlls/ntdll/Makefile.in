@@ -21,8 +21,8 @@ SOURCES = \
 	debugbuffer.c \
 	env.c \
 	error.c \
-	feature.c \
 	exception.c \
+	feature.c \
 	handletable.c \
 	heap.c \
 	large_int.c \
@@ -50,7 +50,6 @@ SOURCES = \
 	sync.c \
 	thread.c \
 	threadpool.c \
-	wnf.c \
 	time.c \
 	unix/alpc.c \
 	unix/cdrom.c \
@@ -74,11 +73,12 @@ SOURCES = \
 	unix/system.c \
 	unix/tape.c \
 	unix/thread.c \
-	unix/wnf.c \
 	unix/virtual.c \
+	unix/wnf.c \
 	unwind.c \
 	version.c \
-	wcstring.c
+	wcstring.c \
+	wnf.c
 
 EXTRA_OBJS = unix/version.o
 

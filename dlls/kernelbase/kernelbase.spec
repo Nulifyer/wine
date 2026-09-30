@@ -129,7 +129,7 @@
 @ stub CheckGroupPolicyEnabled
 # @ stub CheckIfStateChangeNotificationExists
 @ stdcall CheckRemoteDebuggerPresent(long ptr)
-# @ stub CheckTokenCapability
+@ stdcall CheckTokenCapability(long ptr ptr)
 @ stdcall CheckTokenMembership(long ptr ptr)
 @ stdcall CheckTokenMembershipEx(long ptr long ptr)
 @ stdcall ChrCmpIA(long long)
@@ -141,7 +141,7 @@
 # @ stub ClosePackageInfo
 # @ stub ClosePrivateNamespace
 @ stdcall ClosePseudoConsole(ptr)
-# @ stub CloseState
+@ stdcall CloseState(ptr)
 # @ stub CloseStateAtom
 # @ stub CloseStateChangeNotification
 # @ stub CloseStateContainer
@@ -497,6 +497,7 @@
 @ stdcall GetCurrentPackageInfo(long ptr ptr ptr)
 @ stdcall -arch=win64 GetCurrentPackageInfo2(long long ptr ptr ptr)
 @ stdcall -arch=win64 GetCurrentPackageInfo3(long long ptr ptr ptr)
+@ stdcall -arch=win64 GetCurrentPackageInfo_PackageNameAliases(long ptr ptr ptr)
 @ stdcall -arch=win64 AddDependencyToProcessPackageGraph(wstr wstr long long)
 @ stdcall -arch=win64 AddPackageNameAliasesByPackageFullName(wstr long ptr)
 @ stdcall -arch=win64 GetPackageNameAliasesByPackageFullName(wstr ptr ptr)
@@ -645,6 +646,7 @@
 # @ stub GetPackageOSMaxVersionTested
 # @ stub GetPackagePath
 @ stdcall GetPackagePathByFullName(wstr ptr wstr)
+@ stdcall GetPackagePathByFullName2(wstr long ptr wstr)
 # @ stub GetPackagePathOnVolume
 # @ stub GetPackageProperty
 # @ stub GetPackagePropertyString
@@ -710,7 +712,8 @@
 @ stdcall GetSidSubAuthority(ptr long)
 @ stdcall GetSidSubAuthorityCount(ptr)
 # @ stub GetStagedPackageOrigin
-# @ stub GetStagedPackagePathByFullName
+@ stdcall GetStagedPackagePathByFullName(wstr ptr wstr)
+@ stdcall GetStagedPackagePathByFullName2(wstr long ptr wstr)
 @ stdcall GetStartupInfoW(ptr)
 # @ stub GetStateContainerDepth
 # @ stub GetStateFolder
@@ -725,7 +728,7 @@
 @ stdcall GetStringTypeExW(long long wstr long ptr)
 @ stdcall GetStringTypeW(long wstr long ptr)
 # @ stub GetSystemAppDataFolder
-# @ stub GetSystemAppDataKey
+@ stdcall GetSystemAppDataKey(ptr ptr ptr ptr)
 @ stdcall GetSystemCpuSetInformation(ptr long ptr ptr long)
 @ stdcall GetSystemDefaultLCID()
 @ stdcall GetSystemDefaultLangID()
@@ -1057,7 +1060,7 @@
 @ stdcall OpenSemaphoreW(long long wstr)
 @ stdcall OpenState()
 # @ stub OpenStateAtom
-# @ stub OpenStateExplicit
+@ stdcall OpenStateExplicit(long wstr)
 # @ stub OpenStateExplicitForUserSid
 # @ stub OpenStateExplicitForUserSidString
 @ stdcall OpenThread(long long long)
@@ -1067,7 +1070,7 @@
 @ stdcall OutputDebugStringW(wstr)
 # @ stub OverrideRoamingDataModificationTimesInRange
 @ stdcall PackageFamilyNameFromFullName(wstr ptr ptr)
-# @ stub PackageFamilyNameFromId
+@ stdcall PackageFamilyNameFromId(ptr ptr ptr)
 # @ stub PackageFamilyNameFromProductId
 @ stdcall PackageFullNameFromId(ptr ptr ptr)
 # @ stub PackageFullNameFromProductId
@@ -1794,6 +1797,7 @@
 @ stdcall WerUnregisterFile(wstr)
 @ stdcall WerUnregisterMemoryBlock(ptr)
 @ stdcall WerUnregisterRuntimeExceptionModule(wstr ptr)
+@ cdecl WilFailureNotifyWatchers(long ptr ptr)
 # @ stub WerpNotifyLoadStringResource
 # @ stub WerpNotifyUseStringResource
 @ stdcall WideCharToMultiByte(long long wstr long ptr long ptr ptr)

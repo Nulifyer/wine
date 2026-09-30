@@ -1121,6 +1121,7 @@ static void test_RpcServerRegisterAuthInfo(void)
 
 static void test_RpcServerUseProtseq(void)
 {
+    static RPC_STATUS (WINAPI *pRpcServerInqBindingsEx)(void *, RPC_BINDING_VECTOR **);
     RPC_STATUS status;
     RPC_BINDING_VECTOR *bindings;
     ULONG i;
@@ -1128,10 +1129,16 @@ static void test_RpcServerUseProtseq(void)
     ULONG binding_count_after1;
     ULONG binding_count_after2;
     ULONG endpoints_registered = 0;
+    char ncalrpc_endpoint1[64], ncalrpc_endpoint2[64];
     static unsigned char iptcp[] = "ncacn_ip_tcp";
     static unsigned char np[] = "ncacn_np";
     static unsigned char ncalrpc[] = "ncalrpc";
     BOOL iptcp_registered = FALSE, np_registered = FALSE, ncalrpc_registered = FALSE;
+
+    pRpcServerInqBindingsEx = (void *)GetProcAddress(GetModuleHandleA("rpcrt4.dll"),
+                                                     "RpcServerInqBindingsEx");
+    sprintf(ncalrpc_endpoint1, "wine_rpc_test_%08lx_1", GetCurrentProcessId());
+    sprintf(ncalrpc_endpoint2, "wine_rpc_test_%08lx_2", GetCurrentProcessId());
 
     status = RpcServerInqBindings(&bindings);
     if (status == RPC_S_NO_BINDINGS)
@@ -1179,6 +1186,14 @@ static void test_RpcServerUseProtseq(void)
     ok(status == RPC_S_OK, "RpcServerUseProtseqEp(ncalrpc) failed with status %ld\n", status);
     if (status == RPC_S_OK && !ncalrpc_registered) endpoints_registered++;
 
+    status = RpcServerUseProtseqEpA(ncalrpc, 0, (RPC_CSTR)ncalrpc_endpoint1, NULL);
+    ok(status == RPC_S_OK, "RpcServerUseProtseqEp(ncalrpc endpoint 1) failed with status %ld\n", status);
+    if (status == RPC_S_OK) endpoints_registered++;
+
+    status = RpcServerUseProtseqEpA(ncalrpc, 0, (RPC_CSTR)ncalrpc_endpoint2, NULL);
+    ok(status == RPC_S_OK, "RpcServerUseProtseqEp(ncalrpc endpoint 2) failed with status %ld\n", status);
+    if (status == RPC_S_OK) endpoints_registered++;
+
     status = RpcServerInqBindings(&bindings);
     ok(status == RPC_S_OK, "RpcServerInqBindings failed with status %ld\n", status);
     binding_count_after1 = bindings->Count;
@@ -1195,6 +1210,30 @@ static void test_RpcServerUseProtseq(void)
     }
     RpcBindingVectorFree(&bindings);
 
+    if (pRpcServerInqBindingsEx)
+    {
+        SECURITY_DESCRIPTOR invalid_descriptor;
+
+        bindings = NULL;
+        status = pRpcServerInqBindingsEx(NULL, &bindings);
+        ok(status == RPC_S_OK, "RpcServerInqBindingsEx failed with status %ld\n", status);
+        ok(bindings != NULL, "expected binding vector\n");
+        if (bindings)
+        {
+            ok(bindings->Count == binding_count_after1, "got %lu bindings, expected %lu\n",
+               bindings->Count, binding_count_after1);
+            RpcBindingVectorFree(&bindings);
+        }
+
+        memset(&invalid_descriptor, 0, sizeof(invalid_descriptor));
+        bindings = (void *)0xdeadbeef;
+        status = pRpcServerInqBindingsEx(&invalid_descriptor, &bindings);
+        ok(status == RPC_S_INVALID_ARG, "got status %ld\n", status);
+        ok(bindings == NULL, "got binding vector %p\n", bindings);
+    }
+    else
+        win_skip("RpcServerInqBindingsEx is unavailable\n");
+
     /* re-register - endpoints should be reused */
     status = RpcServerUseProtseqA(np, 0, NULL);
     if (status == RPC_S_PROTSEQ_NOT_SUPPORTED)
@@ -1207,6 +1246,12 @@ static void test_RpcServerUseProtseq(void)
 
     status = RpcServerUseProtseqA(ncalrpc, 0, NULL);
     ok(status == RPC_S_OK, "RpcServerUseProtseqEp(ncalrpc) failed with status %ld\n", status);
+
+    status = RpcServerUseProtseqEpA(ncalrpc, 0, (RPC_CSTR)ncalrpc_endpoint1, NULL);
+    ok(status == RPC_S_OK, "RpcServerUseProtseqEp(ncalrpc endpoint 1) failed with status %ld\n", status);
+
+    status = RpcServerUseProtseqEpA(ncalrpc, 0, (RPC_CSTR)ncalrpc_endpoint2, NULL);
+    ok(status == RPC_S_OK, "RpcServerUseProtseqEp(ncalrpc endpoint 2) failed with status %ld\n", status);
 
     status = RpcServerInqBindings(&bindings);
     ok(status == RPC_S_OK, "RpcServerInqBindings failed with status %ld\n", status);
@@ -1262,6 +1307,15 @@ static void test_endpoint_mapper(RPC_CSTR protseq, RPC_CSTR address)
 
     status = RpcBindingReset(handle);
     ok(status == RPC_S_OK, "%s: RpcBindingReset failed with error %lu\n", protseq, status);
+
+    status = RpcBindingSetObject(handle, &object_uuid);
+    ok(status == RPC_S_OK, "%s: RpcBindingSetObject failed with error %lu\n", protseq, status);
+
+    status = RpcEpResolveBinding(handle, IFoo_v0_0_s_ifspec);
+    ok(status == RPC_S_OK, "%s: nil object RpcEpResolveBinding failed with error %lu\n", protseq, status);
+
+    status = RpcBindingReset(handle);
+    ok(status == RPC_S_OK, "%s: nil object RpcBindingReset failed with error %lu\n", protseq, status);
 
     status = RpcEpUnregister(IFoo_v0_0_s_ifspec, binding_vector, NULL);
     ok(status == RPC_S_OK, "%s: RpcEpUnregister failed with error %lu\n", protseq, status);

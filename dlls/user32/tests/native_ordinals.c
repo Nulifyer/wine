@@ -48,6 +48,7 @@ typedef UINT_PTR (WINAPI *delegate_input_fn)(DWORD, void *, void *, HWND, UINT, 
 typedef BOOL (WINAPI *undelegate_input_fn)(HWND, UINT);
 typedef void (CDECL *window_services_destroy_callback)(HWND);
 typedef BOOL (WINAPI *set_window_services_destroy_callback_fn)(HWND, window_services_destroy_callback);
+typedef BOOL (WINAPI *report_inertia_fn)(ULONG_PTR, UINT, HWND, const void *, const void *);
 typedef BOOL (WINAPI *force_enable_numpad_translation_fn)(BOOL);
 typedef UINT (WINAPI *get_window_dpi_fn)(HWND);
 
@@ -79,6 +80,19 @@ static HWND input_delegate_target, input_delegate_callback_hwnd;
 static void *input_delegate_callback_context;
 static UINT input_delegate_callback_message, input_delegate_option;
 static unsigned int input_delegate_callback_count, input_delegate_target_count;
+
+struct test_inertia_info
+{
+    float velocity_x;
+    float velocity_y;
+    UINT source;
+};
+
+struct test_inertia_region
+{
+    RECT rect;
+    float transform[6];
+};
 
 struct numpad_translation_thread_params
 {
@@ -162,6 +176,61 @@ static void test_get_window_dpi(HMODULE module)
     dpi = get_window_dpi(desktop);
     ok(dpi == GetDpiForWindow(desktop), "desktop returned %u.\n", dpi);
     ok(GetLastError() == 0xdeadbeef, "desktop changed last error to %lu.\n", GetLastError());
+}
+
+static void test_report_inertia(HMODULE module)
+{
+    report_inertia_fn report_inertia = (void *)GetProcAddress(module, (const char *)2551);
+    struct test_inertia_info info = {3.0f, 4.0f, 1};
+    struct test_inertia_region region = {{0, 0, 100, 100}, {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f}};
+    BOOL ret;
+
+    ok(!!report_inertia, "ReportInertia ordinal is unavailable.\n");
+    if (!report_inertia || !winetest_platform_is_wine) return;
+
+    SetLastError(0xdeadbeef);
+    ret = report_inertia(0, 5, NULL, &info, &region);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "zero identity returned %d, error %lu.\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = report_inertia(0x1234, 0, NULL, &info, &region);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "missing operation returned %d, error %lu.\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = report_inertia(0x1234, 3, NULL, &info, &region);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "combined operation returned %d, error %lu.\n", ret, GetLastError());
+
+    info.velocity_x = info.velocity_y = 0.0f;
+    SetLastError(0xdeadbeef);
+    ret = report_inertia(0x1234, 5, NULL, &info, &region);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "zero velocity returned %d, error %lu.\n", ret, GetLastError());
+
+    info.velocity_x = 3.0f;
+    info.velocity_y = 4.0f;
+    ret = report_inertia(0x1234, 5, NULL, &info, &region);
+    ok(ret, "start failed, error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = report_inertia(0x1234, 5, NULL, &info, &region);
+    ok(!ret && GetLastError() == ERROR_ACCESS_DENIED,
+       "weaker duplicate returned %d, error %lu.\n", ret, GetLastError());
+
+    info.velocity_x = 1.0f;
+    info.velocity_y = 0.0f;
+    ret = report_inertia(0x1234, 13, NULL, &info, &region);
+    ok(ret, "explicit replacement failed, error %lu.\n", GetLastError());
+
+    ret = report_inertia(0x1234, 6, NULL, NULL, NULL);
+    ok(ret, "stop failed, error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = report_inertia(0x1234, 6, NULL, NULL, NULL);
+    ok(!ret && GetLastError() == ERROR_ACCESS_DENIED,
+       "second stop returned %d, error %lu.\n", ret, GetLastError());
 }
 
 static UINT_PTR WINAPI input_delegate_callback(MSG *message, void *context)
@@ -1220,6 +1289,26 @@ static void test_window_composition_attributes(HMODULE module)
     ret = get_attribute(window, &data);
     ok(ret && value == TRUE, "accent-presence query returned %d, value %#lx.\n", ret, value);
 
+    value = TRUE;
+    data.attribute = 17; /* WCA_CLOAK */
+    data.data = &value;
+    data.size = sizeof(value);
+    ret = set_attribute(window, &data);
+    ok(ret, "setting window cloak failed, error %lu.\n", GetLastError());
+    value = FALSE;
+    data.attribute = 18; /* WCA_CLOAKED */
+    ret = get_attribute(window, &data);
+    ok(ret && value == TRUE, "cloaked-state query returned %d, value %#lx.\n", ret, value);
+
+    value = FALSE;
+    data.attribute = 17;
+    ret = set_attribute(window, &data);
+    ok(ret, "clearing window cloak failed, error %lu.\n", GetLastError());
+    value = TRUE;
+    data.attribute = 18;
+    ret = get_attribute(window, &data);
+    ok(ret && value == FALSE, "uncloaked-state query returned %d, value %#lx.\n", ret, value);
+
     memset(accent, 0, sizeof(accent));
     data.attribute = 19;
     data.data = accent;
@@ -1285,6 +1374,7 @@ START_TEST(native_ordinals)
     module = GetModuleHandleW(L"user32.dll");
     test_force_enable_numpad_translation(module);
     test_get_window_dpi(module);
+    test_report_inertia(module);
     test_input_delegation(module);
     test_schedule_dispatch_notification(module);
     test_queue_status_readonly(module);

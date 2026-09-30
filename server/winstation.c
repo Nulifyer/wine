@@ -133,7 +133,8 @@ static bool winstation_init( struct object *obj, const void *init_data )
     struct winstation *winstation = (struct winstation *)obj;
     const struct winstation_init_data *data = init_data;
 
-    winstation->desktop_switch_event = get_session_desktop_switch_event( current->process->session_id );
+    winstation->session_id = current->process->session_id;
+    winstation->desktop_switch_event = get_session_desktop_switch_event( winstation->session_id );
     if (!winstation->desktop_switch_event) return false;
     if (!(winstation->desktop_names = create_namespace( 7 )))
     {
@@ -310,6 +311,61 @@ struct winstation *get_visible_winstation(void)
     LIST_FOR_EACH_ENTRY( winstation, &winstation_list, struct winstation, entry )
         if (winstation->flags & WSF_VISIBLE) return winstation;
     return NULL;
+}
+
+static struct winstation *get_session_visible_winstation( unsigned int session_id )
+{
+    struct winstation *winstation;
+
+    LIST_FOR_EACH_ENTRY( winstation, &winstation_list, struct winstation, entry )
+        if (winstation->session_id == session_id && (winstation->flags & WSF_VISIBLE)) return winstation;
+    return NULL;
+}
+
+int connect_process_input_desktop( struct process *process )
+{
+    struct winstation *winstation = NULL;
+    struct desktop *desktop = NULL;
+    obj_handle_t handle, old_handle;
+
+    if (process->desktop) return 1;
+
+    if (process->winstation)
+    {
+        winstation = get_process_winstation( process, 0 );
+        if (winstation && winstation->session_id != process->session_id)
+        {
+            release_object( winstation );
+            winstation = NULL;
+            old_handle = process->winstation;
+            process->winstation = 0;
+            close_handle( process, old_handle );
+            clear_error();
+        }
+        if (!winstation) clear_error();
+    }
+    if (!winstation)
+    {
+        if (!(winstation = get_session_visible_winstation( process->session_id ))) goto done;
+        grab_object( winstation );
+        /* This is the server-selected equivalent of an inherited default
+         * station handle, not an application open of an arbitrary station. */
+        handle = alloc_handle_no_access_check( process, winstation,
+                                               STANDARD_RIGHTS_REQUIRED | WINSTA_ALL_ACCESS, 0 );
+        if (!handle) goto done;
+        process->winstation = handle;
+    }
+
+    if (!(desktop = get_input_desktop( winstation ))) goto done;
+    handle = alloc_handle_no_access_check( process, desktop,
+                                           STANDARD_RIGHTS_REQUIRED | DESKTOP_ALL_ACCESS, 0 );
+    if (!handle) goto done;
+    set_process_default_desktop( process, desktop, handle );
+
+done:
+    if (desktop) release_object( desktop );
+    if (winstation) release_object( winstation );
+    return !!process->desktop;
 }
 
 /* retrieve the winstation current input desktop */
@@ -670,6 +726,28 @@ void connect_process_winstation( struct process *process, struct unicode_str des
                                    process, 0, 0, DUPLICATE_SAME_ACCESS );
         winstation = (struct winstation *)get_handle_obj( process, handle, 0, &winstation_ops );
     }
+    if (winstation && winstation->session_id != process->session_id)
+    {
+        release_object( winstation );
+        winstation = NULL;
+        if (handle) close_handle( process, handle );
+        handle = 0;
+        clear_error();
+    }
+    if (!winstation && !winstation_name.len)
+    {
+        clear_error();
+        if ((winstation = get_session_visible_winstation( process->session_id )))
+        {
+            grab_object( winstation );
+            handle = alloc_handle( process, winstation, STANDARD_RIGHTS_REQUIRED | WINSTA_ALL_ACCESS, 0 );
+            if (!handle)
+            {
+                release_object( winstation );
+                winstation = NULL;
+            }
+        }
+    }
     if (!winstation) goto done;
     process->winstation = handle;
 
@@ -686,20 +764,25 @@ void connect_process_winstation( struct process *process, struct unicode_str des
     {
         handle = alloc_handle( process, desktop, STANDARD_RIGHTS_REQUIRED | DESKTOP_ALL_ACCESS, 0 );
     }
-    else
+    else if ((parent_thread && parent_thread->desktop) || parent_process->desktop)
     {
         if (parent_thread && parent_thread->desktop)
             handle = parent_thread->desktop;
-        else if (parent_process->desktop)
-            handle = parent_process->desktop;
-        else
-            goto done;
+        else handle = parent_process->desktop;
 
         desktop = get_desktop_obj( parent_process, handle, 0 );
-
-        if (!desktop || desktop->winstation != winstation) goto done;
-
-        handle = duplicate_handle( parent_process, handle, process, 0, 0, DUPLICATE_SAME_ACCESS );
+        if (desktop && desktop->winstation == winstation)
+            handle = duplicate_handle( parent_process, handle, process, 0, 0, DUPLICATE_SAME_ACCESS );
+        else
+        {
+            if (desktop) release_object( desktop );
+            desktop = NULL;
+            clear_error();
+        }
+    }
+    if (!desktop && !desktop_name.len && (desktop = get_input_desktop( winstation )))
+    {
+        handle = alloc_handle( process, desktop, STANDARD_RIGHTS_REQUIRED | DESKTOP_ALL_ACCESS, 0 );
     }
     if (handle) set_process_default_desktop( process, desktop, handle );
 
@@ -1121,7 +1204,6 @@ DECL_HANDLER(lock_winstation)
     release_object( winstation );
 }
 
-
 /* Return the stable identities used by the authenticated desktop compositor. */
 DECL_HANDLER(get_dwm_desktop_id)
 {
@@ -1205,6 +1287,22 @@ DECL_HANDLER(get_thread_desktop)
         release_object( desktop );
     }
 
+    release_object( thread );
+}
+
+
+/* open a thread's current desktop in the calling process */
+DECL_HANDLER(open_thread_desktop)
+{
+    struct desktop *desktop;
+    struct thread *thread;
+
+    if (!(thread = get_thread_from_id( req->tid ))) return;
+    if ((desktop = get_thread_desktop( thread, 0 )))
+    {
+        reply->handle = alloc_handle( current->process, desktop, req->access, 0 );
+        release_object( desktop );
+    }
     release_object( thread );
 }
 

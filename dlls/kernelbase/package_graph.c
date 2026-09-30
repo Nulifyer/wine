@@ -31,9 +31,17 @@ struct graph_node
     UINT32 alias_count, alias_chars;
 };
 
+struct package_name_alias
+{
+    WCHAR *package_full_name;
+    WCHAR *alias;
+};
+
 static SRWLOCK graph_lock = SRWLOCK_INIT;
 static struct graph_node *graph_head;
 static UINT32 graph_generation;
+
+static WCHAR *copy_string(BYTE **cursor, const WCHAR *value);
 
 extern NTSTATUS WINAPI __wine_set_package_dll_path(const UNICODE_STRING *path);
 
@@ -158,6 +166,8 @@ HRESULT WINAPI AddDependencyToProcessPackageGraph(const WCHAR *family, const WCH
     node = NULL;
     hr = S_OK;
 done:
+    ERR("linuxnt-package-graph-add family=%s alias=%s ordering=%d options=%#x hr=%#lx\n",
+        debugstr_w(family), debugstr_w(alias), ordering, options, hr);
     free_node(node);
     package_catalog_free(package);
     SetLastError(0);
@@ -170,6 +180,7 @@ HRESULT WINAPI AddPackageNameAliasesByPackageFullName(const WCHAR *full_name, UI
     struct graph_node *node;
     HRESULT hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
     DWORD error = GetLastError();
+    UINT32 i;
 
     TRACE("%s, %u, %p\n", debugstr_w(full_name), count, aliases);
     if (!full_name || !*full_name || !count || !aliases) return E_INVALIDARG;
@@ -181,6 +192,10 @@ HRESULT WINAPI AddPackageNameAliasesByPackageFullName(const WCHAR *full_name, UI
         break;
     }
     RtlReleaseSRWLockExclusive(&graph_lock);
+    ERR("linuxnt-package-alias-append full_name=%s count=%u hr=%#lx\n",
+        debugstr_w(full_name), count, hr);
+    for (i = 0; aliases && i < count; ++i)
+        ERR("linuxnt-package-alias-append alias[%u]=%s\n", i, debugstr_w(aliases[i]));
     SetLastError(node ? error : 0);
     return hr;
 }
@@ -212,6 +227,82 @@ HRESULT WINAPI GetPackageNameAliasesByPackageFullName(const WCHAR *full_name, WC
     return hr;
 }
 
+static HRESULT package_aliases_locked(UINT32 flags, UINT32 *size, void *buffer, UINT32 *count)
+{
+    struct package_name_alias *entries = buffer;
+    struct graph_node *node;
+    BYTE *cursor;
+    SIZE_T required = 0, bytes;
+    UINT32 total = 0, supplied = size ? *size : 0, i;
+    HRESULT hr = S_OK;
+
+    if (!size || (*size && !buffer) || (buffer && !count)) return E_INVALIDARG;
+
+    for (node = graph_head; node; node = node->next)
+    {
+        /* Native entries distinguish static and dynamic graph nodes here.
+         * This owner only creates dynamic nodes.  Neither or both filters
+         * select all entries. */
+        if ((flags & (PACKAGE_FILTER_STATIC | PACKAGE_FILTER_DYNAMIC)) == PACKAGE_FILTER_STATIC)
+            continue;
+        for (i = 0; i < node->alias_count; ++i)
+        {
+            const WCHAR *alias = node->aliases;
+            UINT32 j;
+
+            for (j = 0; j < i; ++j) alias += wcslen(alias) + 1;
+            bytes = sizeof(*entries) +
+                    (wcslen(node->package->full_name) + wcslen(alias) + 2) * sizeof(WCHAR);
+            if (bytes > ~0u - required || total == ~0u)
+            {
+                hr = HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW);
+                goto done;
+            }
+            required += bytes;
+            ++total;
+        }
+    }
+
+    supplied = *size;
+    *size = required;
+    if (count) *count = total;
+    if (supplied < required)
+    {
+        hr = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+        goto done;
+    }
+    if (!total) goto done;
+
+    cursor = (BYTE *)(entries + total);
+    for (node = graph_head; node; node = node->next)
+    {
+        const WCHAR *alias = node->aliases;
+
+        if ((flags & (PACKAGE_FILTER_STATIC | PACKAGE_FILTER_DYNAMIC)) == PACKAGE_FILTER_STATIC)
+            continue;
+        for (i = 0; i < node->alias_count; ++i, ++entries)
+        {
+            entries->package_full_name = copy_string(&cursor, node->package->full_name);
+            entries->alias = copy_string(&cursor, alias);
+            alias += wcslen(alias) + 1;
+        }
+    }
+done:
+    return hr;
+}
+
+HRESULT WINAPI GetCurrentPackageInfo_PackageNameAliases(UINT32 flags, UINT32 *size,
+                                                         void *buffer, UINT32 *count)
+{
+    HRESULT hr;
+
+    TRACE("%#x, %p, %p, %p\n", flags, size, buffer, count);
+    RtlAcquireSRWLockShared(&graph_lock);
+    hr = package_aliases_locked(flags, size, buffer, count);
+    RtlReleaseSRWLockShared(&graph_lock);
+    return hr;
+}
+
 static SIZE_T string_bytes(const WCHAR *value)
 {
     return value && *value ? (wcslen(value) + 1) * sizeof(WCHAR) : 0;
@@ -229,6 +320,10 @@ static WCHAR *copy_string(BYTE **cursor, const WCHAR *value)
 
 static LONG graph_info_locked(UINT32 flags, UINT32 path_type, UINT32 *size, BYTE *buffer, UINT32 *count)
 {
+    const UINT32 supported_flags = PACKAGE_FILTER_HEAD | PACKAGE_FILTER_DIRECT |
+        PACKAGE_FILTER_RESOURCE | PACKAGE_FILTER_BUNDLE | PACKAGE_INFORMATION_FULL |
+        PACKAGE_FILTER_OPTIONAL | PACKAGE_FILTER_IS_IN_RELATED_SET |
+        PACKAGE_FILTER_STATIC | PACKAGE_FILTER_DYNAMIC | PACKAGE_FILTER_HOSTRUNTIME;
     struct graph_node *node;
     SIZE_T required = 0, node_size;
     UINT32 total = 0, supplied;
@@ -237,11 +332,12 @@ static LONG graph_info_locked(UINT32 flags, UINT32 path_type, UINT32 *size, BYTE
     LONG ret = ERROR_SUCCESS;
 
     if (!size || (!buffer && *size)) return ERROR_INVALID_PARAMETER;
-    if (!(flags & 0x100000) || !graph_head) { ret = APPMODEL_ERROR_NO_PACKAGE; goto done; }
+    if (!(flags & PACKAGE_FILTER_DYNAMIC) || !graph_head)
+    { ret = APPMODEL_ERROR_NO_PACKAGE; goto done; }
     if (path_type > 2) /* Install, Mutable, Effective for the ordinary package. */
     { SetLastError(0); return ERROR_INVALID_PARAMETER; }
-    if (flags & ~0x100030u) return ERROR_NOT_SUPPORTED;
-    if (!(flags & 0x30) || (flags & 0x10))
+    if (flags & ~supported_flags) return ERROR_NOT_SUPPORTED;
+    if (!(flags & (PACKAGE_FILTER_HEAD | PACKAGE_FILTER_DIRECT)) || (flags & PACKAGE_FILTER_HEAD))
         for (node = graph_head; node; node = node->next)
         {
             node_size = sizeof(*info) + string_bytes(node->package->path) +
@@ -263,7 +359,8 @@ static LONG graph_info_locked(UINT32 flags, UINT32 path_type, UINT32 *size, BYTE
     cursor = buffer + total * sizeof(*info);
     for (node = graph_head; node; node = node->next, ++info)
     {
-        info->flags = 0x10;
+        info->flags = PACKAGE_FILTER_HEAD;
+        if (node->package->type == 2) info->flags |= PACKAGE_PROPERTY_FRAMEWORK;
         info->packageId = *node->id;
         info->path = copy_string(&cursor, node->package->path);
         info->packageId.name = copy_string(&cursor, node->id->name);
@@ -279,9 +376,16 @@ done:
 
 LONG package_graph_info(UINT32 flags, UINT32 path_type, UINT32 *size, BYTE *buffer, UINT32 *count)
 {
+    static LONG diagnostic_count;
+    UINT32 supplied = size ? *size : 0;
     LONG ret;
+
     RtlAcquireSRWLockShared(&graph_lock);
     ret = graph_info_locked(flags, path_type, size, buffer, count);
+    if (InterlockedIncrement(&diagnostic_count) <= 64 || flags == 0x3a0030 || flags == 0x3a0070)
+        ERR("linuxnt-package-graph flags=%#x path_type=%u supplied=%u buffer=%p ret=%#lx required=%u count=%u head=%s\n",
+            flags, path_type, supplied, buffer, ret, size ? *size : 0, count ? *count : 0,
+            graph_head ? debugstr_w(graph_head->package->full_name) : "(null)");
     RtlReleaseSRWLockShared(&graph_lock);
     return ret;
 }
@@ -289,7 +393,7 @@ LONG package_graph_info(UINT32 flags, UINT32 path_type, UINT32 *size, BYTE *buff
 HRESULT package_graph_info3(UINT32 flags, UINT32 type, UINT32 *size, void *buffer, UINT32 *count)
 {
     LONG ret;
-    if (!size) return E_INVALIDARG;
+    if (!size || (*size && !buffer) || (buffer && !count && type != 0x10)) return E_INVALIDARG;
     RtlAcquireSRWLockShared(&graph_lock);
     if (type == 0x10)
     {
@@ -303,12 +407,7 @@ HRESULT package_graph_info3(UINT32 flags, UINT32 type, UINT32 *size, void *buffe
         }
     }
     else if (!graph_head) ret = APPMODEL_ERROR_NO_PACKAGE;
-    else if (type == 0x11)
-    {
-        *size = 0;
-        if (count) *count = 0;
-        ret = ERROR_SUCCESS;
-    }
+    else if (type == 0x11) ret = package_aliases_locked(flags, size, buffer, count);
     else ret = graph_info_locked(flags | 0x100000, type, size, buffer, count);
     RtlReleaseSRWLockShared(&graph_lock);
     return HRESULT_FROM_WIN32(ret);

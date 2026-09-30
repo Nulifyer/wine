@@ -639,6 +639,11 @@ BOOL WINAPI ReportEventW( HANDLE hEventLog, WORD wType, WORD wCategory, DWORD dw
     FIXME("(%p,0x%04x,0x%04x,0x%08lx,%p,0x%04x,0x%08lx,%p,%p): stub\n", hEventLog,
           wType, wCategory, dwEventID, lpUserSid, wNumStrings, dwDataSize, lpStrings, lpRawData);
 
+    if (dwEventID >= 0x80001771 && dwEventID <= 0x80001774)
+        ERR("linuxnt-winlogon-notify event=%#lx subscriber=%s status=%#lx\n", dwEventID,
+            wNumStrings && lpStrings ? debugstr_w(lpStrings[0]) : "(none)",
+            dwDataSize >= sizeof(DWORD) && lpRawData ? *(const DWORD *)lpRawData : 0);
+
     /* partial stub */
 
     if (wNumStrings == 0) return TRUE;

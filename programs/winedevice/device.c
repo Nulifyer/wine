@@ -34,6 +34,7 @@ static const WCHAR servicesW[] = L"\\Registry\\Machine\\System\\CurrentControlSe
 
 extern NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event );
 extern void CDECL wine_enumerate_root_devices( const WCHAR *driver_name );
+extern NTSTATUS CDECL __wine_load_driver( const WCHAR *driver_name );
 
 static WCHAR winedeviceW[] = L"winedevice";
 static SERVICE_STATUS_HANDLE service_handle;
@@ -146,9 +147,44 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
     CloseHandle( stop_event );
 }
 
+static DWORD run_standalone_driver( const WCHAR *driver_name )
+{
+    WCHAR driver_dir[MAX_PATH];
+    DWORD written;
+    NTSTATUS status;
+
+    if (!(stop_event = CreateEventW( NULL, TRUE, FALSE, NULL )))
+        return GetLastError();
+
+    GetSystemDirectoryW( driver_dir, MAX_PATH );
+    wcscat( driver_dir, L"\\drivers" );
+    AddDllDirectory( driver_dir );
+
+    status = __wine_load_driver( driver_name );
+    if (status)
+    {
+        CloseHandle( stop_event );
+        return RtlNtStatusToDosError( status );
+    }
+
+    if (!WriteFile( GetStdHandle( STD_OUTPUT_HANDLE ), "1", 1, &written, NULL ) || written != 1)
+    {
+        DWORD error = GetLastError();
+        CloseHandle( stop_event );
+        return error ? error : ERROR_WRITE_FAULT;
+    }
+
+    status = wine_ntoskrnl_main_loop( stop_event );
+    CloseHandle( stop_event );
+    return RtlNtStatusToDosError( status );
+}
+
 int __cdecl wmain( int argc, WCHAR *argv[] )
 {
     SERVICE_TABLE_ENTRYW service_table[2];
+
+    if (argc == 3 && !wcscmp( argv[1], L"--standalone-driver" ))
+        return run_standalone_driver( argv[2] );
 
     service_table[0].lpServiceName = winedeviceW;
     service_table[0].lpServiceProc = ServiceMain;

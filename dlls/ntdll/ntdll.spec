@@ -60,6 +60,7 @@
 @ stdcall EtwEventWrite(int64 ptr long ptr)
 @ stdcall EtwEventWriteEx(int64 ptr int64 long ptr ptr long ptr)
 @ stdcall EtwEventWriteFull(int64 ptr long ptr ptr long ptr)
+@ stdcall EtwEventWriteNoRegistration(ptr ptr long ptr)
 @ stdcall EtwEventWriteString(int64 long int64 wstr)
 @ stdcall EtwEventWriteTransfer(int64 ptr ptr ptr long ptr)
 @ stdcall EtwGetTraceEnableFlags(int64)
@@ -293,6 +294,7 @@
 @ stub -syscall=0x0003 NtMapUserPhysicalPagesScatter
 @ stdcall -syscall=0x0028 NtMapViewOfSection(long long ptr long long ptr ptr long long long)
 @ stdcall -syscall NtMapViewOfSectionEx(long long ptr ptr ptr long long ptr long)
+@ stdcall -syscall NtManagePartition(long long long ptr long)
 # @ stub NtModifyBootEntry
 @ stdcall -syscall NtNotifyChangeDirectoryFile(long long ptr ptr ptr ptr long long long)
 @ stdcall -syscall NtNotifyChangeKey(long long ptr ptr ptr long long ptr long long)
@@ -312,6 +314,7 @@
 @ stdcall -syscall NtOpenMutant(ptr long ptr)
 # @ stub NtOpenObjectAuditAlarm
 @ stdcall -syscall=0x0026 NtOpenProcess(ptr long ptr ptr)
+@ stdcall -syscall NtOpenPartition(ptr long ptr)
 @ stdcall -syscall NtOpenProcessToken(long long ptr)
 @ stdcall -syscall=0x0030 NtOpenProcessTokenEx(long long long ptr)
 @ stdcall -syscall=0x0037 NtOpenSection(ptr long ptr)
@@ -570,10 +573,12 @@
 # @ stub RtlCheckForOrphanedCriticalSections
 # @ stub RtlCheckProcessParameters
 @ stdcall RtlCheckRegistryKey(long ptr)
+@ stdcall RtlCheckSandboxedToken(long ptr)
 @ stdcall RtlCheckTokenCapability(long ptr ptr)
 @ stdcall RtlCheckTokenMembership(long ptr ptr)
 @ stdcall RtlCheckTokenMembershipEx(long ptr long ptr)
 @ stdcall RtlClearAllBits(ptr)
+@ stdcall RtlClearBit(ptr long)
 @ stdcall RtlClearBits(ptr long long)
 @ stdcall RtlClearThreadWorkOnBehalfTicket()
 # @ stub RtlCloneMemoryStream
@@ -989,6 +994,7 @@
 @ stdcall RtlNumberGenericTableElementsAvl(ptr)
 @ stdcall RtlNumberOfClearBits(ptr)
 @ stdcall RtlNumberOfSetBits(ptr)
+@ stdcall RtlNumberOfSetBitsUlongPtr(ptr)
 @ stdcall RtlOemStringToUnicodeSize(ptr)
 @ stdcall RtlOemStringToUnicodeString(ptr ptr long)
 @ stdcall RtlOemToUnicodeN(ptr long ptr ptr long)
@@ -1001,6 +1007,7 @@
 @ stdcall RtlPrefixUnicodeString(ptr ptr long)
 @ stdcall RtlProcessFlsData(ptr long)
 @ stdcall RtlPublishWnfStateData(int64 ptr ptr long ptr)
+@ stdcall RtlQueryWnfMetaNotification(ptr long int64 ptr)
 @ stdcall RtlQueryWnfStateData(ptr int64 ptr ptr ptr)
 @ stub RtlPropertySetNameToGuid
 @ stub RtlProtectHeap
@@ -1013,6 +1020,12 @@
 @ stdcall RtlQueryEnvironmentVariable_U(ptr ptr ptr)
 @ stdcall RtlQueryEnvironmentVariable(ptr ptr long ptr long ptr)
 @ stdcall RtlQueryFeatureConfiguration(long long ptr ptr)
+@ stdcall RtlQueryFeatureConfigurationChangeStamp()
+@ stdcall RtlQueryAllFeatureConfigurations(int64 ptr ptr ptr)
+@ stdcall RtlQueryFeatureUsageNotificationSubscriptions(ptr ptr)
+@ stdcall RtlQueryInternalFeatureConfiguration(int64 long ptr ptr)
+@ stdcall RtlRegisterFeatureConfigurationChangeNotification(ptr ptr ptr ptr)
+@ stdcall RtlNotifyFeatureUsage(ptr)
 @ stdcall RtlQueryHeapInformation(long long ptr long ptr)
 @ stdcall RtlQueryInformationAcl(ptr ptr long long)
 @ stdcall RtlQueryInformationActivationContext(long long ptr long ptr long ptr)
@@ -1042,6 +1055,8 @@
 @ stdcall RtlQueueWorkItem(ptr ptr long)
 @ stdcall -norelay RtlRaiseException(ptr)
 @ stdcall RtlRaiseStatus(long)
+@ stdcall RtlReportException(ptr ptr long)
+@ stdcall RtlReportExceptionEx(ptr ptr long long long)
 @ stdcall RtlRandom(ptr)
 @ stdcall RtlRandomEx(ptr)
 @ stdcall RtlRbInsertNodeEx(ptr ptr long ptr)
@@ -1087,6 +1102,7 @@
 @ stdcall RtlSelfRelativeToAbsoluteSD(ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RtlSetAllBits(ptr)
 # @ stub RtlSetAttributesSecurityDescriptor
+@ stdcall RtlSetBit(ptr long)
 @ stdcall RtlSetBits(ptr long long)
 @ stdcall RtlSetControlSecurityDescriptor(ptr long long)
 @ stdcall RtlSetCriticalSectionSpinCount(ptr long)
@@ -1095,6 +1111,7 @@
 @ stdcall RtlSetCurrentTransaction(ptr)
 @ stdcall RtlSetDaclSecurityDescriptor(ptr long ptr long)
 @ stdcall RtlSetEnvironmentVariable(ptr ptr ptr)
+@ stdcall RtlSetFeatureConfigurations(ptr long ptr int64)
 @ stdcall RtlSetEnvironmentVar(ptr ptr long ptr long)
 @ stdcall RtlSetExtendedFeaturesMask(ptr int64)
 @ stdcall RtlSetGroupSecurityDescriptor(ptr ptr long)
@@ -1183,6 +1200,9 @@
 # @ stub RtlUnlockBootStatusData
 @ stdcall RtlUnlockHeap(long)
 # @ stub RtlUnlockMemoryStreamRegion
+@ stdcall RtlUnregisterFeatureConfigurationChangeNotification(ptr)
+@ stdcall RtlSubscribeForFeatureUsageNotification(ptr int64)
+@ stdcall RtlUnsubscribeFromFeatureUsageNotifications(ptr int64)
 @ stdcall -norelay RtlUnwind(ptr ptr ptr ptr)
 @ stdcall -arch=!i386 RtlUnwindEx(ptr ptr ptr ptr ptr ptr)
 @ stdcall RtlUpcaseUnicodeChar(long)
@@ -1905,3 +1925,4 @@
 @ stdcall RtlSubscribeWnfStateChangeNotification(ptr int64 long ptr ptr ptr long long)
 @ stdcall RtlUnsubscribeWnfNotificationWaitForCompletion(ptr)
 @ stdcall RtlUnsubscribeWnfStateChangeNotification(ptr)
+@ stdcall RtlWaitForWnfMetaNotification(int64 long long long ptr)

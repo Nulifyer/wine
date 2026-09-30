@@ -422,7 +422,6 @@ void WINAPI DECLSPEC_HOTPATCH RaiseFailFastException( EXCEPTION_RECORD *record, 
     CONTEXT ctx;
 
     WARN( "(%p, %p, %lx)\n", record, context, flags );
-
     if (flags & FAIL_FAST_NO_HARD_ERROR_DLG)
         TerminateProcess( GetCurrentProcess(), STATUS_FAIL_FAST_EXCEPTION );
 
@@ -545,7 +544,6 @@ static BOOL start_debugger( EXCEPTION_POINTERS *epointers, HANDLE event )
 
     format_exception_msg( epointers, buffer, sizeof(buffer) );
     MESSAGE( "wine: %s (thread %04lx), starting debugger...\n", buffer, GetCurrentThreadId() );
-
     InitializeObjectAttributes( &attr, &nameW, 0, 0, NULL );
     if (!NtOpenKey( &dbg_key, KEY_READ, &attr ))
     {
@@ -754,6 +752,17 @@ LONG WINAPI UnhandledExceptionFilter( EXCEPTION_POINTERS *epointers )
     const EXCEPTION_RECORD *rec = epointers->ExceptionRecord;
     ULONG_PTR debug_port;
     BOOL nested;
+
+#ifdef __x86_64__
+    if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->ExceptionAddress == NULL &&
+        rec->NumberParameters >= 2 && rec->ExceptionInformation[0] == EXCEPTION_EXECUTE_FAULT)
+    {
+        const ULONG_PTR *stack = (const ULONG_PTR *)epointers->ContextRecord->Rsp;
+
+        ERR( "linuxnt-null-call return=%p stack=%p,%p,%p,%p\n", (void *)stack[0],
+             (void *)stack[1], (void *)stack[2], (void *)stack[3], (void *)stack[4] );
+    }
+#endif
 
     if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2)
     {

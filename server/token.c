@@ -82,6 +82,14 @@ static const struct sid anonymous_logon_sid = { SID_REVISION, 1, SECURITY_NT_AUT
 static const struct sid authenticated_user_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_AUTHENTICATED_USER_RID } };
 static const struct sid principal_self_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_PRINCIPAL_SELF_RID } };
 static const struct sid high_label_sid = { SID_REVISION, 1, SECURITY_MANDATORY_LABEL_AUTHORITY, { SECURITY_MANDATORY_HIGH_RID } };
+/* RtlDeriveCapabilitySidsFromName(L"muma") group SID.  Interactive-session
+ * System processes use it when calling the native UserManager service. */
+static const struct sid muma_group_sid =
+{
+    SID_REVISION, 9, SECURITY_NT_AUTHORITY,
+    { SECURITY_BUILTIN_DOMAIN_RID, 642225045, 1497410490, 4133325371u, 1747563908,
+      2253433576u, 3934691789u, 210245039, 1860717921 }
+};
 
 static struct luid prev_luid_value = { 1000, 0 };
 static struct list session_user_tokens = LIST_INIT(session_user_tokens);
@@ -1436,9 +1444,26 @@ unsigned int token_get_session_id( struct token *token )
     return token->session_id;
 }
 
-void token_set_session_id( struct token *token, unsigned int session_id )
+int token_set_session_id( struct token *token, unsigned int session_id )
 {
+    struct group *group;
+
+    /* The Session 0 bootstrap token intentionally matches the four-group SMSS
+     * reference.  A LocalSystem token projected into an interactive session is
+     * a multi-user broker caller instead, and carries the derived MUMA group.
+     * Keep this on the SYSTEM_LUID lineage so ordinary tokens cannot acquire
+     * the capability by changing only TokenSessionId. */
+    if (session_id && equal_sid( token->user, &local_system_sid ) &&
+        token->authentication_id.high_part == 0 && token->authentication_id.low_part == 0x3e7 &&
+        !token_sid_present( token, &muma_group_sid, 0 ))
+    {
+        if (!(group = mem_alloc( sizeof(*group) ))) return 0;
+        group->attrs = SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED;
+        copy_sid( &group->sid, &muma_group_sid );
+        list_add_tail( &token->groups, &group->entry );
+    }
     token->session_id = session_id;
+    return 1;
 }
 
 static struct token *find_session_user_token( unsigned int session_id )
@@ -2327,8 +2352,8 @@ DECL_HANDLER(set_token_session_id)
             set_error( STATUS_PRIVILEGE_NOT_HELD );
         else
         {
-            token_set_session_id( token, req->session_id );
-            register_session_user_token( token, 1 );
+            if (token_set_session_id( token, req->session_id ))
+                register_session_user_token( token, 1 );
         }
         release_object( token );
     }

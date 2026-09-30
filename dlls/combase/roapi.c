@@ -1103,6 +1103,7 @@ static HRESULT WINAPI restricted_error_info_GetErrorDetails(IRestrictedErrorInfo
                                                             BSTR *ret_restricted_desc, BSTR *sid)
 {
     struct restricted_error_info *impl = impl_from_IRestrictedErrorInfo(iface);
+    static LONG e_fail_count;
     BSTR desc, restricted_desc;
 
     TRACE("(%p, %p, %p, %p, %p)\n", iface, ret_desc, code, ret_restricted_desc, sid);
@@ -1117,6 +1118,11 @@ static HRESULT WINAPI restricted_error_info_GetErrorDetails(IRestrictedErrorInfo
     *code = impl->code;
     *ret_desc = desc;
     *ret_restricted_desc = restricted_desc;
+
+    if (impl->code == E_FAIL && InterlockedIncrement(&e_fail_count) <= 64)
+        ERR("linuxnt-restricted-error code=%#lx description=%s restricted=%s previous=%p language_exception=%p\n",
+            impl->code, debugstr_w(impl->description), debugstr_w(impl->restricted_description),
+            impl->previous, impl->language_exception);
 
     return S_OK;
 }

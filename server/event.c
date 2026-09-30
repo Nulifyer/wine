@@ -31,11 +31,23 @@
 #include "winternl.h"
 
 #include "handle.h"
+#include "process.h"
 #include "thread.h"
 #include "request.h"
 #include "security.h"
 
 static const WCHAR event_name[] = {'E','v','e','n','t'};
+static const WCHAR shell_startup_event_name[] =
+    {'S','h','e','l','l','S','t','a','r','t','u','p','E','v','e','n','t'};
+
+static int is_shell_startup_event_name( struct unicode_str name )
+{
+    const data_size_t suffix_len = sizeof(shell_startup_event_name);
+
+    return name.len >= suffix_len &&
+           !memcmp( name.str + name.len / sizeof(WCHAR) - ARRAY_SIZE(shell_startup_event_name),
+                    shell_startup_event_name, suffix_len );
+}
 
 struct type_descr event_type =
 {
@@ -338,14 +350,23 @@ DECL_HANDLER(create_event)
 
     if (!get_req_object_attributes( &params )) return;
     reply->handle = create_named_obj_handle( current->process, &params );
+    if (is_shell_startup_event_name( params.name ))
+        fprintf( stderr, "linuxnt-shell-startup-event create pid=%04x tid=%04x access=%08x handle=%04x status=%08x initial=%u\n",
+                 current->process->id, current->id, req->access, reply->handle,
+                 get_error(), req->initial_state );
     if (params.root) release_object( params.root );
 }
 
 /* open a handle to an event */
 DECL_HANDLER(open_event)
 {
+    struct unicode_str name = get_req_unicode_str();
+
     reply->handle = open_object( current->process, req->rootdir, req->access,
-                                 &event_ops, get_req_unicode_str(), req->attributes );
+                                 &event_ops, name, req->attributes );
+    if (is_shell_startup_event_name( name ))
+        fprintf( stderr, "linuxnt-shell-startup-event open pid=%04x tid=%04x access=%08x handle=%04x status=%08x\n",
+                 current->process->id, current->id, req->access, reply->handle, get_error() );
 }
 
 /* do an event operation */

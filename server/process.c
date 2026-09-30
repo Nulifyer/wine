@@ -722,7 +722,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
         process->affinity = parent->affinity;
     }
     if (!process->handles || !process->token) goto error;
-    if (session_id >= 0) token_set_session_id( process->token, session_id );
+    if (session_id >= 0 && !token_set_session_id( process->token, session_id )) goto error;
     process->session_id = token_get_session_id( process->token );
 
     set_fd_events( process->msg_fd, POLLIN );  /* start listening to events */

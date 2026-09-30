@@ -19,8 +19,8 @@ SOURCES = \
 	d3dkmt.c \
 	dc.c \
 	dce.c \
-	defwnd.c \
 	dcomp.c \
+	defwnd.c \
 	dib.c \
 	dibdrv/bitblt.c \
 	dibdrv/dc.c \

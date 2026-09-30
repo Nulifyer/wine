@@ -438,6 +438,7 @@ DECL_HANDLER(get_dcomp_surface_state);
 DECL_HANDLER(open_dcomp_surface_dirty_region);
 DECL_HANDLER(report_inertia);
 DECL_HANDLER(lock_winstation);
+DECL_HANDLER(open_thread_desktop);
 DECL_HANDLER(create_activation_object);
 DECL_HANDLER(configure_activation_object);
 DECL_HANDLER(destroy_activation_object);
@@ -879,6 +880,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_open_dcomp_surface_dirty_region,
     (req_handler)req_report_inertia,
     (req_handler)req_lock_winstation,
+    (req_handler)req_open_thread_desktop,
     (req_handler)req_create_activation_object,
     (req_handler)req_configure_activation_object,
     (req_handler)req_destroy_activation_object,
@@ -3284,6 +3286,11 @@ C_ASSERT( sizeof(struct report_inertia_request) == 32 );
 C_ASSERT( offsetof(struct lock_winstation_request, handle) == 12 );
 C_ASSERT( offsetof(struct lock_winstation_request, lock) == 16 );
 C_ASSERT( sizeof(struct lock_winstation_request) == 24 );
+C_ASSERT( offsetof(struct open_thread_desktop_request, tid) == 12 );
+C_ASSERT( offsetof(struct open_thread_desktop_request, access) == 16 );
+C_ASSERT( sizeof(struct open_thread_desktop_request) == 24 );
+C_ASSERT( offsetof(struct open_thread_desktop_reply, handle) == 8 );
+C_ASSERT( sizeof(struct open_thread_desktop_reply) == 16 );
 C_ASSERT( offsetof(struct create_activation_object_request, window) == 12 );
 C_ASSERT( offsetof(struct create_activation_object_request, cookie) == 16 );
 C_ASSERT( sizeof(struct create_activation_object_request) == 24 );

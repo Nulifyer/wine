@@ -906,7 +906,10 @@ RPC_STATUS RPC_ENTRY RpcBindingBind(PRPC_ASYNC_STATE Async, RPC_BINDING_HANDLE B
   RpcConnection *connection;
   RPC_STATUS status;
 
-  TRACE("(%p,%p,%p)\n", Async, Binding, IfSpec);
+  TRACE("(%p,%p,%p) interface %s version %u.%u\n", Async, Binding, IfSpec,
+        IfSpec ? debugstr_guid(&client_if->InterfaceId.SyntaxGUID) : "(null)",
+        IfSpec ? client_if->InterfaceId.SyntaxVersion.MajorVersion : 0,
+        IfSpec ? client_if->InterfaceId.SyntaxVersion.MinorVersion : 0);
 
   if (!binding || !client_if) return RPC_S_INVALID_ARG;
   if (!binding->FastBinding || binding->server || strcmp(binding->Protseq, "ncalrpc"))

@@ -33,8 +33,38 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(kernelbase);
 
-
 BOOL is_wow64 = FALSE;
+
+struct linuxnt_wil_failure_report
+{
+    HRESULT hr;
+    NTSTATUS status;
+    void *return_address;
+    BYTE failure_type;
+    BYTE reserved1;
+    USHORT flags;
+    ULONG message_id;
+    USHORT line;
+    USHORT reserved2;
+    ULONG reserved3;
+    const char *file;
+    const char *module;
+};
+
+void __cdecl WilFailureNotifyWatchers( unsigned int reserved,
+                                       const struct linuxnt_wil_failure_report *report, void *context )
+{
+    static LONG failure_count;
+    LONG sequence;
+
+    if (!report || (SUCCEEDED( report->hr ) && report->status >= 0)) return;
+    sequence = InterlockedIncrement( &failure_count );
+    if (sequence > 256) return;
+
+    ERR( "linuxnt-wil sequence=%ld reserved=%u hr=%#lx status=%#lx type=%u flags=%#x source=%s:%u module=%s return=%p context=%p\n",
+         sequence, reserved, report->hr, report->status, report->failure_type, report->flags,
+         debugstr_a(report->file), report->line, debugstr_a(report->module), report->return_address, context );
+}
 
 /***********************************************************************
  *           DllMain
@@ -745,8 +775,19 @@ ULONG WINAPI PerfStopProvider(HANDLE handle)
  */
 BOOL WINAPI QuirkIsEnabled(void *arg)
 {
-    FIXME("(%p): stub\n", arg);
-    return FALSE;
+    switch ((ULONG_PTR)arg)
+    {
+    case 0x200bb:
+    case 0x30000:
+    case 0x50000:
+    case 0x90008:
+        return TRUE;
+    case 0x90007:
+        return FALSE;
+    default:
+        FIXME("(%p): unknown quirk policy\n", arg);
+        return FALSE;
+    }
 }
 
 /***********************************************************************

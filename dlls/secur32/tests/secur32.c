@@ -737,6 +737,16 @@ struct test_auth_buffer
     WCHAR strings[3 * (UNLEN + 1)];
 };
 
+struct test_sspiex_logon_user
+{
+    ULONG message_type;
+    ULONG flags;
+    ULONG auth_len;
+    ULONG reserved;
+    void *client_auth_base;
+    struct test_auth_buffer auth;
+};
+
 struct test_msv1_0_interactive_profile
 {
     ULONG message_type;
@@ -786,6 +796,7 @@ static void test_local_interactive_logon(void)
     } process_options = {12, 0x23, FALSE};
     struct test_msv1_0_interactive_profile *profile;
     struct test_auth_buffer auth;
+    struct test_sspiex_logon_user sspiex;
     TOKEN_SOURCE source = {{'W','i','n','l','o','g','o','n'}};
     TOKEN_STATISTICS statistics;
     TOKEN_DEFAULT_DACL *token_default;
@@ -859,6 +870,17 @@ static void test_local_interactive_logon(void)
     ok( status == STATUS_SUCCESS, "MSV1_0 process options returned %#lx.\n", status );
     ok( substatus == STATUS_SUCCESS, "MSV1_0 process options substatus %#lx.\n", substatus );
     ok( !output && !output_len, "got process options output %p length %lu.\n", output, output_len );
+
+    process_options.message_type = 19; /* MsV1_0SetThreadOption */
+    process_options.disable_options = TRUE;
+    output = (void *)0xdeadbeef;
+    output_len = 0xdeadbeef;
+    substatus = 0xdeadbeef;
+    status = LsaCallAuthenticationPackage( trusted, package, &process_options,
+                                           sizeof(process_options), &output, &output_len, &substatus );
+    ok( status == STATUS_SUCCESS, "MSV1_0 thread options returned %#lx.\n", status );
+    ok( substatus == STATUS_SUCCESS, "MSV1_0 thread options substatus %#lx.\n", substatus );
+    ok( !output && !output_len, "got thread options output %p length %lu.\n", output, output_len );
 
     status = NtAllocateLocallyUniqueId( &source.SourceIdentifier );
     ok( status == STATUS_SUCCESS, "NtAllocateLocallyUniqueId returned %#lx.\n", status );
@@ -962,6 +984,36 @@ static void test_local_interactive_logon(void)
         profile, token );
     if (profile) LsaFreeReturnBuffer( profile );
     if (token) NtClose( token );
+
+    sspiex.message_type = 0x8001;
+    sspiex.flags = 1;
+    sspiex.auth_len = init_test_logon( &sspiex.auth, empty, username, empty );
+    sspiex.reserved = 0;
+    sspiex.client_auth_base = &sspiex.auth;
+    profile = NULL;
+    profile_len = 0;
+    token = NULL;
+    substatus = 0xdeadbeef;
+    status = LsaLogonUser( trusted, &name, Interactive, package, &sspiex,
+                           offsetof(struct test_sspiex_logon_user, auth) + sspiex.auth_len,
+                           NULL, &source, (void **)&profile, &profile_len, &logon_id,
+                           &token, &quotas, &substatus );
+    ok( status == STATUS_SUCCESS, "SspiEx logon returned %#lx, substatus %#lx.\n", status, substatus );
+    ok( !!profile && !!token, "SspiEx logon returned profile %p token %p.\n", profile, token );
+    if (profile) LsaFreeReturnBuffer( profile );
+    if (token) NtClose( token );
+
+    ++sspiex.auth_len;
+    profile = (void *)0xdeadbeef;
+    profile_len = 0xdeadbeef;
+    token = (HANDLE)0xdeadbeef;
+    substatus = 0xdeadbeef;
+    status = LsaLogonUser( trusted, &name, Interactive, package, &sspiex,
+                           offsetof(struct test_sspiex_logon_user, auth) + sspiex.auth_len - 1,
+                           NULL, &source, (void **)&profile, &profile_len, &logon_id,
+                           &token, &quotas, &substatus );
+    ok( status == STATUS_INVALID_PARAMETER, "malformed SspiEx logon returned %#lx.\n", status );
+    ok( !profile && !profile_len && !token, "malformed SspiEx outputs were not cleared.\n" );
 
     auth_len = init_test_logon( &auth, empty, username, wrong_password );
     profile = (void *)0xdeadbeef;

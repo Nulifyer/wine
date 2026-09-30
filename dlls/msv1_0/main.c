@@ -43,6 +43,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
 static const LSA_SECPKG_FUNCTION_TABLE *lsa_secpkg_table;
 
 #define MSV1_0_SET_PROCESS_OPTION 12
+#define MSV1_0_SET_THREAD_OPTION 19
 
 struct msv1_0_set_process_option_request
 {
@@ -531,7 +532,10 @@ static NTSTATUS NTAPI ntlm_LsaApCallPackageUntrusted( PLSA_CLIENT_REQUEST reques
         !out_buffer_length || !protocol_status)
         return STATUS_INVALID_PARAMETER;
 
-    if (options->message_type != MSV1_0_SET_PROCESS_OPTION)
+    ERR( "linuxnt-msv1-call-package message=%lu expected=%u length=%lu\n",
+         options->message_type, MSV1_0_SET_PROCESS_OPTION, in_buffer_length );
+    if (options->message_type != MSV1_0_SET_PROCESS_OPTION &&
+        options->message_type != MSV1_0_SET_THREAD_OPTION)
         return SEC_E_UNSUPPORTED_FUNCTION;
 
     *out_buffer = NULL;

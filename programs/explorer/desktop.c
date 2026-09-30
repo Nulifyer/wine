@@ -1171,10 +1171,22 @@ static inline BOOL is_whitespace(WCHAR c)
    not for other desktops. */
 static void set_shell_window( HWND hwnd )
 {
+    WCHAR module[MAX_PATH];
+    WCHAR *name;
     HWINSTA winsta;
     USEROBJECTFLAGS flags;
     HDESK desk;
     WCHAR desk_name[MAX_PATH];
+
+    /* LinuxNT installs this desktop provider under a separate name so that
+       native explorer.exe remains the Windows-visible shell.  The provider
+       still owns the host desktop window, but must leave shell registration
+       available for the genuine shell32 desktop view. */
+    if (GetModuleFileNameW( NULL, module, ARRAY_SIZE(module) ))
+    {
+        name = wcsrchr( module, '\\' );
+        if (!wcsicmp( name ? name + 1 : module, L"wine-desktop-host.exe" )) return;
+    }
 
     if (!(winsta = GetProcessWindowStation()) ||
         !GetUserObjectInformationW( winsta, UOI_FLAGS, &flags, sizeof(flags), NULL ) ||

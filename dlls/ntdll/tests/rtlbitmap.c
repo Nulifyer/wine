@@ -37,7 +37,9 @@ static HMODULE hntdll = 0;
 static VOID (WINAPI *pRtlInitializeBitMap)(PRTL_BITMAP,LPBYTE,ULONG);
 static VOID (WINAPI *pRtlSetAllBits)(PRTL_BITMAP);
 static VOID (WINAPI *pRtlClearAllBits)(PRTL_BITMAP);
+static VOID (WINAPI *pRtlSetBit)(PRTL_BITMAP,ULONG);
 static VOID (WINAPI *pRtlSetBits)(PRTL_BITMAP,ULONG,ULONG);
+static VOID (WINAPI *pRtlClearBit)(PRTL_BITMAP,ULONG);
 static VOID (WINAPI *pRtlClearBits)(PRTL_BITMAP,ULONG,ULONG);
 static BOOLEAN (WINAPI *pRtlAreBitsSet)(PRTL_BITMAP,ULONG,ULONG);
 static BOOLEAN (WINAPI *pRtlAreBitsClear)(PRTL_BITMAP,ULONG,ULONG);
@@ -51,6 +53,7 @@ static ULONG (WINAPI *pRtlFindNextForwardRunSet)(PRTL_BITMAP,ULONG,PULONG);
 static ULONG (WINAPI *pRtlFindNextForwardRunClear)(PRTL_BITMAP,ULONG,PULONG);
 static ULONG (WINAPI *pRtlNumberOfSetBits)(PRTL_BITMAP);
 static ULONG (WINAPI *pRtlNumberOfClearBits)(PRTL_BITMAP);
+static ULONG (WINAPI *pRtlNumberOfSetBitsUlongPtr)(ULONG_PTR);
 static ULONG (WINAPI *pRtlFindLongestRunSet)(PRTL_BITMAP,PULONG);
 static ULONG (WINAPI *pRtlFindLongestRunClear)(PRTL_BITMAP,PULONG);
 
@@ -66,12 +69,15 @@ static void InitFunctionPtrs(void)
     pRtlInitializeBitMap = (void *)GetProcAddress(hntdll, "RtlInitializeBitMap");
     pRtlSetAllBits = (void *)GetProcAddress(hntdll, "RtlSetAllBits");
     pRtlClearAllBits = (void *)GetProcAddress(hntdll, "RtlClearAllBits");
+    pRtlSetBit = (void *)GetProcAddress(hntdll, "RtlSetBit");
     pRtlSetBits = (void *)GetProcAddress(hntdll, "RtlSetBits");
+    pRtlClearBit = (void *)GetProcAddress(hntdll, "RtlClearBit");
     pRtlClearBits = (void *)GetProcAddress(hntdll, "RtlClearBits");
     pRtlAreBitsSet = (void *)GetProcAddress(hntdll, "RtlAreBitsSet");
     pRtlAreBitsClear = (void *)GetProcAddress(hntdll, "RtlAreBitsClear");
     pRtlNumberOfSetBits = (void *)GetProcAddress(hntdll, "RtlNumberOfSetBits");
     pRtlNumberOfClearBits = (void *)GetProcAddress(hntdll, "RtlNumberOfClearBits");
+    pRtlNumberOfSetBitsUlongPtr = (void *)GetProcAddress(hntdll, "RtlNumberOfSetBitsUlongPtr");
     pRtlFindSetBitsAndClear = (void *)GetProcAddress(hntdll, "RtlFindSetBitsAndClear");
     pRtlFindClearBitsAndSet = (void *)GetProcAddress(hntdll, "RtlFindClearBitsAndSet");
     pRtlFindMostSignificantBit = (void *)GetProcAddress(hntdll, "RtlFindMostSignificantBit");
@@ -127,6 +133,22 @@ static void test_RtlClearAllBits(void)
   ok(buff[4] == 0xff, "cleared more than rounded size\n");
 }
 
+static void test_RtlSetBit(void)
+{
+  if (!pRtlSetBit)
+    return;
+
+  memset(buff, 0, sizeof(buff));
+  pRtlInitializeBitMap(&bm, buff, 1);
+
+  pRtlSetBit(&bm, 0);
+  ok(buff[0] == 0x01, "got %#x after setting bit 0\n", buff[0]);
+  pRtlSetBit(&bm, 7);
+  ok(buff[0] == 0x81, "got %#x after setting bit 7\n", buff[0]);
+  pRtlSetBit(&bm, 9);
+  ok(buff[1] == 0x02, "got %#x after setting bit beyond bitmap size\n", buff[1]);
+}
+
 static void test_RtlSetBits(void)
 {
   if (!pRtlSetBits)
@@ -153,6 +175,22 @@ static void test_RtlSetBits(void)
 
   pRtlSetBits(&bm, sizeof(buff)*8-1, 1); /* last bit */
   ok(buff[sizeof(buff)-1] == 0x80, "didn't set last bit\n");
+}
+
+static void test_RtlClearBit(void)
+{
+  if (!pRtlClearBit)
+    return;
+
+  memset(buff, 0xff, sizeof(buff));
+  pRtlInitializeBitMap(&bm, buff, 1);
+
+  pRtlClearBit(&bm, 0);
+  ok(buff[0] == 0xfe, "got %#x after clearing bit 0\n", buff[0]);
+  pRtlClearBit(&bm, 7);
+  ok(buff[0] == 0x7e, "got %#x after clearing bit 7\n", buff[0]);
+  pRtlClearBit(&bm, 9);
+  ok(buff[1] == 0xfd, "got %#x after clearing bit beyond bitmap size\n", buff[1]);
 }
 
 static void test_RtlClearBits(void)
@@ -325,6 +363,23 @@ static void test_RtlNumberOfSetBits(void)
   pRtlSetBits(&bm, sizeof(buff)*8-1, 1); /* Set last bit */
   ulCount = pRtlNumberOfSetBits(&bm);
   ok(ulCount == 8+1+33+1, "count wrong\n");
+}
+
+static void test_RtlNumberOfSetBitsUlongPtr(void)
+{
+  ULONG count;
+
+  if (!pRtlNumberOfSetBitsUlongPtr)
+    return;
+
+  count = pRtlNumberOfSetBitsUlongPtr(0);
+  ok(count == 0, "got %lu set bits for zero\n", count);
+  count = pRtlNumberOfSetBitsUlongPtr(0x55555555);
+  ok(count == 16, "got %lu set bits for alternating bits\n", count);
+  count = pRtlNumberOfSetBitsUlongPtr(~(ULONG_PTR)0);
+  ok(count == sizeof(ULONG_PTR) * 8, "got %lu set bits for all bits\n", count);
+  count = pRtlNumberOfSetBitsUlongPtr((ULONG_PTR)1 << (sizeof(ULONG_PTR) * 8 - 1));
+  ok(count == 1, "got %lu set bits for the high bit\n", count);
 }
 
 static void test_RtlNumberOfClearBits(void)
@@ -672,12 +727,15 @@ START_TEST(rtlbitmap)
     test_RtlInitializeBitMap();
     test_RtlSetAllBits();
     test_RtlClearAllBits();
+    test_RtlSetBit();
     test_RtlSetBits();
+    test_RtlClearBit();
     test_RtlClearBits();
     test_RtlCheckBit();
     test_RtlAreBitsSet();
     test_RtlAreBitsClear();
     test_RtlNumberOfSetBits();
+    test_RtlNumberOfSetBitsUlongPtr();
     test_RtlNumberOfClearBits();
     test_RtlFindSetBitsAndClear();
     test_RtlFindClearBitsAndSet();

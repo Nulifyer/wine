@@ -39,6 +39,7 @@ static void (WINAPI *pAppContainerFreeMemory)(void *);
 static BOOL (WINAPI *pAccessCheckByType)(PSECURITY_DESCRIPTOR, PSID, HANDLE, DWORD,
                                         POBJECT_TYPE_LIST, DWORD, PGENERIC_MAPPING,
                                         PPRIVILEGE_SET, LPDWORD, LPDWORD, LPBOOL);
+static BOOL (WINAPI *pCheckTokenCapability)(HANDLE, PSID, PBOOL);
 static BOOL (WINAPI *pCheckTokenMembershipEx)(HANDLE, PSID, DWORD, PBOOL);
 
 static NTSTATUS (WINAPI *pRtlDeriveCapabilitySidsFromName)(UNICODE_STRING *, PSID, PSID);
@@ -174,6 +175,53 @@ static void test_AccessCheckByType(void)
     CloseHandle(process_token);
     CloseHandle(token);
     free(user);
+}
+
+static void test_CheckTokenCapability(void)
+{
+    static struct
+    {
+        SID sid;
+        DWORD subauthority;
+    } capability_sid = { { SID_REVISION, 2, { SECURITY_APP_PACKAGE_AUTHORITY },
+                           { SECURITY_CAPABILITY_BASE_RID } }, 1 };
+    static struct
+    {
+        SID sid;
+        DWORD subauthority;
+    } invalid_sid = { { 0, 2, { SECURITY_APP_PACKAGE_AUTHORITY },
+                        { SECURITY_CAPABILITY_BASE_RID } }, 1 };
+    BOOL capability, ret;
+
+    if (!pCheckTokenCapability)
+    {
+        win_skip("CheckTokenCapability is not available.\n");
+        return;
+    }
+
+    capability = TRUE;
+    SetLastError(0xdeadbeef);
+    ret = pCheckTokenCapability(NULL, &capability_sid.sid, &capability);
+    ok(ret, "CheckTokenCapability failed, error %lu.\n", GetLastError());
+    ok(!capability, "Unexpected capability.\n");
+    ok(GetLastError() == 0xdeadbeef, "Success changed error to %lu.\n", GetLastError());
+
+    capability = TRUE;
+    SetLastError(0xdeadbeef);
+    ret = pCheckTokenCapability(NULL, &invalid_sid.sid, &capability);
+    ok(!ret && GetLastError() == ERROR_INVALID_SID, "Invalid SID returned %d, error %lu.\n",
+       ret, GetLastError());
+    ok(!capability, "Invalid SID did not clear capability.\n");
+
+    SetLastError(0xdeadbeef);
+    ret = pCheckTokenCapability(NULL, NULL, &capability);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "Null SID returned %d, error %lu.\n",
+       ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pCheckTokenCapability(NULL, &capability_sid.sid, NULL);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "Null result returned %d, error %lu.\n",
+       ret, GetLastError());
 }
 
 static void test_CheckTokenMembershipEx(void)
@@ -455,6 +503,7 @@ START_TEST(security)
     pAppContainerUnregisterSid = (void *)GetProcAddress(hmod, "AppContainerUnregisterSid");
     pAppContainerFreeMemory = (void *)GetProcAddress(hmod, "AppContainerFreeMemory");
     pAccessCheckByType = (void *)GetProcAddress(hmod, "AccessCheckByType");
+    pCheckTokenCapability = (void *)GetProcAddress(hmod, "CheckTokenCapability");
     pCheckTokenMembershipEx = (void *)GetProcAddress(hmod, "CheckTokenMembershipEx");
 
     hmod = LoadLibraryA("ntdll.dll");
@@ -462,6 +511,7 @@ START_TEST(security)
 
     test_DeriveCapabilitySidsFromName();
     test_AccessCheckByType();
+    test_CheckTokenCapability();
     test_CheckTokenMembershipEx();
     test_AppContainerDeriveSidFromMoniker();
     test_AppContainerLookupMoniker();

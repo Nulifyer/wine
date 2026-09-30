@@ -12,6 +12,8 @@ struct package_catalog_entry
 };
 
 HRESULT package_catalog_family(const WCHAR *family_name, struct package_catalog_entry **result);
+HRESULT package_catalog_full_name(const WCHAR *full_name, BOOL registered,
+                                  struct package_catalog_entry **result);
 void package_catalog_free(struct package_catalog_entry *entry);
 
 #endif

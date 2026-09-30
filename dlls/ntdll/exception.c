@@ -304,6 +304,55 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 }
 
 
+/***********************************************************************
+ *            RtlReportException  (NTDLL.@)
+ *
+ * Report an exception without raising it in the calling process.  Windows
+ * forwards an undebugged report to WER; Wine has no equivalent WER service,
+ * so successful local reporting ends after debugger notification.
+ */
+NTSTATUS WINAPI RtlReportException( EXCEPTION_RECORD *rec, CONTEXT *context, ULONG flags )
+{
+    HANDLE debug_port = 0;
+
+    if (flags & ~0x1f) return STATUS_INVALID_PARAMETER;
+
+    if (!(flags & 4) &&
+        !NtQueryInformationProcess( GetCurrentProcess(), ProcessDebugPort,
+                                    &debug_port, sizeof(debug_port), NULL ) && debug_port)
+        return NtRaiseException( rec, context, FALSE );
+
+    TRACE( "exception %p context %p flags %#lx\n", rec, context, flags );
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *            RtlReportExceptionEx  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlReportExceptionEx( EXCEPTION_RECORD *rec, CONTEXT *context, ULONG flags,
+                                      HANDLE process, HANDLE thread )
+{
+    PROCESS_BASIC_INFORMATION process_info;
+    THREAD_BASIC_INFORMATION thread_info;
+    NTSTATUS status;
+
+    if ((status = NtQueryInformationProcess( process, ProcessBasicInformation,
+                                              &process_info, sizeof(process_info), NULL )))
+        return status;
+    if ((status = NtQueryInformationThread( thread, ThreadBasicInformation,
+                                             &thread_info, sizeof(thread_info), NULL )))
+        return status;
+
+    if (process_info.UniqueProcessId == (ULONG_PTR)NtCurrentTeb()->ClientId.UniqueProcess &&
+        thread_info.ClientId.UniqueThread == NtCurrentTeb()->ClientId.UniqueThread)
+        return RtlReportException( rec, context, flags );
+
+    FIXME( "remote exception reporting is not supported, process %p thread %p\n", process, thread );
+    return STATUS_NOT_SUPPORTED;
+}
+
+
 #if defined(__WINE_PE_BUILD) && !defined(__i386__)
 
 /*******************************************************************

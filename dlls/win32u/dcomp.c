@@ -5154,6 +5154,227 @@ struct dcomp_surface_update_wire
     LONG bottom;
 };
 
+#define COMPOSITION_INPUT_SINK_V1_SIZE 0xe8
+#define COMPOSITION_INPUT_SINK_V2_SIZE 0x128
+#define COMPOSITION_INPUT_SINK_MAGIC 0x6b6e6973746e7063ULL
+
+struct composition_input_sink_state
+{
+    UINT64 magic;
+    LUID luid;
+    UINT view_id;
+    BYTE descriptor[COMPOSITION_INPUT_SINK_V2_SIZE];
+    BYTE drop_target[0x38];
+};
+
+static NTSTATUS map_composition_input_sink( HANDLE sink,
+                                             struct composition_input_sink_state **state )
+{
+    struct composition_input_sink_state *mapped = NULL;
+    SIZE_T size = sizeof(*mapped);
+    NTSTATUS status;
+
+    status = NtMapViewOfSection( sink, GetCurrentProcess(), (void **)&mapped, 0, 0, NULL,
+                                 &size, ViewUnmap, 0, PAGE_READONLY );
+    if (status) return status;
+    if (size < sizeof(*mapped) || mapped->magic != COMPOSITION_INPUT_SINK_MAGIC)
+    {
+        NtUnmapViewOfSection( GetCurrentProcess(), mapped );
+        return STATUS_OBJECT_TYPE_MISMATCH;
+    }
+    *state = mapped;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS create_composition_input_sink( const void *user_descriptor, BOOL implicit,
+                                                HANDLE *user_sink )
+{
+    static const UINT queue_offsets[] = {8, 0x40, 0x78, 0xb0, 0xe8};
+    struct composition_input_sink_state *state = NULL;
+    BYTE descriptor[COMPOSITION_INPUT_SINK_V2_SIZE] = {0};
+    LARGE_INTEGER section_size;
+    HANDLE sink = NULL;
+    SIZE_T view_size;
+    NTSTATUS status;
+    UINT input_size, i;
+    LUID luid;
+
+    if (!user_descriptor || !user_sink) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        input_size = *(const UINT *)user_descriptor;
+        memcpy( descriptor, user_descriptor,
+                input_size < COMPOSITION_INPUT_SINK_V2_SIZE ?
+                COMPOSITION_INPUT_SINK_V1_SIZE : COMPOSITION_INPUT_SINK_V2_SIZE );
+        *(UINT *)descriptor = COMPOSITION_INPUT_SINK_V2_SIZE;
+        if (implicit) *(UINT *)(descriptor + 0x120) |= 1;
+        *user_sink = NULL;
+    }
+    __EXCEPT
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+
+    for (i = 0; i < ARRAY_SIZE(queue_offsets); ++i)
+        if (*(UINT *)(descriptor + queue_offsets[i]) > 4) return STATUS_INVALID_PARAMETER;
+
+    if ((status = NtAllocateLocallyUniqueId( &luid ))) return status;
+    section_size.QuadPart = sizeof(*state);
+    if ((status = NtCreateSection( &sink, SECTION_MAP_READ | SECTION_MAP_WRITE | SECTION_QUERY,
+                                    NULL, &section_size, PAGE_READWRITE, SEC_COMMIT, NULL )))
+        return status;
+    view_size = sizeof(*state);
+    if (!(status = NtMapViewOfSection( sink, GetCurrentProcess(), (void **)&state, 0, 0, NULL,
+                                       &view_size, ViewUnmap, 0, PAGE_READWRITE )))
+    {
+        memset( state, 0, sizeof(*state) );
+        state->magic = COMPOSITION_INPUT_SINK_MAGIC;
+        state->luid = luid;
+        memcpy( state->descriptor, descriptor, sizeof(descriptor) );
+        NtUnmapViewOfSection( GetCurrentProcess(), state );
+    }
+    if (status)
+    {
+        NtClose( sink );
+        return status;
+    }
+
+    __TRY
+    {
+        *user_sink = sink;
+    }
+    __EXCEPT
+    {
+        NtClose( sink );
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
+NTSTATUS WINAPI NtCreateCompositionInputSink( const void *descriptor, HANDLE *sink )
+{
+    return create_composition_input_sink( descriptor, FALSE, sink );
+}
+
+NTSTATUS WINAPI NtCreateImplicitCompositionInputSink( const void *descriptor, HANDLE *sink )
+{
+    return create_composition_input_sink( descriptor, TRUE, sink );
+}
+
+NTSTATUS WINAPI NtCloseCompositionInputSink( HANDLE sink )
+{
+    return NtClose( sink );
+}
+
+NTSTATUS WINAPI NtCompositionSetDropTarget( HANDLE sink, const void *user_queue,
+                                             LUID *user_luid )
+{
+    struct composition_input_sink_state *state = NULL;
+    BYTE queue[0x38];
+    SIZE_T size = sizeof(*state);
+    NTSTATUS status;
+    LUID luid;
+
+    if (!user_queue) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        memcpy( queue, user_queue, sizeof(queue) );
+    }
+    __EXCEPT
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+
+    /* Native queue types 0 and 1 select session queues, while 2 and 3
+     * describe window-backed queues. Type 4 is deliberately rejected by
+     * CInputSink::CreateInputQueue. */
+    if (*(const UINT *)queue > 3) return STATUS_INVALID_PARAMETER;
+
+    status = NtMapViewOfSection( sink, GetCurrentProcess(), (void **)&state, 0, 0, NULL,
+                                 &size, ViewUnmap, 0, PAGE_READWRITE );
+    if (status) return status;
+    if (size < sizeof(*state) || state->magic != COMPOSITION_INPUT_SINK_MAGIC)
+    {
+        NtUnmapViewOfSection( GetCurrentProcess(), state );
+        return STATUS_OBJECT_TYPE_MISMATCH;
+    }
+
+    memcpy( state->drop_target, queue, sizeof(queue) );
+    luid = state->luid;
+    NtUnmapViewOfSection( GetCurrentProcess(), state );
+
+    if (user_luid)
+    {
+        __TRY
+        {
+            *user_luid = luid;
+        }
+        __EXCEPT
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+        __ENDTRY
+    }
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI NtDuplicateCompositionInputSink(void)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+NTSTATUS WINAPI NtQueryCompositionInputSink( HANDLE sink, void *query )
+{
+    return STATUS_ACCESS_DENIED;
+}
+
+NTSTATUS WINAPI NtQueryCompositionInputSinkLuid( HANDLE sink, LUID *user_luid )
+{
+    struct composition_input_sink_state *state;
+    LUID luid;
+    NTSTATUS status;
+
+    if (!user_luid) return STATUS_INVALID_PARAMETER;
+    if ((status = map_composition_input_sink( sink, &state ))) return status;
+    luid = state->luid;
+    NtUnmapViewOfSection( GetCurrentProcess(), state );
+    __TRY
+    {
+        *user_luid = luid;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
+NTSTATUS WINAPI NtQueryCompositionInputSinkViewId( HANDLE sink, UINT *user_view_id )
+{
+    struct composition_input_sink_state *state;
+    UINT view_id;
+    NTSTATUS status;
+
+    if (!user_view_id) return STATUS_INVALID_PARAMETER;
+    if ((status = map_composition_input_sink( sink, &state ))) return status;
+    view_id = state->view_id;
+    NtUnmapViewOfSection( GetCurrentProcess(), state );
+    __TRY
+    {
+        *user_view_id = view_id;
+    }
+    __EXCEPT
+    {
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
 NTSTATUS WINAPI NtCreateCompositionSurfaceHandle( const OBJECT_ATTRIBUTES *attributes,
                                                    ACCESS_MASK access, HANDLE *surface )
 {

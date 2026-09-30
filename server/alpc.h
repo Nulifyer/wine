@@ -16,6 +16,7 @@ struct process;
 struct desktop;
 struct object;
 struct rectangle;
+struct region;
 struct winstation;
 
 extern int set_coremsg_input_port_ready( struct process *process, int enabled );
@@ -58,6 +59,9 @@ extern void notify_dwm_window_unlinked( struct desktop *desktop, unsigned int ge
                                         unsigned int window, unsigned int parent );
 extern void notify_dwm_window_destroyed( struct desktop *desktop, unsigned int generation,
                                          unsigned int window );
+extern int notify_dwm_window_visible_region( struct desktop *desktop, unsigned int generation,
+                                             unsigned int window, unsigned int type,
+                                             const struct region *region );
 extern int notify_dwm_window_target_created( unsigned int session_id, unsigned int window,
                                              unsigned int type, struct object *target );
 extern void notify_dwm_window_target_destroyed( unsigned int session_id, unsigned int window,

@@ -1201,6 +1201,22 @@ BOOL WINAPI IsHungAppWindow( HWND hWnd )
 }
 
 /******************************************************************
+ *      GhostWindowFromHungWindow (USER32.@)
+ */
+HWND WINAPI GhostWindowFromHungWindow( HWND hwnd )
+{
+    return NtUserGhostWindowFromHungWindow( hwnd );
+}
+
+/******************************************************************
+ *      HungWindowFromGhostWindow (USER32.@)
+ */
+HWND WINAPI HungWindowFromGhostWindow( HWND hwnd )
+{
+    return NtUserHungWindowFromGhostWindow( hwnd );
+}
+
+/******************************************************************
  *      ChangeWindowMessageFilter (USER32.@)
  */
 BOOL WINAPI ChangeWindowMessageFilter( UINT message, DWORD flag )

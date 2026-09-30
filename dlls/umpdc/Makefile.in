@@ -1,0 +1,4 @@
+MODULE = umpdc.dll
+
+SOURCES = \
+	main.c

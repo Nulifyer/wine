@@ -383,7 +383,15 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         0,    /* TokenRestrictedDeviceGroups */
         sizeof(struct token_security_attributes_information), /* TokenSecurityAttributes */
         0,    /* TokenIsRestricted */
-        0     /* TokenProcessTrustLevel */
+        0,    /* TokenProcessTrustLevel */
+        0,    /* TokenPrivateNameSpace */
+        0,    /* TokenSingletonAttributes */
+        0,    /* TokenBnoIsolation */
+        0,    /* TokenChildProcessFlags */
+        0,    /* TokenIsLessPrivilegedAppContainer */
+        sizeof(DWORD), /* TokenIsSandboxed */
+        0,    /* TokenIsAppSilo */
+        0     /* TokenLoggingInformation */
     };
 
     ULONG len = 0;
@@ -731,6 +739,24 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         {
             TRACE("TokenIsAppContainer semi-stub\n");
             *(DWORD *)info = 0;
+            break;
+        }
+
+    case TokenIsSandboxed:
+        {
+            BYTE label_buffer[sizeof(TOKEN_MANDATORY_LABEL) + SECURITY_MAX_SID_SIZE];
+            TOKEN_MANDATORY_LABEL *label = (TOKEN_MANDATORY_LABEL *)label_buffer;
+            DWORD *is_sandboxed = info;
+            ULONG label_size;
+            SID *sid;
+
+            *is_sandboxed = FALSE;
+            status = NtQueryInformationToken( token, TokenIntegrityLevel, label, sizeof(label_buffer),
+                                               &label_size );
+            if (status) break;
+            sid = label->Label.Sid;
+            if (sid->SubAuthorityCount)
+                *is_sandboxed = sid->SubAuthority[sid->SubAuthorityCount - 1] < SECURITY_MANDATORY_MEDIUM_RID;
             break;
         }
 

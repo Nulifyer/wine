@@ -114,6 +114,7 @@ static const WELLKNOWNSID WellKnownSids[] =
     { WinHighLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_HIGH_RID } } },
     { WinSystemLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_SYSTEM_RID } } },
     { WinBuiltinAnyPackageSid, { SID_REVISION, 2, { SECURITY_APP_PACKAGE_AUTHORITY }, { SECURITY_APP_PACKAGE_BASE_RID, SECURITY_BUILTIN_PACKAGE_ANY_PACKAGE } } },
+    { WinBuiltinDefaultSystemManagedGroupSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_DEFAULT_ACCOUNT } } },
 };
 
 /* these SIDs must be constructed as relative to some domain - only the RID is well-known */
@@ -871,6 +872,30 @@ exit:
 }
 
 /******************************************************************************
+ * CheckTokenCapability    (kernelbase.@)
+ */
+BOOL WINAPI CheckTokenCapability( HANDLE token, PSID capability_sid, PBOOL has_capability )
+{
+    BOOLEAN result;
+    NTSTATUS status;
+
+    TRACE("(%p %s %p)\n", token, debugstr_sid(capability_sid), has_capability);
+
+    if (!capability_sid || !has_capability)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    *has_capability = FALSE;
+    status = RtlCheckTokenCapability( token, capability_sid, &result );
+    if (status) return set_ntstatus( status );
+
+    *has_capability = result;
+    return TRUE;
+}
+
+/******************************************************************************
  * CheckTokenMembershipEx    (kernelbase.@)
  */
 BOOL WINAPI CheckTokenMembershipEx( HANDLE token, PSID sid_to_check, DWORD flags, PBOOL is_member )
@@ -1170,7 +1195,6 @@ BOOL WINAPI SetTokenInformation( HANDLE token, TOKEN_INFORMATION_CLASS class, LP
 
     return set_ntstatus( NtSetInformationToken( token, class, info, len ));
 }
-
 
 /******************************************************************************
  * Security descriptor functions

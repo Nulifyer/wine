@@ -1287,23 +1287,54 @@ static void test_query_startup_system_information(void)
     ok(!memcmp(buffer, (BYTE[8]){0}, 8), "Expected zero write-constraint record\n");
 }
 
+static const BYTE query_policy_cipher[160] =
+{
+    0xc9, 0x98, 0xe5, 0x1b, 0xa3, 0xa9, 0x63, 0x2e,
+    0x56, 0xe1, 0xe2, 0x53, 0xe0, 0x65, 0x77, 0x7c,
+    0x3e, 0x26, 0x3d, 0x34, 0x5f, 0xb9, 0x87, 0xce,
+    0x86, 0xa9, 0xe7, 0xf2, 0x98, 0x08, 0x83, 0x14,
+    0x85, 0x1e, 0x83, 0x91, 0x9d, 0xbd, 0x3c, 0xc3,
+    0x22, 0x0c, 0x21, 0xbe, 0x4a, 0x78, 0x05, 0xb2,
+    0xce, 0x2d, 0x0e, 0x0b,
+    [128] = 0x1d, 0x0e, 0x0f, 0x09, 0x1b, 0x01, 0x1a, 0x18,
+    0x1e, 0x05, 0x0b, 0x19, 0x02, 0x1f, 0x1f, 0x1f,
+    0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f,
+    0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f,
+};
+static const BYTE query_policy_key[8] = {0x58, 0x4a, 0xb5, 0xb1, 0x17, 0xcb, 0x1e, 0xc8};
+static const BYTE wait_for_display_window_cipher[216] =
+{
+    0xf1, 0xfa, 0xc8, 0x2d, 0xe0, 0x33, 0xd8, 0x5f,
+    0xf9, 0xc6, 0x22, 0x6d, 0x4c, 0x42, 0xf7, 0x4d,
+    0xfc, 0x14, 0x5d, 0x13, 0x5e, 0x96, 0xb5, 0x01,
+    0x27, 0x8d, 0x88, 0xcc, 0x29, 0xbb, 0x5c, 0xed,
+    0x53, 0xcb, 0x5d, 0x54, 0xc4, 0x3e, 0x30, 0x92,
+    0xb0, 0x83, 0x3d, 0x3f, 0xb0, 0x55, 0x12, 0xcf,
+    0xb4, 0xd5, 0xfc, 0x3e, 0x7b, 0x62, 0x63, 0x19,
+    0xf4, 0xf0, 0x65, 0xf7, 0x66, 0x4c, 0xb7, 0x04,
+    0x2e, 0x3b, 0xe4, 0x04, 0xd6, 0x65, 0xe6, 0xfb,
+    0xd6, 0x5a, 0x31, 0x8c, 0x4e, 0x8f, 0x77, 0x3d,
+    0xa2, 0xa0, 0x4c, 0x77, 0x21, 0xe7, 0x3d, 0xd5,
+    0xec, 0x78, 0xca, 0xcf, 0x9f, 0x73, 0x5d, 0xa3,
+    0xf5, 0x6f, 0x72, 0x04, 0x46, 0x24, 0x3c, 0xdc,
+    0x82, 0xc5, 0x56, 0xeb, 0xc3, 0x59, 0x5a, 0x07,
+    0x77, 0x90, 0x1e, 0x9a, 0x47, 0x9c, 0xb3, 0xda,
+    0x12, 0xda, 0x4c, 0x36, 0xea, 0x04, 0x08, 0x46,
+    0x89, 0xff, 0xe6, 0x4a, 0x5f, 0x42, 0x6c, 0x2b,
+    0x4a, 0xa3, 0x8b, 0x59, 0xb0, 0xae, 0x2d, 0x84,
+    0xb1, 0x2a, 0x9a, 0x34, 0x8b, 0x2c, 0xa4, 0x6a,
+    0x3e, 0x35, 0x58, 0x74, 0x8f, 0x1f, 0xca, 0x1b,
+    0x09, 0x4a, 0x5d, 0x34, 0x6b, 0x5d, 0x1d, 0x9c,
+    0x38, 0x45, 0x9e, 0x47, 0xc7, 0x39, 0x7d, 0x36,
+    0x5b, 0x74, 0x90, 0x19, 0x91, 0x23, 0x6e, 0xad,
+    0x6d, 0x1a, 0x0a, 0x43, 0x18, 0xed, 0xda, 0x3d,
+    0x9f, 0x06, 0xfd, 0x16, 0x11, 0xc7, 0x83, 0x7b,
+    0xcf, 0x0e, 0x90, 0xc8, 0x36, 0x41, 0x61, 0x76,
+    0xd6, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
 static void test_query_policy_information(void)
 {
-    static const BYTE query_policy_cipher[160] =
-    {
-        0xc9, 0x98, 0xe5, 0x1b, 0xa3, 0xa9, 0x63, 0x2e,
-        0x56, 0xe1, 0xe2, 0x53, 0xe0, 0x65, 0x77, 0x7c,
-        0x3e, 0x26, 0x3d, 0x34, 0x5f, 0xb9, 0x87, 0xce,
-        0x86, 0xa9, 0xe7, 0xf2, 0x98, 0x08, 0x83, 0x14,
-        0x85, 0x1e, 0x83, 0x91, 0x9d, 0xbd, 0x3c, 0xc3,
-        0x22, 0x0c, 0x21, 0xbe, 0x4a, 0x78, 0x05, 0xb2,
-        0xce, 0x2d, 0x0e, 0x0b,
-        [128] = 0x1d, 0x0e, 0x0f, 0x09, 0x1b, 0x01, 0x1a, 0x18,
-        0x1e, 0x05, 0x0b, 0x19, 0x02, 0x1f, 0x1f, 0x1f,
-        0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f,
-        0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f,
-    };
-    static const BYTE query_policy_key[8] = {0x58, 0x4a, 0xb5, 0xb1, 0x17, 0xcb, 0x1e, 0xc8};
     struct system_policy_information
     {
         const void *input;
@@ -1370,8 +1401,107 @@ static void test_query_policy_information(void)
     ok( !memcmp( &policy, &before, sizeof(policy) ), "policy structure changed\n" );
     ok( output[0] == 0xcc, "output changed to %#x\n", output[0] );
 
+    policy.output_size = 228;
+    before = policy;
+    status = pNtQuerySystemInformation( SystemPolicyInformation, &policy, sizeof(policy), NULL );
+    ok( status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#lx\n", status );
+    ok( !memcmp( &policy, &before, sizeof(policy) ), "policy structure changed\n" );
+    ok( output[0] == 0xcc, "output changed to %#x\n", output[0] );
+
+    policy.output_size = 227;
+    before = policy;
+    status = pNtQuerySystemInformation( SystemPolicyInformation, &policy, sizeof(policy), NULL );
+    ok( status == STATUS_DATA_ERROR, "got %#lx\n", status );
+    ok( !memcmp( &policy, &before, sizeof(policy) ), "policy structure changed\n" );
+    ok( output[0] == 0xcc, "output changed to %#x\n", output[0] );
+
     status = pNtQuerySystemInformation( SystemPolicyInformation, &policy, sizeof(policy) + 8, NULL );
     ok( status == STATUS_INFO_LENGTH_MISMATCH, "got %#lx\n", status );
+}
+
+static void test_wait_for_display_window_child(int argc, char **argv)
+{
+    struct system_policy_information
+    {
+        const void *input;
+        void *output;
+        ULONG input_size;
+        ULONG output_size;
+        ULONG version;
+        NTSTATUS status;
+    } policy;
+    BYTE input[396], output[228];
+    ULONG value, offset = 0;
+    HANDLE ready = NULL;
+    NTSTATUS status;
+
+    if (argc >= 2) sscanf( argv[1], "%p", &ready );
+
+    value = sizeof(wait_for_display_window_cipher);
+    memcpy( input + offset, &value, sizeof(value) );
+    offset += sizeof(value);
+    memcpy( input + offset, wait_for_display_window_cipher, sizeof(wait_for_display_window_cipher) );
+    offset += sizeof(wait_for_display_window_cipher);
+    value = sizeof(query_policy_cipher);
+    memcpy( input + offset, &value, sizeof(value) );
+    offset += sizeof(value);
+    memcpy( input + offset, query_policy_cipher, sizeof(query_policy_cipher) );
+    offset += sizeof(query_policy_cipher);
+    value = sizeof(query_policy_key);
+    memcpy( input + offset, &value, sizeof(value) );
+    offset += sizeof(value);
+    memcpy( input + offset, query_policy_key, sizeof(query_policy_key) );
+    offset += sizeof(query_policy_key);
+
+    memset( output, 0xcc, sizeof(output) );
+    policy.input = input;
+    policy.output = output;
+    policy.input_size = offset;
+    policy.output_size = sizeof(output);
+    policy.version = 0;
+    policy.status = 0xcccccccc;
+
+    if (ready) SetEvent( ready );
+    status = pNtQuerySystemInformation( SystemPolicyInformation, &policy, sizeof(policy), NULL );
+    trace( "WaitForDisplayWindow returned %#lx\n", status );
+}
+
+static void test_wait_for_display_window(char **argv)
+{
+    SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
+    STARTUPINFOA si = {sizeof(si)};
+    PROCESS_INFORMATION pi;
+    char cmdline[MAX_PATH];
+    HANDLE ready;
+    DWORD wait;
+    BOOL ret;
+
+    ready = CreateEventA( &sa, TRUE, FALSE, NULL );
+    ok( !!ready, "CreateEvent failed, error %lu\n", GetLastError() );
+    if (!ready) return;
+
+    sprintf( cmdline, "%s %s policy_wait %p", argv[0], argv[1], ready );
+    ret = CreateProcessA( NULL, cmdline, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi );
+    ok( ret, "CreateProcess failed, error %lu\n", GetLastError() );
+    if (!ret)
+    {
+        CloseHandle( ready );
+        return;
+    }
+
+    wait = WaitForSingleObject( ready, 10000 );
+    ok( wait == WAIT_OBJECT_0, "child readiness wait returned %#lx\n", wait );
+    if (wait == WAIT_OBJECT_0)
+    {
+        wait = WaitForSingleObject( pi.hProcess, 200 );
+        ok( wait == WAIT_TIMEOUT, "WaitForDisplayWindow call did not block, wait returned %#lx\n", wait );
+    }
+
+    TerminateProcess( pi.hProcess, 0 );
+    WaitForSingleObject( pi.hProcess, 10000 );
+    CloseHandle( pi.hThread );
+    CloseHandle( pi.hProcess );
+    CloseHandle( ready );
 }
 
 static void test_query_logicalproc(void)
@@ -1889,6 +2019,23 @@ static void test_query_video_state(void)
            "Expected a valid monitor display state, got %u\n", state);
         if (winetest_platform_is_wine)
             ok(state == PowerMonitorOn, "Wine unexpectedly reported monitor display state %u\n", state);
+    }
+}
+
+static void test_query_platform_information(void)
+{
+    BOOLEAN connected_standby = 0xcc;
+    NTSTATUS status;
+
+    status = pNtPowerInformation(PlatformInformation, NULL, 0,
+                                 &connected_standby, sizeof(connected_standby));
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+    if (status == STATUS_SUCCESS)
+    {
+        ok(connected_standby == FALSE || connected_standby == TRUE,
+           "Expected a Boolean platform capability, got %#x\n", connected_standby);
+        if (winetest_platform_is_wine)
+            ok(!connected_standby, "Wine unexpectedly reported connected standby support\n");
     }
 }
 
@@ -4960,6 +5107,7 @@ START_TEST(info)
     {
         if (strcmp(argv[2], "debuggee:dbgport") == 0) test_debuggee_dbgport(argc - 2, argv + 2);
         else if (!strcmp(argv[2], "check_pp_flags"))  test_debuggee_process_parameters_flags(argc - 2, argv + 2);
+        else if (!strcmp(argv[2], "policy_wait")) test_wait_for_display_window_child(argc - 2, argv + 2);
         return; /* Child */
     }
 
@@ -4981,6 +5129,7 @@ START_TEST(info)
     test_query_regquota();
     test_query_startup_system_information();
     test_query_policy_information();
+    test_wait_for_display_window(argv);
     test_query_logicalproc();
     test_query_logicalprocex();
     test_query_cpusetinfo();
@@ -4993,6 +5142,7 @@ START_TEST(info)
     test_power_black_box_update();
     test_power_user_absence_prediction_capability();
     test_query_video_state();
+    test_query_platform_information();
     test_query_processor_power_info();
 
     /* NtQueryInformationProcess */

@@ -1414,7 +1414,6 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
     TEB *teb;
     WOW_TEB *wow_teb;
     unsigned int status;
-
     if (flags & ~supported_flags)
         FIXME( "Unsupported flags %#x.\n", flags );
 

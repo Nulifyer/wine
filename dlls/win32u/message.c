@@ -3470,7 +3470,6 @@ static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DW
         params.locks = *(DWORD *)ret_ptr;
         params.restore = TRUE;
     }
-
     process_driver_events( QS_ALLINPUT, wake_mask, changed_mask );
     if (!(changed_mask & QS_SMRESULT) && (event = get_user_thread_info()->idle_event)) NtSetEvent( event, NULL );
 

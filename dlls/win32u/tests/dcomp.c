@@ -512,6 +512,63 @@ static void test_frame_statistics(void)
     ok( status == STATUS_INVALID_PARAMETER, "got null-output status %#lx\n", status );
 }
 
+static void test_composition_input_sink(void)
+{
+    BYTE descriptor[0x128] = {0};
+    BYTE queue[0x38] = {0};
+    HANDLE sink = NULL, duplicate = NULL, implicit = NULL;
+    LUID luid = {0}, duplicate_luid = {0}, drop_target_luid = {0};
+    UINT view_id = 0xdeadbeef;
+    NTSTATUS status;
+
+    *(UINT *)descriptor = sizeof(descriptor);
+    status = NtCreateCompositionInputSink( NULL, &sink );
+    ok( status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+    status = NtCreateCompositionInputSink( descriptor, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+
+    *(UINT *)(descriptor + 8) = 5;
+    status = NtCreateCompositionInputSink( descriptor, &sink );
+    ok( status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+    *(UINT *)(descriptor + 8) = 2;
+
+    status = NtCreateCompositionInputSink( descriptor, &sink );
+    ok( !status, "NtCreateCompositionInputSink returned %#lx\n", status );
+    ok( !!sink, "expected a composition input sink handle\n" );
+    status = NtQueryCompositionInputSinkLuid( sink, &luid );
+    ok( !status, "NtQueryCompositionInputSinkLuid returned %#lx\n", status );
+    ok( luid.LowPart || luid.HighPart, "expected a nonzero input sink LUID\n" );
+    status = NtQueryCompositionInputSinkViewId( sink, &view_id );
+    ok( !status, "NtQueryCompositionInputSinkViewId returned %#lx\n", status );
+    ok( !view_id, "expected view id 0, got %u\n", view_id );
+
+    status = NtCompositionSetDropTarget( sink, NULL, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+    *(UINT *)queue = 4;
+    status = NtCompositionSetDropTarget( sink, queue, NULL );
+    ok( status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+    *(UINT *)queue = 1;
+    status = NtCompositionSetDropTarget( sink, queue, &drop_target_luid );
+    ok( !status, "NtCompositionSetDropTarget returned %#lx\n", status );
+    ok( !memcmp( &luid, &drop_target_luid, sizeof(luid) ), "drop target returned a different LUID\n" );
+
+    status = NtDuplicateObject( GetCurrentProcess(), sink, GetCurrentProcess(), &duplicate,
+                                0, 0, DUPLICATE_SAME_ACCESS );
+    ok( !status, "NtDuplicateObject returned %#lx\n", status );
+    status = NtQueryCompositionInputSinkLuid( duplicate, &duplicate_luid );
+    ok( !status, "duplicate LUID query returned %#lx\n", status );
+    ok( !memcmp( &luid, &duplicate_luid, sizeof(luid) ), "duplicate changed the sink LUID\n" );
+    memset( queue, 0, sizeof(queue) );
+    status = NtCompositionSetDropTarget( duplicate, queue, NULL );
+    ok( !status, "drop-target replacement through duplicate returned %#lx\n", status );
+
+    status = NtCreateImplicitCompositionInputSink( descriptor, &implicit );
+    ok( !status, "NtCreateImplicitCompositionInputSink returned %#lx\n", status );
+    if (implicit) NtCloseCompositionInputSink( implicit );
+    if (duplicate) NtCloseCompositionInputSink( duplicate );
+    if (sink) NtCloseCompositionInputSink( sink );
+}
+
 static void test_connection_lifetime(void)
 {
     struct dcomposition_connection_batch *record = (void *)0xdeadbeef;
@@ -5981,6 +6038,7 @@ START_TEST(dcomp)
     test_input_registration();
     test_kst();
     test_frame_statistics();
+    test_composition_input_sink();
     test_channel_lifetime();
     test_channel_application_id();
     test_channel_synchronization();

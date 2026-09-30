@@ -78,6 +78,31 @@ BOOL WINAPI RegisterNaturalInputHandler(void)
     return natural_input_handler_proc != NULL;
 }
 
+struct inertia_info
+{
+    float velocity_x;
+    float velocity_y;
+    UINT source;
+};
+
+struct inertia_region
+{
+    RECT rect;
+    float transform[6];
+};
+
+/***********************************************************************
+ *           ReportInertia  (USER32.2551)
+ *
+ * The native USER32 export has five arguments and inserts the private NULL
+ * routing-info argument before entering NtUserReportInertia.
+ */
+BOOL WINAPI ReportInertia( ULONG_PTR id, UINT flags, HWND hwnd, const struct inertia_info *info,
+                           const struct inertia_region *region )
+{
+    return NtUserReportInertia( id, flags, hwnd, NULL, info, region );
+}
+
 /***********************************************************************
  *           GetHimetricScaleFactorFromPixelLocation  (USER32.2560)
  *
@@ -956,6 +981,14 @@ HWND WINAPI GetFocus(void)
 BOOL WINAPI SetShellWindow( HWND hwnd )
 {
     return NtUserSetShellWindowEx( hwnd, hwnd );
+}
+
+/*******************************************************************
+ *           EnableIAMAccess (USER32.@)
+ */
+BOOL WINAPI EnableIAMAccess( ULONGLONG key, BOOL enable )
+{
+    return NtUserEnableIAMAccess( &key, enable );
 }
 
 

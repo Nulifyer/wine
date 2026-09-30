@@ -7654,7 +7654,7 @@ static void test_associate_wait_completion_packet(void)
     UNICODE_STRING keyed_event_name = RTL_CONSTANT_STRING(L"\\BaseNamedObjects\\test_associate_wait_completion_packet_keyed_event");
     HANDLE completion, completion2, packet, packet2, server, client;
     struct test_wait_completion_packet_thread_info thread_info;
-    HANDLE event, mutant, keyed_event, semaphore, thread;
+    HANDLE event, mutant, keyed_event, semaphore, thread, timer;
     BYTE send_buf[TEST_BUF_LEN], recv_buf[TEST_BUF_LEN];
     FILE_IO_COMPLETION_NOTIFICATION_INFORMATION info;
     ULONG_PTR key_context, apc_context;
@@ -7666,6 +7666,8 @@ static void test_associate_wait_completion_packet(void)
     ULONG completion_count;
     IO_STATUS_BLOCK iosb;
     BOOLEAN signaled;
+    DWORD wait;
+    BOOL ret;
     NTSTATUS status;
 
     if (!pNtAssociateWaitCompletionPacket)
@@ -8135,6 +8137,39 @@ static void test_associate_wait_completion_packet(void)
     ok(!completion_count, "Unexpected completion count %ld.\n", completion_count);
 
     status = pNtClose(semaphore);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtClose(packet);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+
+    /* Test associating manual-reset waitable timers. */
+    status = pNtCreateWaitCompletionPacket(&packet, GENERIC_ALL, NULL);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+
+    timer = CreateWaitableTimerW(NULL, TRUE, NULL);
+    ok(timer != NULL, "CreateWaitableTimerW failed, error %lu.\n", GetLastError());
+
+    status = pNtAssociateWaitCompletionPacket(packet, completion, timer, (void *)57, (void *)58,
+                                              STATUS_SUCCESS, (ULONG_PTR)59, NULL);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    completion_count = get_pending_msgs(completion);
+    ok(!completion_count, "Got unexpected completion count %ld.\n", completion_count);
+
+    timeout.QuadPart = 0;
+    ret = SetWaitableTimer(timer, &timeout, 0, NULL, NULL, FALSE);
+    ok(ret, "SetWaitableTimer failed, error %lu.\n", GetLastError());
+
+    wait = WaitForSingleObject(completion, 1000);
+    ok(wait == WAIT_OBJECT_0, "completion wait returned %#lx.\n", wait);
+
+    timeout.QuadPart = -10000000;
+    status = pNtRemoveIoCompletion(completion, &key_context, &apc_context, &iosb, &timeout);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    ok(key_context == 57, "Got unexpected completion key %Id\n", key_context);
+    ok(apc_context == 58, "Got unexpected completion value %Id\n", apc_context);
+    ok(iosb.Information == 59, "Got unexpected iosb.Information %Id\n", iosb.Information);
+    ok(iosb.Status == STATUS_SUCCESS, "Got unexpected iosb.Status %#lx\n", iosb.Status);
+
+    status = pNtClose(timer);
     ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
     status = pNtClose(packet);
     ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);

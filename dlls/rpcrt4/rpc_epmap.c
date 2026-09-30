@@ -41,6 +41,11 @@ void __cdecl ept_insert_ex(handle_t, void **, unsigned32, ept_entry_t *, boolean
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
+static const UUID linuxnt_usermgr_interface =
+    {0xb18fbab6, 0x56f8, 0x4702, {0x84, 0xe0, 0x41, 0x05, 0x32, 0x93, 0xa8, 0x69}};
+static const UUID linuxnt_mpnotify_interface =
+    {0x3ca78105, 0xa3a3, 0x4a68, {0xb4, 0x58, 0x1a, 0x60, 0x6b, 0xab, 0x8f, 0xd6}};
+
 /* The "real" RPC portmapper endpoints that I know of are:
  *
  *  ncadg_ip_udp: 135
@@ -249,6 +254,7 @@ static RPC_STATUS epm_register( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bindin
   error_status_t status2;
   ept_entry_t *entries;
   handle_t handle;
+  BOOL mpnotify = IsEqualGUID(&If->InterfaceId.SyntaxGUID, &linuxnt_mpnotify_interface);
 
   TRACE("(%p,%p,%p,%s) replace=%d\n", IfSpec, BindingVector, UuidVector, debugstr_a((char*)Annotation), replace);
   TRACE(" ifid=%s\n", debugstr_guid(&If->InterfaceId.SyntaxGUID));
@@ -261,6 +267,10 @@ static RPC_STATUS epm_register( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bindin
     for (i=0; i<UuidVector->Count; i++)
       TRACE(" obj[%ld]=%s\n", i, debugstr_guid(UuidVector->Uuid[i]));
   }
+  if (mpnotify)
+    ERR("linuxnt-mpnotify-ep-register begin bindings=%lu objects=%lu object=%s\n",
+        BindingVector->Count, UuidVector ? UuidVector->Count : 0,
+        UuidVector && UuidVector->Count ? debugstr_guid(UuidVector->Uuid[0]) : "(none)");
 
   if (!BindingVector->Count) return RPC_S_OK;
 
@@ -348,6 +358,8 @@ static RPC_STATUS epm_register( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bindin
   }
 
   free(entries);
+
+  if (mpnotify) ERR("linuxnt-mpnotify-ep-register end status=%lu\n", status);
 
   return status;
 }
@@ -504,6 +516,8 @@ RPC_STATUS WINAPI RpcEpResolveBinding( RPC_BINDING_HANDLE Binding, RPC_IF_HANDLE
   twr_t *towers[4] = { NULL };
   unsigned32 num_towers = 0, i;
   char *resolved_endpoint = NULL;
+  BOOL trace_usermgr = IsEqualGUID(&If->InterfaceId.SyntaxGUID, &linuxnt_usermgr_interface);
+  BOOL trace_mpnotify = IsEqualGUID(&If->InterfaceId.SyntaxGUID, &linuxnt_mpnotify_interface);
 
   TRACE("(%p,%p)\n", Binding, IfSpec);
   TRACE(" protseq=%s\n", debugstr_a(bind->Protseq));
@@ -515,7 +529,12 @@ RPC_STATUS WINAPI RpcEpResolveBinding( RPC_BINDING_HANDLE Binding, RPC_IF_HANDLE
   if (bind->Endpoint && (bind->Endpoint[0] != '\0'))
     return RPC_S_OK;
 
+  if (trace_usermgr) ERR("linuxnt-usermgr-epresolve epm-handle begin\n");
+  if (trace_mpnotify) ERR("linuxnt-mpnotify-epresolve begin object=%s protseq=%s\n",
+                          debugstr_guid(&bind->ObjectUuid), debugstr_a(bind->Protseq));
   status = get_epm_handle_client(Binding, &handle);
+  if (trace_usermgr) ERR("linuxnt-usermgr-epresolve epm-handle end status=%ld\n", status);
+  if (trace_mpnotify) ERR("linuxnt-mpnotify-epresolve epm-handle status=%ld\n", status);
   if (status != RPC_S_OK) return status;
   
   status = TowerConstruct(&If->InterfaceId, &If->TransferSyntax, bind->Protseq,
@@ -532,7 +551,12 @@ RPC_STATUS WINAPI RpcEpResolveBinding( RPC_BINDING_HANDLE Binding, RPC_IF_HANDLE
   {
     __TRY
     {
+      if (trace_usermgr) ERR("linuxnt-usermgr-epresolve map begin\n");
       ept_map(handle, &bind->ObjectUuid, tower, &entry_handle, ARRAY_SIZE(towers), &num_towers, towers, &status2);
+      if (trace_usermgr) ERR("linuxnt-usermgr-epresolve map end status=%lu towers=%lu\n",
+                             status2, num_towers);
+      if (trace_mpnotify) ERR("linuxnt-mpnotify-epresolve map status=%lu towers=%lu\n",
+                              status2, num_towers);
       /* FIXME: translate status2? */
     }
     __EXCEPT(rpc_filter)

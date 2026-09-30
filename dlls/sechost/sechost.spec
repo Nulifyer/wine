@@ -17,7 +17,7 @@
 @ stub AuditSetSystemPolicy
 @ stub BuildSecurityDescriptorForSharingAccess
 @ stub BuildSecurityDescriptorForSharingAccessEx
-@ stub CapabilityCheck
+@ stdcall CapabilityCheck(long wstr ptr)
 @ stub CapabilityCheckForSingleSessionSku
 @ stdcall ChangeServiceConfig2A(long long ptr)
 @ stdcall ChangeServiceConfig2W(long long ptr)

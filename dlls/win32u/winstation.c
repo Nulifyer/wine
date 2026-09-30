@@ -138,6 +138,64 @@ NTSTATUS WINAPI NtUserRemoteConnect( void *connect_info, ULONG operation, void *
     return STATUS_SUCCESS;
 }
 
+/***********************************************************************
+ *           NtUserRemoteConnectState   (win32u.@)
+ */
+UINT WINAPI NtUserRemoteConnectState(void)
+{
+    /* Native state 3 represents an initialized USER/GDI connection whose
+     * connection-completion flag is set. Wine's local display has no remote
+     * transport lifecycle, so expose that stable terminal state. */
+    return 3;
+}
+
+/***********************************************************************
+ *           NtUserRemoteDisconnect   (win32u.@)
+ */
+NTSTATUS WINAPI NtUserRemoteDisconnect(void)
+{
+    /* There is no remote display transport to disconnect. */
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           NtUserRemoteNotify   (win32u.@)
+ */
+NTSTATUS WINAPI NtUserRemoteNotify( const UINT *notification )
+{
+    UINT value;
+
+    if (!notification) return STATUS_ACCESS_VIOLATION;
+    __TRY
+    {
+        value = *notification;
+    }
+    __EXCEPT
+    {
+        return STATUS_ACCESS_VIOLATION;
+    }
+    __ENDTRY
+
+    TRACE( "notification %u\n", value );
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           NtUserRemotePassthruDisable   (win32u.@)
+ */
+NTSTATUS WINAPI NtUserRemotePassthruDisable(void)
+{
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           NtUserRemotePassthruEnable   (win32u.@)
+ */
+NTSTATUS WINAPI NtUserRemotePassthruEnable(void)
+{
+    return STATUS_SUCCESS;
+}
+
 BOOL WINAPI NtUserGetDesktopID( UINT selector, UINT64 *id )
 {
     object_id_t desktop_id = 0;
@@ -687,23 +745,54 @@ HDESK WINAPI NtUserGetThreadDesktop( DWORD thread )
     return ret;
 }
 
-/***********************************************************************
- *           NtUserSetThreadDesktop   (win32u.@)
- */
-BOOL WINAPI NtUserSetThreadDesktop( HDESK handle )
+static NTSTATUS open_thread_desktop( DWORD thread, ACCESS_MASK access, HDESK *handle )
 {
-    BOOL ret, was_virtual_desktop = is_virtual_desktop();
+    NTSTATUS status;
+
+    *handle = 0;
+    SERVER_START_REQ( open_thread_desktop )
+    {
+        req->tid = thread;
+        req->access = access;
+        status = wine_server_call( req );
+        if (!status) *handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS open_input_desktop_handle( DWORD flags, BOOL inherit, ACCESS_MASK access, HDESK *handle )
+{
+    NTSTATUS status;
+
+    *handle = 0;
+    SERVER_START_REQ( open_input_desktop )
+    {
+        req->flags      = flags;
+        req->access     = access;
+        req->attributes = inherit ? OBJ_INHERIT : 0;
+        status = wine_server_call( req );
+        if (!status) *handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS set_thread_desktop( HDESK handle )
+{
+    BOOL was_virtual_desktop = is_virtual_desktop();
     struct obj_locator locator;
+    NTSTATUS status;
 
     SERVER_START_REQ( set_thread_desktop )
     {
         req->handle = wine_server_obj_handle( handle );
-        ret = !wine_server_call_err( req );
+        status = wine_server_call( req );
         locator = reply->locator;
     }
     SERVER_END_REQ;
 
-    if (ret)  /* reset the desktop windows */
+    if (!status)
     {
         struct user_thread_info *thread_info = get_user_thread_info();
         struct session_thread_data *data = get_session_thread_data();
@@ -713,7 +802,128 @@ BOOL WINAPI NtUserSetThreadDesktop( HDESK handle )
         thread_info->msg_window = 0;
         if (was_virtual_desktop != is_virtual_desktop()) update_display_cache( TRUE );
     }
-    return ret;
+    return status;
+}
+
+/***********************************************************************
+ *           NtUserSetThreadDesktop   (win32u.@)
+ */
+BOOL WINAPI NtUserSetThreadDesktop( HDESK handle )
+{
+    NTSTATUS status = set_thread_desktop( handle );
+
+    if (status) RtlSetLastWin32Error( RtlNtStatusToDosError( status ) );
+    return !status;
+}
+
+static NTSTATUS use_thread_desktop( struct ntuser_thread_desktop_state *state,
+                                    HDESK target )
+{
+    NTSTATUS status;
+
+    if (state->desktop || state->target)
+    {
+        NtUserCloseDesktop( target );
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    state->desktop = NtUserGetThreadDesktop( GetCurrentThreadId() );
+    if (!state->desktop)
+    {
+        status = STATUS_INVALID_HANDLE;
+        goto failed;
+    }
+
+    if (!(status = set_thread_desktop( target )))
+    {
+        state->target = target;
+        return STATUS_SUCCESS;
+    }
+
+    state->desktop = 0;
+failed:
+    NtUserCloseDesktop( target );
+    return status;
+}
+
+static NTSTATUS restore_thread_desktop( struct ntuser_thread_desktop_state *state )
+{
+    NTSTATUS status;
+
+    if (!state->desktop || !state->target) return STATUS_INVALID_PARAMETER;
+    if ((status = set_thread_desktop( state->desktop ))) return status;
+
+    if (!NtUserCloseDesktop( state->target )) status = STATUS_UNSUCCESSFUL;
+    state->desktop = 0;
+    state->target = 0;
+    return status;
+}
+
+/***********************************************************************
+ *           NtUserSetInformationThread   (win32u.@)
+ */
+NTSTATUS WINAPI NtUserSetInformationThread( HANDLE thread, USERTHREADINFOCLASS info_class,
+                                             void *info, ULONG length )
+{
+    struct ntuser_thread_desktop_state *state = info;
+    THREAD_BASIC_INFORMATION caller_info, thread_info;
+    HDESK target;
+    NTSTATUS status;
+
+    if (length > 32) return STATUS_INVALID_PARAMETER;
+    if (length && !info) return STATUS_ACCESS_VIOLATION;
+    status = NtQueryInformationThread( thread, ThreadBasicInformation,
+                                       &caller_info, sizeof(caller_info), NULL );
+    if (status) return status;
+
+    switch (info_class)
+    {
+    case UserThreadUseActiveDesktop:
+        if (length != sizeof(*state)) return STATUS_INFO_LENGTH_MISMATCH;
+        status = open_input_desktop_handle( 0, FALSE, DESKTOP_ALL_ACCESS, &target );
+        if (status) return status;
+        return use_thread_desktop( state, target );
+
+    case UserThreadUseDesktop:
+        if (length != sizeof(*state)) return STATUS_INFO_LENGTH_MISMATCH;
+        status = NtQueryInformationThread( state->thread, ThreadBasicInformation,
+                                           &thread_info, sizeof(thread_info), NULL );
+        if (status) return status;
+        status = open_thread_desktop( HandleToULong( thread_info.ClientId.UniqueThread ),
+                                      DESKTOP_ALL_ACCESS, &target );
+        if (status) return status;
+        return use_thread_desktop( state, target );
+
+    case UserThreadRestoreDesktop:
+        if (length != sizeof(*state) && length != 32)
+            return STATUS_INFO_LENGTH_MISMATCH;
+        return restore_thread_desktop( state );
+
+    case UserThreadBroadcastShellHook:
+        if (length != sizeof(*state)) return STATUS_INFO_LENGTH_MISMATCH;
+        status = open_input_desktop_handle( 0, FALSE, DESKTOP_ALL_ACCESS, &target );
+        if (status) return status;
+        if ((status = use_thread_desktop( state, target ))) return status;
+        call_hooks( WH_SHELL, 0x37, 0, 0, 0 );
+        return restore_thread_desktop( state );
+
+    case UserThreadShutdownInformation:
+    case UserThreadFlags:
+    case UserThreadTaskName:
+    case UserThreadWOWInformation:
+    case UserThreadHungStatus:
+    case UserThreadInitiateShutdown:
+    case UserThreadEndShutdown:
+    case UserThreadCsrApiPort:
+    case UserThreadSetWinlogonWindow:
+    case UserThreadConsoleShutdown:
+    case UserThreadConsoleEndShutdown:
+    case UserThreadConvertibleState:
+    case UserThreadDockState:
+        return STATUS_NOT_SUPPORTED;
+    default:
+        return STATUS_INVALID_INFO_CLASS;
+    }
 }
 
 /***********************************************************************
@@ -721,7 +931,8 @@ BOOL WINAPI NtUserSetThreadDesktop( HDESK handle )
  */
 HDESK WINAPI NtUserOpenInputDesktop( DWORD flags, BOOL inherit, ACCESS_MASK access )
 {
-    HANDLE ret = 0;
+    HDESK ret;
+    NTSTATUS status;
 
     TRACE( "(%x,%i,%x)\n", flags, inherit, access );
 
@@ -730,14 +941,8 @@ HDESK WINAPI NtUserOpenInputDesktop( DWORD flags, BOOL inherit, ACCESS_MASK acce
     if (flags)
         FIXME( "partial stub flags %08x\n", flags );
 
-    SERVER_START_REQ( open_input_desktop )
-    {
-        req->flags      = flags;
-        req->access     = access;
-        req->attributes = inherit ? OBJ_INHERIT : 0;
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->handle );
-    }
-    SERVER_END_REQ;
+    status = open_input_desktop_handle( flags, inherit, access, &ret );
+    if (status) RtlSetLastWin32Error( RtlNtStatusToDosError( status ) );
 
     return ret;
 }

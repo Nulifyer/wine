@@ -48,6 +48,27 @@
 #include "wine/test.h"
 
 #define check_interface( a, b, c ) check_interface_( __LINE__, a, b, c, FALSE )
+
+typedef struct ICoreApplicationPrivate ICoreApplicationPrivate;
+typedef struct ICoreApplicationPrivateVtbl
+{
+    HRESULT (WINAPI *QueryInterface)(ICoreApplicationPrivate *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(ICoreApplicationPrivate *);
+    ULONG (WINAPI *Release)(ICoreApplicationPrivate *);
+    HRESULT (WINAPI *GetIids)(ICoreApplicationPrivate *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(ICoreApplicationPrivate *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(ICoreApplicationPrivate *, TrustLevel *);
+    HRESULT (WINAPI *get_Properties)(ICoreApplicationPrivate *, IPropertySet **);
+    HRESULT (WINAPI *get_PrivateProperties)(ICoreApplicationPrivate *, IPropertySet **);
+} ICoreApplicationPrivateVtbl;
+
+struct ICoreApplicationPrivate
+{
+    const ICoreApplicationPrivateVtbl *lpVtbl;
+};
+
+static const IID IID_ICoreApplicationPrivate =
+    {0x17b0e613, 0x942a, 0x422d, {0x90, 0x4c, 0xf9, 0x0d, 0xc7, 0x1a, 0x7d, 0xae}};
 static void check_interface_( unsigned int line, void *iface_ptr, REFIID iid, BOOL supported, BOOL is_broken )
 {
     HRESULT hr, expected_hr, broken_hr;
@@ -284,8 +305,21 @@ static void test_ApplicationView(void)
 static void test_CoreApplication(void)
 {
     static const WCHAR *class_name = RuntimeClass_Windows_ApplicationModel_Core_CoreApplication;
+    ICoreApplicationPrivate *private;
+    ICoreImmersiveApplication *immersive;
+    ICoreApplicationUseCount *use_count;
+    ICoreApplication *core;
+    IVectorView_CoreApplicationView *views;
+    IMap_HSTRING_IInspectable *map;
+    IPropertySet *props, *props2, *private_props;
+    IInspectable *value;
+    IUnknown *identity, *identity2;
     IActivationFactory *factory;
-    HSTRING str;
+    HSTRING str, key;
+    IID *iids;
+    UINT32 size;
+    ULONG count;
+    boolean replaced;
     HRESULT hr;
     LONG ref;
 
@@ -305,6 +339,87 @@ static void test_CoreApplication(void)
     check_interface( factory, &IID_IInspectable, TRUE );
     check_interface( factory, &IID_IAgileObject, TRUE );
     check_interface( factory, &IID_IActivationFactory, TRUE );
+    check_interface( factory, &IID_ICoreApplication, TRUE );
+    check_interface( factory, &IID_ICoreApplication2, TRUE );
+    check_interface( factory, &IID_ICoreApplication3, TRUE );
+    check_interface( factory, &IID_ICoreApplicationExit, TRUE );
+    check_interface( factory, &IID_ICoreApplicationUnhandledError, TRUE );
+    check_interface( factory, &IID_ICoreApplicationUseCount, TRUE );
+    check_interface( factory, &IID_ICoreImmersiveApplication, TRUE );
+    check_interface( factory, &IID_ICoreImmersiveApplication2, TRUE );
+    check_interface( factory, &IID_ICoreImmersiveApplication3, TRUE );
+    check_interface( factory, &IID_ICoreApplicationPrivate, TRUE );
+
+    hr = IActivationFactory_GetIids( factory, &count, &iids );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ok( count >= 9, "got %lu interfaces.\n", count );
+    CoTaskMemFree( iids );
+
+    hr = IActivationFactory_GetRuntimeClassName( factory, &str );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ok( !wcscmp( WindowsGetStringRawBuffer( str, NULL ), class_name ), "got %s.\n", debugstr_hstring(str) );
+    WindowsDeleteString( str );
+
+    hr = IActivationFactory_QueryInterface( factory, &IID_ICoreApplication, (void **)&core );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = IActivationFactory_QueryInterface( factory, &IID_IUnknown, (void **)&identity );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = ICoreApplication_QueryInterface( core, &IID_IUnknown, (void **)&identity2 );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ok( identity == identity2, "factory %p and statics %p have different identities.\n", identity, identity2 );
+    IUnknown_Release( identity2 );
+    IUnknown_Release( identity );
+
+    hr = ICoreApplication_get_Properties( core, &props );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = ICoreApplication_get_Properties( core, &props2 );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ok( props == props2, "property set identity changed, %p != %p.\n", props, props2 );
+    IPropertySet_Release( props2 );
+
+    hr = IActivationFactory_QueryInterface( factory, &IID_ICoreApplicationPrivate, (void **)&private );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = private->lpVtbl->get_PrivateProperties( private, &private_props );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ok( private_props != props, "public and private property sets unexpectedly share identity.\n" );
+
+    hr = IPropertySet_QueryInterface( private_props, &IID_IMap_HSTRING_IInspectable, (void **)&map );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = WindowsCreateString( L"linuxnt.test", 12, &key );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = IMap_HSTRING_IInspectable_Insert( map, key, (IInspectable *)props, &replaced );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ok( !replaced, "new value was reported as replaced.\n" );
+    hr = IMap_HSTRING_IInspectable_Lookup( map, key, &value );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ok( value == (IInspectable *)props, "got value %p, expected %p.\n", value, props );
+    IInspectable_Release( value );
+    hr = IMap_HSTRING_IInspectable_Remove( map, key );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    WindowsDeleteString( key );
+    IMap_HSTRING_IInspectable_Release( map );
+    IPropertySet_Release( private_props );
+    private->lpVtbl->Release( private );
+    IPropertySet_Release( props );
+
+    hr = IActivationFactory_QueryInterface( factory, &IID_ICoreImmersiveApplication, (void **)&immersive );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = ICoreImmersiveApplication_get_Views( immersive, &views );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = IVectorView_CoreApplicationView_get_Size( views, &size );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ok( !size, "got %u views.\n", size );
+    IVectorView_CoreApplicationView_Release( views );
+    ICoreImmersiveApplication_Release( immersive );
+
+    hr = IActivationFactory_QueryInterface( factory, &IID_ICoreApplicationUseCount, (void **)&use_count );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = ICoreApplicationUseCount_IncrementApplicationUseCount( use_count );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    hr = ICoreApplicationUseCount_DecrementApplicationUseCount( use_count );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    ICoreApplicationUseCount_Release( use_count );
+    ICoreApplication_Release( core );
 
     ref = IActivationFactory_Release( factory );
     ok( ref == 1, "got ref %ld.\n", ref );

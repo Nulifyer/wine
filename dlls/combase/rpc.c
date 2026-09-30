@@ -346,6 +346,32 @@ static BOOL wait_for_named_pipe(const WCHAR *name, DWORD timeout)
     return FALSE;
 }
 
+static BOOL service_uses_shared_host(SC_HANDLE service)
+{
+    static const WCHAR shared_hostW[] = L"svchost.exe";
+    QUERY_SERVICE_CONFIGW *config;
+    const WCHAR *cursor;
+    DWORD size;
+    BOOL ret = FALSE;
+
+    QueryServiceConfigW(service, NULL, 0, &size);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || !(config = malloc(size))) return FALSE;
+
+    if (QueryServiceConfigW(service, config, size, &size))
+    {
+        for (cursor = config->lpBinaryPathName; cursor && *cursor; cursor++)
+        {
+            if (!wcsnicmp(cursor, shared_hostW, ARRAY_SIZE(shared_hostW) - 1))
+            {
+                ret = TRUE;
+                break;
+            }
+        }
+    }
+    free(config);
+    return ret;
+}
+
 static BOOL start_rpcss(void)
 {
     static LONG standalone_started;
@@ -355,6 +381,7 @@ static BOOL start_rpcss(void)
     STARTUPINFOW startup = { sizeof(startup) };
     PROCESS_INFORMATION process;
     SC_HANDLE scm, service;
+    BOOL shared_host;
     BOOL ret = FALSE;
 
     TRACE("\n");
@@ -365,34 +392,45 @@ static BOOL start_rpcss(void)
         return FALSE;
     }
 
-    if (!(service = OpenServiceW(scm, L"RpcSs", SERVICE_START | SERVICE_QUERY_STATUS)))
+    if (!(service = OpenServiceW(scm, L"RpcSs", SERVICE_START | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG)))
     {
         ERR("Failed to open RpcSs service\n");
         CloseServiceHandle( scm );
         return FALSE;
     }
 
+    shared_host = service_uses_shared_host(service);
     if (StartServiceW(service, 0, NULL) || GetLastError() == ERROR_SERVICE_ALREADY_RUNNING)
     {
-        ULONGLONG start_time = GetTickCount64();
-        do
+        if (shared_host)
         {
-            DWORD dummy;
-
-            if (!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, (BYTE *)&status, sizeof(status), &dummy))
-                break;
-            if (status.dwCurrentState == SERVICE_RUNNING)
+            /* A native, svchost-hosted RpcSs does not publish Wine's private
+             * irpcss/irot endpoints.  Let the standalone adapter own them
+             * without waiting for the native service to finish starting. */
+            ret = TRUE;
+        }
+        else
+        {
+            ULONGLONG start_time = GetTickCount64();
+            do
             {
-                ret = TRUE;
-                break;
-            }
-            if (GetTickCount64() - start_time > 30000) break;
-            Sleep( 100 );
+                DWORD dummy;
 
-        } while (status.dwCurrentState == SERVICE_START_PENDING);
+                if (!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, (BYTE *)&status, sizeof(status), &dummy))
+                    break;
+                if (status.dwCurrentState == SERVICE_RUNNING)
+                {
+                    ret = TRUE;
+                    break;
+                }
+                if (GetTickCount64() - start_time > 30000) break;
+                Sleep( 100 );
 
-        if (status.dwCurrentState != SERVICE_RUNNING)
-            WARN("RpcSs failed to start %lu\n", status.dwCurrentState);
+            } while (status.dwCurrentState == SERVICE_START_PENDING);
+
+            if (status.dwCurrentState != SERVICE_RUNNING)
+                WARN("RpcSs failed to start %lu\n", status.dwCurrentState);
+        }
     }
     else
         ERR("Failed to start RpcSs service\n");

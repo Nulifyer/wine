@@ -21,22 +21,39 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
 {
     HDESK desktop = arg;
     HMODULE user32 = GetModuleHandleA( "user32.dll" );
+    HWND (WINAPI *create_window_in_band)(DWORD, LPCWSTR, LPCWSTR, DWORD, INT, INT,
+                                          INT, INT, HWND, HMENU, HINSTANCE, void *, DWORD);
     HWND (WINAPI *get_shell_change_notify_window)(void);
+    BOOL (WINAPI *get_window_band)(HWND, DWORD *);
+    BOOL (WINAPI *acquire_iam_key)(ULONGLONG *);
+    BOOL (WINAPI *enable_iam_access)(ULONGLONG, BOOL);
     BOOL (WINAPI *set_shell_change_notify_window)(HWND);
     BOOL (WINAPI *set_shell_window)(HWND);
-    HWND hwnd;
+    ULONGLONG key, second_key;
+    DWORD band;
+    HWND band_hwnd, hwnd;
     BOOL ret;
 
     ret = SetThreadDesktop( desktop );
     ok( ret, "failed to select test desktop, error %lu\n", GetLastError() );
 
+    create_window_in_band = (void *)GetProcAddress( user32, "CreateWindowInBand" );
     get_shell_change_notify_window = (void *)GetProcAddress( user32, "GetShellChangeNotifyWindow" );
+    get_window_band = (void *)GetProcAddress( user32, "GetWindowBand" );
+    acquire_iam_key = (void *)GetProcAddress( user32, (const char *)2509 );
+    enable_iam_access = (void *)GetProcAddress( user32, (const char *)2510 );
     set_shell_change_notify_window = (void *)GetProcAddress( user32, "SetShellChangeNotifyWindow" );
     set_shell_window = (void *)GetProcAddress( user32, "SetShellWindow" );
+    ok( !!create_window_in_band, "CreateWindowInBand is unavailable\n" );
     ok( !!get_shell_change_notify_window, "GetShellChangeNotifyWindow is unavailable\n" );
+    ok( !!get_window_band, "GetWindowBand is unavailable\n" );
+    ok( !!acquire_iam_key, "AcquireIAMKey is unavailable\n" );
+    ok( !!enable_iam_access, "EnableIAMAccess is unavailable\n" );
     ok( !!set_shell_change_notify_window, "SetShellChangeNotifyWindow is unavailable\n" );
     ok( !!set_shell_window, "SetShellWindow is unavailable\n" );
-    if (!get_shell_change_notify_window || !set_shell_change_notify_window || !set_shell_window)
+    if (!create_window_in_band || !get_shell_change_notify_window || !get_window_band ||
+        !acquire_iam_key || !enable_iam_access || !set_shell_change_notify_window ||
+        !set_shell_window)
         return 0;
 
     hwnd = CreateWindowExA( 0, "#32770", "shell notify test", WS_OVERLAPPEDWINDOW,
@@ -48,8 +65,64 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     ret = set_shell_change_notify_window( hwnd );
     ok( !ret, "set shell change notify window without a registered shell succeeded\n" );
 
+    key = 0xdeadbeefdeadbeef;
+    SetLastError( 0xdeadbeef );
+    ret = acquire_iam_key( &key );
+    ok( !ret, "acquired IAM key without a registered shell\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "expected access denied, got %lu\n", GetLastError() );
+    ok( key == 0xdeadbeefdeadbeef, "IAM key changed to %#I64x on failure\n", key );
+
     ret = set_shell_window( hwnd );
     ok( ret, "failed to register shell window, error %lu\n", GetLastError() );
+    key = 0;
+    ret = acquire_iam_key( &key );
+    ok( ret, "failed to acquire IAM key, error %lu\n", GetLastError() );
+    ok( key != 0, "acquired a zero IAM key\n" );
+
+    ret = enable_iam_access( key, TRUE );
+    ok( ret, "failed to enable IAM access, error %lu\n", GetLastError() );
+
+    band_hwnd = create_window_in_band( 0, L"static", NULL, WS_POPUP, 0, 0, 32, 32,
+                                       NULL, NULL, NULL, NULL, 12 );
+    ok( !!band_hwnd, "failed to create IAM window in band 12, error %lu\n", GetLastError() );
+    if (band_hwnd)
+    {
+        band = ~0u;
+        ret = get_window_band( band_hwnd, &band );
+        ok( ret, "failed to query IAM window band, error %lu\n", GetLastError() );
+        ok( band == 12, "expected band 12, got %lu\n", band );
+        DestroyWindow( band_hwnd );
+    }
+
+    ret = enable_iam_access( key, FALSE );
+    ok( ret, "failed to disable IAM access, error %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    band_hwnd = create_window_in_band( 0, L"static", NULL, WS_POPUP, 0, 0, 32, 32,
+                                       NULL, NULL, NULL, NULL, 12 );
+    ok( !!band_hwnd, "shell process failed to create band 12 window without thread IAM, error %lu\n",
+        GetLastError() );
+    if (band_hwnd)
+    {
+        band = ~0u;
+        ret = get_window_band( band_hwnd, &band );
+        ok( ret, "failed to query shell window band, error %lu\n", GetLastError() );
+        ok( band == 12, "expected band 12, got %lu\n", band );
+        DestroyWindow( band_hwnd );
+    }
+
+    SetLastError( 0xdeadbeef );
+    ret = enable_iam_access( key ^ 1, TRUE );
+    ok( !ret, "enabled IAM access with the wrong key\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "expected access denied, got %lu\n", GetLastError() );
+
+    second_key = 0xdeadbeefdeadbeef;
+    SetLastError( 0xdeadbeef );
+    ret = acquire_iam_key( &second_key );
+    ok( !ret, "acquired IAM key more than once\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "expected access denied, got %lu\n", GetLastError() );
+    ok( second_key == 0xdeadbeefdeadbeef, "second IAM key changed to %#I64x\n", second_key );
+
     ret = set_shell_change_notify_window( hwnd );
     ok( ret, "failed to set shell change notify window, error %lu\n", GetLastError() );
     ok( get_shell_change_notify_window() == hwnd, "wrong shell change notify window %p\n",

@@ -3063,7 +3063,7 @@ DECL_HANDLER(get_window_composition_attribute)
     case 1:  values[0] = is_nc_rendering_enabled( win ); break;
     case 2:  values[0] = win->composition_policy; break;
     case 3: case 4: case 6: case 7: case 9: case 11: case 13:
-    case 15: case 16: case 20: case 24: case 25: case 26: case 29: case 36:
+    case 15: case 16: case 18: case 20: case 24: case 25: case 26: case 29: case 36:
         values[0] = !!(win->composition_flags & (1ull << req->attribute));
         break;
     case 5:  /* Wine has no separate DWM-provided caption-button margins. */
@@ -3102,6 +3102,10 @@ DECL_HANDLER(set_window_composition_attribute)
     {
     case 2:
         win->composition_policy = values[0];
+        break;
+    case 17: /* WCA_CLOAK updates the read-only WCA_CLOAKED state. */
+        if (values[0]) win->composition_flags |= (1ull << 17) | (1ull << 18);
+        else win->composition_flags &= ~((1ull << 17) | (1ull << 18));
         break;
     case 3: case 4: case 6: case 7: case 9: case 11: case 13:
     case 15: case 16: case 20: case 24: case 25: case 26: case 29: case 36:
@@ -3281,7 +3285,12 @@ DECL_HANDLER(get_desktop_window)
 
     struct desktop *desktop = get_thread_desktop( current, 0 );
 
-    if (!desktop) return;
+    if (!desktop)
+    {
+        clear_error();
+        if (!connect_process_input_desktop( current->process )) return;
+        if (!(desktop = get_thread_desktop( current, 0 ))) return;
+    }
 
     if (!desktop->top_window && req->force)  /* create it */
     {

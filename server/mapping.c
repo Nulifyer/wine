@@ -413,6 +413,28 @@ static int generate_dll_event( struct thread *thread, int code, struct memory_vi
     return 1;
 }
 
+static int process_image_has_name( const struct process *process, const char *name )
+{
+    data_size_t image_len = process->imagelen / sizeof(WCHAR);
+    size_t name_len = strlen( name );
+    data_size_t start, i;
+
+    if (!name_len || name_len > image_len) return 0;
+    start = image_len - name_len;
+    if (start && process->image[start - 1] != '\\' && process->image[start - 1] != '/') return 0;
+
+    for (i = 0; i < name_len; i++)
+    {
+        WCHAR ch = process->image[start + i];
+        char expected = name[i];
+
+        if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+        if (expected >= 'A' && expected <= 'Z') expected += 'a' - 'A';
+        if (ch != expected) return 0;
+    }
+    return 1;
+}
+
 /* add a view to the process list */
 /* return 1 if this is the main exe view */
 static int add_process_view( struct thread *thread, struct memory_view *view )
@@ -420,6 +442,7 @@ static int add_process_view( struct thread *thread, struct memory_view *view )
     static const char services_name[] = "services.exe";
     static const char svchost_name[] = "svchost.exe";
     struct process *process = thread->process;
+    const char *delay_main_image;
     struct unicode_str name;
     data_size_t i;
 
@@ -446,6 +469,13 @@ static int add_process_view( struct thread *thread, struct memory_view *view )
                     fputc( ch >= 0x20 && ch < 0x7f ? ch : '?', stderr );
                 }
                 fputc( '\n', stderr );
+            }
+            if ((delay_main_image = getenv( "LINUXNT_DEBUG_DELAY_MAIN_IMAGE" )) &&
+                process_image_has_name( process, delay_main_image ))
+            {
+                fprintf( stderr, "linuxnt: delaying %s unix=%d before main image reply\n",
+                         delay_main_image, process->unix_pid );
+                usleep( 30000000 );
             }
             if (getenv( "LINUXNT_DEBUG_DELAY_SERVICES_START" ) &&
                 process->imagelen / sizeof(WCHAR) >= sizeof(services_name) - 1)

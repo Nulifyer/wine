@@ -178,15 +178,31 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
 
 static int run_standalone(void)
 {
+    static const WCHAR mutex_name[] = L"__wine_rpcss_standalone_mutex";
     HANDLE shutdown_event = NULL;
+    HANDLE mutex;
     RPC_STATUS ret;
     NTSTATUS status;
 
     TRACE( "starting standalone host adapter\n" );
 
+    if (!(mutex = CreateMutexW( NULL, TRUE, mutex_name )))
+    {
+        DWORD error = GetLastError();
+        WARN( "Failed to create standalone ownership mutex, error %lu.\n", error );
+        return error;
+    }
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        TRACE( "standalone host adapter is already running\n" );
+        CloseHandle( mutex );
+        return 0;
+    }
+
     if ((ret = RPCSS_Initialize()))
     {
         WARN( "Failed to initialize standalone rpc interfaces, status %ld.\n", ret );
+        CloseHandle( mutex );
         return ret;
     }
 
@@ -207,6 +223,7 @@ static int run_standalone(void)
     RpcServerUnregisterIf( Irpcss_v0_0_s_ifspec, NULL, TRUE );
     RpcMgmtWaitServerListen();
     if (shutdown_event) CloseHandle( shutdown_event );
+    CloseHandle( mutex );
     return status ? RtlNtStatusToDosError( status ) : 0;
 }
 

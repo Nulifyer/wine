@@ -3,8 +3,8 @@ IMPORTS   = imm32 user32 gdi32 dwmapi setupapi opengl32 d3d9 dxgi d3d10 d3d11 d3
 
 SOURCES = \
 	cursor_suppression.c \
-	dcomp.c \
 	d3dkmt.c \
+	dcomp.c \
 	device_removal.c \
 	text_ready.c \
 	win32u.c

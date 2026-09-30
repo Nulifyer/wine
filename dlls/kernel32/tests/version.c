@@ -31,6 +31,7 @@ static UINT (WINAPI * pGetSystemFirmwareTable)(DWORD, DWORD, void *, DWORD);
 static LONG (WINAPI * pGetEffectivePackageStatusForUser)(HANDLE, const WCHAR *, UINT32 *);
 static LONG (WINAPI * pGetPackageStatus)(const WCHAR *, UINT32 *);
 static LONG (WINAPI * pPackageFamilyNameFromFullName)(const WCHAR *, UINT32 *, WCHAR *);
+static LONG (WINAPI * pPackageFamilyNameFromId)(const PACKAGE_ID *, UINT32 *, WCHAR *);
 static LONG (WINAPI * pPackageFullNameFromId)(const PACKAGE_ID *, UINT32 *, WCHAR *);
 static LONG (WINAPI * pPackageIdFromFullName)(const WCHAR *, UINT32, UINT32 *, BYTE *);
 static LONG (WINAPI * pPackageNameAndPublisherIdFromFamilyName)(const WCHAR *, UINT32 *, WCHAR *, UINT32 *, WCHAR *);
@@ -56,6 +57,7 @@ static void init_function_pointers(void)
     GET_PROC(EnumSystemFirmwareTables);
     GET_PROC(GetSystemFirmwareTable);
     GET_PROC(PackageFamilyNameFromFullName);
+    GET_PROC(PackageFamilyNameFromId);
     GET_PROC(PackageFullNameFromId);
     GET_PROC(PackageIdFromFullName);
     GET_PROC(PackageNameAndPublisherIdFromFamilyName);
@@ -1242,6 +1244,49 @@ static void test_PackageFamilyNameFromFullName(void)
     ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
 }
 
+static void test_PackageFamilyNameFromId(void)
+{
+    static const WCHAR family_name[] = L"TestPackage_0abcdefghjkme";
+    WCHAR buffer[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1];
+    PACKAGE_ID id = {0};
+    UINT32 length;
+    LONG ret;
+
+    if (!pPackageFamilyNameFromId)
+    {
+        win_skip("PackageFamilyNameFromId not available.\n");
+        return;
+    }
+
+    length = ARRAY_SIZE(buffer);
+    ret = pPackageFamilyNameFromId(NULL, &length, buffer);
+    ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
+    ret = pPackageFamilyNameFromId(&id, NULL, buffer);
+    ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
+
+    id.name = (WCHAR *)L"TestPackage";
+    id.publisherId = (WCHAR *)L"0abcdefghjkme";
+    length = ARRAY_SIZE(buffer);
+    ret = pPackageFamilyNameFromId(&id, &length, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "Unexpected ret %ld.\n", ret);
+
+    length = 0;
+    ret = pPackageFamilyNameFromId(&id, &length, NULL);
+    ok(ret == ERROR_INSUFFICIENT_BUFFER, "Unexpected ret %ld.\n", ret);
+    ok(length == ARRAY_SIZE(family_name), "Unexpected length %u.\n", length);
+
+    length--;
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = pPackageFamilyNameFromId(&id, &length, buffer);
+    ok(ret == ERROR_INSUFFICIENT_BUFFER, "Unexpected ret %ld.\n", ret);
+    ok(length == ARRAY_SIZE(family_name), "Unexpected length %u.\n", length);
+
+    ret = pPackageFamilyNameFromId(&id, &length, buffer);
+    ok(ret == ERROR_SUCCESS, "Unexpected ret %ld.\n", ret);
+    ok(length == ARRAY_SIZE(family_name), "Unexpected length %u.\n", length);
+    ok(!wcscmp(buffer, family_name), "Unexpected family name %s.\n", debugstr_w(buffer));
+}
+
 static void test_PackageNameAndPublisherIdFromFamilyName(void)
 {
     static const WCHAR family_name[] = L"Microsoft.ScreenSketch_8wekyb3d8bbwe";
@@ -1366,6 +1411,7 @@ START_TEST(version)
     test_PackageIdFromFullName();
     test_PackageFullNameFromId();
     test_PackageFamilyNameFromFullName();
+    test_PackageFamilyNameFromId();
     test_PackageNameAndPublisherIdFromFamilyName();
     test_package_status();
 }

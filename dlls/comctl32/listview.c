@@ -215,6 +215,14 @@ typedef struct listview_interface
     LONG refs;
 } LISTVIEW_INTERFACE;
 
+#define MAX_LISTVIEW_WORK_AREAS 16
+
+struct lv_work_area_with_dpi
+{
+    RECT rect;
+    UINT dpi;
+};
+
 enum notification_mask
 {
   NOTIFY_MASK_ITEM_CHANGE = 0x1,
@@ -339,20 +347,26 @@ struct tagLISTVIEW_INFO
   IUnknown *owner_data_callback;
   IUnknown *subitem_callback;
   DWORD selection_flags;
+  INT work_area_count;
+  struct lv_work_area_with_dpi work_areas[MAX_LISTVIEW_WORK_AREAS];
 };
 
 #define LVM_QUERYINTERFACE (LVM_FIRST + 189)
 
 static const IID IID_IListView_Win7 =
     {0xe5b16af2, 0x3990, 0x4681, {0xa6, 0x09, 0x1f, 0x06, 0x0c, 0xd1, 0x42, 0x69}};
+static const IID IID_IListView2 =
+    {0xc327e26b, 0x13c2, 0x47f7, {0x98, 0xe5, 0x79, 0xee, 0xd1, 0x26, 0x5e, 0x41}};
 
 static DWORD LISTVIEW_SetExtendedListViewStyle(LISTVIEW_INFO *infoPtr, DWORD mask, DWORD ex_style);
+static INT LISTVIEW_GetSelectedCount(const LISTVIEW_INFO *infoPtr);
 
 static HRESULT WINAPI listview_iface_QueryInterface(LISTVIEW_INTERFACE *iface, REFIID iid, void **out)
 {
     if (!out) return E_POINTER;
     *out = NULL;
-    if (!IsEqualIID(iid, &IID_IUnknown) && !IsEqualIID(iid, &IID_IListView_Win7)) return E_NOINTERFACE;
+    if (!IsEqualIID(iid, &IID_IUnknown) && !IsEqualIID(iid, &IID_IListView_Win7) &&
+        !IsEqualIID(iid, &IID_IListView2)) return E_NOINTERFACE;
     *out = iface;
     InterlockedIncrement(&iface->refs);
     return S_OK;
@@ -390,6 +404,40 @@ static HRESULT WINAPI listview_iface_SetSelectionFlags(LISTVIEW_INTERFACE *iface
     return S_OK;
 }
 
+static HRESULT WINAPI listview_iface_GetItemCount(LISTVIEW_INTERFACE *iface, INT *count)
+{
+    if (!count) return E_POINTER;
+    *count = 0;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    *count = SendMessageW(iface->info->hwndSelf, LVM_GETITEMCOUNT, 0, 0);
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_SetItemCount(LISTVIEW_INTERFACE *iface, INT count, DWORD flags)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    return SendMessageW(iface->info->hwndSelf, LVM_SETITEMCOUNT, count, flags) ? S_OK : E_FAIL;
+}
+
+static HRESULT WINAPI listview_iface_SetIconSpacing(LISTVIEW_INTERFACE *iface, INT cx, INT cy,
+                                                     INT *old_cx, INT *old_cy)
+{
+    LRESULT old_spacing;
+
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    old_spacing = SendMessageW(iface->info->hwndSelf, LVM_SETICONSPACING, 0, MAKELPARAM(cx, cy));
+    if (old_cx) *old_cx = (SHORT)LOWORD(old_spacing);
+    if (old_cy) *old_cy = (SHORT)HIWORD(old_spacing);
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_ArrangeItems(LISTVIEW_INTERFACE *iface, INT code)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    if (iface->info->uView != LV_VIEW_ICON) return E_UNEXPECTED;
+    return SendMessageW(iface->info->hwndSelf, LVM_ARRANGE, code, 0) ? S_OK : E_FAIL;
+}
+
 static HRESULT WINAPI listview_iface_SetExtendedStyle(LISTVIEW_INTERFACE *iface, DWORD mask,
                                                        DWORD style, DWORD *old_style)
 {
@@ -399,6 +447,66 @@ static HRESULT WINAPI listview_iface_SetExtendedStyle(LISTVIEW_INTERFACE *iface,
     old = LISTVIEW_SetExtendedListViewStyle(iface->info, mask, style);
     if (old_style) *old_style = old;
     return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_GetSelectedCount(LISTVIEW_INTERFACE *iface, INT *count)
+{
+    if (!count) return E_POINTER;
+    *count = 0;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    *count = LISTVIEW_GetSelectedCount(iface->info);
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_GetHeader(LISTVIEW_INTERFACE *iface, HWND *header)
+{
+    if (!header) return E_POINTER;
+    *header = NULL;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    *header = iface->info->hwndHeader;
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_GetColumn(LISTVIEW_INTERFACE *iface, INT index,
+                                                LVCOLUMNW *column)
+{
+    if (!column) return E_POINTER;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    return SendMessageW(iface->info->hwndSelf, LVM_GETCOLUMNW, index, (LPARAM)column) ? S_OK : E_FAIL;
+}
+
+static HRESULT WINAPI listview_iface_SetColumn(LISTVIEW_INTERFACE *iface, INT index,
+                                                const LVCOLUMNW *column)
+{
+    if (!column) return E_POINTER;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    return SendMessageW(iface->info->hwndSelf, LVM_SETCOLUMNW, index, (LPARAM)column) ? S_OK : E_FAIL;
+}
+
+static HRESULT WINAPI listview_iface_InsertColumn(LISTVIEW_INTERFACE *iface, INT index,
+                                                   const LVCOLUMNW *column, INT *inserted)
+{
+    LRESULT result;
+
+    if (!column || !inserted) return E_POINTER;
+    *inserted = -1;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    result = SendMessageW(iface->info->hwndSelf, LVM_INSERTCOLUMNW, index, (LPARAM)column);
+    if (result == -1) return E_FAIL;
+    *inserted = result;
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_DeleteColumn(LISTVIEW_INTERFACE *iface, INT index)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    return SendMessageW(iface->info->hwndSelf, LVM_DELETECOLUMN, index, 0) ? S_OK : E_FAIL;
+}
+
+static HRESULT WINAPI listview_iface_SetColumnWidth(LISTVIEW_INTERFACE *iface, INT index, INT width)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    return SendMessageW(iface->info->hwndSelf, LVM_SETCOLUMNWIDTH, index, width) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI listview_iface_GetToolTip(LISTVIEW_INTERFACE *iface, HWND *tooltip)
@@ -439,19 +547,106 @@ static HRESULT WINAPI listview_iface_SetSubItemCallback(LISTVIEW_INTERFACE *ifac
     return S_OK;
 }
 
-static const void *const listview_iface_vtbl[144] =
+static HRESULT WINAPI listview_iface_SetWorkAreasWithDpi(LISTVIEW_INTERFACE *iface, INT count,
+                                                          const struct lv_work_area_with_dpi *areas)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    if (count < 0) return E_INVALIDARG;
+    if (count && !areas) return E_POINTER;
+    if (iface->info->uView != LV_VIEW_ICON) return E_UNEXPECTED;
+    if (count > MAX_LISTVIEW_WORK_AREAS) count = MAX_LISTVIEW_WORK_AREAS;
+    if (count) memcpy(iface->info->work_areas, areas, count * sizeof(*areas));
+    if (count < MAX_LISTVIEW_WORK_AREAS)
+        memset(iface->info->work_areas + count, 0,
+               (MAX_LISTVIEW_WORK_AREAS - count) * sizeof(*areas));
+    iface->info->work_area_count = count;
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_GetWorkAreaCount(LISTVIEW_INTERFACE *iface, INT *count)
+{
+    if (!count) return E_POINTER;
+    *count = 0;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    if (iface->info->uView != LV_VIEW_ICON) return E_UNEXPECTED;
+    *count = iface->info->work_area_count;
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_GetWorkAreasWithDpi(LISTVIEW_INTERFACE *iface, INT count,
+                                                          struct lv_work_area_with_dpi *areas)
+{
+    if (count < 0) return E_INVALIDARG;
+    if (count && !areas) return E_POINTER;
+    if (areas) memset(areas, 0, count * sizeof(*areas));
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    if (iface->info->uView != LV_VIEW_ICON) return E_UNEXPECTED;
+    if (count > iface->info->work_area_count) count = iface->info->work_area_count;
+    if (count) memcpy(areas, iface->info->work_areas, count * sizeof(*areas));
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_SetWorkAreaImageList(LISTVIEW_INTERFACE *iface, INT work_area,
+                                                           INT image_list_type, HIMAGELIST image_list,
+                                                           HIMAGELIST *old_image_list)
+{
+    if (old_image_list) *old_image_list = NULL;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI listview_iface_GetWorkAreaImageList(LISTVIEW_INTERFACE *iface, INT work_area,
+                                                           INT image_list_type, HIMAGELIST *image_list)
+{
+    if (!image_list) return E_POINTER;
+    *image_list = NULL;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI listview_iface_EnableIconBullying(LISTVIEW_INTERFACE *iface, INT enable)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_EnableQuirks(LISTVIEW_INTERFACE *iface, DWORD quirks)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    return S_OK;
+}
+
+static const void *const listview_iface_vtbl[150] =
 {
     [0] = listview_iface_QueryInterface,
     [1] = listview_iface_AddRef,
     [2] = listview_iface_Release,
     [3] = listview_iface_GetWindow,
     [4] = listview_iface_ContextSensitiveHelp,
+    [15] = listview_iface_GetItemCount,
+    [16] = listview_iface_SetItemCount,
     [26] = listview_iface_SetSelectionFlags,
+    [40] = listview_iface_SetIconSpacing,
+    [52] = listview_iface_ArrangeItems,
+    [65] = listview_iface_GetHeader,
+    [61] = listview_iface_GetColumn,
+    [62] = listview_iface_SetColumn,
+    [66] = listview_iface_InsertColumn,
+    [67] = listview_iface_DeleteColumn,
+    [72] = listview_iface_SetColumnWidth,
+    [78] = listview_iface_GetSelectedCount,
     [81] = listview_iface_SetExtendedStyle,
     [84] = listview_iface_GetToolTip,
+    [94] = listview_iface_GetWorkAreaCount,
     [112] = listview_iface_SetOwnerDataCallback,
     [140] = listview_iface_GetColumnMargin,
     [141] = listview_iface_SetSubItemCallback,
+    [144] = listview_iface_SetWorkAreasWithDpi,
+    [145] = listview_iface_GetWorkAreasWithDpi,
+    [146] = listview_iface_SetWorkAreaImageList,
+    [147] = listview_iface_GetWorkAreaImageList,
+    [148] = listview_iface_EnableIconBullying,
+    [149] = listview_iface_EnableQuirks,
 };
 
 /*

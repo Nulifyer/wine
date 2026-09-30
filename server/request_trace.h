@@ -4761,6 +4761,17 @@ static void dump_lock_winstation_request( const struct lock_winstation_request *
     fprintf( stderr, ", lock=%d", req->lock );
 }
 
+static void dump_open_thread_desktop_request( const struct open_thread_desktop_request *req )
+{
+    fprintf( stderr, " tid=%04x", req->tid );
+    fprintf( stderr, ", access=%08x", req->access );
+}
+
+static void dump_open_thread_desktop_reply( const struct open_thread_desktop_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
 static void dump_create_activation_object_request( const struct create_activation_object_request *req )
 {
     fprintf( stderr, " window=%08x", req->window );
@@ -5251,6 +5262,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_open_dcomp_surface_dirty_region_request,
     (dump_func)dump_report_inertia_request,
     (dump_func)dump_lock_winstation_request,
+    (dump_func)dump_open_thread_desktop_request,
     (dump_func)dump_create_activation_object_request,
     (dump_func)dump_configure_activation_object_request,
     (dump_func)dump_destroy_activation_object_request,
@@ -5692,6 +5704,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_open_dcomp_surface_dirty_region_reply,
     NULL,
     NULL,
+    (dump_func)dump_open_thread_desktop_reply,
     (dump_func)dump_create_activation_object_reply,
     NULL,
     NULL,
@@ -6133,6 +6146,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "open_dcomp_surface_dirty_region",
     "report_inertia",
     "lock_winstation",
+    "open_thread_desktop",
     "create_activation_object",
     "configure_activation_object",
     "destroy_activation_object",

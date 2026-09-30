@@ -387,6 +387,64 @@ typedef struct _RPC_SECURITY_QOS_V2_A
 #define RPC_IF_ALLOW_LOCAL_ONLY             0x20
 #define RPC_IF_SEC_NO_CACHE                 0x40
 
+typedef void *RPC_INTERFACE_GROUP, **PRPC_INTERFACE_GROUP;
+
+typedef struct
+{
+    unsigned long Version;
+    RPC_WSTR ProtSeq;
+    RPC_WSTR Endpoint;
+    void *SecurityDescriptor;
+    unsigned long Backlog;
+} RPC_ENDPOINT_TEMPLATEW, *PRPC_ENDPOINT_TEMPLATEW;
+
+typedef struct
+{
+    unsigned long Version;
+    RPC_CSTR ProtSeq;
+    RPC_CSTR Endpoint;
+    void *SecurityDescriptor;
+    unsigned long Backlog;
+} RPC_ENDPOINT_TEMPLATEA, *PRPC_ENDPOINT_TEMPLATEA;
+
+typedef struct
+{
+    unsigned long Version;
+    RPC_IF_HANDLE IfSpec;
+    UUID *MgrTypeUuid;
+    RPC_MGR_EPV *MgrEpv;
+    unsigned int Flags;
+    unsigned int MaxCalls;
+    unsigned int MaxRpcSize;
+    RPC_IF_CALLBACK_FN *IfCallback;
+    UUID_VECTOR *UuidVector;
+    RPC_CSTR Annotation;
+    void *SecurityDescriptor;
+} RPC_INTERFACE_TEMPLATEA, *PRPC_INTERFACE_TEMPLATEA;
+
+typedef struct
+{
+    unsigned long Version;
+    RPC_IF_HANDLE IfSpec;
+    UUID *MgrTypeUuid;
+    RPC_MGR_EPV *MgrEpv;
+    unsigned int Flags;
+    unsigned int MaxCalls;
+    unsigned int MaxRpcSize;
+    RPC_IF_CALLBACK_FN *IfCallback;
+    UUID_VECTOR *UuidVector;
+    RPC_WSTR Annotation;
+    void *SecurityDescriptor;
+} RPC_INTERFACE_TEMPLATEW, *PRPC_INTERFACE_TEMPLATEW;
+
+#define RPC_ENDPOINT_TEMPLATE  WINELIB_NAME_AW(RPC_ENDPOINT_TEMPLATE)
+#define PRPC_ENDPOINT_TEMPLATE WINELIB_NAME_AW(PRPC_ENDPOINT_TEMPLATE)
+#define RPC_INTERFACE_TEMPLATE  WINELIB_NAME_AW(RPC_INTERFACE_TEMPLATE)
+#define PRPC_INTERFACE_TEMPLATE WINELIB_NAME_AW(PRPC_INTERFACE_TEMPLATE)
+
+typedef void RPC_ENTRY RPC_INTERFACE_GROUP_IDLE_CALLBACK_FN(
+    RPC_INTERFACE_GROUP IfGroup, void *IdleCallbackContext, unsigned long IsGroupIdle);
+
 RPC_STATUS RPC_ENTRY DceErrorInqTextA(RPC_STATUS e, RPC_CSTR buffer);
 RPC_STATUS RPC_ENTRY DceErrorInqTextW(RPC_STATUS e, RPC_WSTR buffer);
 #define              DceErrorInqText WINELIB_NAME_AW(DceErrorInqText)
@@ -485,6 +543,25 @@ RPCRTAPI RPC_STATUS RPC_ENTRY
 
 RPCRTAPI RPC_STATUS RPC_ENTRY
   RpcServerInqBindings( RPC_BINDING_VECTOR** BindingVector );
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcServerInterfaceGroupCreateA( RPC_INTERFACE_TEMPLATEA *Interfaces, unsigned long NumIfs,
+                                  RPC_ENDPOINT_TEMPLATEA *Endpoints, unsigned long NumEndpoints,
+                                  unsigned long IdlePeriod, RPC_INTERFACE_GROUP_IDLE_CALLBACK_FN IdleCallbackFn,
+                                  void *IdleCallbackContext, PRPC_INTERFACE_GROUP IfGroup );
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcServerInterfaceGroupCreateW( RPC_INTERFACE_TEMPLATEW *Interfaces, unsigned long NumIfs,
+                                  RPC_ENDPOINT_TEMPLATEW *Endpoints, unsigned long NumEndpoints,
+                                  unsigned long IdlePeriod, RPC_INTERFACE_GROUP_IDLE_CALLBACK_FN IdleCallbackFn,
+                                  void *IdleCallbackContext, PRPC_INTERFACE_GROUP IfGroup );
+#define RpcServerInterfaceGroupCreate WINELIB_NAME_AW(RpcServerInterfaceGroupCreate)
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcServerInterfaceGroupActivate( RPC_INTERFACE_GROUP IfGroup );
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcServerInterfaceGroupDeactivate( RPC_INTERFACE_GROUP IfGroup, unsigned long ForceDeactivation );
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcServerInterfaceGroupClose( RPC_INTERFACE_GROUP IfGroup );
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcServerInterfaceGroupInqBindings( RPC_INTERFACE_GROUP IfGroup, RPC_BINDING_VECTOR **BindingVector );
 RPCRTAPI RPC_STATUS RPC_ENTRY
   RpcServerInqBindingHandle( RPC_BINDING_HANDLE *Binding );
 

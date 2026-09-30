@@ -70,6 +70,44 @@ static RpcObjTypeMap *RpcObjTypeMaps;
 static struct list protseqs = LIST_INIT(protseqs);
 static struct list server_interfaces = LIST_INIT(server_interfaces);
 static struct list server_registered_auth_info = LIST_INIT(server_registered_auth_info);
+static const UUID linuxnt_mpnotify_interface =
+    {0x3ca78105, 0xa3a3, 0x4a68, {0xb4, 0x58, 0x1a, 0x60, 0x6b, 0xab, 0x8f, 0xd6}};
+static BOOL linuxnt_mpnotify_registered;
+
+struct rpc_interface_group_interface
+{
+    RPC_INTERFACE_TEMPLATEW template;
+    UUID mgr_type_uuid;
+    UUID_VECTOR *uuid_vector;
+    WCHAR *annotation;
+    void *security_descriptor;
+    RpcServerInterface *registered_interface;
+    BOOL ep_registered;
+};
+
+struct rpc_interface_group_endpoint
+{
+    char *protseq;
+    char *endpoint;
+    void *security_descriptor;
+    ULONG backlog;
+};
+
+struct rpc_interface_group
+{
+    DWORD magic;
+    BOOL active;
+    ULONG interface_count;
+    ULONG endpoint_count;
+    struct rpc_interface_group_interface *interfaces;
+    struct rpc_interface_group_endpoint *endpoints;
+    RPC_BINDING_VECTOR *bindings;
+    ULONG idle_period;
+    RPC_INTERFACE_GROUP_IDLE_CALLBACK_FN *idle_callback;
+    void *idle_context;
+};
+
+#define RPC_INTERFACE_GROUP_MAGIC 0x47504352
 
 static CRITICAL_SECTION server_cs;
 static CRITICAL_SECTION_DEBUG server_cs_debug =
@@ -655,6 +693,10 @@ static RPC_STATUS process_bind_packet(RpcConnection *conn, RpcPktBindHdr *hdr,
 
 static RPC_STATUS process_request_packet(RpcConnection *conn, RpcPktRequestHdr *hdr, RPC_MESSAGE *msg)
 {
+  static const UUID linuxnt_usermgr_interface =
+    {0xb18fbab6, 0x56f8, 0x4702, {0x84, 0xe0, 0x41, 0x05, 0x32, 0x93, 0xa8, 0x69}};
+  static const UUID linuxnt_mpnotify_interface =
+    {0x3ca78105, 0xa3a3, 0x4a68, {0xb4, 0x58, 0x1a, 0x60, 0x6b, 0xab, 0x8f, 0xd6}};
   RPC_STATUS status;
   RpcPktHdr *response = NULL;
   RpcServerInterface* sif;
@@ -741,6 +783,10 @@ static RPC_STATUS process_request_packet(RpcConnection *conn, RpcPktRequestHdr *
   exception = FALSE;
 
   /* dispatch */
+  if (IsEqualGUID(&conn->ActiveInterface.SyntaxGUID, &linuxnt_usermgr_interface))
+    ERR("linuxnt-usermgr-server proc=%u begin\n", msg->ProcNum);
+  if (IsEqualGUID(&conn->ActiveInterface.SyntaxGUID, &linuxnt_mpnotify_interface))
+    ERR("linuxnt-mpnotify-server proc=%u begin\n", msg->ProcNum);
   RPCRT4_SetThreadCurrentCallHandle(msg->Handle);
   RPCRT4_SetThreadCurrentCallMessage(msg);
   if (InterlockedCompareExchange(&server_exception_filter_disabled, 0, 0))
@@ -762,6 +808,12 @@ static RPC_STATUS process_request_packet(RpcConnection *conn, RpcPktRequestHdr *
                                          RPC2NCA_STATUS(status));
     } __ENDTRY
   }
+  if (IsEqualGUID(&conn->ActiveInterface.SyntaxGUID, &linuxnt_usermgr_interface))
+    ERR("linuxnt-usermgr-server proc=%u end exception=%u buffer_length=%u\n",
+        msg->ProcNum, exception, msg->BufferLength);
+  if (IsEqualGUID(&conn->ActiveInterface.SyntaxGUID, &linuxnt_mpnotify_interface))
+    ERR("linuxnt-mpnotify-server proc=%u end exception=%u buffer_length=%u\n",
+        msg->ProcNum, exception, msg->BufferLength);
     RPCRT4_SetThreadCurrentCallMessage(NULL);
     RPCRT4_SetThreadCurrentCallHandle(NULL);
 
@@ -1235,6 +1287,24 @@ RPC_STATUS WINAPI RpcServerInqBindings( RPC_BINDING_VECTOR** BindingVector )
 }
 
 /***********************************************************************
+ *             RpcServerInqBindingsEx (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerInqBindingsEx( void *SecurityDescriptor,
+                                          RPC_BINDING_VECTOR **BindingVector )
+{
+  TRACE("(%p,%p)\n", SecurityDescriptor, BindingVector);
+
+  *BindingVector = NULL;
+  if (SecurityDescriptor && !IsValidSecurityDescriptor(SecurityDescriptor))
+    return RPC_S_INVALID_ARG;
+
+  if (SecurityDescriptor)
+    FIXME("Security descriptor filtering is not supported.\n");
+
+  return RpcServerInqBindings(BindingVector);
+}
+
+/***********************************************************************
  *             RpcServerUseProtseqEpA (RPCRT4.@)
  */
 RPC_STATUS WINAPI RpcServerUseProtseqEpA( RPC_CSTR Protseq, UINT MaxCalls, RPC_CSTR Endpoint, LPVOID SecurityDescriptor )
@@ -1427,10 +1497,14 @@ RPC_STATUS WINAPI RpcServerUseProtseqW(RPC_WSTR Protseq, unsigned int MaxCalls, 
   ProtseqA = RPCRT4_strdupWtoA(Protseq);
   status = RPCRT4_get_or_create_serverprotseq(MaxCalls, ProtseqA, &ps);
   free(ProtseqA);
-  if (status != RPC_S_OK)
+  if (status != RPC_S_OK) {
+    ERR("linuxnt-rpc-server-use-protseq protseq=%s create-status=%lu\n", debugstr_w(Protseq), status);
     return status;
+  }
 
-  return RPCRT4_use_protseq(ps, NULL);
+  status = RPCRT4_use_protseq(ps, NULL);
+  ERR("linuxnt-rpc-server-use-protseq protseq=%s status=%lu\n", debugstr_w(Protseq), status);
+  return status;
 }
 
 /***********************************************************************
@@ -1479,8 +1553,17 @@ RPC_STATUS WINAPI RpcServerRegisterIf( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid, 
 RPC_STATUS WINAPI RpcServerRegisterIfEx( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid, RPC_MGR_EPV* MgrEpv,
                        UINT Flags, UINT MaxCalls, RPC_IF_CALLBACK_FN* IfCallbackFn )
 {
+  PRPC_SERVER_INTERFACE iface = IfSpec;
+  RPC_STATUS status;
+
   TRACE("(%p,%s,%p,%u,%u,%p)\n", IfSpec, debugstr_guid(MgrTypeUuid), MgrEpv, Flags, MaxCalls, IfCallbackFn);
-  return RpcServerRegisterIf3( IfSpec, MgrTypeUuid, MgrEpv, Flags, MaxCalls, (UINT)-1, IfCallbackFn, NULL );
+  status = RpcServerRegisterIf3( IfSpec, MgrTypeUuid, MgrEpv, Flags, MaxCalls, (UINT)-1, IfCallbackFn, NULL );
+  if (iface && IsEqualGUID(&iface->InterfaceId.SyntaxGUID, &linuxnt_mpnotify_interface))
+  {
+    linuxnt_mpnotify_registered = status == RPC_S_OK;
+    ERR("linuxnt-mpnotify-register-if status=%lu flags=%#x\n", status, Flags);
+  }
+  return status;
 }
 
 /***********************************************************************
@@ -1495,8 +1578,9 @@ RPC_STATUS WINAPI RpcServerRegisterIf2( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid,
 /***********************************************************************
  *             RpcServerRegisterIf3 (RPCRT4.@)
  */
-RPC_STATUS WINAPI RpcServerRegisterIf3( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid, RPC_MGR_EPV* MgrEpv,
-    UINT Flags, UINT MaxCalls, UINT MaxRpcSize, RPC_IF_CALLBACK_FN* IfCallbackFn, void* SecurityDescriptor)
+static RPC_STATUS rpc_server_register_interface( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid,
+    RPC_MGR_EPV* MgrEpv, UINT Flags, UINT MaxCalls, UINT MaxRpcSize,
+    RPC_IF_CALLBACK_FN* IfCallbackFn, void* SecurityDescriptor, RpcServerInterface **registered)
 {
   PRPC_SERVER_INTERFACE If = IfSpec;
   RpcServerInterface* sif;
@@ -1504,6 +1588,8 @@ RPC_STATUS WINAPI RpcServerRegisterIf3( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid,
 
   TRACE("(%p,%s,%p,%u,%u,%u,%p,%p)\n", IfSpec, debugstr_guid(MgrTypeUuid), MgrEpv, Flags, MaxCalls,
         MaxRpcSize, IfCallbackFn, SecurityDescriptor);
+
+  if (!If) return RPC_S_INVALID_ARG;
 
   if (SecurityDescriptor)
       FIXME("Unsupported SecurityDescriptor argument.\n");
@@ -1527,6 +1613,7 @@ RPC_STATUS WINAPI RpcServerRegisterIf3( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid,
   TRACE(" interpreter info: %p\n", If->InterpreterInfo);
 
   sif = calloc(1, sizeof(RpcServerInterface));
+  if (!sif) return RPC_S_OUT_OF_RESOURCES;
   sif->If           = If;
   if (MgrTypeUuid) {
     sif->MgrTypeUuid = *MgrTypeUuid;
@@ -1547,7 +1634,16 @@ RPC_STATUS WINAPI RpcServerRegisterIf3( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid,
   if (sif->Flags & RPC_IF_AUTOLISTEN)
       RPCRT4_start_listen(TRUE);
 
+  if (registered) *registered = sif;
+
   return RPC_S_OK;
+}
+
+RPC_STATUS WINAPI RpcServerRegisterIf3( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid, RPC_MGR_EPV* MgrEpv,
+    UINT Flags, UINT MaxCalls, UINT MaxRpcSize, RPC_IF_CALLBACK_FN* IfCallbackFn, void* SecurityDescriptor)
+{
+  return rpc_server_register_interface(IfSpec, MgrTypeUuid, MgrEpv, Flags, MaxCalls, MaxRpcSize,
+                                       IfCallbackFn, SecurityDescriptor, NULL);
 }
 
 static BOOL rpc_server_interface_matches(const RpcServerInterface *sif,
@@ -1643,6 +1739,430 @@ RPC_STATUS WINAPI RpcServerUnregisterIfEx( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUu
 
   return rpc_server_unregister_interfaces(IfSpec, MgrTypeUuid, TRUE, TRUE,
                                           RundownContextHandles != 0);
+}
+
+static void rpc_interface_group_free_uuid_vector(UUID_VECTOR *vector)
+{
+    ULONG i;
+
+    if (!vector) return;
+    for (i = 0; i < vector->Count; ++i) free(vector->Uuid[i]);
+    free(vector);
+}
+
+static UUID_VECTOR *rpc_interface_group_copy_uuid_vector(const UUID_VECTOR *source)
+{
+    UUID_VECTOR *copy;
+    ULONG i;
+
+    if (!source) return NULL;
+    copy = calloc(1, offsetof(UUID_VECTOR, Uuid) + source->Count * sizeof(copy->Uuid[0]));
+    if (!copy) return NULL;
+    copy->Count = source->Count;
+    for (i = 0; i < source->Count; ++i)
+    {
+        if (!source->Uuid[i]) goto failed;
+        if (!(copy->Uuid[i] = malloc(sizeof(*copy->Uuid[i])))) goto failed;
+        *copy->Uuid[i] = *source->Uuid[i];
+    }
+    return copy;
+
+failed:
+    rpc_interface_group_free_uuid_vector(copy);
+    return NULL;
+}
+
+static void *rpc_interface_group_copy_security_descriptor(void *source)
+{
+    DWORD size;
+    void *copy;
+
+    if (!source) return NULL;
+    if (!IsValidSecurityDescriptor(source)) return NULL;
+    size = GetSecurityDescriptorLength(source);
+    if (!(copy = malloc(size))) return NULL;
+    memcpy(copy, source, size);
+    return copy;
+}
+
+static void rpc_interface_group_free(struct rpc_interface_group *group)
+{
+    ULONG i;
+
+    if (!group) return;
+    if (group->bindings) RpcBindingVectorFree(&group->bindings);
+    for (i = 0; i < group->interface_count; ++i)
+    {
+        rpc_interface_group_free_uuid_vector(group->interfaces[i].uuid_vector);
+        free(group->interfaces[i].annotation);
+        free(group->interfaces[i].security_descriptor);
+    }
+    for (i = 0; i < group->endpoint_count; ++i)
+    {
+        free(group->endpoints[i].protseq);
+        free(group->endpoints[i].endpoint);
+        free(group->endpoints[i].security_descriptor);
+    }
+    free(group->interfaces);
+    free(group->endpoints);
+    group->magic = 0;
+    free(group);
+}
+
+static RPC_STATUS rpc_interface_group_create(const RPC_INTERFACE_TEMPLATEW *interfaces,
+                                              ULONG interface_count,
+                                              const RPC_ENDPOINT_TEMPLATEW *endpoints,
+                                              ULONG endpoint_count, ULONG idle_period,
+                                              RPC_INTERFACE_GROUP_IDLE_CALLBACK_FN *idle_callback,
+                                              void *idle_context, PRPC_INTERFACE_GROUP handle)
+{
+    struct rpc_interface_group *group;
+    ULONG i;
+
+    if (!handle || !interfaces || !interface_count || !endpoints || !endpoint_count)
+        return RPC_S_INVALID_ARG;
+    *handle = NULL;
+    if (!(group = calloc(1, sizeof(*group)))) return RPC_S_OUT_OF_RESOURCES;
+    group->interface_count = interface_count;
+    group->endpoint_count = endpoint_count;
+    group->idle_period = idle_period;
+    group->idle_callback = idle_callback;
+    group->idle_context = idle_context;
+    if (!(group->interfaces = calloc(interface_count, sizeof(*group->interfaces))) ||
+        !(group->endpoints = calloc(endpoint_count, sizeof(*group->endpoints))))
+        goto out_of_memory;
+
+    for (i = 0; i < interface_count; ++i)
+    {
+        struct rpc_interface_group_interface *dest = &group->interfaces[i];
+        const RPC_INTERFACE_TEMPLATEW *source = &interfaces[i];
+
+        if (source->Version || !source->IfSpec) goto invalid_arg;
+        dest->template = *source;
+        if (source->MgrTypeUuid)
+        {
+            dest->mgr_type_uuid = *source->MgrTypeUuid;
+            dest->template.MgrTypeUuid = &dest->mgr_type_uuid;
+        }
+        if (source->UuidVector &&
+            !(dest->uuid_vector = rpc_interface_group_copy_uuid_vector(source->UuidVector)))
+            goto out_of_memory;
+        dest->template.UuidVector = dest->uuid_vector;
+        if (source->Annotation && !(dest->annotation = wcsdup((WCHAR *)source->Annotation)))
+            goto out_of_memory;
+        dest->template.Annotation = (RPC_WSTR)dest->annotation;
+        if (source->SecurityDescriptor)
+        {
+            if (!IsValidSecurityDescriptor(source->SecurityDescriptor)) goto invalid_arg;
+            if (!(dest->security_descriptor = rpc_interface_group_copy_security_descriptor(
+                      source->SecurityDescriptor))) goto out_of_memory;
+            dest->template.SecurityDescriptor = dest->security_descriptor;
+        }
+    }
+
+    for (i = 0; i < endpoint_count; ++i)
+    {
+        struct rpc_interface_group_endpoint *dest = &group->endpoints[i];
+        const RPC_ENDPOINT_TEMPLATEW *source = &endpoints[i];
+
+        if (source->Version || !source->ProtSeq) goto invalid_arg;
+        if (!(dest->protseq = RPCRT4_strdupWtoA((WCHAR *)source->ProtSeq))) goto out_of_memory;
+        if (source->Endpoint && !(dest->endpoint = RPCRT4_strdupWtoA((WCHAR *)source->Endpoint)))
+            goto out_of_memory;
+        if (source->SecurityDescriptor)
+        {
+            if (!IsValidSecurityDescriptor(source->SecurityDescriptor)) goto invalid_arg;
+            if (!(dest->security_descriptor = rpc_interface_group_copy_security_descriptor(
+                      source->SecurityDescriptor))) goto out_of_memory;
+            FIXME("endpoint security descriptors are not enforced\n");
+        }
+        dest->backlog = source->Backlog;
+    }
+
+    if (idle_callback || idle_period)
+        FIXME("interface group idle notifications are not implemented\n");
+    group->magic = RPC_INTERFACE_GROUP_MAGIC;
+    *handle = group;
+    return RPC_S_OK;
+
+invalid_arg:
+    rpc_interface_group_free(group);
+    return RPC_S_INVALID_ARG;
+out_of_memory:
+    rpc_interface_group_free(group);
+    return RPC_S_OUT_OF_RESOURCES;
+}
+
+RPC_STATUS WINAPI RpcServerInterfaceGroupCreateW(RPC_INTERFACE_TEMPLATEW *interfaces,
+                                                  ULONG interface_count,
+                                                  RPC_ENDPOINT_TEMPLATEW *endpoints,
+                                                  ULONG endpoint_count, ULONG idle_period,
+                                                  RPC_INTERFACE_GROUP_IDLE_CALLBACK_FN *idle_callback,
+                                                  void *idle_context, PRPC_INTERFACE_GROUP handle)
+{
+    TRACE("(%p,%lu,%p,%lu,%lu,%p,%p,%p)\n", interfaces, interface_count, endpoints,
+          endpoint_count, idle_period, idle_callback, idle_context, handle);
+    return rpc_interface_group_create(interfaces, interface_count, endpoints, endpoint_count,
+                                      idle_period, idle_callback, idle_context, handle);
+}
+
+RPC_STATUS WINAPI RpcServerInterfaceGroupCreateA(RPC_INTERFACE_TEMPLATEA *interfaces,
+                                                  ULONG interface_count,
+                                                  RPC_ENDPOINT_TEMPLATEA *endpoints,
+                                                  ULONG endpoint_count, ULONG idle_period,
+                                                  RPC_INTERFACE_GROUP_IDLE_CALLBACK_FN *idle_callback,
+                                                  void *idle_context, PRPC_INTERFACE_GROUP handle)
+{
+    RPC_INTERFACE_TEMPLATEW *interfacesW = NULL;
+    RPC_ENDPOINT_TEMPLATEW *endpointsW = NULL;
+    RPC_STATUS status = RPC_S_OUT_OF_RESOURCES;
+    ULONG i;
+
+    TRACE("(%p,%lu,%p,%lu,%lu,%p,%p,%p)\n", interfaces, interface_count, endpoints,
+          endpoint_count, idle_period, idle_callback, idle_context, handle);
+    if (!interfaces || !interface_count || !endpoints || !endpoint_count)
+        return RPC_S_INVALID_ARG;
+    if (!(interfacesW = calloc(interface_count, sizeof(*interfacesW))) ||
+        !(endpointsW = calloc(endpoint_count, sizeof(*endpointsW)))) goto done;
+    for (i = 0; i < interface_count; ++i)
+    {
+        interfacesW[i].Version = interfaces[i].Version;
+        interfacesW[i].IfSpec = interfaces[i].IfSpec;
+        interfacesW[i].MgrTypeUuid = interfaces[i].MgrTypeUuid;
+        interfacesW[i].MgrEpv = interfaces[i].MgrEpv;
+        interfacesW[i].Flags = interfaces[i].Flags;
+        interfacesW[i].MaxCalls = interfaces[i].MaxCalls;
+        interfacesW[i].MaxRpcSize = interfaces[i].MaxRpcSize;
+        interfacesW[i].IfCallback = interfaces[i].IfCallback;
+        interfacesW[i].UuidVector = interfaces[i].UuidVector;
+        interfacesW[i].SecurityDescriptor = interfaces[i].SecurityDescriptor;
+        if (interfaces[i].Annotation &&
+            !(interfacesW[i].Annotation = (RPC_WSTR)RPCRT4_strdupAtoW((char *)interfaces[i].Annotation)))
+            goto done;
+    }
+    for (i = 0; i < endpoint_count; ++i)
+    {
+        endpointsW[i].Version = endpoints[i].Version;
+        endpointsW[i].SecurityDescriptor = endpoints[i].SecurityDescriptor;
+        endpointsW[i].Backlog = endpoints[i].Backlog;
+        if (endpoints[i].ProtSeq &&
+            !(endpointsW[i].ProtSeq = (RPC_WSTR)RPCRT4_strdupAtoW((char *)endpoints[i].ProtSeq)))
+            goto done;
+        if (endpoints[i].Endpoint &&
+            !(endpointsW[i].Endpoint = (RPC_WSTR)RPCRT4_strdupAtoW((char *)endpoints[i].Endpoint)))
+            goto done;
+    }
+    status = rpc_interface_group_create(interfacesW, interface_count, endpointsW, endpoint_count,
+                                        idle_period, idle_callback, idle_context, handle);
+done:
+    if (interfacesW)
+        for (i = 0; i < interface_count; ++i) free(interfacesW[i].Annotation);
+    if (endpointsW)
+        for (i = 0; i < endpoint_count; ++i)
+        {
+            free(endpointsW[i].ProtSeq);
+            free(endpointsW[i].Endpoint);
+        }
+    free(interfacesW);
+    free(endpointsW);
+    return status;
+}
+
+static RPC_STATUS rpc_interface_group_open_endpoint(struct rpc_interface_group_endpoint *endpoint,
+                                                     RPC_BINDING_HANDLE *binding)
+{
+    RpcConnection **existing = NULL, *connection = NULL, *cursor;
+    RpcServerProtseq *protseq;
+    RPC_STATUS status = RPC_S_OK;
+    ULONG count = 0, i = 0;
+
+    status = RPCRT4_get_or_create_serverprotseq(endpoint->backlog, endpoint->protseq, &protseq);
+    if (status != RPC_S_OK) return status;
+
+    EnterCriticalSection(&protseq->cs);
+    if (endpoint->endpoint)
+    {
+        LIST_FOR_EACH_ENTRY(cursor, &protseq->listeners, RpcConnection, protseq_entry)
+            if (!strcmp(endpoint->endpoint, cursor->Endpoint))
+            {
+                connection = cursor;
+                break;
+            }
+    }
+    if (!connection)
+    {
+        LIST_FOR_EACH_ENTRY(cursor, &protseq->listeners, RpcConnection, protseq_entry) ++count;
+        if (count && !(existing = malloc(count * sizeof(*existing))))
+        {
+            LeaveCriticalSection(&protseq->cs);
+            return RPC_S_OUT_OF_RESOURCES;
+        }
+        LIST_FOR_EACH_ENTRY(cursor, &protseq->listeners, RpcConnection, protseq_entry)
+            existing[i++] = cursor;
+        status = protseq->ops->open_endpoint(protseq, endpoint->endpoint);
+        if (status == RPC_S_OK)
+        {
+            LIST_FOR_EACH_ENTRY(cursor, &protseq->listeners, RpcConnection, protseq_entry)
+            {
+                for (i = 0; i < count && existing[i] != cursor; ++i) {}
+                if (i == count)
+                {
+                    connection = cursor;
+                    break;
+                }
+            }
+            if (!connection) status = RPC_S_NO_BINDINGS;
+        }
+    }
+    if (connection && status == RPC_S_OK)
+        status = RPCRT4_MakeBinding((RpcBinding **)binding, connection);
+    free(existing);
+    LeaveCriticalSection(&protseq->cs);
+    return status;
+}
+
+static void rpc_interface_group_unregister_interface(RpcServerInterface *interface)
+{
+    BOOL free_now;
+
+    EnterCriticalSection(&server_cs);
+    list_remove(&interface->entry);
+    free_now = !interface->CurrentCalls;
+    if (!free_now) interface->Delete = TRUE;
+    LeaveCriticalSection(&server_cs);
+    if (interface->Flags & RPC_IF_AUTOLISTEN) RPCRT4_stop_listen(TRUE);
+    if (free_now) free(interface);
+}
+
+RPC_STATUS WINAPI RpcServerInterfaceGroupActivate(RPC_INTERFACE_GROUP handle)
+{
+    struct rpc_interface_group *group = handle;
+    RPC_STATUS status = RPC_S_OK;
+    ULONG i;
+
+    TRACE("(%p)\n", handle);
+    if (!group || group->magic != RPC_INTERFACE_GROUP_MAGIC) return RPC_S_INVALID_ARG;
+    if (group->active) return RPC_S_ALREADY_LISTENING;
+
+    group->bindings = calloc(1, offsetof(RPC_BINDING_VECTOR, BindingH) +
+                                group->endpoint_count * sizeof(group->bindings->BindingH[0]));
+    if (!group->bindings) return RPC_S_OUT_OF_RESOURCES;
+    group->bindings->Count = group->endpoint_count;
+    for (i = 0; i < group->endpoint_count; ++i)
+    {
+        status = rpc_interface_group_open_endpoint(&group->endpoints[i],
+                                                    &group->bindings->BindingH[i]);
+        if (status != RPC_S_OK) goto failed;
+    }
+    for (i = 0; i < group->interface_count; ++i)
+    {
+        RPC_INTERFACE_TEMPLATEW *template = &group->interfaces[i].template;
+        status = rpc_server_register_interface(template->IfSpec, template->MgrTypeUuid,
+                                               template->MgrEpv, template->Flags | RPC_IF_AUTOLISTEN,
+                                               template->MaxCalls, template->MaxRpcSize,
+                                               template->IfCallback, template->SecurityDescriptor,
+                                               &group->interfaces[i].registered_interface);
+        if (status != RPC_S_OK) goto failed;
+        status = RpcEpRegisterW(template->IfSpec, group->bindings, template->UuidVector,
+                                template->Annotation);
+        if (status != RPC_S_OK) goto failed;
+        group->interfaces[i].ep_registered = TRUE;
+    }
+    group->active = TRUE;
+    return RPC_S_OK;
+
+failed:
+    for (i = 0; i < group->interface_count; ++i)
+    {
+        struct rpc_interface_group_interface *interface = &group->interfaces[i];
+        if (interface->ep_registered)
+            RpcEpUnregister(interface->template.IfSpec, group->bindings,
+                            interface->template.UuidVector);
+        if (interface->registered_interface)
+            rpc_interface_group_unregister_interface(interface->registered_interface);
+        interface->registered_interface = NULL;
+        interface->ep_registered = FALSE;
+    }
+    RpcBindingVectorFree(&group->bindings);
+    return status;
+}
+
+RPC_STATUS WINAPI RpcServerInterfaceGroupDeactivate(RPC_INTERFACE_GROUP handle, ULONG force)
+{
+    struct rpc_interface_group *group = handle;
+    RPC_STATUS status = RPC_S_OK, current;
+    ULONG i;
+
+    TRACE("(%p,%lu)\n", handle, force);
+    if (!group || group->magic != RPC_INTERFACE_GROUP_MAGIC) return RPC_S_INVALID_ARG;
+    if (!group->active) return RPC_S_OK;
+    if (!force)
+    {
+        EnterCriticalSection(&server_cs);
+        for (i = 0; i < group->interface_count; ++i)
+            if (group->interfaces[i].registered_interface->CurrentCalls) break;
+        LeaveCriticalSection(&server_cs);
+        if (i != group->interface_count) return RPC_S_SERVER_TOO_BUSY;
+    }
+
+    for (i = 0; i < group->interface_count; ++i)
+    {
+        struct rpc_interface_group_interface *interface = &group->interfaces[i];
+        if (interface->ep_registered)
+        {
+            current = RpcEpUnregister(interface->template.IfSpec, group->bindings,
+                                      interface->template.UuidVector);
+            if (current != RPC_S_OK && status == RPC_S_OK) status = current;
+        }
+        rpc_interface_group_unregister_interface(interface->registered_interface);
+        interface->registered_interface = NULL;
+        interface->ep_registered = FALSE;
+    }
+    RpcBindingVectorFree(&group->bindings);
+    group->active = FALSE;
+    return force ? RPC_S_OK : status;
+}
+
+RPC_STATUS WINAPI RpcServerInterfaceGroupInqBindings(RPC_INTERFACE_GROUP handle,
+                                                      RPC_BINDING_VECTOR **bindings)
+{
+    struct rpc_interface_group *group = handle;
+    RPC_BINDING_VECTOR *copy;
+    RPC_STATUS status;
+    ULONG i;
+
+    TRACE("(%p,%p)\n", handle, bindings);
+    if (!group || group->magic != RPC_INTERFACE_GROUP_MAGIC || !bindings)
+        return RPC_S_INVALID_ARG;
+    *bindings = NULL;
+    if (!group->bindings) return RPC_S_NO_BINDINGS;
+    copy = calloc(1, offsetof(RPC_BINDING_VECTOR, BindingH) +
+                     group->bindings->Count * sizeof(copy->BindingH[0]));
+    if (!copy) return RPC_S_OUT_OF_RESOURCES;
+    copy->Count = group->bindings->Count;
+    for (i = 0; i < copy->Count; ++i)
+    {
+        status = RpcBindingCopy(group->bindings->BindingH[i], &copy->BindingH[i]);
+        if (status != RPC_S_OK)
+        {
+            copy->Count = i;
+            RpcBindingVectorFree(&copy);
+            return status;
+        }
+    }
+    *bindings = copy;
+    return RPC_S_OK;
+}
+
+RPC_STATUS WINAPI RpcServerInterfaceGroupClose(RPC_INTERFACE_GROUP handle)
+{
+    struct rpc_interface_group *group = handle;
+
+    TRACE("(%p)\n", handle);
+    if (!group || group->magic != RPC_INTERFACE_GROUP_MAGIC) return RPC_S_INVALID_ARG;
+    RpcServerInterfaceGroupDeactivate(group, TRUE);
+    rpc_interface_group_free(group);
+    return RPC_S_OK;
 }
 
 /***********************************************************************
@@ -1967,6 +2487,9 @@ RPC_STATUS WINAPI RpcServerListen( UINT MinimumCallThreads, UINT MaxCalls, UINT 
     return RPC_S_NO_PROTSEQS_REGISTERED;
 
   status = RPCRT4_start_listen(FALSE);
+
+  if (linuxnt_mpnotify_registered)
+    ERR("linuxnt-mpnotify-listen status=%lu dont-wait=%u\n", status, DontWait);
 
   if (DontWait || (status != RPC_S_OK)) return status;
 

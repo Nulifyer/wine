@@ -99,6 +99,7 @@ static void test_NtUserRemoteConnect(void)
 {
     BYTE connect_info[64] = {0};
     BYTE output[64] = {0};
+    UINT notification;
     NTSTATUS status;
 
     if (!winetest_platform_is_wine)
@@ -107,8 +108,39 @@ static void test_NtUserRemoteConnect(void)
         return;
     }
 
+    ok( NtUserRemoteConnectState() == 3, "expected stable local connection state\n" );
+
     status = NtUserRemoteConnect( connect_info, 10, output );
     ok( status == STATUS_SUCCESS, "NtUserRemoteConnect returned %#lx\n", status );
+    ok( NtUserRemoteConnectState() == 3, "connect changed local connection state\n" );
+
+    notification = 7;
+    status = NtUserRemoteNotify( &notification );
+    ok( status == STATUS_SUCCESS, "unknown NtUserRemoteNotify returned %#lx\n", status );
+    ok( NtUserRemoteConnectState() == 3, "unknown notification changed local state\n" );
+
+    status = NtUserRemoteNotify( NULL );
+    ok( status == STATUS_ACCESS_VIOLATION, "NULL NtUserRemoteNotify returned %#lx\n", status );
+    ok( NtUserRemoteConnectState() == 3, "invalid notification changed local state\n" );
+
+    notification = 11;
+    status = NtUserRemoteNotify( &notification );
+    ok( status == STATUS_SUCCESS, "NtUserRemoteNotify(11) returned %#lx\n", status );
+    ok( NtUserRemoteConnectState() == 3, "notification changed local connection state\n" );
+
+    status = NtUserRemotePassthruEnable();
+    ok( status == STATUS_SUCCESS, "NtUserRemotePassthruEnable returned %#lx\n", status );
+    status = NtUserRemotePassthruDisable();
+    ok( status == STATUS_SUCCESS, "NtUserRemotePassthruDisable returned %#lx\n", status );
+
+    status = NtUserRemoteDisconnect();
+    ok( status == STATUS_SUCCESS, "NtUserRemoteDisconnect returned %#lx\n", status );
+    ok( NtUserRemoteConnectState() == 3, "disconnect changed local connection state\n" );
+
+    notification = 12;
+    status = NtUserRemoteNotify( &notification );
+    ok( status == STATUS_SUCCESS, "NtUserRemoteNotify(12) returned %#lx\n", status );
+    ok( NtUserRemoteConnectState() == 3, "notification changed local connection state\n" );
 }
 
 static void test_NtUserCitSetInfo(void)
@@ -131,6 +163,70 @@ static void test_NtUserCitSetInfo(void)
     ok( status == STATUS_INVALID_INFO_CLASS, "class 0 returned %#lx\n", status );
     status = NtUserCitSetInfo( 6, NULL );
     ok( status == STATUS_INVALID_INFO_CLASS, "class 6 returned %#lx\n", status );
+}
+
+static void test_NtUserSetInformationThread(void)
+{
+    struct ntuser_thread_desktop_state state = {0};
+    HDESK initial, active;
+    NTSTATUS status;
+
+    if (!winetest_platform_is_wine)
+    {
+        win_skip( "desktop-transition access is reserved to the session USER process\n" );
+        return;
+    }
+
+    initial = NtUserGetThreadDesktop( GetCurrentThreadId() );
+    ok( !!initial, "NtUserGetThreadDesktop failed, error %lu\n", GetLastError() );
+
+    status = NtUserSetInformationThread( NtCurrentThread(), UserThreadUseActiveDesktop,
+                                         &state, sizeof(state) );
+    ok( status == STATUS_SUCCESS, "active desktop transition returned %#lx\n", status );
+    active = NtUserGetThreadDesktop( GetCurrentThreadId() );
+    ok( state.desktop == initial, "saved desktop %p, expected %p\n", state.desktop, initial );
+    ok( !!state.target, "target desktop was not retained\n" );
+    ok( active == state.target, "current desktop %p, expected target %p\n", active, state.target );
+
+    status = NtUserSetInformationThread( NtCurrentThread(), UserThreadRestoreDesktop,
+                                         &state, sizeof(state) );
+    ok( status == STATUS_SUCCESS, "desktop restore returned %#lx\n", status );
+    ok( !state.desktop && !state.target, "restore did not release state %p/%p\n",
+        state.desktop, state.target );
+    ok( NtUserGetThreadDesktop( GetCurrentThreadId() ) == initial,
+        "restore did not reinstate desktop %p\n", initial );
+
+    state.thread = NtCurrentThread();
+    status = NtUserSetInformationThread( NtCurrentThread(), UserThreadUseDesktop,
+                                         &state, sizeof(state) );
+    ok( status == STATUS_SUCCESS, "target-thread desktop transition returned %#lx\n", status );
+    status = NtUserSetInformationThread( NtCurrentThread(), UserThreadRestoreDesktop,
+                                         &state, sizeof(state) );
+    ok( status == STATUS_SUCCESS, "target-thread desktop restore returned %#lx\n", status );
+
+    status = NtUserSetInformationThread( NtCurrentThread(), UserThreadBroadcastShellHook,
+                                         &state, sizeof(state) );
+    ok( status == STATUS_SUCCESS, "shell-hook desktop transition returned %#lx\n", status );
+    ok( NtUserGetThreadDesktop( GetCurrentThreadId() ) == initial,
+        "shell-hook transition did not restore desktop %p\n", initial );
+
+    status = NtUserSetInformationThread( NtCurrentThread(), UserThreadUseActiveDesktop,
+                                         &state, sizeof(state) - 1 );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "short state returned %#lx\n", status );
+    status = NtUserSetInformationThread( NtCurrentThread(), UserThreadUseActiveDesktop,
+                                         &state, 33 );
+    ok( status == STATUS_INVALID_PARAMETER, "oversized state returned %#lx\n", status );
+    status = NtUserSetInformationThread( NtCurrentThread(), UserThreadUseActiveDesktop,
+                                         NULL, sizeof(state) );
+    ok( status == STATUS_ACCESS_VIOLATION, "null state returned %#lx\n", status );
+    status = NtUserSetInformationThread( (HANDLE)0xdead, UserThreadUseActiveDesktop,
+                                         &state, sizeof(state) );
+    ok( status == STATUS_INVALID_HANDLE, "invalid thread returned %#lx\n", status );
+    status = NtUserSetInformationThread( NtCurrentThread(), UserThreadInitiateShutdown,
+                                         &state, sizeof(state) );
+    ok( status == STATUS_NOT_SUPPORTED, "unsupported owner class returned %#lx\n", status );
+    status = NtUserSetInformationThread( NtCurrentThread(), 0xdead, &state, sizeof(state) );
+    ok( status == STATUS_INVALID_INFO_CLASS, "invalid class returned %#lx\n", status );
 }
 
 static void test_NtUserEnumDisplayDevices(void)
@@ -3346,6 +3442,7 @@ START_TEST(win32u)
     test_NtUserLayoutCompleted( argv );
     test_NtUserRemoteConnect();
     test_NtUserCitSetInfo();
+    test_NtUserSetInformationThread();
     test_rootless_user_object_names();
     test_NtUserDisplayConfigGetDeviceInfo();
     test_NtUserQueryWindow();

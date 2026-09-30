@@ -31,11 +31,39 @@
 
 static const IID IID_IListView_Win7 =
     {0xe5b16af2, 0x3990, 0x4681, {0xa6, 0x09, 0x1f, 0x06, 0x0c, 0xd1, 0x42, 0x69}};
+static const IID IID_IListView2 =
+    {0xc327e26b, 0x13c2, 0x47f7, {0x98, 0xe5, 0x79, 0xee, 0xd1, 0x26, 0x5e, 0x41}};
+
+struct lv_work_area_with_dpi
+{
+    RECT rect;
+    UINT dpi;
+};
 
 typedef HRESULT (WINAPI *listview_get_window_fn)(IUnknown *, HWND *);
+typedef HRESULT (WINAPI *listview_get_item_count_fn)(IUnknown *, INT *);
+typedef HRESULT (WINAPI *listview_set_icon_spacing_fn)(IUnknown *, INT, INT, INT *, INT *);
+typedef HRESULT (WINAPI *listview_arrange_items_fn)(IUnknown *, INT);
+typedef HRESULT (WINAPI *listview_get_header_fn)(IUnknown *, HWND *);
+typedef HRESULT (WINAPI *listview_get_column_fn)(IUnknown *, INT, LVCOLUMNW *);
+typedef HRESULT (WINAPI *listview_set_column_fn)(IUnknown *, INT, const LVCOLUMNW *);
+typedef HRESULT (WINAPI *listview_insert_column_fn)(IUnknown *, INT, const LVCOLUMNW *, INT *);
+typedef HRESULT (WINAPI *listview_delete_column_fn)(IUnknown *, INT);
+typedef HRESULT (WINAPI *listview_set_column_width_fn)(IUnknown *, INT, INT);
+typedef HRESULT (WINAPI *listview_get_selected_count_fn)(IUnknown *, INT *);
 typedef HRESULT (WINAPI *listview_set_extended_style_fn)(IUnknown *, DWORD, DWORD, DWORD *);
 typedef HRESULT (WINAPI *listview_get_tooltip_fn)(IUnknown *, HWND *);
 typedef HRESULT (WINAPI *listview_get_column_margin_fn)(IUnknown *, RECT *);
+typedef HRESULT (WINAPI *listview_get_work_area_count_fn)(IUnknown *, INT *);
+typedef HRESULT (WINAPI *listview_set_work_areas_with_dpi_fn)(IUnknown *, INT,
+                                                               const struct lv_work_area_with_dpi *);
+typedef HRESULT (WINAPI *listview_get_work_areas_with_dpi_fn)(IUnknown *, INT,
+                                                               struct lv_work_area_with_dpi *);
+typedef HRESULT (WINAPI *listview_set_work_area_image_list_fn)(IUnknown *, INT, INT, HIMAGELIST,
+                                                                HIMAGELIST *);
+typedef HRESULT (WINAPI *listview_get_work_area_image_list_fn)(IUnknown *, INT, INT, HIMAGELIST *);
+typedef HRESULT (WINAPI *listview_enable_icon_bullying_fn)(IUnknown *, INT);
+typedef HRESULT (WINAPI *listview_enable_quirks_fn)(IUnknown *, DWORD);
 #include "v6util.h"
 #include "msg.h"
 
@@ -7805,12 +7833,22 @@ static void test_queryinterface(void)
 {
     const void *const *vtbl;
     IUnknown *iface = (IUnknown *)0xdeadbeef, *unknown = NULL;
+    IUnknown *iface2 = NULL;
     IUnknown *invalid_iface = (IUnknown *)0xdeadbeef;
     DWORD old_style = 0xdeadbeef;
-    HWND hwnd, tooltip = NULL;
+    INT old_cx = 0, old_cy = 0;
+    INT item_count = -1;
+    LVCOLUMNW column = {0};
+    LVITEMA item = {0};
+    INT inserted = -1;
+    INT selected_count = -1;
+    INT work_area_count = -1;
+    HWND header = NULL, hwnd, tooltip = NULL;
     LRESULT ret;
     HRESULT hr;
     RECT margin;
+    struct lv_work_area_with_dpi work_area = {{0, 0, 640, 480}, 96};
+    HIMAGELIST image_list = (HIMAGELIST)0xdeadbeef;
 
     hwnd = create_listview_control(LVS_REPORT);
     ret = SendMessageA(hwnd, LVM_QUERYINTERFACE, (WPARAM)&IID_IListView_Win7, (LPARAM)&iface);
@@ -7827,10 +7865,64 @@ static void test_queryinterface(void)
     ok(unknown == iface, "Expected identity pointer %p, got %p.\n", iface, unknown);
     if (unknown) unknown->lpVtbl->Release(unknown);
 
+    hr = iface->lpVtbl->QueryInterface(iface, &IID_IListView2, (void **)&iface2);
+    ok(hr == S_OK, "IListView2 QueryInterface returned %#lx.\n", hr);
+    ok(iface2 == iface, "Expected IListView2 pointer %p, got %p.\n", iface, iface2);
+
     vtbl = *(const void *const **)iface;
     hr = ((listview_get_window_fn)vtbl[3])(iface, &tooltip);
     ok(hr == S_OK, "GetWindow returned %#lx.\n", hr);
     ok(tooltip == hwnd, "Expected window %p, got %p.\n", hwnd, tooltip);
+
+    hr = ((listview_set_icon_spacing_fn)vtbl[40])(iface, 60, 70, &old_cx, &old_cy);
+    ok(hr == S_OK, "SetIconSpacing returned %#lx.\n", hr);
+    ret = SendMessageA(hwnd, LVM_SETICONSPACING, 0, MAKELPARAM(60, 70));
+    ok((SHORT)LOWORD(ret) == 60 && (SHORT)HIWORD(ret) == 70,
+       "Expected icon spacing 60x70, got %dx%d.\n", (SHORT)LOWORD(ret), (SHORT)HIWORD(ret));
+
+    hr = ((listview_get_header_fn)vtbl[65])(iface, &header);
+    ok(hr == S_OK, "GetHeader returned %#lx.\n", hr);
+    ok(header == (HWND)SendMessageA(hwnd, LVM_GETHEADER, 0, 0),
+       "Expected header window %p, got %p.\n",
+       (HWND)SendMessageA(hwnd, LVM_GETHEADER, 0, 0), header);
+
+    column.mask = LVCF_WIDTH;
+    column.cx = 80;
+    hr = ((listview_insert_column_fn)vtbl[66])(iface, 0, &column, &inserted);
+    ok(hr == S_OK, "InsertColumn returned %#lx.\n", hr);
+    ok(inserted == 0, "Expected inserted column 0, got %d.\n", inserted);
+    column.cx = 0;
+    hr = ((listview_get_column_fn)vtbl[61])(iface, 0, &column);
+    ok(hr == S_OK, "GetColumn returned %#lx.\n", hr);
+    ok(column.cx == 80, "Expected column width 80, got %d.\n", column.cx);
+    column.cx = 90;
+    hr = ((listview_set_column_fn)vtbl[62])(iface, 0, &column);
+    ok(hr == S_OK, "SetColumn returned %#lx.\n", hr);
+    hr = ((listview_set_column_width_fn)vtbl[72])(iface, 0, 100);
+    ok(hr == S_OK, "SetColumnWidth returned %#lx.\n", hr);
+    ok(SendMessageA(hwnd, LVM_GETCOLUMNWIDTH, 0, 0) == 100,
+       "Expected column width 100, got %Id.\n", SendMessageA(hwnd, LVM_GETCOLUMNWIDTH, 0, 0));
+    hr = ((listview_delete_column_fn)vtbl[67])(iface, 0);
+    ok(hr == S_OK, "DeleteColumn returned %#lx.\n", hr);
+
+    hr = ((listview_get_selected_count_fn)vtbl[78])(iface, &selected_count);
+    ok(hr == S_OK, "GetSelectedCount returned %#lx.\n", hr);
+    ok(selected_count == 0, "Expected no selected items, got %d.\n", selected_count);
+    item.mask = LVIF_TEXT;
+    item.pszText = (char *)"first";
+    ok(ListView_InsertItemA(hwnd, &item) == 0, "Failed to insert the first item.\n");
+    item.iItem = 1;
+    item.pszText = (char *)"second";
+    ok(ListView_InsertItemA(hwnd, &item) == 1, "Failed to insert the second item.\n");
+    hr = ((listview_get_item_count_fn)vtbl[15])(iface, &item_count);
+    ok(hr == S_OK, "GetItemCount returned %#lx.\n", hr);
+    ok(item_count == 2, "Expected two items, got %d.\n", item_count);
+    item.state = LVIS_SELECTED;
+    item.stateMask = LVIS_SELECTED;
+    SendMessageA(hwnd, LVM_SETITEMSTATE, 1, (LPARAM)&item);
+    hr = ((listview_get_selected_count_fn)vtbl[78])(iface, &selected_count);
+    ok(hr == S_OK, "GetSelectedCount returned %#lx.\n", hr);
+    ok(selected_count == 1, "Expected one selected item, got %d.\n", selected_count);
 
     hr = ((listview_set_extended_style_fn)vtbl[81])(iface, LVS_EX_FULLROWSELECT,
                                                     LVS_EX_FULLROWSELECT, &old_style);
@@ -7849,6 +7941,35 @@ static void test_queryinterface(void)
     ok(hr == S_OK, "GetColumnMargin returned %#lx.\n", hr);
     ok(IsRectEmpty(&margin), "Expected an empty column margin, got %s.\n", wine_dbgstr_rect(&margin));
 
+    ret = SendMessageA(hwnd, LVM_SETVIEW, LV_VIEW_ICON, 0);
+    ok(ret == 1, "LVM_SETVIEW returned %Id.\n", ret);
+    hr = ((listview_arrange_items_fn)vtbl[52])(iface, LVA_SNAPTOGRID);
+    ok(hr == S_OK, "ArrangeItems returned %#lx.\n", hr);
+    hr = ((listview_set_work_areas_with_dpi_fn)vtbl[144])(iface, 1, &work_area);
+    ok(hr == S_OK, "SetWorkAreasWithDpi returned %#lx.\n", hr);
+    hr = ((listview_get_work_area_count_fn)vtbl[94])(iface, &work_area_count);
+    ok(hr == S_OK, "GetWorkAreaCount returned %#lx.\n", hr);
+    ok(work_area_count == 1, "Expected one work area, got %d.\n", work_area_count);
+    SetRectEmpty(&work_area.rect);
+    work_area.dpi = 0;
+    hr = ((listview_get_work_areas_with_dpi_fn)vtbl[145])(iface, 1, &work_area);
+    ok(hr == S_OK, "GetWorkAreasWithDpi returned %#lx.\n", hr);
+    ok(EqualRect(&work_area.rect, &(RECT){0, 0, 640, 480}) && work_area.dpi == 96,
+       "Expected the retained work area, got %s at %u DPI.\n",
+       wine_dbgstr_rect(&work_area.rect), work_area.dpi);
+    hr = ((listview_set_work_area_image_list_fn)vtbl[146])(iface, 0, LVSIL_NORMAL,
+                                                           NULL, &image_list);
+    ok(hr == E_NOTIMPL, "SetWorkAreaImageList returned %#lx.\n", hr);
+    ok(!image_list, "Expected a NULL old image list, got %p.\n", image_list);
+    image_list = (HIMAGELIST)0xdeadbeef;
+    hr = ((listview_get_work_area_image_list_fn)vtbl[147])(iface, 0, LVSIL_NORMAL, &image_list);
+    ok(hr == E_NOTIMPL, "GetWorkAreaImageList returned %#lx.\n", hr);
+    ok(!image_list, "Expected a NULL image list, got %p.\n", image_list);
+    hr = ((listview_enable_icon_bullying_fn)vtbl[148])(iface, FALSE);
+    ok(hr == S_OK, "EnableIconBullying returned %#lx.\n", hr);
+    hr = ((listview_enable_quirks_fn)vtbl[149])(iface, 3);
+    ok(hr == S_OK, "EnableQuirks returned %#lx.\n", hr);
+
     ret = SendMessageA(hwnd, CCM_SETNOTIFYWINDOW, (WPARAM)GetDesktopWindow(), 0);
     ok((HWND)ret == hwndparent, "Expected old notify window %p, got %p.\n", hwndparent, (HWND)ret);
     ret = SendMessageA(hwnd, CCM_SETNOTIFYWINDOW, (WPARAM)hwndparent, 0);
@@ -7859,6 +7980,7 @@ static void test_queryinterface(void)
     ok(ret == FALSE, "Unexpected LVM_QUERYINTERFACE result %Id.\n", ret);
     ok(invalid_iface == NULL, "Expected a NULL interface, got %p.\n", invalid_iface);
 
+    if (iface2) iface2->lpVtbl->Release(iface2);
     iface->lpVtbl->Release(iface);
     DestroyWindow(hwnd);
 }

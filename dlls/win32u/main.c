@@ -456,6 +456,16 @@ NTSTATUS SYSCALL_API NtGdiDdDDIQueryAdapterInfo( D3DKMT_QUERYADAPTERINFO *desc )
     SYSCALL_FUNC( NtGdiDdDDIQueryAdapterInfo );
 }
 
+NTSTATUS SYSCALL_API NtGdiDdDDIGetMemoryBudgetTarget( void *desc )
+{
+    SYSCALL_FUNC( NtGdiDdDDIGetMemoryBudgetTarget );
+}
+
+NTSTATUS SYSCALL_API NtGdiDdDDIGetYieldPercentage( void *desc )
+{
+    SYSCALL_FUNC( NtGdiDdDDIGetYieldPercentage );
+}
+
 NTSTATUS SYSCALL_API NtGdiDdDDIQueryResourceInfo( D3DKMT_QUERYRESOURCEINFO *desc )
 {
     SYSCALL_FUNC( NtGdiDdDDIQueryResourceInfo );
@@ -1863,6 +1873,16 @@ HWND SYSCALL_API NtUserGetOpenClipboardWindow(void)
     SYSCALL_FUNC( NtUserGetOpenClipboardWindow );
 }
 
+HWND SYSCALL_API NtUserGhostWindowFromHungWindow( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserGhostWindowFromHungWindow, hwnd );
+}
+
+HWND SYSCALL_API NtUserHungWindowFromGhostWindow( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserHungWindowFromGhostWindow, hwnd );
+}
+
 BOOL SYSCALL_API NtUserGetPointerInfoList( UINT32 id, POINTER_INPUT_TYPE type, UINT_PTR unk0, UINT_PTR unk1, SIZE_T size,
                                            UINT32 *entry_count, UINT32 *pointer_count, void *pointer_info )
 {
@@ -2317,6 +2337,36 @@ INT SYSCALL_API NtUserReleaseDC( HWND hwnd, HDC hdc )
     SYSCALL_FUNC( NtUserReleaseDC );
 }
 
+NTSTATUS SYSCALL_API NtUserRemoteConnect( void *connect_info, ULONG operation, void *output )
+{
+    SYSCALL_FUNC( NtUserRemoteConnect );
+}
+
+UINT SYSCALL_API NtUserRemoteConnectState(void)
+{
+    SYSCALL_FUNC( NtUserRemoteConnectState );
+}
+
+NTSTATUS SYSCALL_API NtUserRemoteDisconnect(void)
+{
+    SYSCALL_FUNC( NtUserRemoteDisconnect );
+}
+
+NTSTATUS SYSCALL_API NtUserRemoteNotify( const UINT *notification )
+{
+    SYSCALL_FUNC( NtUserRemoteNotify );
+}
+
+NTSTATUS SYSCALL_API NtUserRemotePassthruDisable(void)
+{
+    SYSCALL_FUNC( NtUserRemotePassthruDisable );
+}
+
+NTSTATUS SYSCALL_API NtUserRemotePassthruEnable(void)
+{
+    SYSCALL_FUNC( NtUserRemotePassthruEnable );
+}
+
 BOOL SYSCALL_API NtUserRemoveClipboardFormatListener( HWND hwnd )
 {
     SYSCALL_FUNC( NtUserRemoveClipboardFormatListener );
@@ -2545,6 +2595,12 @@ UINT_PTR SYSCALL_API NtUserSetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout 
 HWND SYSCALL_API NtUserSetTaskmanWindow( HWND hwnd )
 {
     SYSCALL_FUNC( NtUserSetTaskmanWindow );
+}
+
+NTSTATUS SYSCALL_API NtUserSetInformationThread( HANDLE thread, USERTHREADINFOCLASS info_class,
+                                                  void *info, ULONG length )
+{
+    SYSCALL_FUNC( NtUserSetInformationThread );
 }
 
 BOOL SYSCALL_API NtUserSetThreadDesktop( HDESK handle )

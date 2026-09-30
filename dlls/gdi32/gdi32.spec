@@ -127,6 +127,8 @@
 @ stdcall D3DKMTEnumAdapters2(ptr) win32u.NtGdiDdDDIEnumAdapters2
 @ stdcall D3DKMTEnumAdapters3(ptr) win32u.NtDxgkEnumAdapters3
 @ stdcall D3DKMTEscape(ptr) win32u.NtGdiDdDDIEscape
+@ stdcall D3DKMTGetMemoryBudgetTarget(ptr) win32u.NtGdiDdDDIGetMemoryBudgetTarget
+@ stdcall D3DKMTGetYieldPercentage(ptr) win32u.NtGdiDdDDIGetYieldPercentage
 @ stdcall D3DKMTIsFeatureEnabled(ptr) win32u.NtDxgkIsFeatureEnabled
 @ stdcall D3DKMTOpenAdapterFromDeviceName(ptr) win32u.NtGdiDdDDIOpenAdapterFromDeviceName
 @ stdcall D3DKMTOpenAdapterFromGdiDisplayName(ptr)

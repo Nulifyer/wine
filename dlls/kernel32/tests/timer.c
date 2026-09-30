@@ -28,6 +28,7 @@ static void test_timer(void)
 {
     HANDLE handle;
     BOOL r;
+    DWORD wait;
     LARGE_INTEGER due;
 
     /* try once with a positive number */
@@ -47,6 +48,21 @@ static void test_timer(void)
     due.QuadPart = -10000;
     r = SetWaitableTimer( handle, &due, 0x1f4, NULL, NULL, FALSE );
     ok( r, "failed to set timer\n");
+
+    CloseHandle( handle );
+
+    /* An absolute due time of zero is already expired and must signal promptly. */
+    handle = CreateWaitableTimerA( NULL, TRUE, NULL );
+    ok( handle != NULL, "failed to create manual-reset waitable timer\n" );
+
+    due.QuadPart = 0;
+    r = SetWaitableTimer( handle, &due, 0, NULL, NULL, FALSE );
+    ok( r, "failed to set zero-due-time timer\n" );
+
+    wait = WaitForSingleObject( handle, 1000 );
+    ok( wait == WAIT_OBJECT_0, "zero-due-time wait returned %#lx\n", wait );
+    wait = WaitForSingleObject( handle, 0 );
+    ok( wait == WAIT_OBJECT_0, "manual-reset timer did not remain signaled, got %#lx\n", wait );
 
     CloseHandle( handle );
 }

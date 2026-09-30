@@ -14,9 +14,13 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
+#include "appmodel.h"
 #include "wine/test.h"
 
 typedef LONG (WINAPI *token_identity_query)(HANDLE, UINT32 *, WCHAR *);
+typedef LONG (WINAPI *package_path_query)(const WCHAR *, UINT32, UINT32 *, WCHAR *);
+typedef HRESULT (WINAPI *package_alias_query)(UINT32, UINT32 *, void *, UINT32 *);
+typedef HRESULT (WINAPI *package_info3_query)(UINT32, UINT32, UINT32 *, void *, UINT32 *);
 
 static void test_open_state_unpackaged_identity(void)
 {
@@ -126,8 +130,101 @@ static void test_token_package_identity(void)
     CloseHandle(process_token);
 }
 
+static void test_package_path_validation(void)
+{
+    static const char *names[] =
+    {
+        "GetPackagePathByFullName2",
+        "GetStagedPackagePathByFullName2",
+    };
+    static const WCHAR full_name[] = L"Test.Package_1.0.0.0_neutral__123456789abcd";
+    WCHAR buffer[2];
+    HMODULE module = GetModuleHandleA("kernelbase.dll");
+    package_path_query query;
+    UINT32 length;
+    unsigned int i;
+    LONG status;
+
+    for (i = 0; i < ARRAY_SIZE(names); ++i)
+    {
+        query = (void *)GetProcAddress(module, names[i]);
+        if (!query)
+        {
+            win_skip("%s is not available.\n", names[i]);
+            continue;
+        }
+
+        length = 0;
+        status = query(NULL, PackagePathType_Install, &length, NULL);
+        ok(status == ERROR_INVALID_PARAMETER, "%s returned %#lx.\n", names[i], status);
+        status = query(full_name, PackagePathType_Install, NULL, NULL);
+        ok(status == ERROR_INVALID_PARAMETER, "%s returned %#lx.\n", names[i], status);
+        length = ARRAY_SIZE(buffer);
+        status = query(full_name, PackagePathType_Install, &length, NULL);
+        ok(status == ERROR_INVALID_PARAMETER, "%s returned %#lx.\n", names[i], status);
+        length = 0;
+        status = query(full_name, PackagePathType_EffectiveExternal + 1, &length, NULL);
+        ok(status == ERROR_INVALID_PARAMETER, "%s returned %#lx.\n", names[i], status);
+    }
+}
+
+static void test_package_alias_validation(void)
+{
+    package_alias_query query;
+    package_info3_query query3;
+    BYTE buffer[16];
+    UINT32 count, size;
+    HRESULT hr;
+
+    query = (void *)GetProcAddress(GetModuleHandleA("kernelbase.dll"),
+                                   "GetCurrentPackageInfo_PackageNameAliases");
+    if (!query)
+    {
+        win_skip("GetCurrentPackageInfo_PackageNameAliases is not available.\n");
+        return;
+    }
+
+    hr = query(0, NULL, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    size = 1;
+    hr = query(0, &size, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    size = sizeof(buffer);
+    hr = query(0, &size, buffer, NULL);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    size = 0;
+    count = 0xcccccccc;
+    hr = query(0, &size, NULL, &count);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(!size, "got size %u.\n", size);
+    ok(!count, "got count %u.\n", count);
+
+    query3 = (void *)GetProcAddress(GetModuleHandleA("kernelbase.dll"), "GetCurrentPackageInfo3");
+    if (!query3)
+    {
+        win_skip("GetCurrentPackageInfo3 is not available.\n");
+        return;
+    }
+
+    hr = query3(0, 0x11, NULL, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    size = 1;
+    hr = query3(0, 0x11, &size, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+
+    size = sizeof(buffer);
+    hr = query3(0, 0x11, &size, buffer, NULL);
+    ok(hr == E_INVALIDARG, "got hr %#lx.\n", hr);
+}
+
 START_TEST(appmodel_state)
 {
     test_open_state_unpackaged_identity();
     test_token_package_identity();
+    test_package_path_validation();
+    test_package_alias_validation();
 }

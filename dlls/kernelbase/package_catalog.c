@@ -133,28 +133,16 @@ void package_catalog_free(struct package_catalog_entry *entry)
     }
 }
 
-static HRESULT read_package(struct cache_reader *reader, UINT64 id, UINT64 user,
-                            struct package_catalog_entry **result)
+static HRESULT read_package_data(struct cache_reader *reader, UINT64 id,
+                                 struct package_catalog_entry **result)
 {
     struct package_catalog_entry *entry = NULL;
-    void *registration = NULL, *package = NULL, *family = NULL;
+    void *package = NULL, *family = NULL;
     WCHAR path[256];
-    UINT64 registration_id, family_id, state, linked_id;
+    UINT64 family_id;
     HRESULT hr;
 
     *result = NULL;
-    swprintf(path, ARRAY_SIZE(path), L"PackageUser\\Index\\UserAndPackage\\%llx^%llx", user, id);
-    if ((hr = lookup(reader, path, &registration_id)) != S_OK) return hr;
-    swprintf(path, ARRAY_SIZE(path), L"PackageUser\\Data\\%llx", registration_id);
-    if (FAILED(hr = reader->open(reader->manager, path, 0, &registration))) goto done;
-    if (!registration) { hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA); goto done; }
-    if (FAILED(hr = reader->integer(registration, L"User", &linked_id))) goto done;
-    if (linked_id != user) { hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA); goto done; }
-    if (FAILED(hr = reader->integer(registration, L"Package", &linked_id))) goto done;
-    if (linked_id != id) { hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA); goto done; }
-    if (FAILED(hr = reader->integer(registration, L"DeploymentState", &state))) goto done;
-    /* Other deployment states need their own registration/activation contract. */
-    if (state != 2) { hr = HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED); goto done; }
     swprintf(path, ARRAY_SIZE(path), L"Package\\Data\\%llx", id);
     if (FAILED(hr = reader->open(reader->manager, path, 0, &package))) goto done;
     if (!package) { hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA); goto done; }
@@ -175,6 +163,32 @@ done:
     package_catalog_free(entry);
     if (family) reader->close(family);
     if (package) reader->close(package);
+    return hr;
+}
+
+static HRESULT read_package(struct cache_reader *reader, UINT64 id, UINT64 user,
+                            struct package_catalog_entry **result)
+{
+    void *registration = NULL;
+    WCHAR path[256];
+    UINT64 registration_id, state, linked_id;
+    HRESULT hr;
+
+    *result = NULL;
+    swprintf(path, ARRAY_SIZE(path), L"PackageUser\\Index\\UserAndPackage\\%llx^%llx", user, id);
+    if ((hr = lookup(reader, path, &registration_id)) != S_OK) return hr;
+    swprintf(path, ARRAY_SIZE(path), L"PackageUser\\Data\\%llx", registration_id);
+    if (FAILED(hr = reader->open(reader->manager, path, 0, &registration))) goto done;
+    if (!registration) { hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA); goto done; }
+    if (FAILED(hr = reader->integer(registration, L"User", &linked_id))) goto done;
+    if (linked_id != user) { hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA); goto done; }
+    if (FAILED(hr = reader->integer(registration, L"Package", &linked_id))) goto done;
+    if (linked_id != id) { hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA); goto done; }
+    if (FAILED(hr = reader->integer(registration, L"DeploymentState", &state))) goto done;
+    /* Other deployment states need their own registration/activation contract. */
+    if (state != 2) { hr = HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED); goto done; }
+    hr = read_package_data(reader, id, result);
+done:
     if (registration) reader->close(registration);
     return hr;
 }
@@ -223,6 +237,46 @@ done:
     if (index) reader.close(index);
     close_reader(&reader);
     if (FAILED(hr)) { package_catalog_free(*result); *result = NULL; }
+    return hr;
+}
+
+HRESULT package_catalog_full_name(const WCHAR *full_name, BOOL registered,
+                                  struct package_catalog_entry **result)
+{
+    struct package_catalog_entry *entry = NULL;
+    struct cache_reader reader;
+    WCHAR path[PACKAGE_FULL_NAME_MAX_LENGTH + 40];
+    UINT64 id, user;
+    HRESULT hr;
+
+    TRACE("full name %s, registered %u\n", debugstr_w(full_name), registered);
+    *result = NULL;
+    if (!full_name || !*full_name || wcslen(full_name) > PACKAGE_FULL_NAME_MAX_LENGTH ||
+        wcschr(full_name, L'\\')) return E_INVALIDARG;
+    if (FAILED(hr = open_reader(&reader))) goto done;
+    if (!reader.manager) { hr = S_FALSE; goto done; }
+    swprintf(path, ARRAY_SIZE(path), L"Package\\Index\\PackageFullName\\%s", full_name);
+    if ((hr = lookup(&reader, path, &id)) != S_OK) goto done;
+    if (registered)
+    {
+        if ((hr = current_user(&reader, &user)) != S_OK) goto done;
+        hr = read_package(&reader, id, user, &entry);
+    }
+    else hr = read_package_data(&reader, id, &entry);
+    if (hr == S_OK && wcsicmp(entry->full_name, full_name))
+    {
+        package_catalog_free(entry);
+        entry = NULL;
+        hr = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    }
+    if (hr == S_OK)
+    {
+        *result = entry;
+        entry = NULL;
+    }
+done:
+    package_catalog_free(entry);
+    close_reader(&reader);
     return hr;
 }
 

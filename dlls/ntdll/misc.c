@@ -30,6 +30,16 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
+static BOOL linuxnt_debug_etw_payloads(void)
+{
+    static const WCHAR name[] = L"LINUXNT_DEBUG_ETW_PAYLOADS";
+    WCHAR value[2];
+    SIZE_T length;
+
+    return !RtlQueryEnvironmentVariable( NULL, name, ARRAY_SIZE(name) - 1,
+                                         value, ARRAY_SIZE(value), &length );
+}
+
 /******************************************************************************
  *                  RtlQueryResourcePolicy (NTDLL.@)
  */
@@ -324,7 +334,8 @@ BOOL WINAPI EvtIntReportEventAndSourceAsync( HANDLE handle, const WCHAR *source,
     FIXME("(%p, %s, %u, %u, %#lx, %p, %u, %lu, %p, %p): stub\n", handle,
           debugstr_w(source), type, category, event_id, user_sid, string_count, data_size,
           strings, data);
-    if ((event_id == 0xc0001b58 || event_id == 0xc0001b7e) && strings)
+    if (source && !wcsicmp(source, L"Service Control Manager") &&
+        event_id >= 0xc0001b50 && event_id <= 0xc0001b7f && strings)
         for (i = 0; i < string_count; ++i)
             FIXME("event %lu string[%u]=%s\n", event_id & 0xffff, i, debugstr_w(strings[i]));
 
@@ -393,11 +404,29 @@ BOOLEAN WINAPI EtwEventProviderEnabled( REGHANDLE handle, UCHAR level, ULONGLONG
 ULONG WINAPI EtwEventRegister( LPCGUID provider, PENABLECALLBACK callback, PVOID context,
                 PREGHANDLE handle )
 {
+    static const GUID broker_infrastructure_provider =
+        {0x63b6c2d2, 0x0440, 0x44de, {0xa6,0x74,0xaa,0x51,0xa2,0x51,0xb1,0x23}};
+    static const GUID app_extensions_provider =
+        {0xe86ff119, 0x662f, 0x5d23, {0x69,0xb1,0x0e,0xd8,0xbf,0x76,0x86,0xc2}};
     WARN("(%s, %p, %p, %p) stub.\n", debugstr_guid(provider), callback, context, handle);
 
-    if (!handle) return ERROR_INVALID_PARAMETER;
+    if (linuxnt_debug_etw_payloads())
+        ERR("linuxnt-etw-register provider=%s callback=%p context=%p target=%u\n",
+            debugstr_guid(provider), callback, context,
+            provider && IsEqualGUID( provider, &app_extensions_provider ));
+
+    if (!provider || !handle) return ERROR_INVALID_PARAMETER;
 
     *handle = 0xdeadbeef;
+    if (provider && callback &&
+        (IsEqualGUID( provider, &broker_infrastructure_provider ) ||
+         (linuxnt_debug_etw_payloads() && IsEqualGUID( provider, &app_extensions_provider ))))
+    {
+        if (linuxnt_debug_etw_payloads())
+            ERR("linuxnt-etw-enable provider=%s level=5 keywords=%s\n",
+                debugstr_guid(provider), wine_dbgstr_longlong(~0ULL));
+        callback( provider, 1, 5, ~0ULL, 0, NULL, context );
+    }
     return ERROR_SUCCESS;
 }
 
@@ -473,6 +502,7 @@ ULONG WINAPI EtwWriteUMSecurityEvent( PCEVENT_DESCRIPTOR descriptor, USHORT even
 ULONG WINAPI EtwEventUnregister( REGHANDLE handle )
 {
     WARN("(%s) stub.\n", wine_dbgstr_longlong(handle));
+    if (!handle) return ERROR_INVALID_HANDLE;
     return ERROR_SUCCESS;
 }
 
@@ -493,6 +523,36 @@ ULONG WINAPI EtwEventWriteString( REGHANDLE handle, UCHAR level, ULONGLONG keywo
 {
     FIXME("%s, %u, %s, %s: stub\n", wine_dbgstr_longlong(handle), level,
           wine_dbgstr_longlong(keyword), debugstr_w(string));
+    if (!handle) return ERROR_INVALID_HANDLE;
+    if (!string) return ERROR_INVALID_PARAMETER;
+    return ERROR_SUCCESS;
+}
+
+static ULONG etw_write_event( REGHANDLE handle, const GUID *provider,
+                              const EVENT_DESCRIPTOR *descriptor, const GUID *activity,
+                              const GUID *related, ULONG count, const EVENT_DATA_DESCRIPTOR *data )
+{
+    ULONG i;
+
+    if ((!handle && !provider) || !descriptor || (count && !data)) return ERROR_INVALID_PARAMETER;
+    if (!linuxnt_debug_etw_payloads()) return ERROR_SUCCESS;
+
+    ERR("linuxnt-etw handle=%s provider=%s event=%u level=%u keyword=%s activity=%s related=%s count=%lu\n",
+        wine_dbgstr_longlong(handle), debugstr_guid(provider), descriptor->Id, descriptor->Level,
+        wine_dbgstr_longlong(descriptor->Keyword), debugstr_guid(activity), debugstr_guid(related), count);
+    for (i = 0; i < count; i++)
+    {
+        ULONGLONG value = 0;
+        ULONG size = min( data[i].Size, (ULONG)sizeof(value) );
+        ULONG preview = min( data[i].Size, 128u );
+
+        if (data[i].Ptr && size) memcpy( &value, (const void *)(ULONG_PTR)data[i].Ptr, size );
+        ERR("linuxnt-etw data[%lu] size=%lu value=%s bytes=%s wide=%s\n", i, data[i].Size,
+            wine_dbgstr_longlong(value),
+            data[i].Ptr ? debugstr_an((const char *)(ULONG_PTR)data[i].Ptr, preview) : "(null)",
+            data[i].Ptr && !(preview % sizeof(WCHAR))
+                ? debugstr_wn((const WCHAR *)(ULONG_PTR)data[i].Ptr, preview / sizeof(WCHAR)) : "(odd)");
+    }
     return ERROR_SUCCESS;
 }
 
@@ -504,7 +564,18 @@ ULONG WINAPI EtwEventWriteTransfer( REGHANDLE handle, PCEVENT_DESCRIPTOR descrip
 {
     FIXME("%s, %p, %s, %s, %lu, %p: stub\n", wine_dbgstr_longlong(handle), descriptor,
           debugstr_guid(activity), debugstr_guid(related), count, data);
-    return ERROR_SUCCESS;
+    if (!handle) return ERROR_INVALID_HANDLE;
+    return etw_write_event( handle, NULL, descriptor, activity, related, count, data );
+}
+
+/******************************************************************************
+ *                  EtwEventWriteNoRegistration   (NTDLL.@)
+ */
+ULONG WINAPI EtwEventWriteNoRegistration( LPCGUID provider, PCEVENT_DESCRIPTOR descriptor,
+                                          ULONG count, PEVENT_DATA_DESCRIPTOR data )
+{
+    TRACE("%s, %p, %lu, %p\n", debugstr_guid(provider), descriptor, count, data);
+    return etw_write_event( 0, provider, descriptor, NULL, NULL, count, data );
 }
 
 /******************************************************************************
@@ -591,7 +662,8 @@ ULONG WINAPI EtwEventWrite( REGHANDLE handle, const EVENT_DESCRIPTOR *descriptor
     EVENT_DATA_DESCRIPTOR *data )
 {
     FIXME("(%s, %p, %lu, %p): stub\n", wine_dbgstr_longlong(handle), descriptor, count, data);
-    return ERROR_SUCCESS;
+    if (!handle) return ERROR_INVALID_HANDLE;
+    return etw_write_event( handle, NULL, descriptor, NULL, NULL, count, data );
 }
 
 /******************************************************************************
@@ -603,7 +675,9 @@ ULONG WINAPI EtwEventWriteEx( REGHANDLE handle, const EVENT_DESCRIPTOR *descript
 {
     FIXME( "(%s, %p, %#I64x, %lu, %p, %p, %lu, %p): stub\n", wine_dbgstr_longlong(handle), descriptor, filter,
            flags, activity_id, related_activity_id, data_count, data );
-    return ERROR_SUCCESS;
+    if (!handle) return ERROR_INVALID_HANDLE;
+    return etw_write_event( handle, NULL, descriptor, activity_id, related_activity_id,
+                            data_count, data );
 }
 
 /******************************************************************************

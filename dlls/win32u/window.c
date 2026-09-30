@@ -3464,6 +3464,19 @@ BOOL get_window_placement( HWND hwnd, WINDOWPLACEMENT *placement )
     return TRUE;
 }
 
+/* Wine does not create or manage ghost windows. These native lookup APIs only
+ * return an associated counterpart; therefore no Wine-owned window currently
+ * has one. */
+HWND WINAPI NtUserGhostWindowFromHungWindow( HWND hwnd )
+{
+    return 0;
+}
+
+HWND WINAPI NtUserHungWindowFromGhostWindow( HWND hwnd )
+{
+    return 0;
+}
+
 /***********************************************************************
  *           NtUserGetWindowPlacement (win32u.@)
  */
@@ -6893,6 +6906,60 @@ HWND get_shell_window(void)
     SERVER_END_REQ;
 
     return hwnd;
+}
+
+static LONG iam_key_acquired;
+static ULONGLONG iam_key_value;
+
+/***********************************************************************
+ *           NtUserAcquireIAMKey (win32u.@)
+ *
+ * The IAM key is acquired once by the process that owns the shell window.
+ * Windows keeps the key and its owning thread in desktop state.  Wine does
+ * not yet enforce IAM permissions, so process-local state preserves the
+ * observable acquisition contract without granting access to other clients.
+ */
+BOOL WINAPI NtUserAcquireIAMKey( ULONGLONG *key )
+{
+    LARGE_INTEGER counter;
+    ULONGLONG value;
+    DWORD shell_process;
+
+    if (!key || !get_window_thread( get_shell_window(), &shell_process ) ||
+        shell_process != GetCurrentProcessId() ||
+        InterlockedCompareExchange( &iam_key_acquired, 1, 0 ))
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+
+    NtQueryPerformanceCounter( &counter, NULL );
+    value = counter.QuadPart ^ ((ULONGLONG)GetCurrentProcessId() << 32) ^ GetCurrentThreadId();
+    value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+    value ^= value >> 31;
+    iam_key_value = value ? value : 1;
+    *key = iam_key_value;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           NtUserEnableIAMAccess (win32u.@)
+ */
+BOOL WINAPI NtUserEnableIAMAccess( const ULONGLONG *key, BOOL enable )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    DWORD shell_process;
+
+    if (!key || !get_window_thread( get_shell_window(), &shell_process ) ||
+        shell_process != GetCurrentProcessId() || !iam_key_acquired || *key != iam_key_value)
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+
+    thread_info->client_info->iam_access = enable;
+    return TRUE;
 }
 
 HWND get_shell_change_notify_window(void)

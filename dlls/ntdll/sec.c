@@ -2636,7 +2636,6 @@ NTSTATUS WINAPI RtlCapabilityCheck( HANDLE token, UNICODE_STRING *cap_name, BOOL
 
     TRACE( "token %p, cap_name %s, has_capability %p.\n",
            token, debugstr_us(cap_name), has_capability );
-
     if (!cap_name) return STATUS_INVALID_PARAMETER;
     if (!has_capability) return STATUS_ACCESS_VIOLATION;
     *has_capability = FALSE;
@@ -2662,6 +2661,25 @@ NTSTATUS WINAPI RtlCapabilityCheck( HANDLE token, UNICODE_STRING *cap_name, BOOL
     }
 
     return RtlCheckTokenCapability( effective_token, cap_buffer, has_capability );
+}
+
+/******************************************************************************
+ * RtlCheckSandboxedToken (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlCheckSandboxedToken( HANDLE token, BOOLEAN *is_sandboxed )
+{
+    DWORD value = FALSE;
+    ULONG size;
+    NTSTATUS status;
+
+    TRACE( "token %p, is_sandboxed %p.\n", token, is_sandboxed );
+
+    if (!is_sandboxed) return STATUS_ACCESS_VIOLATION;
+    *is_sandboxed = FALSE;
+    if (!token) token = GetCurrentThreadEffectiveToken();
+    status = NtQueryInformationToken( token, TokenIsSandboxed, &value, sizeof(value), &size );
+    if (!status && value) *is_sandboxed = TRUE;
+    return status;
 }
 
 /******************************************************************************

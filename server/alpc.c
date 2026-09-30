@@ -1324,6 +1324,53 @@ void notify_dwm_window_destroyed( struct desktop *desktop, unsigned int generati
     queue_dwm_window_message( port, data, sizeof(data), "destroy", window );
 }
 
+/* Native win32k publishes window-relative visible regions in chunks of at
+ * most 27 RECTs.  A null region removes the corresponding tracker region;
+ * an empty region is represented by one empty RECT. */
+int notify_dwm_window_visible_region( struct desktop *desktop, unsigned int generation,
+                                      unsigned int window, unsigned int type,
+                                      const struct region *region )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    struct rectangle *rects = NULL;
+    data_size_t rect_size = 0;
+    unsigned int offset = 0, count = 0;
+    unsigned __int64 hwnd = window;
+    int ret = 1;
+
+    if (!port || generation != port->composition_id ||
+        port->kernel_session_phase != DWM_SESSION_PORT_READY) return 0;
+    if (region)
+    {
+        if (!(rects = get_region_data( region, ~(data_size_t)0, &rect_size ))) return 0;
+        count = rect_size / sizeof(*rects);
+    }
+
+    do
+    {
+        unsigned int chunk = min( count - offset, 27u );
+        unsigned char data[28 + 27 * sizeof(struct rectangle)] = {0};
+
+        put_u32( data, 0x40000096 );
+        memcpy( data + 4, &hwnd, sizeof(hwnd) );
+        put_u32( data + 12, offset );
+        put_u32( data + 16, count );
+        put_u32( data + 20, type );
+        put_u32( data + 24, chunk );
+        if (chunk) memcpy( data + 28, rects + offset, chunk * sizeof(*rects) );
+        if (!queue_dwm_window_message( port, data, 28 + chunk * sizeof(*rects),
+                                       "visible-region", window ))
+        {
+            ret = 0;
+            break;
+        }
+        offset += chunk;
+    } while (offset < count);
+
+    free( rects );
+    return ret;
+}
+
 static int queue_dwm_window_target_message( struct alpc_port *port, unsigned int command,
                                             unsigned int window, unsigned int type,
                                             obj_handle_t handle )

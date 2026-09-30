@@ -844,6 +844,24 @@ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
 }
 
 /******************************************************************************
+ *           NtGdiDdDDIGetMemoryBudgetTarget    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDIGetMemoryBudgetTarget( void *desc )
+{
+    FIXME( "(%p): stub\n", desc );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ *           NtGdiDdDDIGetYieldPercentage    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDIGetYieldPercentage( void *desc )
+{
+    FIXME( "(%p): stub\n", desc );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
  *           NtGdiDdDDIQueryVideoMemoryInfo    (win32u.@)
  */
 NTSTATUS WINAPI NtGdiDdDDIQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc )

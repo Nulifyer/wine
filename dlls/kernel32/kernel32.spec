@@ -228,6 +228,7 @@
 # @ stub ClosePrivateNamespace
 @ stdcall CloseProfileUserMapping()
 @ stdcall -import ClosePseudoConsole(ptr)
+@ stdcall CloseState(ptr) kernelbase.CloseState
 @ stub CloseSystemHandle
 @ stdcall CloseThreadpool(ptr) NTDLL.TpReleasePool
 @ stdcall CloseThreadpoolCleanupGroup(ptr) NTDLL.TpReleaseCleanupGroup
@@ -786,6 +787,9 @@
 @ stdcall GetPackageFullName(long ptr ptr) kernelbase.GetPackageFullName
 @ stdcall GetPackagesByPackageFamily(wstr ptr ptr ptr ptr) kernelbase.GetPackagesByPackageFamily
 @ stdcall GetPackagePathByFullName(wstr ptr wstr) kernelbase.GetPackagePathByFullName
+@ stdcall GetPackagePathByFullName2(wstr long ptr wstr) kernelbase.GetPackagePathByFullName2
+@ stdcall GetStagedPackagePathByFullName(wstr ptr wstr) kernelbase.GetStagedPackagePathByFullName
+@ stdcall GetStagedPackagePathByFullName2(wstr long ptr wstr) kernelbase.GetStagedPackagePathByFullName2
 @ stdcall -import GetPhysicallyInstalledSystemMemory(ptr)
 @ stdcall -import GetPriorityClass(long)
 @ stdcall GetPrivateProfileIntA(str str long str)
@@ -842,6 +846,7 @@
 @ stdcall GetStringTypeExA(long long str long ptr)
 @ stdcall -import GetStringTypeExW(long long wstr long ptr)
 @ stdcall -import GetStringTypeW(long wstr long ptr)
+@ stdcall GetSystemAppDataKey(ptr ptr ptr ptr) kernelbase.GetSystemAppDataKey
 @ stdcall -import GetSystemCpuSetInformation(ptr long ptr ptr long)
 @ stdcall -import GetSystemFileCacheSize(ptr ptr ptr)
 @ stdcall -import GetSystemDefaultLCID()
@@ -1168,6 +1173,7 @@
 @ stdcall OpenProfileUserMapping()
 @ stdcall OpenSemaphoreA(long long str)
 @ stdcall -import OpenSemaphoreW(long long wstr)
+@ stdcall OpenStateExplicit(long wstr) kernelbase.OpenStateExplicit
 @ stdcall -import OpenThread(long long long)
 @ stdcall -import OpenThreadToken(long long long ptr)
 @ stdcall -i386 OpenVxDHandle(long)
@@ -1182,6 +1188,7 @@
 @ stdcall -import PostQueuedCompletionStatus(long long ptr ptr)
 @ stdcall -import PackageIdFromFullName(wstr long ptr ptr)
 @ stdcall -import PackageFamilyNameFromFullName(wstr ptr ptr)
+@ stdcall -import PackageFamilyNameFromId(ptr ptr ptr)
 @ stdcall -import PackageFullNameFromId(ptr ptr ptr)
 @ stdcall -import PackageNameAndPublisherIdFromFamilyName(wstr ptr ptr ptr ptr)
 @ stdcall PowerClearRequest(long long)

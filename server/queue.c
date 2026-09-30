@@ -1202,6 +1202,10 @@ static int get_posted_message( struct msg_queue *queue, user_handle_t win,
 
     /* return it to the app */
 found:
+    if (msg->msg == 0x45c || msg->msg == 0x559 || msg->msg == 0x574 || msg->msg == 0x5c3)
+        fprintf( stderr, "linuxnt-shell-startup-message dequeue pid=%04x tid=%04x msg=%04x hwnd=%08x remove=%u wp=%lx lp=%lx\n",
+                 current->process->id, current->id, msg->msg, msg->win, !!(flags & PM_REMOVE),
+                 (unsigned long)msg->wparam, (unsigned long)msg->lparam );
     reply->total = msg->data_size;
     if (msg->data_size > get_reply_max_size())
     {
@@ -3309,6 +3313,12 @@ DECL_HANDLER(send_message)
     struct thread *thread = NULL;
 
     if (!(thread = get_thread_from_id( req->id ))) return;
+
+    if (req->type == MSG_POSTED &&
+        (req->msg == 0x45c || req->msg == 0x559 || req->msg == 0x574 || req->msg == 0x5c3))
+        fprintf( stderr, "linuxnt-shell-startup-message enqueue src=%04x:%04x dst=%04x:%04x msg=%04x hwnd=%08x wp=%lx lp=%lx\n",
+                 current->process->id, current->id, thread->process->id, thread->id,
+                 req->msg, req->win, (unsigned long)req->wparam, (unsigned long)req->lparam );
 
     if (!(recv_queue = thread->queue))
     {

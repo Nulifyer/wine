@@ -324,8 +324,18 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
                                    ALPC_MESSAGE_ATTRIBUTES *send_msg_attr,
                                    ALPC_MESSAGE_ATTRIBUTES *recv_msg_attr, LARGE_INTEGER *timeout )
 {
-    return connect_port( port_handle, port_name, obj_attr, port_attr, flags, required_server_sid, NULL, FALSE,
-                         connect_msg, connect_msg_size, send_msg_attr, recv_msg_attr, timeout );
+    NTSTATUS status;
+
+    status = connect_port( port_handle, port_name, obj_attr, port_attr, flags, required_server_sid, NULL, FALSE,
+                           connect_msg, connect_msg_size, send_msg_attr, recv_msg_attr, timeout );
+    if (port_name && port_name->Buffer && port_name->Length == 8 * sizeof(WCHAR) &&
+        port_name->Buffer[0] == '\\' && port_name->Buffer[1] == 'P' && port_name->Buffer[2] == 'd' &&
+        port_name->Buffer[3] == 'c' && port_name->Buffer[4] == 'P' && port_name->Buffer[5] == 'o' &&
+        port_name->Buffer[6] == 'r' && port_name->Buffer[7] == 't')
+        ERR( "linuxnt-pdc-connect name=%s status=%#x handle=%p\n",
+             debugstr_wn( port_name->Buffer, port_name->Length / sizeof(WCHAR) ), (unsigned int)status,
+             status ? NULL : *port_handle );
+    return status;
 }
 
 NTSTATUS WINAPI NtAlpcConnectPortEx( HANDLE *port_handle,

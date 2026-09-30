@@ -280,6 +280,9 @@ NTSTATUS WINAPI LsaCallAuthenticationPackage(HANDLE lsa_handle, ULONG package_id
             0, package_id, in_buffer, in_buffer, in_buffer_length,
             out_buffer, out_buffer_length, prot_status);
     LSASS_CALL_END
+    ERR( "linuxnt-lsa-call-package package=%lu message=%#lx length=%lu status=%#lx protocol=%#lx\n",
+         package_id, in_buffer_length >= sizeof(ULONG) ? *(ULONG *)in_buffer : 0,
+         in_buffer_length, status, prot_status ? *prot_status : 0 );
     return status;
 }
 
@@ -321,6 +324,8 @@ NTSTATUS WINAPI LsaRegisterLogonProcess(PLSA_STRING LogonProcessName,
                                      (BYTE *)LogonProcessName->Buffer, LogonProcessName->Length,
                                      SecurityMode, &rpc_handle );
     LSASS_CALL_END
+    ERR( "linuxnt-lsa-register name=%s status=%#lx mode=%#lx rpc_handle=%p\n",
+         debugstr_as(LogonProcessName), status, *SecurityMode, rpc_handle );
     if (status) return status;
     if (!(lsa_conn = alloc_lsa_handle(LSA_MAGIC_CONNECTION)))
     {
@@ -477,6 +482,14 @@ NTSTATUS WINAPI LsaLogonUser(HANDLE LsaHandle, PLSA_STRING OriginName,
                          (BYTE *)SourceContext->SourceName, SourceContext->SourceIdentifier,
                          &wire_profile, LogonId, &wire_token, &wire_quotas, SubStatus );
     LSASS_CALL_END
+    ERR( "linuxnt-lsa-logon package=%lu message=%#lx length=%lu envelope={%#lx,%lu,%#lx,%#lx} status=%#lx substatus=%#lx token=%#I64x\n",
+         AuthenticationPackage, AuthenticationInformationLength >= sizeof(ULONG)
+         ? *(ULONG *)AuthenticationInformation : 0, AuthenticationInformationLength,
+         AuthenticationInformationLength >= 8 ? *((ULONG *)AuthenticationInformation + 1) : 0,
+         AuthenticationInformationLength >= 12 ? *((ULONG *)AuthenticationInformation + 2) : 0,
+         AuthenticationInformationLength >= 16 ? *((ULONG *)AuthenticationInformation + 3) : 0,
+         AuthenticationInformationLength >= 28 ? *((ULONG *)AuthenticationInformation + 6) : 0,
+         status, *SubStatus, wire_token );
     if (status) goto done;
     if (!wire_token)
     {
@@ -1310,10 +1323,14 @@ NTSTATUS WINAPI LsaLookupAuthenticationPackage(HANDLE lsa_handle,
         {
             RtlFreeUnicodeString(&package_name_us);
             *package_id = i;
+            ERR( "linuxnt-lsa-lookup name=%s package=%lu loaded=%lu status=0\n",
+                 debugstr_as(package_name), i, loaded_packages_count );
             return STATUS_SUCCESS;
         }
     }
     RtlFreeUnicodeString(&package_name_us);
 
+    ERR( "linuxnt-lsa-lookup name=%s loaded=%lu status=%#lx\n",
+         debugstr_as(package_name), loaded_packages_count, STATUS_UNSUCCESSFUL );
     return STATUS_UNSUCCESSFUL; /* FIXME */
 }

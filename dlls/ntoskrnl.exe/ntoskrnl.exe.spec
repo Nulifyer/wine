@@ -1721,3 +1721,4 @@
 
 @ cdecl wine_ntoskrnl_main_loop(long)
 @ cdecl wine_enumerate_root_devices(wstr)
+@ cdecl __wine_load_driver(wstr)

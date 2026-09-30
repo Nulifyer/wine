@@ -7117,6 +7117,72 @@ NTSTATUS WINAPI NtCreatePagingFile( UNICODE_STRING *name, LARGE_INTEGER *min_siz
     return STATUS_SUCCESS;
 }
 
+/***********************************************************************
+ *             NtOpenPartition  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtOpenPartition( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
+{
+    static const WCHAR system_partitionW[] =
+        {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s','\\',
+         'M','e','m','o','r','y','P','a','r','t','i','t','i','o','n','0',0};
+    const UNICODE_STRING *name;
+    NTSTATUS status;
+
+    TRACE( "%p %#x %p\n", handle, (unsigned int)access, attr );
+
+    if (!handle || !attr || attr->Length != sizeof(*attr) || !(name = attr->ObjectName) || !name->Buffer)
+        return STATUS_INVALID_PARAMETER;
+    if (name->Length != sizeof(system_partitionW) - sizeof(WCHAR) ||
+        wcsnicmp( name->Buffer, system_partitionW, ARRAY_SIZE(system_partitionW) - 1 ))
+        return STATUS_OBJECT_NAME_NOT_FOUND;
+    if (access & ~1) return STATUS_ACCESS_DENIED;
+
+    /* Wine has a single system memory partition.  Use a server-owned event as
+     * its lifetime handle; partition state itself is queried from the host. */
+    status = NtCreateEvent( handle, EVENT_QUERY_STATE, NULL, NotificationEvent, FALSE );
+    ERR( "linuxnt-open-partition name=%s access=%#x status=%#x handle=%p\n",
+         debugstr_wn( name->Buffer, name->Length / sizeof(WCHAR) ), (unsigned int)access,
+         (unsigned int)status, status ? NULL : *handle );
+    return status;
+}
+
+/***********************************************************************
+ *             NtManagePartition  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtManagePartition( HANDLE target, HANDLE source, PARTITION_INFORMATION_CLASS class,
+                                   void *buffer, ULONG size )
+{
+    MEMORY_PARTITION_CONFIGURATION_INFORMATION *info = buffer;
+    SYSTEM_PERFORMANCE_INFORMATION performance;
+    SYSTEM_BASIC_INFORMATION basic;
+    EVENT_BASIC_INFORMATION event;
+    NTSTATUS status;
+
+    TRACE( "%p %p %u %p %u\n", target, source, class, buffer, size );
+
+    if ((status = NtQueryEvent( target, EventBasicInformation, &event, sizeof(event), NULL ))) return status;
+    if (source) return STATUS_NOT_IMPLEMENTED;
+    if (class != SystemMemoryPartitionInformation) return STATUS_INVALID_INFO_CLASS;
+    if (size != sizeof(*info)) return STATUS_INFO_LENGTH_MISMATCH;
+    if (!info) return STATUS_ACCESS_VIOLATION;
+
+    status = NtQuerySystemInformation( SystemBasicInformation, &basic, sizeof(basic), NULL );
+    if (status) return status;
+    status = NtQuerySystemInformation( SystemPerformanceInformation, &performance, sizeof(performance), NULL );
+    if (status) return status;
+
+    memset( info, 0, sizeof(*info) );
+    info->NumberOfNumaNodes = 1;
+    info->ResidentAvailablePages = performance.AvailablePages;
+    info->CommittedPages = performance.TotalCommittedPages;
+    info->CommitLimit = performance.TotalCommitLimit;
+    info->PeakCommitment = performance.TotalCommittedPages;
+    info->TotalNumberOfPages = basic.MmNumberOfPhysicalPages;
+    info->AvailablePages = performance.AvailablePages;
+    info->MaximumCommitLimit = performance.TotalCommitLimit;
+    return STATUS_SUCCESS;
+}
+
 #ifndef _WIN64
 
 /***********************************************************************

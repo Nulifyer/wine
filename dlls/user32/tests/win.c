@@ -14728,6 +14728,26 @@ static void test_GW_ENABLEDPOPUP(void)
     DestroyWindow(parent2);
 }
 
+static void test_IsShellManagedWindow( HWND hwnd )
+{
+    BOOL (WINAPI *pIsShellManagedWindow)(HWND);
+    HMODULE user32 = GetModuleHandleA( "user32.dll" );
+    BOOL ret;
+
+    pIsShellManagedWindow = (void *)GetProcAddress( user32, (const char *)2574 );
+    if (!pIsShellManagedWindow)
+    {
+        win_skip( "IsShellManagedWindow is unavailable\n" );
+        return;
+    }
+
+    SetLastError( 0xdeadbeef );
+    ret = pIsShellManagedWindow( (HWND)0xdeadbeef );
+    ok( !ret, "invalid window is shell-managed\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    ok( !pIsShellManagedWindow( hwnd ), "ordinary test window is shell-managed\n" );
+}
+
 START_TEST(win)
 {
     char **argv;
@@ -14844,6 +14864,7 @@ START_TEST(win)
     test_fullscreen();
     test_hwnd_message();
     test_IsTopLevelWindow();
+    test_IsShellManagedWindow(hwndMain);
     test_SetWindowCompositionTransition();
     test_IsWindowBroadcastingDpiToChildren();
     test_message_window_topmost();

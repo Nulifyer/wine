@@ -40,6 +40,7 @@ struct inertia_info;
 struct winstation
 {
     struct object      obj;                /* object header */
+    unsigned int       session_id;         /* owning logon session */
     unsigned int       flags;              /* winstation flags */
     struct list        entry;              /* entry in global winstation list */
     struct list        desktops;           /* list of desktops of this winstation */
@@ -252,6 +253,7 @@ extern void set_winstation_composited( struct winstation *winstation, int compos
 extern struct desktop *get_desktop_obj( struct process *process, obj_handle_t handle, unsigned int access );
 extern struct winstation *get_process_winstation( struct process *process, unsigned int access );
 extern struct desktop *get_thread_desktop( struct thread *thread, unsigned int access );
+extern int connect_process_input_desktop( struct process *process );
 extern void connect_process_winstation( struct process *process, struct unicode_str desktop_name,
                                         struct thread *parent_thread, struct process *parent_process );
 extern void cleanup_process_winstation_state( struct process *process );

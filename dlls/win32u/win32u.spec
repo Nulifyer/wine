@@ -1,16 +1,16 @@
 @ extern -arch=win32 Wow64Transition __wine_syscall_dispatcher
 @ stdcall -syscall NtBindCompositionSurface(long long long long ptr ptr)
-@ stub -syscall NtCloseCompositionInputSink
+@ stdcall -syscall NtCloseCompositionInputSink(long)
 @ stub -syscall NtCompositionInputThread
-@ stub -syscall NtCompositionSetDropTarget
+@ stdcall -syscall NtCompositionSetDropTarget(long ptr ptr)
 @ stub -syscall NtCompositorNotifyExitWindows
 @ stub -syscall NtCompositorNotifyForegroundChanged
 @ stub -syscall NtCompositorUpdateLastInputTime
 @ stub -syscall NtConfigureInputSpace
 @ stub -syscall NtConfirmCompositionSurfaceIndependentFlipEntry
-@ stub -syscall NtCreateCompositionInputSink
+@ stdcall -syscall NtCreateCompositionInputSink(ptr ptr)
 @ stdcall -syscall NtCreateCompositionSurfaceHandle(ptr long ptr)
-@ stub -syscall NtCreateImplicitCompositionInputSink
+@ stdcall -syscall NtCreateImplicitCompositionInputSink(ptr ptr)
 @ stub -syscall NtDCompositionAddCrossDeviceVisualChild
 @ stdcall -syscall NtDCompositionBeginFrame(long ptr ptr)
 @ stub -syscall NtDCompositionBoostCompositorClock
@@ -71,7 +71,7 @@
 @ stub -syscall NtDCompositionWaitForChannel
 @ stub -syscall NtDCompositionWaitForCompositorClock
 @ stub -syscall NtDesktopCaptureBits
-@ stub -syscall NtDuplicateCompositionInputSink
+@ stdcall -syscall NtDuplicateCompositionInputSink()
 @ stub -syscall NtDxgkCancelPresents
 @ stub -syscall NtDxgkCheckSinglePlaneForMultiPlaneOverlaySupport
 @ stub -syscall NtDxgkConnectDoorbell
@@ -266,7 +266,7 @@
 @ stub -syscall NtGdiDdDDIGetDWMVerticalBlankEvent
 @ stub -syscall NtGdiDdDDIGetDeviceState
 @ stub -syscall NtGdiDdDDIGetDisplayModeList
-@ stub -syscall NtGdiDdDDIGetMemoryBudgetTarget
+@ stdcall -syscall NtGdiDdDDIGetMemoryBudgetTarget(ptr)
 @ stub -syscall NtGdiDdDDIGetMultiPlaneOverlayCaps
 @ stub -syscall NtGdiDdDDIGetMultisampleMethodList
 @ stub -syscall NtGdiDdDDIGetOverlayState
@@ -284,7 +284,7 @@
 @ stub -syscall NtGdiDdDDIGetSharedResourceAdapterLuid
 @ stub -syscall NtGdiDdDDIGetSharedResourceAdapterLuidFlipManager
 @ stub -syscall NtGdiDdDDIGetSwapChainSurfacePhysicalAddress
-@ stub -syscall NtGdiDdDDIGetYieldPercentage
+@ stdcall -syscall NtGdiDdDDIGetYieldPercentage(ptr)
 @ stub -syscall NtGdiDdDDIInvalidateActiveVidPn
 @ stub -syscall NtGdiDdDDIInvalidateCache
 @ stub -syscall NtGdiDdDDILock
@@ -739,9 +739,9 @@
 @ stub -syscall NtOpenCompositionSurfaceSwapChainHandleInfo
 @ stub -syscall NtQueryCompositionInputIsImplicit
 @ stub -syscall NtQueryCompositionInputQueueAndTransform
-@ stub -syscall NtQueryCompositionInputSink
-@ stub -syscall NtQueryCompositionInputSinkLuid
-@ stub -syscall NtQueryCompositionInputSinkViewId
+@ stdcall -syscall NtQueryCompositionInputSink(long ptr)
+@ stdcall -syscall NtQueryCompositionInputSinkLuid(long ptr)
+@ stdcall -syscall NtQueryCompositionInputSinkViewId(long ptr)
 @ stdcall -syscall NtQueryCompositionSurfaceBinding(long ptr ptr)
 @ stub -syscall NtQueryCompositionSurfaceFrameRate
 @ stub -syscall NtQueryCompositionSurfaceHDRMetaData
@@ -790,7 +790,7 @@
 @ stdcall -syscall NtTokenManagerThread(ptr)
 @ stdcall -syscall NtUnBindCompositionSurface(long long long)
 @ stub -syscall NtUpdateInputSinkTransforms
-@ stub -syscall NtUserAcquireIAMKey
+@ stdcall -syscall NtUserAcquireIAMKey(ptr)
 @ stub -syscall NtUserAcquireInteractiveControlBackgroundAccess
 @ stdcall -syscall NtUserActivateKeyboardLayout(long long)
 @ stdcall -syscall NtUserAddClipboardFormatListener(long)
@@ -933,7 +933,7 @@
 @ stub -syscall NtUserDwmWindowNotificationsEnabled
 @ stdcall -syscall NtUserEmptyClipboard()
 @ stub -syscall NtUserEnableChildWindowDpiMessage
-@ stub -syscall NtUserEnableIAMAccess
+@ stdcall -syscall NtUserEnableIAMAccess(ptr long)
 @ stdcall -syscall NtUserEnableMenuItem(long long long)
 @ stub -syscall NtUserEnableModernAppWindowKeyboardIntercept
 @ stdcall -syscall NtUserEnableMouseInPointer(long)
@@ -1127,7 +1127,7 @@
 @ stdcall -syscall NtUserGetWindowRgnEx(long long long)
 @ stub -syscall NtUserGetWindowThreadProcessId
 @ stub -syscall NtUserGetWindowTrackInfoAsync
-@ stub -syscall NtUserGhostWindowFromHungWindow
+@ stdcall -syscall NtUserGhostWindowFromHungWindow(long)
 @ stdcall -syscall NtUserHandleDelegatedInput(ptr long)
 @ stub -syscall NtUserHandleSystemThreadCreationFailure
 @ stub -syscall NtUserHardErrorControl
@@ -1135,7 +1135,7 @@
 @ stub -syscall NtUserHideCursorNoCapture
 @ stub -syscall NtUserHidePointerContactVisualization
 @ stdcall -syscall NtUserHiliteMenuItem(long long long long)
-@ stub -syscall NtUserHungWindowFromGhostWindow
+@ stdcall -syscall NtUserHungWindowFromGhostWindow(long)
 @ stub -syscall NtUserHwndQueryRedirectionInfo
 @ stub -syscall NtUserHwndSetRedirectionInfo
 @ stub -syscall NtUserImpersonateDdeClientWindow
@@ -1291,12 +1291,12 @@
 @ stdcall -syscall NtUserReleaseDC(long long)
 @ stub -syscall NtUserReleaseDwmHitTestWaiters
 @ stdcall -syscall NtUserRemoteConnect(ptr long ptr)
-@ stub -syscall NtUserRemoteConnectState
+@ stdcall -syscall NtUserRemoteConnectState()
 @ stub -syscall NtUserRemoteConsoleShadowStop
-@ stub -syscall NtUserRemoteDisconnect
-@ stub -syscall NtUserRemoteNotify
-@ stub -syscall NtUserRemotePassthruDisable
-@ stub -syscall NtUserRemotePassthruEnable
+@ stdcall -syscall NtUserRemoteDisconnect()
+@ stdcall -syscall NtUserRemoteNotify(ptr)
+@ stdcall -syscall NtUserRemotePassthruDisable()
+@ stdcall -syscall NtUserRemotePassthruEnable()
 @ stub -syscall NtUserRemoteReconnect
 @ stub -syscall NtUserRemoteRedrawRectangle
 @ stub -syscall NtUserRemoteRedrawScreen
@@ -1375,7 +1375,7 @@
 @ stub -syscall NtUserSetImeHotKey
 @ stub -syscall NtUserSetImeInfoEx
 @ stub -syscall NtUserSetImeOwnerWindow
-@ stub -syscall NtUserSetInformationThread
+@ stdcall -syscall NtUserSetInformationThread(long long ptr long)
 @ stub -syscall NtUserSetInputServiceState
 @ stub -syscall NtUserSetInteractiveControlFocus
 @ stub -syscall NtUserSetInteractiveCtrlRotationAngle

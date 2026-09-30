@@ -25,8 +25,8 @@
 2506 stub @
 2507 stub -noname SetAutoRotation  # NtUserSetAutoRotation
 2508 stub -noname PromotePointer  # NtUserPromotePointer
-2509 stub -noname AcquireIAMKey  # NtUserAcquireIAMKey
-2510 stub @
+2509 stdcall -noname AcquireIAMKey(ptr) NtUserAcquireIAMKey
+2510 stdcall -noname EnableIAMAccess(int64 long)
 2511 stub -noname SetFallbackForeground  # NtUserSetFallbackForeground
 2512 stub -noname GetDisplayAutoRotationPreferencesByProcessId  # NtUserGetDisplayAutoRotationPreferencesByProcessId
 2513 stub -noname SetActiveProcessForMonitor  # NtUserSetActiveProcessForMonitor
@@ -67,7 +67,7 @@
 2548 stub -noname GetPrecisionTouchPadConfiguration  # NtUserGetPrecisionTouchPadConfiguration
 2549 stub -noname SetPrecisionTouchPadConfiguration  # NtUserSetPrecisionTouchPadConfiguration
 2550 stub -noname CompositionInputSinkLuidFromPoint  # NtUserCompositionInputSinkLuidFromPoint
-# 2551 stub ReportInertia
+2551 stdcall -noname ReportInertia(long long long ptr ptr)
 2552 stub @
 2553 stub @
 2554 stub @
@@ -90,7 +90,7 @@
 2571 stdcall SetCoreWindow(long long) NtUserSetCoreWindow
 2572 stdcall -noname IsCoreWindow(long)
 2573 stub @
-2574 stub @
+2574 stdcall -noname IsShellManagedWindow(long)
 2575 stub @
 2576 stub -noname SetCoreWindowPartner  # NtUserSetCoreWindowPartner
 
@@ -731,12 +731,12 @@
 @ stdcall GetWindowTextW(long ptr long)
 @ stdcall GetWindowThreadProcessId(long ptr)
 @ stdcall GetWindowWord(long long)
-# @ stub GhostWindowFromHungWindow
+@ stdcall GhostWindowFromHungWindow(long)
 @ stdcall GrayStringA(long long ptr long long long long long long)
 @ stdcall GrayStringW(long long ptr long long long long long long)
 @ stdcall HideCaret(long) NtUserHideCaret
 @ stdcall HiliteMenuItem(long long long long) NtUserHiliteMenuItem
-@ stub -arch=win64 HungWindowFromGhostWindow
+@ stdcall HungWindowFromGhostWindow(long)
 # @ stub IMPGetIMEA
 # @ stub IMPGetIMEW
 # @ stub IMPQueryIMEA

@@ -7,8 +7,8 @@ SOURCES = \
 	alpc_token.c \
 	atom.c \
 	boot_status.c \
-	critical.c \
 	change.c \
+	critical.c \
 	directory.c \
 	env.c \
 	environment_var.c \
@@ -25,14 +25,15 @@ SOURCES = \
 	lsa_event.c \
 	om.c \
 	path.c \
+	persisted_state.c \
 	pipe.c \
 	port.c \
 	pdc_activation.c \
 	power_capabilities.c \
-	persisted_state.c \
 	privilege_audit.c \
-	remove_privileges.c \
 	reg.c \
+	report_exception.c \
+	remove_privileges.c \
 	resource.c \
 	resource.rc \
 	rtl.c \
@@ -41,14 +42,14 @@ SOURCES = \
 	service_session.c \
 	string.c \
 	switchback.c \
-	system_root.c \
 	sync.c \
-	token.c \
+	system_root.c \
 	testdll.c \
 	testdll.spec \
 	thread.c \
 	threadpool.c \
 	time.c \
+	token.c \
 	unwind.c \
 	virtual.c \
 	wnf.c \

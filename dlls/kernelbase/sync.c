@@ -658,7 +658,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenEventA( DWORD access, BOOL inherit, LPCSTR n
  */
 HANDLE WINAPI DECLSPEC_HOTPATCH OpenEventW( DWORD access, BOOL inherit, LPCWSTR name )
 {
-    HANDLE ret;
+    HANDLE ret = 0;
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
 
@@ -666,7 +666,14 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenEventW( DWORD access, BOOL inherit, LPCWSTR 
 
     if (!get_open_object_attributes( &attr, &nameW, inherit, name )) return 0;
 
-    if (!set_ntstatus( NtOpenEvent( &ret, access, &attr ))) return 0;
+    if (!set_ntstatus( NtOpenEvent( &ret, access, &attr )))
+    {
+        TRACE( "linuxnt: caller=%p access=%#lx inherit=%u name=%s ret=%p error=%lu\n",
+               __builtin_return_address( 0 ), access, inherit, debugstr_w(name), ret, GetLastError() );
+        return 0;
+    }
+    TRACE( "linuxnt: caller=%p access=%#lx inherit=%u name=%s ret=%p error=%lu\n",
+           __builtin_return_address( 0 ), access, inherit, debugstr_w(name), ret, GetLastError() );
     return ret;
 }
 
@@ -684,7 +691,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH PulseEvent( HANDLE handle )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH SetEvent( HANDLE handle )
 {
-    return set_ntstatus( NtSetEvent( handle, NULL ));
+    BOOL ret = set_ntstatus( NtSetEvent( handle, NULL ));
+
+    TRACE( "linuxnt: caller=%p handle=%p ret=%u error=%lu\n",
+           __builtin_return_address( 0 ), handle, ret, GetLastError() );
+    return ret;
 }
 
 

@@ -1,6 +1,6 @@
 MODULE    = sechost.dll
 IMPORTLIB = sechost
-IMPORTS   = kernelbase
+IMPORTS   = kernelbase ntdll
 DELAYIMPORTS = rpcrt4
 
 SOURCES = \

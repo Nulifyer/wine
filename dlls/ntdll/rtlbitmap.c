@@ -112,6 +112,16 @@ VOID WINAPI RtlClearAllBits(PRTL_BITMAP lpBits)
 }
 
 /*************************************************************************
+ * RtlSetBit	[NTDLL.@]
+ */
+void WINAPI RtlSetBit( RTL_BITMAP *bitmap, ULONG bit )
+{
+    BYTE *buffer = (BYTE *)bitmap->Buffer;
+
+    buffer[bit >> 3] |= 1u << (bit & 7);
+}
+
+/*************************************************************************
  * RtlSetBits	[NTDLL.@]
  */
 void WINAPI RtlSetBits( RTL_BITMAP *bitmap, ULONG start, ULONG count )
@@ -131,6 +141,16 @@ void WINAPI RtlSetBits( RTL_BITMAP *bitmap, ULONG start, ULONG count )
         if (end & 31) bitmap->Buffer[pos] |= ~maskbits( end );
     }
     else bitmap->Buffer[pos] |= maskbits( start ) & ~maskbits( end );
+}
+
+/*************************************************************************
+ * RtlClearBit	[NTDLL.@]
+ */
+void WINAPI RtlClearBit( RTL_BITMAP *bitmap, ULONG bit )
+{
+    BYTE *buffer = (BYTE *)bitmap->Buffer;
+
+    buffer[bit >> 3] &= ~(1u << (bit & 7));
 }
 
 /*************************************************************************
@@ -355,6 +375,18 @@ ULONG WINAPI RtlNumberOfSetBits( const RTL_BITMAP *bitmap )
 
     TRACE( "%p -> %lu\n", bitmap, ret );
     return ret;
+}
+
+/*************************************************************************
+ * RtlNumberOfSetBitsUlongPtr [NTDLL.@]
+ */
+ULONG WINAPI RtlNumberOfSetBitsUlongPtr( ULONG_PTR target )
+{
+#if defined(__x86_64__) || defined(__aarch64__)
+    return __popcnt64( target );
+#else
+    return __popcnt( target );
+#endif
 }
 
 /*************************************************************************

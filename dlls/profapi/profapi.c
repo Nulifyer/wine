@@ -33,6 +33,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(profapi);
 
 static const WCHAR profile_list[] =
     L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList";
+static const WCHAR appcontainer_storage[] =
+    L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppContainer\\Storage\\";
 static const WCHAR system_sid[] = L"S-1-5-18";
 
 static HRESULT hresult_from_win32( DWORD status )
@@ -108,4 +110,64 @@ HRESULT WINAPI profapi_get_directory( DWORD selector, const WCHAR *sid, WCHAR *o
     memcpy( output, source, copied * sizeof(WCHAR) );
     output[copied] = 0;
     return copied == length ? S_OK : HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+}
+
+HRESULT WINAPI profapi_open_package_registry( const WCHAR *family, const WCHAR *child,
+                                               const WCHAR *subkey, REGSAM access, HKEY *key )
+{
+    static const WCHAR children[] = L"\\Children\\";
+    SIZE_T family_len, child_len = 0, subkey_len = 0, length, maximum;
+    WCHAR *path, *cursor;
+    HKEY current_user;
+    LSTATUS status;
+
+    TRACE( "(%s,%s,%s,%#lx,%p)\n", debugstr_w(family), debugstr_w(child),
+           debugstr_w(subkey), access, key );
+
+    if (!family || !key) return E_INVALIDARG;
+    *key = NULL;
+
+    family_len = wcslen( family );
+    if (child) child_len = wcslen( child );
+    if (subkey) subkey_len = wcslen( subkey );
+    maximum = ~(SIZE_T)0 / sizeof(WCHAR);
+    if (family_len > maximum - ARRAY_SIZE(appcontainer_storage)) return E_OUTOFMEMORY;
+    length = ARRAY_SIZE(appcontainer_storage) + family_len;
+    if (child && child_len > maximum - length - (ARRAY_SIZE(children) - 1))
+        return E_OUTOFMEMORY;
+    if (child) length += ARRAY_SIZE(children) - 1 + child_len;
+    if (subkey && subkey_len > maximum - length - 1) return E_OUTOFMEMORY;
+    if (subkey) length += 1 + subkey_len;
+
+    if (!(path = HeapAlloc( GetProcessHeap(), 0, length * sizeof(WCHAR) )))
+        return E_OUTOFMEMORY;
+
+    cursor = path;
+    memcpy( cursor, appcontainer_storage, sizeof(appcontainer_storage) - sizeof(WCHAR) );
+    cursor += ARRAY_SIZE(appcontainer_storage) - 1;
+    memcpy( cursor, family, family_len * sizeof(WCHAR) );
+    cursor += family_len;
+    if (child)
+    {
+        memcpy( cursor, children, sizeof(children) - sizeof(WCHAR) );
+        cursor += ARRAY_SIZE(children) - 1;
+        memcpy( cursor, child, child_len * sizeof(WCHAR) );
+        cursor += child_len;
+    }
+    if (subkey)
+    {
+        *cursor++ = '\\';
+        memcpy( cursor, subkey, subkey_len * sizeof(WCHAR) );
+        cursor += subkey_len;
+    }
+    *cursor = 0;
+
+    status = RegOpenCurrentUser( KEY_READ | KEY_WOW64_64KEY, &current_user );
+    if (!status)
+    {
+        status = RegOpenKeyExW( current_user, path, 0, access, key );
+        RegCloseKey( current_user );
+    }
+    HeapFree( GetProcessHeap(), 0, path );
+    return hresult_from_win32( status );
 }

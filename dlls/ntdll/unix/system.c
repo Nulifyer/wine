@@ -4051,8 +4051,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
             NTSTATUS status;
         } *policy = info;
         const BYTE *input;
-        ULONG block_size, offset;
-
+        ULONG block_size, encrypted_size, offset;
         if (size != sizeof(*policy))
         {
             ret = STATUS_INFO_LENGTH_MISMATCH;
@@ -4076,7 +4075,8 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         }
 
         input = policy->input;
-        if (policy->version || policy->input_size < 12 || policy->output_size < 252)
+        /* SystemPolicy output records vary by operation. */
+        if (policy->version || policy->input_size < 12 || policy->output_size < 228)
         {
             ret = STATUS_DATA_ERROR;
             break;
@@ -4088,6 +4088,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
             ret = STATUS_DATA_ERROR;
             break;
         }
+        encrypted_size = block_size;
         offset = sizeof(block_size) + block_size;
         memcpy( &block_size, input + offset, sizeof(block_size) );
         if (block_size != sizeof(query_policy_cipher) || policy->input_size < 176 ||
@@ -4109,6 +4110,21 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
             memcmp( input + offset, query_policy_key, sizeof(query_policy_key) ))
         {
             ret = STATUS_DATA_ERROR;
+            break;
+        }
+
+        if (getenv( "LINUXNT_DEBUG_SYSTEM_POLICY" ))
+            ERR( "linuxnt-system-policy pid=%u tid=%p input=%u output=%u encrypted=%u\n",
+                 getpid(), NtCurrentTeb()->ClientId.UniqueThread, policy->input_size,
+                 policy->output_size, encrypted_size );
+
+        /* Explorer uses operation 5 (WaitForDisplayWindow) with a 216-byte
+         * encrypted request and a 228-byte response buffer.  Windows blocks
+         * this call until the display window state changes.  Wine has no
+         * software-policy broker yet, so preserve the steady-state wait. */
+        if (policy->input_size == 396 && policy->output_size == 228 && encrypted_size == 216)
+        {
+            ret = server_wait( NULL, 0, SELECT_INTERRUPTIBLE, NULL );
             break;
         }
 
@@ -4826,6 +4842,18 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
 
         /* Wine's graphical session is active while this process is running. */
         *state = PowerMonitorOn;
+        return STATUS_SUCCESS;
+    }
+
+    case PlatformInformation:
+    {
+        BOOLEAN *connected_standby = output;
+
+        if (input || in_size) return STATUS_INVALID_PARAMETER;
+        if (!output || out_size < sizeof(*connected_standby)) return STATUS_BUFFER_TOO_SMALL;
+
+        /* Wine does not expose an AoAc / connected-standby platform. */
+        *connected_standby = FALSE;
         return STATUS_SUCCESS;
     }
 

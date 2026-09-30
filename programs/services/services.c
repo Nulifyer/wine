@@ -36,8 +36,13 @@
 #include "services.h"
 
 #define MAX_SERVICE_NAME 260
+#define LOGON32_LOGON_SERVICE 5
+#define LOGON32_PROVIDER_DEFAULT 0
 
 WINE_DEFAULT_DEBUG_CHANNEL(service);
+
+typedef BOOL (WINAPI *logon_user_ex_ex_fn)(const WCHAR *, const WCHAR *, const WCHAR *, DWORD, DWORD,
+                                           TOKEN_GROUPS *, HANDLE *, SID **, void **, DWORD *, QUOTA_LIMITS *);
 
 struct scmdatabase *active_database;
 
@@ -988,6 +993,38 @@ static DWORD set_service_privileges(HANDLE process)
     return err;
 }
 
+static const WCHAR *get_builtin_service_account(const WCHAR *account)
+{
+    const WCHAR *name;
+
+    if (!account) return NULL;
+    name = wcsrchr(account, '\\');
+    if (name) name++;
+    else name = account;
+    if (!wcsicmp(name, L"LocalService")) return L"LocalService";
+    if (!wcsicmp(name, L"NetworkService")) return L"NetworkService";
+    return NULL;
+}
+
+static BOOL logon_builtin_service_account(const WCHAR *account, HANDLE *token)
+{
+    logon_user_ex_ex_fn logon_user;
+    HMODULE module;
+    BOOL ret;
+
+    if (!(module = LoadLibraryW(L"sspicli.dll"))) return FALSE;
+    if (!(logon_user = (logon_user_ex_ex_fn)GetProcAddress(module, "LogonUserExExW")))
+    {
+        FreeLibrary(module);
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+        return FALSE;
+    }
+    ret = logon_user(account, L"NT AUTHORITY", NULL, LOGON32_LOGON_SERVICE,
+                     LOGON32_PROVIDER_DEFAULT, NULL, token, NULL, NULL, NULL, NULL);
+    FreeLibrary(module);
+    return ret;
+}
+
 static DWORD service_start_process(struct service_entry *service_entry, struct process_entry **new_process,
                                    BOOL *shared_process)
 {
@@ -995,7 +1032,8 @@ static DWORD service_start_process(struct service_entry *service_entry, struct p
     PROCESS_INFORMATION pi;
     STARTUPINFOW si;
     BOOL is_wow64 = FALSE, local_system;
-    HANDLE token;
+    HANDLE token, service_token = NULL;
+    const WCHAR *builtin_account;
     WCHAR *path;
     DWORD err;
     BOOL r;
@@ -1132,10 +1170,27 @@ found:
     process->use_count++;
     local_system = !wcsicmp(service_entry->config.lpServiceStartName, L"LocalSystem") ||
                    !wcsicmp(service_entry->config.lpServiceStartName, L".\\LocalSystem");
+    builtin_account = get_builtin_service_account(service_entry->config.lpServiceStartName);
+    if (builtin_account && !logon_builtin_service_account(builtin_account, &service_token))
+    {
+        err = GetLastError();
+        service_unlock(service_entry);
+        free(path);
+        process_terminate(process);
+        release_process(process);
+        return err;
+    }
     service_unlock(service_entry);
 
-    r = CreateProcessW(NULL, path, NULL, NULL, FALSE, CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS |
-                      (local_system ? CREATE_SUSPENDED : 0), environment, NULL, &si, &pi);
+    if (service_token)
+        r = CreateProcessAsUserW(service_token, NULL, path, NULL, NULL, FALSE,
+                                 CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS,
+                                 environment, NULL, &si, &pi);
+    else
+        r = CreateProcessW(NULL, path, NULL, NULL, FALSE,
+                           CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS |
+                           (local_system ? CREATE_SUSPENDED : 0), environment, NULL, &si, &pi);
+    if (service_token) CloseHandle(service_token);
     free(path);
     if (!r)
     {
