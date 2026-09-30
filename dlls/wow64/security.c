@@ -79,6 +79,34 @@ NTSTATUS WINAPI wow64_NtAccessCheck( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtAccessCheckByType
+ */
+NTSTATUS WINAPI wow64_NtAccessCheckByType( UINT *args )
+{
+    SECURITY_DESCRIPTOR *sd32 = get_ptr( &args );
+    SID *principal_self = get_ptr( &args );
+    HANDLE handle = get_handle( &args );
+    ACCESS_MASK access = get_ulong( &args );
+    OBJECT_TYPE_LIST32 *types32 = get_ptr( &args );
+    ULONG types_len = get_ulong( &args );
+    GENERIC_MAPPING *mapping = get_ptr( &args );
+    PRIVILEGE_SET *privs = get_ptr( &args );
+    ULONG *retlen = get_ptr( &args );
+    ACCESS_MASK *access_granted = get_ptr( &args );
+    NTSTATUS *access_status = get_ptr( &args );
+
+    SECURITY_DESCRIPTOR sd;
+
+    /* The native owner supports only the no-object-list partition.  Preserve
+     * that rejection without dereferencing or truncating a 32-bit list. */
+    if (types32 || types_len) return STATUS_NOT_IMPLEMENTED;
+    return NtAccessCheckByType( secdesc_32to64( &sd, sd32 ), principal_self, handle,
+                               access, NULL, 0, mapping, privs, retlen,
+                               access_granted, access_status );
+}
+
+
+/**********************************************************************
  *           wow64_NtAccessCheckAndAuditAlarm
  */
 NTSTATUS WINAPI wow64_NtAccessCheckAndAuditAlarm( UINT *args )

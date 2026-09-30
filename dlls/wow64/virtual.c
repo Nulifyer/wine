@@ -460,6 +460,29 @@ static void notify_map_view_of_section( HANDLE handle, void *addr, SIZE_T size, 
 }
 
 /**********************************************************************
+ *           wow64_NtManagePartition
+ */
+NTSTATUS WINAPI wow64_NtManagePartition( UINT *args )
+{
+    /* Partition configuration contains SIZE_T fields and needs a dedicated
+     * 32-bit representation.  Do not pass its buffer to the native owner. */
+    FIXME( "32-bit partition management is not implemented\n" );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/**********************************************************************
+ *           wow64_NtOpenPartition
+ */
+NTSTATUS WINAPI wow64_NtOpenPartition( UINT *args )
+{
+    /* Opening is unsupported until the 32-bit partition state owner exists. */
+    FIXME( "32-bit partition opening is not implemented\n" );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/**********************************************************************
  *           wow64_NtMapViewOfSection
  */
 NTSTATUS WINAPI wow64_NtMapViewOfSection( UINT *args )
