@@ -9,6 +9,7 @@ server_interp_EXTRAIDLFLAGS = -Oicf --prefix-client=interp_
 SOURCES = \
 	cstub.c \
 	cstub.idl \
+	epmap_capacity.c \
 	explicit_handle.idl \
 	generated.c \
 	ndr_marshall.c \

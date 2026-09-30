@@ -248,8 +248,9 @@ void __cdecl ept_map(handle_t h,
                     *status = rpc_status;
                     break; /* FIXME: more cleanup? */
                 }
+                (*num_towers)++;
             }
-            (*num_towers)++;
+            else break;
         }
     }
 
