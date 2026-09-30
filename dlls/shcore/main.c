@@ -45,7 +45,65 @@ INT WINAPI SHStringFromGUIDW(REFGUID, LPWSTR, INT);
 HWND WINAPI SHCreateWorkerWindowW(WNDPROC, HWND, DWORD, DWORD, HMENU, LONG_PTR);
 
 static DWORD shcore_tls;
+static DWORD taskpool_tls;
 static IUnknown *process_ref;
+static LONG taskpool_context;
+static DWORD taskpool_reuse_thread;
+static BOOL taskpool_reuse_allowed = TRUE;
+static BOOL taskpool_wait_for_more_tasks = TRUE;
+
+struct IComPoolTask;
+
+struct IComPoolTaskVtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct IComPoolTask *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct IComPoolTask *);
+    ULONG (WINAPI *Release)(struct IComPoolTask *);
+    HRESULT (WINAPI *Run)(struct IComPoolTask *);
+};
+
+struct IComPoolTask
+{
+    const struct IComPoolTaskVtbl *lpVtbl;
+};
+
+struct IDelayedTask;
+
+struct IDelayedTaskVtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct IDelayedTask *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct IDelayedTask *);
+    ULONG (WINAPI *Release)(struct IDelayedTask *);
+    void (WINAPI *Cancel)(struct IDelayedTask *);
+};
+
+struct IDelayedTask
+{
+    const struct IDelayedTaskVtbl *lpVtbl;
+};
+
+enum taskpool_state
+{
+    TASKPOOL_PENDING,
+    TASKPOOL_RUNNING,
+    TASKPOOL_CANCELLED,
+    TASKPOOL_COMPLETE,
+};
+
+struct taskpool_work
+{
+    struct IDelayedTask IDelayedTask_iface;
+    LONG refcount;
+    LONG state;
+    DWORD apartment;
+    DWORD options;
+    DWORD context;
+    DWORD delay;
+    HANDLE cancel_event;
+    HANDLE completion_event;
+    HMODULE module;
+    struct IComPoolTask *task;
+};
 
 enum scale_scope_type
 {
@@ -400,6 +458,207 @@ HWND WINAPI SHCoreCreateWorkerWindowW(WNDPROC wndproc, HWND parent, DWORD ex_sty
     return SHCreateWorkerWindowW(wndproc, parent, ex_style, style, menu, window_data);
 }
 
+static inline struct taskpool_work *impl_from_IDelayedTask(struct IDelayedTask *iface)
+{
+    return CONTAINING_RECORD(iface, struct taskpool_work, IDelayedTask_iface);
+}
+
+static HRESULT WINAPI delayed_task_QueryInterface(struct IDelayedTask *iface, REFIID iid, void **out)
+{
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (!IsEqualIID(iid, &IID_IUnknown)) return E_NOINTERFACE;
+    *out = iface;
+    iface->lpVtbl->AddRef(iface);
+    return S_OK;
+}
+
+static ULONG WINAPI delayed_task_AddRef(struct IDelayedTask *iface)
+{
+    struct taskpool_work *work = impl_from_IDelayedTask(iface);
+    return InterlockedIncrement(&work->refcount);
+}
+
+static ULONG WINAPI delayed_task_Release(struct IDelayedTask *iface)
+{
+    struct taskpool_work *work = impl_from_IDelayedTask(iface);
+    ULONG refcount = InterlockedDecrement(&work->refcount);
+
+    if (!refcount)
+    {
+        CloseHandle(work->cancel_event);
+        if (work->completion_event) CloseHandle(work->completion_event);
+        free(work);
+    }
+    return refcount;
+}
+
+static void WINAPI delayed_task_Cancel(struct IDelayedTask *iface)
+{
+    struct taskpool_work *work = impl_from_IDelayedTask(iface);
+
+    if (InterlockedCompareExchange(&work->state, TASKPOOL_CANCELLED,
+            TASKPOOL_PENDING) == TASKPOOL_PENDING)
+        SetEvent(work->cancel_event);
+}
+
+static const struct IDelayedTaskVtbl delayed_task_vtbl =
+{
+    delayed_task_QueryInterface,
+    delayed_task_AddRef,
+    delayed_task_Release,
+    delayed_task_Cancel,
+};
+
+static void taskpool_run(struct taskpool_work *work)
+{
+    IUnknown *previous;
+    HRESULT hr;
+
+    hr = CoInitializeEx(NULL, work->apartment == 1 ? COINIT_APARTMENTTHREADED : COINIT_MULTITHREADED);
+    previous = taskpool_tls == TLS_OUT_OF_INDEXES ? NULL : TlsGetValue(taskpool_tls);
+    if (taskpool_tls != TLS_OUT_OF_INDEXES) TlsSetValue(taskpool_tls, &work->IDelayedTask_iface);
+
+    TRACE("running task %p, apartment %lu, options %#lx, context %#lx.\n",
+            work->task, work->apartment, work->options, work->context);
+    work->task->lpVtbl->Run(work->task);
+
+    if (taskpool_tls != TLS_OUT_OF_INDEXES) TlsSetValue(taskpool_tls, previous);
+    if (hr == S_OK || hr == S_FALSE) CoUninitialize();
+}
+
+static void CALLBACK taskpool_callback(PTP_CALLBACK_INSTANCE instance, void *context)
+{
+    struct taskpool_work *work = context;
+
+    if ((!work->delay || WaitForSingleObject(work->cancel_event, work->delay) == WAIT_TIMEOUT) &&
+            InterlockedCompareExchange(&work->state, TASKPOOL_RUNNING,
+            TASKPOOL_PENDING) == TASKPOOL_PENDING)
+    {
+        taskpool_run(work);
+        InterlockedExchange(&work->state, TASKPOOL_COMPLETE);
+    }
+
+    work->task->lpVtbl->Release(work->task);
+    if (work->completion_event) SetEvent(work->completion_event);
+    FreeLibrary(work->module);
+    work->IDelayedTask_iface.lpVtbl->Release(&work->IDelayedTask_iface);
+}
+
+void WINAPI SHTaskPoolAllowThreadReuse(void)
+{
+    taskpool_reuse_thread = GetCurrentThreadId();
+}
+
+void WINAPI SHTaskPoolDoNotWaitForMoreTasks(void)
+{
+    taskpool_wait_for_more_tasks = FALSE;
+}
+
+HRESULT WINAPI SHTaskPoolGetCurrentThreadLifetime(IUnknown **out)
+{
+    struct IDelayedTask *lifetime;
+
+    *out = NULL;
+    if (taskpool_tls == TLS_OUT_OF_INDEXES || !(lifetime = TlsGetValue(taskpool_tls)))
+        return E_NOINTERFACE;
+    lifetime->lpVtbl->AddRef(lifetime);
+    *out = (IUnknown *)lifetime;
+    return S_OK;
+}
+
+DWORD WINAPI SHTaskPoolGetUniqueContext(void)
+{
+    return InterlockedIncrement(&taskpool_context);
+}
+
+HRESULT WINAPI SHTaskPoolQueueTask(DWORD apartment, DWORD options, DWORD context, DWORD delay,
+        struct IComPoolTask *task, IUnknown **delayed_task)
+{
+    struct taskpool_work *work;
+    DWORD index;
+    HRESULT hr = S_OK;
+
+    TRACE("apartment %lu, options %#lx, context %#lx, delay %lu, task %p, delayed_task %p.\n",
+            apartment, options, context, delay, task, delayed_task);
+
+    if (delayed_task) *delayed_task = NULL;
+    if (!task) return E_OUTOFMEMORY;
+
+    if (apartment == 4 || apartment == 6)
+    {
+        task->lpVtbl->Run(task);
+        return S_OK;
+    }
+    if (apartment > 6) return E_INVALIDARG;
+    if (apartment == 3) apartment = 0;
+    else if (apartment == 5) apartment = 1;
+
+    if (!(work = calloc(1, sizeof(*work)))) return E_OUTOFMEMORY;
+    work->IDelayedTask_iface.lpVtbl = &delayed_task_vtbl;
+    work->refcount = 1;
+    work->apartment = apartment;
+    work->options = options;
+    work->context = context;
+    work->delay = delay;
+    work->task = task;
+    if (!(work->cancel_event = CreateEventW(NULL, TRUE, FALSE, NULL)))
+    {
+        free(work);
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+    if (!delay && (options & 0x60) &&
+            !(work->completion_event = CreateEventW(NULL, TRUE, FALSE, NULL)))
+    {
+        hr = HRESULT_FROM_WIN32(GetLastError());
+        work->IDelayedTask_iface.lpVtbl->Release(&work->IDelayedTask_iface);
+        return hr;
+    }
+    if (!GetModuleHandleExW(0, L"shcore.dll", &work->module))
+    {
+        HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+        work->IDelayedTask_iface.lpVtbl->Release(&work->IDelayedTask_iface);
+        return hr;
+    }
+
+    /* Keep the caller reference until waiting/output publication finishes.
+     * A worker may finish before TrySubmitThreadpoolCallback returns. */
+    task->lpVtbl->AddRef(task);
+    work->IDelayedTask_iface.lpVtbl->AddRef(&work->IDelayedTask_iface);
+    if (!TrySubmitThreadpoolCallback(taskpool_callback, work, NULL))
+    {
+        HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+        task->lpVtbl->Release(task);
+        FreeLibrary(work->module);
+        work->IDelayedTask_iface.lpVtbl->Release(&work->IDelayedTask_iface);
+        work->IDelayedTask_iface.lpVtbl->Release(&work->IDelayedTask_iface);
+        return hr;
+    }
+
+    if (work->completion_event)
+    {
+        if (options & 0x40)
+            hr = CoWaitForMultipleHandles(COWAIT_DISPATCH_CALLS, INFINITE, 1,
+                    &work->completion_event, &index);
+        /* Even a failed COM wait must not let the task retain the caller's
+         * stack after this function returns. */
+        if (!(options & 0x40) || FAILED(hr))
+            WaitForSingleObject(work->completion_event, INFINITE);
+    }
+    if (delay && delayed_task)
+    {
+        work->IDelayedTask_iface.lpVtbl->AddRef(&work->IDelayedTask_iface);
+        *delayed_task = (IUnknown *)&work->IDelayedTask_iface;
+    }
+    work->IDelayedTask_iface.lpVtbl->Release(&work->IDelayedTask_iface);
+    return hr;
+}
+
+void WINAPI SHTaskPoolSetThreadReuseAllowed(BOOL allowed)
+{
+    taskpool_reuse_allowed = !!allowed;
+}
+
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 {
     TRACE("%p, %lu, %p.\n", instance, reason, reserved);
@@ -409,12 +668,15 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(instance);
             shcore_tls = TlsAlloc();
+            taskpool_tls = TlsAlloc();
             break;
         case DLL_PROCESS_DETACH:
             if (reserved) break;
             cleanup_scale_notifications();
             if (shcore_tls != TLS_OUT_OF_INDEXES)
                 TlsFree(shcore_tls);
+            if (taskpool_tls != TLS_OUT_OF_INDEXES)
+                TlsFree(taskpool_tls);
             break;
     }
 

@@ -2,4 +2,5 @@ TESTDLL = shcore.dll
 IMPORTS = advapi32 ole32 user32
 
 SOURCES = \
-	shcore.c
+	shcore.c \
+	taskpool_sync.c

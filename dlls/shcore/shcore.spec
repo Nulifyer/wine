@@ -81,12 +81,12 @@
 @ stdcall SHSetValueW(long wstr wstr long ptr long)
 @ stdcall SHStrDupA(str ptr)
 @ stdcall SHStrDupW(wstr ptr)
-# @ stub SHTaskPoolAllowThreadReuse
-# @ stub SHTaskPoolDoNotWaitForMoreTasks
-# @ stub SHTaskPoolGetCurrentThreadLifetime
-# @ stub SHTaskPoolGetUniqueContext
-# @ stub SHTaskPoolQueueTask
-# @ stub SHTaskPoolSetThreadReuseAllowed
+@ stdcall SHTaskPoolAllowThreadReuse()
+@ stdcall SHTaskPoolDoNotWaitForMoreTasks()
+@ stdcall SHTaskPoolGetCurrentThreadLifetime(ptr)
+@ stdcall SHTaskPoolGetUniqueContext()
+@ stdcall SHTaskPoolQueueTask(long long long long ptr ptr)
+@ stdcall SHTaskPoolSetThreadReuseAllowed(long)
 @ stdcall SHUnicodeToAnsi(wstr ptr ptr)
 @ stdcall SHUnicodeToUnicode(wstr ptr long)
 @ stdcall SetCurrentProcessExplicitAppUserModelID(wstr)

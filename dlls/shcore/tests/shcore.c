@@ -60,6 +60,12 @@ static HRESULT (WINAPI *pRevokeScaleChangeNotifications)(DISPLAY_DEVICE_TYPE, DW
 static HRESULT (WINAPI *pRegisterScaleChangeNotificationsForWindow)(HWND, HWND, UINT, DWORD *);
 static HRESULT (WINAPI *pRevokeScaleChangeNotificationsForWindow)(HWND, DWORD);
 static HRESULT (WINAPI *pUpdateScalingInfoCache)(void);
+static void (WINAPI *pSHTaskPoolAllowThreadReuse)(void);
+static void (WINAPI *pSHTaskPoolDoNotWaitForMoreTasks)(void);
+static HRESULT (WINAPI *pSHTaskPoolGetCurrentThreadLifetime)(IUnknown **);
+static DWORD (WINAPI *pSHTaskPoolGetUniqueContext)(void);
+static HRESULT (WINAPI *pSHTaskPoolQueueTask)(DWORD, DWORD, DWORD, DWORD, IUnknown *, IUnknown **);
+static void (WINAPI *pSHTaskPoolSetThreadReuseAllowed)(BOOL);
 
 /* Keys used for testing */
 #define REG_TEST_KEY        "Software\\Wine\\Test"
@@ -95,6 +101,12 @@ static void init(HMODULE hshcore)
     X(SHCopyKeyA);
     X(SHCreateStreamOnFileA);
     X(IStream_Size);
+    X(SHTaskPoolAllowThreadReuse);
+    X(SHTaskPoolDoNotWaitForMoreTasks);
+    X(SHTaskPoolGetCurrentThreadLifetime);
+    X(SHTaskPoolGetUniqueContext);
+    X(SHTaskPoolQueueTask);
+    X(SHTaskPoolSetThreadReuseAllowed);
 #undef X
     pGetScaleFactorForWindow = (void *)GetProcAddress(hshcore, (const char *)244);
     pGetOverrideScaleFactorForWindow = (void *)GetProcAddress(hshcore, (const char *)247);
@@ -107,6 +119,128 @@ static void init(HMODULE hshcore)
     pRegisterScaleChangeNotificationsForWindow = (void *)GetProcAddress(hshcore, (const char *)245);
     pRevokeScaleChangeNotificationsForWindow = (void *)GetProcAddress(hshcore, (const char *)246);
     pUpdateScalingInfoCache = (void *)GetProcAddress(hshcore, (const char *)249);
+}
+
+struct taskpool_test_iface;
+
+struct taskpool_test_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct taskpool_test_iface *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct taskpool_test_iface *);
+    ULONG (WINAPI *Release)(struct taskpool_test_iface *);
+    HRESULT (WINAPI *Run)(struct taskpool_test_iface *);
+};
+
+struct taskpool_test_iface
+{
+    const struct taskpool_test_vtbl *lpVtbl;
+};
+
+struct taskpool_test
+{
+    struct taskpool_test_iface IComPoolTask_iface;
+    LONG refcount;
+    HANDLE event;
+    DWORD caller_thread;
+    DWORD run_thread;
+    HRESULT lifetime_hr;
+    IUnknown *lifetime;
+};
+
+static inline struct taskpool_test *impl_from_taskpool_iface(struct taskpool_test_iface *iface)
+{
+    return CONTAINING_RECORD(iface, struct taskpool_test, IComPoolTask_iface);
+}
+
+static HRESULT WINAPI taskpool_test_QueryInterface(struct taskpool_test_iface *iface, REFIID iid, void **out)
+{
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (!IsEqualIID(iid, &IID_IUnknown)) return E_NOINTERFACE;
+    *out = iface;
+    iface->lpVtbl->AddRef(iface);
+    return S_OK;
+}
+
+static ULONG WINAPI taskpool_test_AddRef(struct taskpool_test_iface *iface)
+{
+    struct taskpool_test *test = impl_from_taskpool_iface(iface);
+    return InterlockedIncrement(&test->refcount);
+}
+
+static ULONG WINAPI taskpool_test_Release(struct taskpool_test_iface *iface)
+{
+    struct taskpool_test *test = impl_from_taskpool_iface(iface);
+    return InterlockedDecrement(&test->refcount);
+}
+
+static HRESULT WINAPI taskpool_test_Run(struct taskpool_test_iface *iface)
+{
+    struct taskpool_test *test = impl_from_taskpool_iface(iface);
+
+    test->run_thread = GetCurrentThreadId();
+    test->lifetime_hr = pSHTaskPoolGetCurrentThreadLifetime(&test->lifetime);
+    SetEvent(test->event);
+    return S_OK;
+}
+
+static const struct taskpool_test_vtbl taskpool_test_vtbl =
+{
+    taskpool_test_QueryInterface,
+    taskpool_test_AddRef,
+    taskpool_test_Release,
+    taskpool_test_Run,
+};
+
+static void test_taskpool(void)
+{
+    struct taskpool_test task = {{&taskpool_test_vtbl}, 1};
+    IUnknown *lifetime = (IUnknown *)0xdeadbeef, *delayed = (IUnknown *)0xdeadbeef;
+    DWORD context1, context2;
+    HRESULT hr;
+
+    ok(!!pSHTaskPoolAllowThreadReuse, "SHTaskPoolAllowThreadReuse is missing.\n");
+    ok(!!pSHTaskPoolDoNotWaitForMoreTasks, "SHTaskPoolDoNotWaitForMoreTasks is missing.\n");
+    ok(!!pSHTaskPoolGetCurrentThreadLifetime, "SHTaskPoolGetCurrentThreadLifetime is missing.\n");
+    ok(!!pSHTaskPoolGetUniqueContext, "SHTaskPoolGetUniqueContext is missing.\n");
+    ok(!!pSHTaskPoolQueueTask, "SHTaskPoolQueueTask is missing.\n");
+    ok(!!pSHTaskPoolSetThreadReuseAllowed, "SHTaskPoolSetThreadReuseAllowed is missing.\n");
+    if (!pSHTaskPoolAllowThreadReuse || !pSHTaskPoolDoNotWaitForMoreTasks ||
+        !pSHTaskPoolGetCurrentThreadLifetime || !pSHTaskPoolGetUniqueContext ||
+        !pSHTaskPoolQueueTask || !pSHTaskPoolSetThreadReuseAllowed) return;
+
+    context1 = pSHTaskPoolGetUniqueContext();
+    context2 = pSHTaskPoolGetUniqueContext();
+    ok(context1 != 0, "got zero context.\n");
+    ok(context2 == context1 + 1, "got contexts %#lx and %#lx.\n", context1, context2);
+
+    hr = pSHTaskPoolGetCurrentThreadLifetime(&lifetime);
+    ok(hr == E_NOINTERFACE, "got hr %#lx.\n", hr);
+    ok(!lifetime, "got lifetime %p.\n", lifetime);
+
+    hr = pSHTaskPoolQueueTask(3, 0, context1, 0, NULL, &delayed);
+    ok(hr == E_OUTOFMEMORY, "got hr %#lx.\n", hr);
+    ok(!delayed, "got delayed task %p.\n", delayed);
+
+    task.event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    ok(!!task.event, "failed to create event, error %lu.\n", GetLastError());
+    task.caller_thread = GetCurrentThreadId();
+    delayed = (IUnknown *)0xdeadbeef;
+    hr = pSHTaskPoolQueueTask(3, 0, context2, 0, (IUnknown *)&task.IComPoolTask_iface, &delayed);
+    ok(hr == S_OK, "got hr %#lx.\n", hr);
+    ok(!delayed, "got delayed task %p.\n", delayed);
+    ok(WaitForSingleObject(task.event, 5000) == WAIT_OBJECT_0, "task did not run.\n");
+    ok(task.run_thread != task.caller_thread, "task ran on the caller thread.\n");
+    ok(task.lifetime_hr == S_OK, "got lifetime hr %#lx.\n", task.lifetime_hr);
+    ok(!!task.lifetime, "missing task lifetime.\n");
+    if (task.lifetime) IUnknown_Release(task.lifetime);
+    while (task.refcount != 1) Sleep(1);
+    CloseHandle(task.event);
+
+    pSHTaskPoolSetThreadReuseAllowed(FALSE);
+    pSHTaskPoolSetThreadReuseAllowed(TRUE);
+    pSHTaskPoolAllowThreadReuse();
+    pSHTaskPoolDoNotWaitForMoreTasks();
 }
 
 static void test_scale_factor_queries(void)
@@ -1004,6 +1138,7 @@ START_TEST(shcore)
     init(hshcore);
 
     test_AppUserModelID();
+    test_taskpool();
     test_scale_factor_queries();
     test_scale_change_notifications();
     test_process_reference();
