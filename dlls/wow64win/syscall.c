@@ -448,6 +448,45 @@ NTSTATUS WINAPI wow64_NtTokenManagerThread( UINT *args )
 #define SYSCALL_STUB(name) NTSTATUS WINAPI wow64_ ## name( UINT *args ) { stub_syscall( #name ); }
 ALL_SYSCALL_STUBS
 
+/* These native interfaces have no 32-bit argument/state adapter yet.  Reuse
+ * Wine's existing noncontinuable stub exception rather than returning a value
+ * which a BOOL, handle or status consumer could mistake for success.  Remove
+ * the corresponding entry when its real WoW64 adapter is implemented. */
+SYSCALL_STUB( NtCloseCompositionInputSink )
+SYSCALL_STUB( NtCompositionSetDropTarget )
+SYSCALL_STUB( NtCreateCompositionInputSink )
+SYSCALL_STUB( NtCreateImplicitCompositionInputSink )
+SYSCALL_STUB( NtDCompositionSynchronize )
+SYSCALL_STUB( NtDCompositionTelemetrySetApplicationId )
+SYSCALL_STUB( NtDuplicateCompositionInputSink )
+SYSCALL_STUB( NtEnableOneCoreTransformMode )
+SYSCALL_STUB( NtGdiDdDDIGetMemoryBudgetTarget )
+SYSCALL_STUB( NtGdiDdDDIGetYieldPercentage )
+SYSCALL_STUB( NtIsOneCoreTransformMode )
+SYSCALL_STUB( NtOpenCompositionSurfaceDirtyRegion )
+SYSCALL_STUB( NtQueryCompositionInputSink )
+SYSCALL_STUB( NtQueryCompositionInputSinkLuid )
+SYSCALL_STUB( NtQueryCompositionInputSinkViewId )
+SYSCALL_STUB( NtQueryCompositionSurfaceBinding )
+SYSCALL_STUB( NtQueryCompositionSurfaceRenderingRealization )
+SYSCALL_STUB( NtUserAcquireIAMKey )
+SYSCALL_STUB( NtUserConfigureActivationObject )
+SYSCALL_STUB( NtUserCreateActivationObject )
+SYSCALL_STUB( NtUserDestroyActivationObject )
+SYSCALL_STUB( NtUserEnableIAMAccess )
+SYSCALL_STUB( NtUserForceEnableNumpadTranslation )
+SYSCALL_STUB( NtUserGhostWindowFromHungWindow )
+SYSCALL_STUB( NtUserHungWindowFromGhostWindow )
+SYSCALL_STUB( NtUserIsTopLevelWindow )
+SYSCALL_STUB( NtUserIsWindowBroadcastingDpiToChildren )
+SYSCALL_STUB( NtUserQueryActivationObject )
+SYSCALL_STUB( NtUserReportInertia )
+SYSCALL_STUB( NtUserSetForegroundRedirectionForActivationObject )
+SYSCALL_STUB( NtUserSetInformationThread )
+SYSCALL_STUB( NtUserSetShellChangeNotifyHWND )
+SYSCALL_STUB( NtUserSetWindowCompositionTransition )
+SYSCALL_STUB( NtValidateCompositionSurfaceHandle )
+
 static void * const win32_syscalls[] =
 {
 #define SYSCALL_ENTRY(id,name,args) wow64_ ## name,
