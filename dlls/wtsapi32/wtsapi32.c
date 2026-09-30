@@ -29,6 +29,66 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wtsapi);
 
+/* WINSTATIONCONFIG from MS-TSTS. Expose only the two USERCONFIG fields queried
+ * here; the remaining configuration and its state stay in the WINSTA owner. */
+struct station_launch_config
+{
+    BYTE prefix[0xf0];
+    WCHAR working_directory[257];
+    WCHAR initial_program[257];
+    BYTE remainder[0xa68 - 0x4f4];
+};
+C_ASSERT(sizeof(struct station_launch_config) == 0xa68);
+C_ASSERT(FIELD_OFFSET(struct station_launch_config, working_directory) == 0xf0);
+C_ASSERT(FIELD_OFFSET(struct station_launch_config, initial_program) == 0x2f2);
+
+DECLSPEC_IMPORT BOOLEAN WINAPI WinStationQueryInformationW(HANDLE, ULONG, ULONG, void *, ULONG, ULONG *);
+
+static BOOL query_session_launch_config(HANDLE server, DWORD session, WTS_INFO_CLASS class,
+                                      WCHAR **buffer, DWORD *count)
+{
+    struct station_launch_config config = {0};
+    ULONG returned = 0;
+    WCHAR *source, *result;
+    SIZE_T length;
+
+    /* WTSOpenServer does not produce usable server handles yet. Do not pass
+     * an unrepresented handle to WINSTA's private handle implementation. */
+    if (server)
+    {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return FALSE;
+    }
+    if (!WinStationQueryInformationW(server, session, 1, &config, sizeof(config), &returned))
+    {
+        TRACE("session %lu class %u configuration query failed, error %lu\n", session, class, GetLastError());
+        return FALSE;
+    }
+    /* Native WTS applies this restriction after the configuration query. */
+    if (class == WTSInitialProgram && !session)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    source = class == WTSInitialProgram ? config.initial_program : config.working_directory;
+    for (length = 0; length < ARRAY_SIZE(config.initial_program) && source[length]; ++length) {}
+    if (length == ARRAY_SIZE(config.initial_program) || returned > sizeof(config))
+    {
+        SetLastError(ERROR_INVALID_DATA);
+        return FALSE;
+    }
+    if (!(result = malloc((length + 1) * sizeof(WCHAR))))
+    {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return FALSE;
+    }
+    memcpy(result, source, (length + 1) * sizeof(WCHAR));
+    *buffer = result;
+    *count = (length + 1) * sizeof(WCHAR);
+    TRACE("session %lu class %u configuration bytes %lu value %s\n", session, class, returned, debugstr_w(result));
+    return TRUE;
+}
+
 
 /************************************************************
  *                WTSCloseServer  (WTSAPI32.@)
@@ -554,6 +614,9 @@ BOOL WINAPI WTSQuerySessionInformationW(HANDLE server, DWORD session_id, WTS_INF
         SetLastError(ERROR_INVALID_USER_BUFFER);
         return FALSE;
     }
+
+    if (class == WTSInitialProgram || class == WTSWorkingDirectory)
+        return query_session_launch_config(server, session_id, class, buffer, count);
 
     if (class == WTSConnectState)
     {
