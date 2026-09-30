@@ -2688,13 +2688,29 @@ HRESULT WINAPI InternalCoStdMarshalObject(REFIID riid, DWORD dest_context, void 
 HRESULT WINAPI CoGetStandardMarshal(REFIID riid, IUnknown *pUnk, DWORD dwDestContext,
         void *dest_context, DWORD flags, IMarshal **marshal)
 {
-    if (pUnk == NULL)
-    {
-        FIXME("%s, NULL, %lx, %p, %lx, %p, unimplemented yet.\n", debugstr_guid(riid), dwDestContext,
-                dest_context, flags, marshal);
-        return E_NOTIMPL;
-    }
+    struct apartment *apt;
+
     TRACE("%s, %p, %lx, %p, %lx, %p\n", debugstr_guid(riid), pUnk, dwDestContext, dest_context, flags, marshal);
+
+    /* Native validation precedes apartment lookup and leaves invalid-argument
+     * outputs untouched. Context 5 and the extended flag bits are retained by
+     * the native ABI; accepting them does not implement remote transport. */
+    if (!marshal || dwDestContext > 5 ||
+        (dest_context && dwDestContext != MSHCTX_DIFFERENTMACHINE && dwDestContext != 5) ||
+        (flags & 0x7ff8ffc0))
+        return E_INVALIDARG;
+    *marshal = NULL;
+    if (!(apt = apartment_get_current_or_mta())) return CO_E_NOTINITIALIZED;
+    apartment_release(apt);
+
+    /* A NULL object requests the client-side standard unmarshaler. Reuse the
+     * existing STDOBJREF, proxy and reference owners, with the same receiving
+     * context used by CoUnmarshalInterface. No target object is fabricated. */
+    if (!pUnk)
+    {
+        dwDestContext = MSHCTX_LOCAL;
+        dest_context = NULL;
+    }
 
     return StdMarshalImpl_Construct(&IID_IMarshal, dwDestContext, dest_context, (void **)marshal);
 }
