@@ -4761,6 +4761,10 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
         PSYSTEM_POWER_CAPABILITIES PowerCaps = output;
         FIXME("semi-stub: SystemPowerCapabilities\n");
         if (out_size < sizeof(SYSTEM_POWER_CAPABILITIES)) return STATUS_BUFFER_TOO_SMALL;
+        /* Populate the complete ABI, including newer capability fields that
+         * older headers name as spare bytes. In particular, Wine does not
+         * expose connected standby, so AoAc must not inherit caller data. */
+        memset(PowerCaps, 0, sizeof(*PowerCaps));
         /* FIXME: These values are based off a native XP desktop, should probably use APM/ACPI to get the 'real' values */
         PowerCaps->PowerButtonPresent = TRUE;
         PowerCaps->SleepButtonPresent = FALSE;
