@@ -4059,19 +4059,268 @@ static void test_RtlValidSecurityDescriptor(void)
 
 static void test_RtlValidRelativeSecurityDescriptor(void)
 {
-    SECURITY_DESCRIPTOR_RELATIVE sd;
+    static const ULONG invalid_offsets[] = {1, 16, 19, 21, 31, 32, 0xfffffffc, 0xffffffff};
+    static const SECURITY_INFORMATION required[] = {0, OWNER_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION,
+        DACL_SECURITY_INFORMATION, SACL_SECURITY_INFORMATION, 0xffffffff};
+    union { SECURITY_DESCRIPTOR_RELATIVE sd; BYTE bytes[128]; } buffer;
+    SECURITY_DESCRIPTOR_RELATIVE *sd = &buffer.sd;
+    BYTE *pages, *end, *copy;
+    SYSTEM_INFO system_info;
+    DWORD old_protect;
+    SID *sid = (SID *)(buffer.bytes + sizeof(*sd));
+    ACL *acl = (ACL *)(buffer.bytes + sizeof(*sd));
+    ULONG *field;
+    unsigned int i, j;
     BOOLEAN ret;
 
-    memset(&sd, 0, sizeof(sd));
-    sd.Revision = SECURITY_DESCRIPTOR_REVISION;
-    sd.Control = SE_SELF_RELATIVE;
+    memset(&buffer, 0, sizeof(buffer));
+    sd->Revision = SECURITY_DESCRIPTOR_REVISION;
+    sd->Control = SE_SELF_RELATIVE;
 
-    ret = RtlValidRelativeSecurityDescriptor((SECURITY_DESCRIPTOR *)&sd, sizeof(sd), 0);
-    ok(ret, "Expected a valid relative security descriptor.\n");
+    for (i = 0; i <= sizeof(*sd); ++i)
+    {
+        ret = RtlValidRelativeSecurityDescriptor(sd, i, 0);
+        ok(ret == (i == sizeof(*sd)), "Length %u: got %u.\n", i, ret);
+    }
+    for (i = 0; i < ARRAY_SIZE(required); ++i)
+    {
+        ret = RtlValidRelativeSecurityDescriptor(sd, sizeof(*sd), required[i]);
+        ok(ret == !(required[i] & (OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION)),
+           "Required %#lx: got %u.\n", required[i], ret);
+    }
+    sd->Control = 0;
+    ok(!RtlValidRelativeSecurityDescriptor(sd, sizeof(*sd), 0), "Accepted an absolute descriptor.\n");
+    sd->Control = SE_SELF_RELATIVE;
+    sd->Revision = 0;
+    ok(!RtlValidRelativeSecurityDescriptor(sd, sizeof(*sd), 0), "Accepted revision zero.\n");
+    sd->Revision = SECURITY_DESCRIPTOR_REVISION;
 
-    sd.Revision = 0;
-    ret = RtlValidRelativeSecurityDescriptor((SECURITY_DESCRIPTOR *)&sd, sizeof(sd), 0);
-    ok(!ret, "Expected an invalid relative security descriptor.\n");
+    sid->Revision = SID_REVISION;
+    sid->SubAuthorityCount = 1;
+    for (i = 0; i < 2; ++i)
+    {
+        field = i ? &sd->Group : &sd->Owner;
+        for (j = 0; j < ARRAY_SIZE(invalid_offsets); ++j)
+        {
+            *field = invalid_offsets[j];
+            ret = RtlValidRelativeSecurityDescriptor(sd, 32, 0);
+            ok(!ret, "SID field %u offset %#lx accepted.\n", i, *field);
+        }
+        *field = sizeof(*sd);
+        for (j = 20; j <= 32; ++j)
+        {
+            ret = RtlValidRelativeSecurityDescriptor(sd, j, i ? GROUP_SECURITY_INFORMATION : OWNER_SECURITY_INFORMATION);
+            ok(ret == (j == 32), "SID field %u length %u: got %u.\n", i, j, ret);
+        }
+        sid->Revision = 0;
+        ok(!RtlValidRelativeSecurityDescriptor(sd, 32, 0), "Accepted invalid SID revision.\n");
+        sid->Revision = SID_REVISION;
+        sid->SubAuthorityCount = 16;
+        ok(!RtlValidRelativeSecurityDescriptor(sd, sizeof(buffer), 0), "Accepted 16 SID subauthorities.\n");
+        sid->SubAuthorityCount = 15;
+        ok(RtlValidRelativeSecurityDescriptor(sd, 88, 0), "Rejected maximum SID.\n");
+        ok(!RtlValidRelativeSecurityDescriptor(sd, 87, 0), "Accepted truncated maximum SID.\n");
+        sid->SubAuthorityCount = 0;
+        ok(!RtlValidRelativeSecurityDescriptor(sd, 28, 0), "Accepted SID without minimum descriptor space.\n");
+        ok(RtlValidRelativeSecurityDescriptor(sd, 32, 0), "Rejected zero-subauthority SID with space.\n");
+        sid->SubAuthorityCount = 1;
+        *field = 0;
+    }
+    /* Owner and group may share the same SID. */
+    sd->Owner = sd->Group = sizeof(*sd);
+    ok(RtlValidRelativeSecurityDescriptor(sd, 32, OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION),
+       "Rejected overlapping owner/group.\n");
+    sd->Owner = sd->Group = 0;
+
+    memset(acl, 0, sizeof(*acl));
+    acl->AclRevision = ACL_REVISION;
+    acl->AclSize = sizeof(*acl);
+    for (i = 0; i < 2; ++i)
+    {
+        SECURITY_DESCRIPTOR_CONTROL present = i ? SE_SACL_PRESENT : SE_DACL_PRESENT;
+        field = i ? &sd->Sacl : &sd->Dacl;
+        *field = 0xffffffff;
+        ok(RtlValidRelativeSecurityDescriptor(sd, sizeof(*sd), required[i + 3]),
+           "Validated an absent ACL offset.\n");
+        sd->Control |= present;
+        *field = 0;
+        ok(RtlValidRelativeSecurityDescriptor(sd, sizeof(*sd), required[i + 3]), "Rejected null ACL.\n");
+        for (j = 0; j < ARRAY_SIZE(invalid_offsets); ++j)
+        {
+            *field = invalid_offsets[j];
+            ok(!RtlValidRelativeSecurityDescriptor(sd, 28, 0), "ACL field %u offset %#lx accepted.\n", i, *field);
+        }
+        *field = sizeof(*sd);
+        for (j = 20; j <= 28; ++j)
+        {
+            ret = RtlValidRelativeSecurityDescriptor(sd, j, 0);
+            ok(ret == (j == 28), "ACL field %u length %u: got %u.\n", i, j, ret);
+        }
+        acl->AclSize = 7;
+        ok(!RtlValidRelativeSecurityDescriptor(sd, 28, 0), "Accepted undersized ACL.\n");
+        acl->AclSize = 9;
+        ok(!RtlValidRelativeSecurityDescriptor(sd, 28, 0), "Accepted oversized ACL.\n");
+        acl->AclSize = sizeof(*acl);
+        acl->AceCount = 1;
+        ok(!RtlValidRelativeSecurityDescriptor(sd, 28, 0), "Accepted ACL missing its ACE header.\n");
+        acl->AceCount = 0;
+        sd->Control &= ~present;
+        *field = 0;
+    }
+
+    /* Place each advertised buffer immediately before an inaccessible page. */
+    GetSystemInfo(&system_info);
+    pages = VirtualAlloc(NULL, 2 * system_info.dwPageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    ok(!!pages, "Failed to allocate guard pages.\n");
+    if (!pages) return;
+    end = pages + system_info.dwPageSize;
+    ret = VirtualProtect(end, system_info.dwPageSize, PAGE_NOACCESS, &old_protect);
+    ok(ret, "Failed to protect guard page.\n");
+    if (ret)
+    {
+        for (i = 0; i < sizeof(*sd); ++i)
+        {
+            copy = end - i;
+            memcpy(copy, sd, i);
+            ok(!RtlValidRelativeSecurityDescriptor(copy, i, 0), "Guarded short header %u accepted.\n", i);
+        }
+        sd->Owner = sizeof(*sd);
+        sid->Revision = SID_REVISION;
+        sid->SubAuthorityCount = 1;
+        copy = end - 31;
+        memcpy(copy, sd, 31);
+        ok(!RtlValidRelativeSecurityDescriptor(copy, 31, 0), "Guarded short SID accepted.\n");
+        sd->Owner = 0;
+        sd->Control |= SE_DACL_PRESENT;
+        sd->Dacl = sizeof(*sd);
+        memset(acl, 0, sizeof(*acl));
+        acl->AclRevision = ACL_REVISION;
+        acl->AclSize = sizeof(*acl);
+        acl->AceCount = 1;
+        copy = end - 28;
+        memcpy(copy, sd, 28);
+        ok(!RtlValidRelativeSecurityDescriptor(copy, 28, 0), "Guarded missing ACE accepted.\n");
+    }
+    VirtualFree(pages, 0, MEM_RELEASE);
+}
+
+static void test_RtlValidAcl(void)
+{
+    static const BYTE sid_types[] = {0, 1, 2, 3, 9, 10, 13, 14, 17, 19, 20};
+    static const BYTE object_types[] = {5, 6, 7, 8, 11, 12, 15, 16};
+    union { ACL acl; BYTE bytes[128]; } buffer;
+    ACL *acl = &buffer.acl;
+    ACE_HEADER *ace = (ACE_HEADER *)(acl + 1);
+    SID *sid = (SID *)((BYTE *)ace + 8);
+    DWORD *flags = (DWORD *)((BYTE *)ace + 8);
+    unsigned int i, j, sid_offset;
+
+    memset(&buffer, 0, sizeof(buffer));
+    acl->AclRevision = ACL_REVISION;
+    for (i = 0; i <= sizeof(*acl); ++i)
+    {
+        acl->AclSize = i;
+        ok(RtlValidAcl(acl) == (i == sizeof(*acl)), "ACL size %u validation failed.\n", i);
+    }
+    for (i = 0; i < 6; ++i)
+    {
+        acl->AclRevision = i;
+        ok(RtlValidAcl(acl) == (i >= 2 && i <= 4), "ACL revision %u validation failed.\n", i);
+    }
+    acl->AclRevision = ACL_REVISION;
+    acl->AceCount = 1;
+    ace->AceType = 0xff;
+    for (i = 0; i < sizeof(*ace); ++i)
+    {
+        acl->AclSize = sizeof(*acl) + i;
+        ok(!RtlValidAcl(acl), "Accepted short ACE header %u.\n", i);
+    }
+    acl->AclSize = sizeof(*acl) + sizeof(*ace);
+    for (i = 0; i <= 5; ++i)
+    {
+        ace->AceSize = i;
+        ok(RtlValidAcl(acl) == (i == sizeof(*ace)), "ACE size %u validation failed.\n", i);
+    }
+    /* Unknown ACE types require a header, but their payload need not be DWORD-aligned. */
+    ace->AceSize = 5;
+    acl->AclSize = sizeof(*acl) + ace->AceSize;
+    ok(RtlValidAcl(acl), "Rejected unknown ACE with an unaligned size.\n");
+    ace->AceSize = sizeof(*ace);
+    acl->AclSize = sizeof(*acl) + ace->AceSize;
+    acl->AceCount = 2;
+    ok(!RtlValidAcl(acl), "Accepted missing second ACE.\n");
+    acl->AceCount = 1;
+    for (i = 0; i < ARRAY_SIZE(sid_types); ++i)
+    {
+        ace->AceType = sid_types[i];
+        ace->AceSize = 20;
+        acl->AclSize = sizeof(*acl) + ace->AceSize;
+        sid->Revision = SID_REVISION;
+        sid->SubAuthorityCount = 1;
+        ok(RtlValidAcl(acl), "Rejected valid SID ACE type %u.\n", ace->AceType);
+        sid->Revision = 0;
+        ok(!RtlValidAcl(acl), "Accepted bad SID revision type %u.\n", ace->AceType);
+        sid->Revision = SID_REVISION;
+        sid->SubAuthorityCount = 2;
+        ok(!RtlValidAcl(acl), "Accepted truncated SID type %u.\n", ace->AceType);
+        sid->SubAuthorityCount = 16;
+        ok(!RtlValidAcl(acl), "Accepted too many subauthorities type %u.\n", ace->AceType);
+        sid->SubAuthorityCount = 1;
+        ace->AceSize = 19;
+        ok(!RtlValidAcl(acl), "Accepted unaligned SID ACE type %u.\n", ace->AceType);
+        ace->AceSize = 12;
+        ok(!RtlValidAcl(acl), "Accepted missing SID type %u.\n", ace->AceType);
+    }
+    /* Compound ACEs contain separate server and client SIDs. */
+    memset(ace, 0, 40);
+    ace->AceType = ACCESS_ALLOWED_COMPOUND_ACE_TYPE;
+    ace->AceSize = 36;
+    acl->AclSize = sizeof(*acl) + ace->AceSize;
+    acl->AclRevision = ACL_REVISION3;
+    *(USHORT *)((BYTE *)ace + 8) = 1;
+    sid = (SID *)((BYTE *)ace + 12);
+    sid->Revision = SID_REVISION;
+    sid->SubAuthorityCount = 1;
+    sid = (SID *)((BYTE *)ace + 24);
+    sid->Revision = SID_REVISION;
+    sid->SubAuthorityCount = 1;
+    ok(RtlValidAcl(acl), "Rejected compound ACE.\n");
+    acl->AclRevision = ACL_REVISION;
+    ok(!RtlValidAcl(acl), "Accepted compound ACE with old ACL revision.\n");
+    acl->AclRevision = ACL_REVISION3;
+    *(USHORT *)((BYTE *)ace + 8) = 0;
+    ok(!RtlValidAcl(acl), "Accepted invalid compound type.\n");
+    *(USHORT *)((BYTE *)ace + 8) = 1;
+    sid->Revision = 0;
+    ok(!RtlValidAcl(acl), "Accepted invalid compound client SID.\n");
+    sid->Revision = SID_REVISION;
+    sid->SubAuthorityCount = 2;
+    ok(!RtlValidAcl(acl), "Accepted truncated compound client SID.\n");
+    ace->AceSize = 32;
+    sid->SubAuthorityCount = 1;
+    ok(!RtlValidAcl(acl), "Accepted truncated compound ACE.\n");
+
+    for (i = 0; i < ARRAY_SIZE(object_types); ++i)
+    {
+        ace->AceType = object_types[i];
+        for (j = 0; j < 4; ++j)
+        {
+            *flags = j;
+            sid_offset = 12 + (!!(j & 1) + !!(j & 2)) * sizeof(GUID);
+            sid = (SID *)((BYTE *)ace + sid_offset);
+            sid->Revision = SID_REVISION;
+            sid->SubAuthorityCount = 1;
+            ace->AceSize = sid_offset + sizeof(SID);
+            acl->AclSize = sizeof(*acl) + ace->AceSize;
+            acl->AclRevision = ACL_REVISION4;
+            ok(RtlValidAcl(acl), "Rejected object type %u flags %u.\n", ace->AceType, j);
+            acl->AclRevision = ACL_REVISION;
+            ok(!RtlValidAcl(acl), "Accepted object type %u with old ACL revision.\n", ace->AceType);
+            acl->AclRevision = ACL_REVISION4;
+            sid->SubAuthorityCount = 2;
+            ok(!RtlValidAcl(acl), "Accepted truncated object SID type %u flags %u.\n", ace->AceType, j);
+        }
+    }
 }
 
 static PSECURITY_DESCRIPTOR create_security_object_descriptor(BOOL owner_present, BOOL group_present)
@@ -6622,6 +6871,7 @@ START_TEST(rtl)
     test_RtlSidHash();
     test_RtlValidSecurityDescriptor();
     test_RtlValidRelativeSecurityDescriptor();
+    test_RtlValidAcl();
     test_RtlCopySecurityDescriptor();
     test_RtlSetSecurityObject();
     test_RtlCreateAndSetSD();

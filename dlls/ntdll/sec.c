@@ -36,6 +36,7 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
+WINE_DECLARE_DEBUG_CHANNEL(secdesc);
 
 static const USHORT protected_access_by_source_signer[] =
 {
@@ -753,14 +754,55 @@ BOOLEAN WINAPI RtlValidSecurityDescriptor(PSECURITY_DESCRIPTOR descriptor)
     return sd && sd->Revision == SECURITY_DESCRIPTOR_REVISION;
 }
 
-/**************************************************************************
- * RtlValidRelativeSecurityDescriptor		[NTDLL.@]
- */
-BOOLEAN WINAPI RtlValidRelativeSecurityDescriptor(PSECURITY_DESCRIPTOR descriptor,
-    ULONG length, SECURITY_INFORMATION info)
+static BOOLEAN valid_sid_buffer( const SID *sid, ULONG length )
 {
-    FIXME("%p,%lu,%ld: semi-stub\n", descriptor, length, info);
-    return RtlValidSecurityDescriptor(descriptor);
+    if (length < offsetof( SID, SubAuthority )) return FALSE;
+    return sid->Revision == SID_REVISION && sid->SubAuthorityCount <= SID_MAX_SUB_AUTHORITIES &&
+           length >= offsetof( SID, SubAuthority ) + sid->SubAuthorityCount * sizeof(DWORD);
+}
+
+static BOOLEAN valid_relative_sid( const SECURITY_DESCRIPTOR_RELATIVE *sd, ULONG length, ULONG offset )
+{
+    if (offset < sizeof(*sd) || offset >= length || (offset & 3)) return FALSE;
+    if (length - offset < sizeof(SID)) return FALSE;
+    return valid_sid_buffer( (const SID *)((const BYTE *)sd + offset), length - offset );
+}
+
+static BOOLEAN valid_relative_acl( const SECURITY_DESCRIPTOR_RELATIVE *sd, ULONG length, ULONG offset )
+{
+    ACL *acl;
+
+    if (!offset) return TRUE;
+    if (offset < sizeof(*sd) || offset >= length || (offset & 3)) return FALSE;
+    if (length - offset < sizeof(*acl)) return FALSE;
+    acl = (ACL *)((BYTE *)sd + offset);
+    return acl->AclSize <= length - offset && RtlValidAcl( acl );
+}
+
+static BOOLEAN valid_relative_security_descriptor( const SECURITY_DESCRIPTOR_RELATIVE *sd,
+                                                   ULONG length, SECURITY_INFORMATION info )
+{
+    if (length < sizeof(*sd)) return FALSE;
+    if (sd->Revision != SECURITY_DESCRIPTOR_REVISION || !(sd->Control & SE_SELF_RELATIVE)) return FALSE;
+    if (sd->Owner ? !valid_relative_sid( sd, length, sd->Owner ) : !!(info & OWNER_SECURITY_INFORMATION))
+        return FALSE;
+    if (sd->Group ? !valid_relative_sid( sd, length, sd->Group ) : !!(info & GROUP_SECURITY_INFORMATION))
+        return FALSE;
+    if ((sd->Control & SE_DACL_PRESENT) && !valid_relative_acl( sd, length, sd->Dacl )) return FALSE;
+    if ((sd->Control & SE_SACL_PRESENT) && !valid_relative_acl( sd, length, sd->Sacl )) return FALSE;
+    return TRUE;
+}
+
+/**************************************************************************
+ * RtlValidRelativeSecurityDescriptor            [NTDLL.@]
+ */
+BOOLEAN WINAPI RtlValidRelativeSecurityDescriptor( PSECURITY_DESCRIPTOR descriptor,
+                                                   ULONG length, SECURITY_INFORMATION info )
+{
+    BOOLEAN ret = valid_relative_security_descriptor( descriptor, length, info );
+
+    TRACE_(secdesc)( "%p, %lu, %#lx: %u\n", descriptor, length, info, ret );
+    return ret;
 }
 
 /**************************************************************************
@@ -1886,45 +1928,101 @@ NTSTATUS WINAPI RtlAddProcessTrustLabelAce( ACL *acl, DWORD revision, DWORD flag
     return add_label_ace( acl, revision, flags, sid, type, mask );
 }
 
-/******************************************************************************
- *  RtlValidAcl		[NTDLL.@]
- */
-BOOLEAN WINAPI RtlValidAcl(PACL pAcl)
+static BOOLEAN valid_acl( const ACL *acl )
 {
-        BOOLEAN ret;
-	TRACE("(%p)\n", pAcl);
+    const ACE_HEADER *ace;
+    const BYTE *ptr;
+    const SID *sid;
+    ULONG offset, sid_offset, sid_length, flags;
+    unsigned int i;
 
-	__TRY
-	{
-		PACE_HEADER	ace;
-		int		i;
+    if ((ULONG_PTR)acl & 1) return FALSE;
+    if (acl->AclRevision < MIN_ACL_REVISION || acl->AclRevision > MAX_ACL_REVISION) return FALSE;
+    if (acl->AclSize < sizeof(*acl)) return FALSE;
 
-                if (pAcl->AclRevision < MIN_ACL_REVISION ||
-                    pAcl->AclRevision > MAX_ACL_REVISION)
-                    ret = FALSE;
-                else
-                {
-                    ace = (PACE_HEADER)(pAcl+1);
-                    ret = TRUE;
-                    for (i=0;i<=pAcl->AceCount;i++)
-                    {
-                        if ((char *)ace > (char *)pAcl + pAcl->AclSize)
-                        {
-                            ret = FALSE;
-                            break;
-                        }
-                        if (i != pAcl->AceCount)
-                            ace = (PACE_HEADER)(((BYTE*)ace)+ace->AceSize);
-                    }
-                }
-	}
-	__EXCEPT_PAGE_FAULT
-	{
-		WARN("(%p): invalid pointer!\n", pAcl);
-		return FALSE;
-	}
-	__ENDTRY
-        return ret;
+    offset = sizeof(*acl);
+    for (i = 0; i < acl->AceCount; ++i)
+    {
+        if (acl->AclSize - offset < sizeof(*ace)) return FALSE;
+        ptr = (const BYTE *)acl + offset;
+        if ((ULONG_PTR)ptr & 1) return FALSE;
+        ace = (const ACE_HEADER *)ptr;
+        if (ace->AceSize < sizeof(*ace) || ace->AceSize > acl->AclSize - offset) return FALSE;
+
+        switch (ace->AceType)
+        {
+        case ACCESS_ALLOWED_ACE_TYPE:
+        case ACCESS_DENIED_ACE_TYPE:
+        case SYSTEM_AUDIT_ACE_TYPE:
+        case SYSTEM_ALARM_ACE_TYPE:
+        case ACCESS_ALLOWED_CALLBACK_ACE_TYPE:
+        case ACCESS_DENIED_CALLBACK_ACE_TYPE:
+        case SYSTEM_AUDIT_CALLBACK_ACE_TYPE:
+        case SYSTEM_ALARM_CALLBACK_ACE_TYPE:
+        case SYSTEM_MANDATORY_LABEL_ACE_TYPE:
+        case SYSTEM_SCOPED_POLICY_ID_ACE_TYPE:
+        case SYSTEM_PROCESS_TRUST_LABEL_ACE_TYPE:
+            sid_offset = offsetof( ACCESS_ALLOWED_ACE, SidStart );
+            if ((ace->AceSize & 3) || ace->AceSize < sid_offset + offsetof( SID, SubAuthority ) ||
+                !valid_sid_buffer( (const SID *)(ptr + sid_offset), ace->AceSize - sid_offset ))
+                return FALSE;
+            break;
+
+        case ACCESS_ALLOWED_OBJECT_ACE_TYPE:
+        case ACCESS_DENIED_OBJECT_ACE_TYPE:
+        case ACCESS_AUDIT_OBJECT_ACE_TYPE:
+        case ACCESS_ALARM_OBJECT_ACE_TYPE:
+        case ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE:
+        case ACCESS_DENIED_CALLBACK_OBJECT_ACE_TYPE:
+        case SYSTEM_AUDIT_CALLBACK_OBJECT_ACE_TYPE:
+        case SYSTEM_ALARM_CALLBACK_OBJECT_ACE_TYPE:
+            if (acl->AclRevision < ACL_REVISION4 || (ace->AceSize & 3) || ace->AceSize < 12) return FALSE;
+            memcpy( &flags, ptr + 8, sizeof(flags) );
+            sid_offset = 12;
+            if (flags & ACE_OBJECT_TYPE_PRESENT) sid_offset += sizeof(GUID);
+            if (flags & ACE_INHERITED_OBJECT_TYPE_PRESENT) sid_offset += sizeof(GUID);
+            if (ace->AceSize < sid_offset + sizeof(SID) ||
+                !valid_sid_buffer( (const SID *)(ptr + sid_offset), ace->AceSize - sid_offset )) return FALSE;
+            break;
+
+        case ACCESS_ALLOWED_COMPOUND_ACE_TYPE:
+            if (acl->AclRevision < 3 || (ace->AceSize & 3) || ace->AceSize < 24) return FALSE;
+            if (*(const USHORT *)(ptr + 8) != 1) return FALSE;
+            sid = (const SID *)(ptr + 12);
+            if (!valid_sid_buffer( sid, ace->AceSize - 12 )) return FALSE;
+            sid_length = offsetof( SID, SubAuthority ) + sid->SubAuthorityCount * sizeof(DWORD);
+            sid_offset = 12 + sid_length;
+            if (ace->AceSize < sid_offset + sizeof(SID) ||
+                !valid_sid_buffer( (const SID *)(ptr + sid_offset), ace->AceSize - sid_offset )) return FALSE;
+            break;
+
+        default:
+            break;
+        }
+        offset += ace->AceSize;
+    }
+    return TRUE;
+}
+
+/******************************************************************************
+ *  RtlValidAcl                  [NTDLL.@]
+ */
+BOOLEAN WINAPI RtlValidAcl( ACL *acl )
+{
+    BOOLEAN ret;
+
+    __TRY
+    {
+        ret = valid_acl( acl );
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        WARN( "%p: invalid pointer!\n", acl );
+        return FALSE;
+    }
+    __ENDTRY
+    TRACE_(secdesc)( "%p: %u\n", acl, ret );
+    return ret;
 }
 
 /******************************************************************************
