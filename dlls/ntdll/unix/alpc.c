@@ -278,12 +278,19 @@ static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
         if (!status)
         {
             handle = wine_server_ptr_handle( reply->handle );
-            wait_handle = reply->wait_handle ? wine_server_ptr_handle( reply->wait_handle ) : handle;
+            wait_handle = wine_server_ptr_handle( reply->wait_handle );
         }
     }
     SERVER_END_REQ;
     free( server_objattr );
     if (status) return status;
+    if (!wait_handle)
+    {
+        /* Asynchronous admission returns the client handle before acceptance.
+         * Its result is delivered through the port's ordinary receive queue. */
+        *port_handle = handle;
+        return STATUS_SUCCESS;
+    }
 
     /* Exactly one wait owns the caller's timeout. A pending request is canceled
      * by closing the private client handle, with the server also canceling it on thread termination. */

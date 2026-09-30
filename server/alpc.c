@@ -1641,17 +1641,24 @@ static void dispatch_receives( struct alpc_port *port )
     struct alpc_port *queue = message_queue( port );
     struct alpc_message *message;
 
-    while (!list_empty( &port->receive_waiters ) && (message = find_message( port )))
+    while (!list_empty( &port->receive_waiters ))
     {
         struct alpc_wait *wait = LIST_ENTRY( list_head( &port->receive_waiters ), struct alpc_wait, receive_entry );
+        unsigned int status = port->connect_status == STATUS_PENDING ? 0 : port->connect_status;
+
+        if (!(message = find_message( port )) && !status) break;
         list_remove( &wait->receive_entry );
         wait->receive_port = NULL;
-        wait->info = message->info;
-        if (message->info.size > wait->capacity) wait->status = STATUS_BUFFER_TOO_SMALL;
+        if (status) wait->status = status;
         else
         {
-            wait->reply = take_message( queue, message );
-            wait->status = STATUS_SUCCESS;
+            wait->info = message->info;
+            if (message->info.size > wait->capacity) wait->status = STATUS_BUFFER_TOO_SMALL;
+            else
+            {
+                wait->reply = take_message( queue, message );
+                wait->status = STATUS_SUCCESS;
+            }
         }
         signal_sync( wait->sync );
     }
@@ -2048,8 +2055,22 @@ static int alpc_port_close_handle( struct object *obj, struct process *process, 
     }
     LIST_FOR_EACH_ENTRY_SAFE( client, next, &port->pending_connections, struct alpc_port, pending_entry )
     {
-        client->connect_status = STATUS_MESSAGE_LOST;
-        signal_sync( client->connect_sync );
+        if (client->want_reply)
+        {
+            client->connect_status = STATUS_MESSAGE_LOST;
+            signal_sync( client->connect_sync );
+        }
+        else
+        {
+            if ((message = new_message( NULL, 0, ALPC_MESSAGE_TYPE_CANCELED |
+                                         (client->wow64 ? 0x1000 : 0), client->connection_id, client->thread )))
+            {
+                set_message_destination( message, client, client->initial_message_context );
+                list_add_tail( &client->messages, &message->entry );
+            }
+            else client->connect_status = STATUS_NO_MEMORY;
+            notify_port( client );
+        }
         unlink_pending( client );
     }
     close_receive_waits( port );
@@ -2246,6 +2267,11 @@ DECL_HANDLER(alpc_send_receive)
         goto done;
     }
     if (!req->receive) goto done;
+    if (port->connect_status && port->connect_status != STATUS_PENDING)
+    {
+        set_error( port->connect_status );
+        goto done;
+    }
     if (!(message = find_message( port )))
     {
         if (port->connection_port || !(port->flags & 0x40000))
@@ -2373,9 +2399,9 @@ done:
     release_object( port );
 }
 
-/* Admission uses the same listening queue, with a pending client reference
- * owned by its listener. The client's wait handle is private to NTDLL until
- * acceptance completes. */
+/* The listener owns pending clients. Synchronous admission uses a private
+ * wait handle; asynchronous admission returns the client immediately and
+ * delivers acceptance or cancellation through its receive queue. */
 DECL_HANDLER(alpc_connect_port)
 {
     static const WCHAR pdc_port_name[] = {'\\','P','d','c','P','o','r','t'};
@@ -2581,21 +2607,24 @@ DECL_HANDLER(alpc_connect_port)
         close_handle( current->process, handle );
         goto done;
     }
-    if (!(client->connect_sync = create_internal_sync( 1, 0 )) ||
-        !(client->connecting_wait_handle = alloc_handle( current->process, client->connect_sync, SYNCHRONIZE, 0 )))
+    if (req->flags & ALPC_SYNC_CONNECTION)
     {
-        free_message( message );
-        close_handle( current->process, handle );
-        goto done;
+        if (!(client->connect_sync = create_internal_sync( 1, 0 )) ||
+            !(client->connecting_wait_handle = alloc_handle( current->process, client->connect_sync, SYNCHRONIZE, 0 )))
+        {
+            free_message( message );
+            close_handle( current->process, handle );
+            goto done;
+        }
+        client->connecting_handle = handle;
+        list_add_tail( &connecting_ports, &client->connecting_entry );
     }
     message->token = (struct token *)grab_object( client->client_token );
     message->info.attributes_valid |= ALPC_MESSAGE_TOKEN_ATTRIBUTE;
     client->context = handle;
     client->initial_message_context = req->message_context;
     message->info.sequence = ++listener->receive_sequence;
-    client->connecting_handle = handle;
-    list_add_tail( &connecting_ports, &client->connecting_entry );
-    client->want_reply = req->flags & 0x20000;
+    client->want_reply = !!(req->flags & ALPC_SYNC_CONNECTION);
     client->connection_id = message->info.id;
     client->wow64 = req->client_flags & 1;
     client->pending_listener = listener;
@@ -2705,7 +2734,12 @@ DECL_HANDLER(alpc_accept_connect_port)
     if (!req->accept)
     {
         client->connect_status = STATUS_PORT_CONNECTION_REFUSED;
-        signal_sync( client->connect_sync );
+        if (client->want_reply) signal_sync( client->connect_sync );
+        else
+        {
+            notify_port( client );
+            dispatch_receives( client );
+        }
         unlink_pending( client );
         goto done;
     }
@@ -2716,7 +2750,7 @@ DECL_HANDLER(alpc_accept_connect_port)
     }
     if (!(server = create_named_object( &params ))) goto done;
     if (!(message = new_message( get_req_data(), size, ALPC_MESSAGE_TYPE_CONNECTION_REPLY |
-                                (client->wow64 ? 0x1000 : 0), client->connection_id, client->thread ))) goto done;
+                                (client->wow64 ? 0x1000 : 0), client->connection_id, current ))) goto done;
     if (!(handle = alloc_handle( current->process, server, ALPC_PORT_ALL_ACCESS, req->attributes ))) goto done;
     server->connection_port = (struct alpc_port *)grab_object( listener );
     list_add_tail( &listener->accepted_connections, &server->accepted_entry );
@@ -2729,13 +2763,19 @@ DECL_HANDLER(alpc_accept_connect_port)
     client->peer = (struct alpc_port *)grab_object( server );
     server->status = client->status = CONNECTED;
     client->connect_status = STATUS_SUCCESS;
+    set_message_destination( message, client, client->initial_message_context );
     if (client->want_reply)
     {
-        set_message_destination( message, client, client->initial_message_context );
         client->connect_reply = message;
-        message = NULL;
+        signal_sync( client->connect_sync );
     }
-    signal_sync( client->connect_sync );
+    else
+    {
+        list_add_tail( &client->messages, &message->entry );
+        notify_port( client );
+        dispatch_receives( client );
+    }
+    message = NULL;
     unlink_pending( client );
     reply->handle = handle;
 done:

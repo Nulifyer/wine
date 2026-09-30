@@ -33,6 +33,7 @@ DECL_FUNCPTR(NtAlpcAcceptConnectPort)
 DECL_FUNCPTR(NtAlpcCancelMessage)
 DECL_FUNCPTR(NtAlpcCreatePort)
 DECL_FUNCPTR(NtAlpcConnectPort)
+DECL_FUNCPTR(NtAlpcConnectPortEx)
 DECL_FUNCPTR(NtAlpcQueryInformation)
 DECL_FUNCPTR(NtAlpcSendWaitReceivePort)
 
@@ -54,6 +55,7 @@ static void init_functions(void)
     LOAD_FUNCPTR(NtAlpcCancelMessage)
     LOAD_FUNCPTR(NtAlpcCreatePort)
     LOAD_FUNCPTR(NtAlpcConnectPort)
+    LOAD_FUNCPTR(NtAlpcConnectPortEx)
     LOAD_FUNCPTR(NtAlpcQueryInformation)
     LOAD_FUNCPTR(NtAlpcSendWaitReceivePort)
 
@@ -917,9 +919,250 @@ done:
     if (listener) CloseHandle(listener);
 }
 
+
+struct async_connect_context
+{
+    UNICODE_STRING name;
+    ALPC_PORT_ATTRIBUTES attr;
+    struct alpc_test_frame message;
+    SIZE_T capacity;
+    HANDLE port, completed, release;
+    NTSTATUS status;
+    ULONG flags;
+    BOOL extended, no_message, detached;
+};
+
+static DWORD WINAPI async_connect_thread(void *arg)
+{
+    struct async_connect_context *context = arg;
+    OBJECT_ATTRIBUTES object_attr;
+    LARGE_INTEGER timeout;
+    ALPC_PORT_MESSAGE *message = context->no_message ? NULL : &context->message.header;
+    SIZE_T *capacity = context->no_message ? NULL : &context->capacity;
+
+    timeout.QuadPart = -50000000;
+    if (context->extended)
+    {
+        InitializeObjectAttributes(&object_attr, &context->name, 0, NULL, NULL);
+        context->status = pNtAlpcConnectPortEx(&context->port, &object_attr, NULL, &context->attr,
+                                                context->flags, NULL, message, capacity, NULL, NULL, &timeout);
+    }
+    else
+        context->status = pNtAlpcConnectPort(&context->port, &context->name, NULL, &context->attr,
+                                              context->flags, NULL, message, capacity, NULL, NULL, &timeout);
+    SetEvent(context->completed);
+    if (!context->detached) WaitForSingleObject(context->release, 10000);
+    return 0;
+}
+
+static void test_async_connection_completion(void)
+{
+    struct async_connect_context context;
+    struct alpc_test_frame incoming, received, original;
+    OBJECT_ATTRIBUTES object_attr;
+    UNICODE_STRING name;
+    HANDLE listener, server, thread;
+    LARGE_INTEGER zero = {0};
+    WCHAR buffer[96];
+    NTSTATUS status;
+    SIZE_T size;
+    DWORD tid, wait, before;
+    unsigned int mode;
+
+    if (!pNtAlpcConnectPort || !pNtAlpcConnectPortEx || !pNtAlpcAcceptConnectPort ||
+        !pNtAlpcCreatePort || !pNtAlpcSendWaitReceivePort)
+    {
+        win_skip("Connection completion dependencies are unavailable.\n");
+        return;
+    }
+
+    for (mode = 0; mode < 16; ++mode)
+    {
+        winetest_push_context("connection completion %u", mode);
+        memset(&context, 0, sizeof(context));
+        memset(&incoming, 0, sizeof(incoming));
+        listener = server = thread = NULL;
+        context.flags = mode < 8 && (mode & 1) ? ALPC_SYNC_CONNECTION : 0;
+        context.extended = mode < 8 ? !!(mode & 2) : !!(mode & 1);
+        context.no_message = mode == 8 || mode == 9;
+        context.detached = mode >= 10;
+        context.message.header.DataLength = 16;
+        context.message.header.TotalLength = sizeof(context.message.header) + 16;
+        memset(context.message.data, 0x42, 16);
+        original = context.message;
+        context.capacity = sizeof(context.message);
+        context.completed = CreateEventW(NULL, TRUE, FALSE, NULL);
+        context.release = CreateEventW(NULL, TRUE, FALSE, NULL);
+        ok(context.completed && context.release, "CreateEvent failed, error %lu.\n", GetLastError());
+        if (!context.completed || !context.release) goto cleanup;
+        swprintf(buffer, ARRAY_SIZE(buffer), L"\\BaseNamedObjects\\winetest_async_connect_%lu_%u",
+                 GetCurrentProcessId(), mode);
+        RtlInitUnicodeString(&name, buffer);
+        context.name = name;
+        init_port_attr(&context.attr, 0x70000, sizeof(incoming));
+        InitializeObjectAttributes(&object_attr, &name, 0, NULL, NULL);
+        status = pNtAlpcCreatePort(&listener, &object_attr, &context.attr);
+        ok(!status, "Create returned %#lx.\n", status);
+        if (status) goto cleanup;
+        thread = CreateThread(NULL, 0, async_connect_thread, &context, 0, &tid);
+        ok(!!thread, "CreateThread failed, error %lu.\n", GetLastError());
+        if (!thread) goto cleanup;
+        wait = WaitForSingleObject(listener, 3000);
+        ok(wait == WAIT_OBJECT_0, "Listener wait returned %#lx.\n", wait);
+        if (wait != WAIT_OBJECT_0) goto cleanup;
+        size = sizeof(incoming);
+        status = pNtAlpcSendWaitReceivePort(listener, 0, NULL, NULL, &incoming.header, &size, NULL, &zero);
+        ok(!status, "Request receive returned %#lx.\n", status);
+        if (status) goto cleanup;
+        before = WaitForSingleObject(context.completed, context.flags ? 0 : 1000);
+        ok(before == (context.flags ? WAIT_TIMEOUT : WAIT_OBJECT_0),
+           "Before accept connector wait returned %#lx.\n", before);
+        if (context.detached)
+            ok(WaitForSingleObject(thread, 1000) == WAIT_OBJECT_0, "Returned asynchronous connector did not exit.\n");
+        incoming.header.DataLength = 16;
+        incoming.header.TotalLength = sizeof(incoming.header) + 16;
+        memset(incoming.data, 0x63, 16);
+        if (mode == 12 || mode == 13)
+        {
+            CloseHandle(context.port);
+            context.port = NULL;
+            status = pNtAlpcAcceptConnectPort(&server, listener, 0, NULL, &context.attr, NULL,
+                                             &incoming.header, NULL, TRUE);
+            trace("async-connect mode=%u closed-client-accept=%08lx\n", mode, status);
+            ok(status == STATUS_REQUEST_CANCELED, "Closed-client accept returned %#lx.\n", status);
+            status = pNtAlpcAcceptConnectPort(&server, listener, 0, NULL, &context.attr, NULL,
+                                             &incoming.header, NULL, TRUE);
+            trace("async-connect mode=%u closed-client-again=%08lx\n", mode, status);
+            ok(status == STATUS_INVALID_MESSAGE, "Repeated closed-client accept returned %#lx.\n", status);
+            goto cleanup;
+        }
+        if (mode == 14 || mode == 15)
+        {
+            CloseHandle(listener);
+            listener = NULL;
+            wait = WaitForSingleObject(context.port, 500);
+            trace("async-connect mode=%u closed-listener-wait=%lx\n", mode, wait);
+            ok(wait == WAIT_OBJECT_0, "Closed-listener wait returned %#lx.\n", wait);
+            memset(&received, 0xcc, sizeof(received));
+            original = received;
+            size = sizeof(received);
+            status = pNtAlpcSendWaitReceivePort(context.port, 0, NULL, NULL, &received.header, &size, NULL, &zero);
+            trace("async-connect mode=%u closed-listener-receive=%08lx size=%Iu type=%x data=%u id-match=%u id-zero=%u pid-zero=%u pid-self=%u tid-server=%u tid-client=%u tid-zero=%u byte=%x\n",
+                  mode, status, size, received.header.Type, received.header.DataLength,
+                  received.header.MessageId == incoming.header.MessageId, !received.header.MessageId,
+                  !received.header.ClientId.UniqueProcess,
+                  received.header.ClientId.UniqueProcess == ULongToHandle(GetCurrentProcessId()),
+                  received.header.ClientId.UniqueThread == ULongToHandle(GetCurrentThreadId()),
+                  received.header.ClientId.UniqueThread == ULongToHandle(tid),
+                  !received.header.ClientId.UniqueThread, received.data[0]);
+            ok(status == STATUS_SUCCESS, "Closed-listener receive returned %#lx.\n", status);
+            ok(size == sizeof(received), "Closed-listener capacity changed to %Iu.\n", size);
+            ok((received.header.Type & 0xff) == ALPC_MESSAGE_TYPE_CANCELED,
+               "Closed-listener completion type %#x.\n", received.header.Type);
+            ok(!received.header.DataLength, "Cancellation length %u.\n", received.header.DataLength);
+            ok(received.header.MessageId == incoming.header.MessageId, "Cancellation id differs.\n");
+            ok(received.header.ClientId.UniqueProcess == ULongToHandle(GetCurrentProcessId()),
+               "Cancellation process %p.\n", received.header.ClientId.UniqueProcess);
+            ok(received.header.ClientId.UniqueThread == ULongToHandle(tid),
+               "Cancellation thread %p.\n", received.header.ClientId.UniqueThread);
+            ok(!memcmp(original.data, received.data, sizeof(received.data)), "Empty cancellation changed data.\n");
+            size = sizeof(received);
+            status = pNtAlpcSendWaitReceivePort(context.port, 0, NULL, NULL, &received.header, &size, NULL, &zero);
+            trace("async-connect mode=%u closed-listener-again=%08lx size=%Iu\n", mode, status, size);
+            ok(status == STATUS_UNSUCCESSFUL, "Drained cancellation receive returned %#lx.\n", status);
+            goto cleanup;
+        }
+        status = pNtAlpcAcceptConnectPort(&server, listener, 0, NULL, &context.attr, (void *)0x51,
+                                         &incoming.header, NULL, mode >= 8 || !(mode & 4));
+        ok(!status, "Accept returned %#lx.\n", status);
+        if (status) goto cleanup;
+        wait = WaitForSingleObject(context.completed, 3000);
+        ok(wait == WAIT_OBJECT_0, "Connector wait returned %#lx.\n", wait);
+        if (wait != WAIT_OBJECT_0) goto cleanup;
+        trace("async-connect mode=%u before=%lx connect=%08lx handle=%u capacity=%Iu unchanged=%u type=%x\n",
+              mode, before, context.status, !!context.port, context.capacity,
+              !memcmp(&original, &context.message, sizeof(original)), context.message.header.Type);
+        ok(context.status == (context.flags && (mode & 4) ? STATUS_PORT_CONNECTION_REFUSED : STATUS_SUCCESS),
+           "Connect returned %#lx.\n", context.status);
+        if (!context.flags || (mode & 4))
+        {
+            ok(context.capacity == sizeof(context.message), "Capacity changed to %Iu.\n", context.capacity);
+            ok(!memcmp(&original, &context.message, sizeof(original)), "Connection buffer changed.\n");
+        }
+        else
+        {
+            ok(context.capacity == sizeof(context.message.header) + 16, "Reply capacity %Iu.\n", context.capacity);
+            ok((context.message.header.Type & 0xff) == 11, "Reply type %#x.\n", context.message.header.Type);
+            ok(context.message.header.ClientId.UniqueThread == ULongToHandle(GetCurrentThreadId()),
+               "Reply sender thread %p.\n", context.message.header.ClientId.UniqueThread);
+        }
+        if (context.status) goto cleanup;
+        wait = WaitForSingleObject(context.port, 500);
+        trace("async-connect mode=%u queue-wait=%lx\n", mode, wait);
+        ok(wait == (context.flags ? WAIT_TIMEOUT : WAIT_OBJECT_0), "Completion wait returned %#lx.\n", wait);
+        if (wait != WAIT_OBJECT_0) goto cleanup;
+        memset(&received, 0xcc, sizeof(received));
+        size = sizeof(received.header) + 4;
+        status = pNtAlpcSendWaitReceivePort(context.port, 0, NULL, NULL, &received.header, &size, NULL, &zero);
+        trace("async-connect mode=%u short=%08lx size=%Iu\n", mode, status, size);
+        ok(status == (mode < 8 && (mode & 4) ? STATUS_PORT_CONNECTION_REFUSED : STATUS_BUFFER_TOO_SMALL),
+           "Short receive returned %#lx.\n", status);
+        ok(size == (mode < 8 && (mode & 4) ? sizeof(received.header) + 4 : sizeof(received.header) + 16),
+           "Short receive size %Iu.\n", size);
+        size = sizeof(received);
+        status = pNtAlpcSendWaitReceivePort(context.port, 0, NULL, NULL, &received.header, &size, NULL, &zero);
+        trace("async-connect mode=%u receive=%08lx type=%x data=%u size=%Iu id-match=%u pid-self=%u tid-server=%u tid-client=%u tid-zero=%u byte=%x\n",
+              mode, status, received.header.Type, received.header.DataLength, size,
+              received.header.MessageId == incoming.header.MessageId,
+              received.header.ClientId.UniqueProcess == ULongToHandle(GetCurrentProcessId()),
+              received.header.ClientId.UniqueThread == ULongToHandle(GetCurrentThreadId()),
+              received.header.ClientId.UniqueThread == ULongToHandle(tid),
+              !received.header.ClientId.UniqueThread, received.data[0]);
+        ok(status == (mode < 8 && (mode & 4) ? STATUS_PORT_CONNECTION_REFUSED : STATUS_SUCCESS),
+           "Completion receive returned %#lx.\n", status);
+        ok(size == sizeof(received), "Ordinary receive changed capacity to %Iu.\n", size);
+        if (!status)
+        {
+            ok((received.header.Type & 0xff) == 11, "Completion type %#x.\n", received.header.Type);
+            ok(received.header.DataLength == 16, "Completion length %u.\n", received.header.DataLength);
+            ok(received.header.MessageId == incoming.header.MessageId, "Completion request id differs.\n");
+            ok(received.header.ClientId.UniqueProcess == ULongToHandle(GetCurrentProcessId()),
+               "Completion process %p.\n", received.header.ClientId.UniqueProcess);
+            ok(received.header.ClientId.UniqueThread == ULongToHandle(GetCurrentThreadId()),
+               "Completion thread %p.\n", received.header.ClientId.UniqueThread);
+            ok(received.data[0] == 0x63 && received.data[15] == 0x63, "Completion data differs.\n");
+        }
+        wait = WaitForSingleObject(context.port, 0);
+        ok(wait == WAIT_TIMEOUT, "Drained completion wait returned %#lx.\n", wait);
+        trace("async-connect mode=%u drained-wait=%lx\n", mode, wait);
+
+cleanup:
+        if (listener) CloseHandle(listener);
+        if (server) CloseHandle(server);
+        SetEvent(context.release);
+        if (thread)
+        {
+            ok(WaitForSingleObject(thread, 7000) == WAIT_OBJECT_0, "Connector did not exit.\n");
+            CloseHandle(thread);
+        }
+        if (context.port) CloseHandle(context.port);
+        if (context.completed) CloseHandle(context.completed);
+        if (context.release) CloseHandle(context.release);
+        winetest_pop_context();
+    }
+}
+
 START_TEST(alpc)
 {
+    char **argv;
+    int argc = winetest_get_mainargs(&argv);
+
     init_functions();
+    if (argc > 2 && !strcmp(argv[2], "async-connect"))
+    {
+        test_async_connection_completion();
+        return;
+    }
 
     test_AlpcGetHeaderSize();
     test_AlpcGetMessageAttribute();
@@ -930,5 +1173,6 @@ START_TEST(alpc)
     test_accepted_port_routing();
     test_empty_view_reply();
     test_NtAlpcCancelMessage();
+    test_async_connection_completion();
     test_power_port();
 }
