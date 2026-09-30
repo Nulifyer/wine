@@ -29,6 +29,7 @@
 
 #include "dcom.h"
 #include "combase_private.h"
+#include "winrtprovider.h"
 
 #include "wine/debug.h"
 #include "wine/exception.h"
@@ -3057,6 +3058,7 @@ HRESULT WINAPI CoGetPSClsid(REFIID riid, CLSID *pclsid)
     /* These interfaces are owned by combase's built-in proxy/stub factory. */
     if (IsEqualIID(riid, &IID_IClassFactory) || IsEqualIID(riid, &inspectable_iid) ||
             IsEqualIID(riid, &activation_factory_iid) ||
+            IsEqualIID(riid, &IID_IWineActivationFactoryProvider) ||
             IsEqualIID(riid, &priv_dragdrop_iid))
     {
         *pclsid = CLSID_PSFactoryBuffer;

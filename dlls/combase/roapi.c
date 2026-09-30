@@ -29,6 +29,7 @@
 #include "errhandlingapi.h"
 
 #include "combase_private.h"
+#include "winrtprovider.h"
 
 #include "wine/exception.h"
 #include "wine/debug.h"
@@ -58,7 +59,7 @@ struct activation_factory_registration;
 struct activation_factory_entry
 {
     struct list entry;
-    IUnknown IUnknown_iface;
+    IWineActivationFactoryProvider IWineActivationFactoryProvider_iface;
     HSTRING classid;
     PFNGETACTIVATIONFACTORY callback;
     HMODULE module;
@@ -77,9 +78,9 @@ struct activation_factory_registration
 static SRWLOCK activation_factory_lock = SRWLOCK_INIT;
 static struct list activation_factory_list = LIST_INIT(activation_factory_list);
 
-static inline struct activation_factory_entry *impl_from_activation_factory_provider(IUnknown *iface)
+static inline struct activation_factory_entry *impl_from_activation_factory_provider(IWineActivationFactoryProvider *iface)
 {
-    return CONTAINING_RECORD(iface, struct activation_factory_entry, IUnknown_iface);
+    return CONTAINING_RECORD(iface, struct activation_factory_entry, IWineActivationFactoryProvider_iface);
 }
 
 HRESULT package_get_class_path(const WCHAR *classid, WCHAR **path);
@@ -192,7 +193,7 @@ static ULONG activation_factory_registration_release(struct activation_factory_r
 }
 
 static HRESULT get_activation_factory_from_callback(struct activation_factory_entry *entry,
-        REFIID iid, void **factory)
+        REFIID iid, void **factory, HRESULT empty_factory_error)
 {
     IActivationFactory *activation_factory = NULL;
     HRESULT hr;
@@ -203,13 +204,13 @@ static HRESULT get_activation_factory_from_callback(struct activation_factory_en
         if (activation_factory)
             hr = IActivationFactory_QueryInterface(activation_factory, iid, factory);
         else
-            hr = E_UNEXPECTED;
+            hr = empty_factory_error;
     }
     if (activation_factory) IActivationFactory_Release(activation_factory);
     return hr;
 }
 
-static HRESULT WINAPI activation_factory_provider_QueryInterface(IUnknown *iface, REFIID iid, void **out)
+static HRESULT WINAPI activation_factory_provider_QueryInterface(IWineActivationFactoryProvider *iface, REFIID iid, void **out)
 {
     struct activation_factory_entry *entry = impl_from_activation_factory_provider(iface);
 
@@ -218,42 +219,44 @@ static HRESULT WINAPI activation_factory_provider_QueryInterface(IUnknown *iface
     if (!out) return E_POINTER;
     *out = NULL;
 
-    if (IsEqualIID(iid, &IID_IUnknown))
+    if (IsEqualIID(iid, &IID_IUnknown) || IsEqualIID(iid, &IID_IWineActivationFactoryProvider))
     {
         *out = iface;
-        IUnknown_AddRef(iface);
+        IWineActivationFactoryProvider_AddRef(iface);
         return S_OK;
     }
 
-    /* Keep the provider on the standard COM marshaler. The object returned by
-     * the class callback may choose its own marshaler after the remote client
-     * asks for the requested factory interface. */
-    if (IsEqualIID(iid, &IID_IProxyManager) || IsEqualIID(iid, &IID_IMarshal) ||
-            IsEqualIID(iid, &IID_IMarshal2) ||
-            IsEqualIID(iid, &IID_IStdMarshalInfo) || IsEqualIID(iid, &IID_IExternalConnection) ||
-            IsEqualIID(iid, &IID_IAgileObject) || IsEqualIID(iid, &IID_INoMarshal))
-        return E_NOINTERFACE;
-
-    return get_activation_factory_from_callback(entry, iid, out);
+    return E_NOINTERFACE;
 }
 
-static ULONG WINAPI activation_factory_provider_AddRef(IUnknown *iface)
+static HRESULT WINAPI activation_factory_provider_GetActivationFactory(IWineActivationFactoryProvider *iface,
+        REFIID iid, IUnknown **out)
+{
+    struct activation_factory_entry *entry = impl_from_activation_factory_provider(iface);
+
+    if (!out) return E_POINTER;
+    *out = NULL;
+    return get_activation_factory_from_callback(entry, iid, (void **)out, RPC_E_SERVERFAULT);
+}
+
+static ULONG WINAPI activation_factory_provider_AddRef(IWineActivationFactoryProvider *iface)
 {
     struct activation_factory_entry *entry = impl_from_activation_factory_provider(iface);
     return InterlockedIncrement(&entry->registration->refs);
 }
 
-static ULONG WINAPI activation_factory_provider_Release(IUnknown *iface)
+static ULONG WINAPI activation_factory_provider_Release(IWineActivationFactoryProvider *iface)
 {
     struct activation_factory_entry *entry = impl_from_activation_factory_provider(iface);
     return activation_factory_registration_release(entry->registration);
 }
 
-static const IUnknownVtbl activation_factory_provider_vtbl =
+static const IWineActivationFactoryProviderVtbl activation_factory_provider_vtbl =
 {
     activation_factory_provider_QueryInterface,
     activation_factory_provider_AddRef,
     activation_factory_provider_Release,
+    activation_factory_provider_GetActivationFactory,
 };
 
 static HRESULT create_stream_from_mip(const MInterfacePointer *mip, IStream **stream)
@@ -279,7 +282,7 @@ static HRESULT create_stream_from_mip(const MInterfacePointer *mip, IStream **st
     return hr;
 }
 
-static HRESULT marshal_activation_factory_provider(IUnknown *provider, MInterfacePointer **mip)
+static HRESULT marshal_activation_factory_provider(IWineActivationFactoryProvider *provider, MInterfacePointer **mip)
 {
     LARGE_INTEGER zero = {{0}};
     IStream *stream = NULL;
@@ -290,7 +293,7 @@ static HRESULT marshal_activation_factory_provider(IUnknown *provider, MInterfac
 
     *mip = NULL;
     if (FAILED(hr = CreateStreamOnHGlobal(NULL, TRUE, &stream))) return hr;
-    if (FAILED(hr = CoMarshalInterface(stream, &IID_IUnknown, provider,
+    if (FAILED(hr = CoMarshalInterface(stream, &IID_IWineActivationFactoryProvider, (IUnknown *)provider,
             MSHCTX_LOCAL | MSHCTX_NOSHAREDMEM, NULL, MSHLFLAGS_TABLESTRONG))) goto done;
     if (FAILED(hr = GetHGlobalFromStream(stream, &global))) goto release_marshal;
     if ((size = GlobalSize(global)) > ULONG_MAX || !(data = GlobalLock(global)))
@@ -331,7 +334,7 @@ static HRESULT release_marshaled_activation_factory(MInterfacePointer *mip)
 static HRESULT get_remote_activation_factory(HSTRING classid, REFIID iid, void **factory, BOOL *found)
 {
     MInterfacePointer *mip = NULL;
-    IUnknown *provider = NULL;
+    IWineActivationFactoryProvider *provider = NULL;
     IStream *stream = NULL;
     HRESULT hr;
 
@@ -343,10 +346,10 @@ static HRESULT get_remote_activation_factory(HSTRING classid, REFIID iid, void *
     *found = TRUE;
 
     if (SUCCEEDED(hr = create_stream_from_mip(mip, &stream)))
-        hr = CoUnmarshalInterface(stream, &IID_IUnknown, (void **)&provider);
-    if (SUCCEEDED(hr)) hr = IUnknown_QueryInterface(provider, iid, factory);
+        hr = CoUnmarshalInterface(stream, &IID_IWineActivationFactoryProvider, (void **)&provider);
+    if (SUCCEEDED(hr)) hr = IWineActivationFactoryProvider_GetActivationFactory(provider, iid, (IUnknown **)factory);
 
-    if (provider) IUnknown_Release(provider);
+    if (provider) IWineActivationFactoryProvider_Release(provider);
     if (stream) IStream_Release(stream);
     free(mip);
     return hr;
@@ -375,7 +378,7 @@ static HRESULT get_registered_activation_factory(HSTRING classid, REFIID iid, vo
 
     if (!registration) return REGDB_E_CLASSNOTREG;
 
-    hr = get_activation_factory_from_callback(entry, iid, factory);
+    hr = get_activation_factory_from_callback(entry, iid, factory, E_UNEXPECTED);
     activation_factory_registration_release(registration);
     return hr;
 }
@@ -900,7 +903,7 @@ HRESULT WINAPI RoRegisterActivationFactories(HSTRING *classes, PFNGETACTIVATIONF
     for (i = 0; i < count; ++i)
     {
         entry = &registration->entries[i];
-        entry->IUnknown_iface.lpVtbl = &activation_factory_provider_vtbl;
+        entry->IWineActivationFactoryProvider_iface.lpVtbl = &activation_factory_provider_vtbl;
         entry->callback = callbacks[i];
         entry->registration = registration;
         if (!classes[i] || !callbacks[i])
@@ -930,7 +933,7 @@ HRESULT WINAPI RoRegisterActivationFactories(HSTRING *classes, PFNGETACTIVATIONF
     for (i = 0; i < count; ++i)
     {
         entry = &registration->entries[i];
-        if (FAILED(hr = marshal_activation_factory_provider(&entry->IUnknown_iface, &mip))) goto failed;
+        if (FAILED(hr = marshal_activation_factory_provider(&entry->IWineActivationFactoryProvider_iface, &mip))) goto failed;
         hr = rpc_register_activation_factory(WindowsGetStringRawBuffer(entry->classid, NULL), mip,
                 &entry->rpc_cookie, &entry->rpc_context);
         if (FAILED(hr))

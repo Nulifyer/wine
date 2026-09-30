@@ -25,6 +25,7 @@ SOURCES = \
 	combase_unknwn.idl \
 	usrmarshal.c \
 	windowprop.c \
-	winrt.idl
+	winrt.idl \
+	winrtprovider.idl
 
 dlldata_EXTRADEFS = -DENTRY_PREFIX=COMBASE_ -DPROXY_CLSID=CLSID_PSFactoryBuffer

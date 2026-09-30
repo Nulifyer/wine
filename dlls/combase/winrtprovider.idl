@@ -1,0 +1,23 @@
+/*
+ * Private Wine WinRT registration-provider transport.
+ *
+ * Copyright 2026 LinuxNT contributors
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ */
+#pragma makedep header proxy
+import "unknwn.idl";
+
+[
+    object,
+    uuid(082ec731-82ad-4e37-9d39-2378917f2f9d),
+    pointer_default(unique)
+]
+interface IWineActivationFactoryProvider : IUnknown
+{
+    HRESULT GetActivationFactory([in] REFIID iid,
+            [out, iid_is(iid)] IUnknown **factory);
+}
