@@ -81,7 +81,8 @@ static inline HRESULT generate_ipid(struct stub_manager *m, IPID *ipid)
     }
 
     ipid->Data1 = InterlockedIncrement(&m->apt->ipidc);
-    ipid->Data2 = !m->apt->multi_threaded ? (USHORT)m->apt->tid : 0;
+    ipid->Data2 = m->apt->neutral ? APARTMENT_NEUTRAL_IPID_TID :
+            (!m->apt->multi_threaded ? (USHORT)m->apt->tid : 0);
     ipid->Data3 = (USHORT)GetCurrentProcessId();
     return S_OK;
 }
@@ -627,6 +628,8 @@ static HRESULT ipid_to_ifstub(const IPID *ipid, struct apartment **stub_apt,
     /* FIXME: hack for IRemUnknown */
     if (ipid->Data2 == 0xffff)
         *stub_apt = apartment_findfromoxid(*(const OXID *)ipid->Data4);
+    else if (ipid->Data2 == APARTMENT_NEUTRAL_IPID_TID && ipid->Data3 == (USHORT)GetCurrentProcessId())
+        *stub_apt = apartment_findfromoxid(((OXID)GetCurrentProcessId() << 32) | APARTMENT_NEUTRAL_OXID);
     else if (!ipid->Data2 && (ipid->Data3 == (USHORT)GetCurrentProcessId()))
         *stub_apt = apartment_get_mta();
     else
@@ -855,7 +858,8 @@ static HRESULT WINAPI Rundown_RemQueryInterface(IRundown *iface,
     for (i = 0; i < cIids; i++)
     {
         HRESULT hrobj = marshal_object(apt, &(*ppQIResults)[i].std, &iids[i],
-                                       stubmgr->object, dest_context, dest_context_data, MSHLFLAGS_NORMAL);
+                                       stubmgr->object, dest_context, dest_context_data,
+                                       MSHLFLAGS_NORMAL | (ifstub->flags & MSHLFLAGSP_FREETHREADED));
         if (hrobj == S_OK)
             successful_qis++;
         (*ppQIResults)[i].hResult = hrobj;

@@ -34,6 +34,7 @@ struct apartment
     struct list entry;
 
     LONG  refs;              /* refcount of the apartment (LOCK) */
+    BOOL neutral;           /* process free-threaded export/proxy owner (RO) */
     BOOL multi_threaded;     /* multi-threaded or single-threaded apartment? (RO) */
     DWORD tid;               /* thread id (RO) */
     OXID oxid;               /* object exporter ID (RO) */
@@ -176,7 +177,8 @@ HRESULT rpc_get_local_class_object_session(REFCLSID clsid, REFIID iid, DWORD ses
 HRESULT rpc_register_local_server(REFCLSID clsid, IStream *stream, DWORD flags, unsigned int *cookie);
 HRESULT rpc_revoke_local_server(unsigned int cookie);
 HRESULT rpc_create_clientchannel(const OXID *oxid, const IPID *ipid, const OXID_INFO *oxid_info, const IID *iid,
-        DWORD dest_context, void *dest_context_data, IRpcChannelBuffer **chan, struct apartment *apt);
+        DWORD dest_context, void *dest_context_data, IRpcChannelBuffer **chan, struct apartment *apt,
+        BOOL free_threaded);
 HRESULT rpc_create_serverchannel(DWORD dest_context, void *dest_context_data, IRpcChannelBuffer **chan);
 HRESULT rpc_register_interface(REFIID riid);
 void rpc_unregister_interface(REFIID riid, BOOL wait);
@@ -229,6 +231,9 @@ HRESULT apartment_increment_mta_usage(CO_MTA_USAGE_COOKIE *cookie);
 void apartment_decrement_mta_usage(CO_MTA_USAGE_COOKIE cookie);
 HRESULT ensure_mta(void);
 struct apartment * apartment_get_mta(void);
+struct apartment * apartment_get_neutral(void);
+#define APARTMENT_NEUTRAL_OXID 0xcafd
+#define APARTMENT_NEUTRAL_IPID_TID 0xfffe
 HRESULT apartment_get_inproc_class_object(struct apartment *apt, const struct class_reg_data *regdata,
         REFCLSID rclsid, REFIID riid, DWORD class_context, void **ppv);
 HRESULT apartment_get_local_server_stream(struct apartment *apt, IStream **ret);
@@ -244,6 +249,10 @@ struct apartment * apartment_findfromtid(DWORD tid);
 
 HRESULT marshal_object(struct apartment *apt, STDOBJREF *stdobjref, REFIID riid, IUnknown *object,
         DWORD dest_context, void *dest_context_data, MSHLFLAGS mshlflags);
+/* Private flags used by the free-threaded standard marshaling path. */
+#define MSHLFLAGSP_FREETHREADED 0x40000
+#define SORFP_FREETHREADED 0x200
+
 HRESULT unmarshal_object(const STDOBJREF *stdobjref, struct apartment *apt, MSHCTX dest_context,
         void *dest_context_data, REFIID riid, const OXID_INFO *oxid_info, void **object);
 

@@ -94,6 +94,7 @@ typedef struct
 
     RPC_BINDING_HANDLE     bind; /* handle to the remote server */
     OXID                   oxid; /* apartment in which the channel is valid */
+    BOOL                   free_threaded; /* standard free-threaded object reference */
     DWORD                  server_pid; /* id of server process */
     HANDLE                 event; /* cached event handle */
     IID                    iid; /* IID of the proxy this belongs to */
@@ -1659,7 +1660,7 @@ static inline HRESULT ClientRpcChannelBuffer_IsCorrectApartment(ClientRpcChannel
 {
     if (!apt)
         return S_FALSE;
-    if (This->oxid != apartment_getoxid(apt))
+    if (!This->free_threaded && This->oxid != apartment_getoxid(apt))
         return S_FALSE;
     return S_OK;
 }
@@ -1949,7 +1950,7 @@ static const IRpcChannelBufferVtbl ServerRpcChannelBufferVtbl =
 HRESULT rpc_create_clientchannel(const OXID *oxid, const IPID *ipid,
                                 const OXID_INFO *oxid_info, const IID *iid,
                                 DWORD dest_context, void *dest_context_data,
-                                IRpcChannelBuffer **chan, struct apartment *apt)
+                                IRpcChannelBuffer **chan, struct apartment *apt, BOOL free_threaded)
 {
     ClientRpcChannelBuffer *This;
     WCHAR                   endpoint[200];
@@ -2004,6 +2005,7 @@ HRESULT rpc_create_clientchannel(const OXID *oxid, const IPID *ipid,
     This->super.dest_context_data = dest_context_data;
     This->bind = bind;
     This->oxid = apartment_getoxid(apt);
+    This->free_threaded = free_threaded;
     This->server_pid = oxid_info->dwPid;
     This->event = NULL;
     This->iid = *iid;

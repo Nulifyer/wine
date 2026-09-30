@@ -302,7 +302,8 @@ static HRESULT WINAPI ftmarshaler_GetMarshalSizeMax(IMarshal *iface, REFIID riid
     }
 
     /* Use the standard marshaller to handle all other cases */
-    CoGetStandardMarshal(riid, pv, dest_context, pvDestContext, mshlflags, &marshal);
+    if (FAILED(hr = CoGetStandardMarshal(riid, pv, dest_context, pvDestContext, mshlflags, &marshal)))
+        return hr;
     hr = IMarshal_GetMarshalSizeMax(marshal, riid, pv, dest_context, pvDestContext, mshlflags, size);
     IMarshal_Release(marshal);
     return hr;
@@ -346,8 +347,10 @@ static HRESULT WINAPI ftmarshaler_MarshalInterface(IMarshal *iface, IStream *str
     }
 
     /* Use the standard marshaler to handle all other cases */
-    CoGetStandardMarshal(riid, pv, dest_context, pvDestContext, mshlflags, &marshal);
-    hr = IMarshal_MarshalInterface(marshal, stream, riid, pv, dest_context, pvDestContext, mshlflags);
+    if (FAILED(hr = CoGetStandardMarshal(riid, pv, dest_context, pvDestContext, mshlflags, &marshal)))
+        return hr;
+    hr = IMarshal_MarshalInterface(marshal, stream, riid, pv, dest_context, pvDestContext,
+            mshlflags | MSHLFLAGSP_FREETHREADED);
     IMarshal_Release(marshal);
     return hr;
 }
@@ -996,7 +999,7 @@ HRESULT marshal_object(struct apartment *apt, STDOBJREF *stdobjref, REFIID riid,
     if (!(manager = get_stub_manager_from_object(apt, object, TRUE)))
         return E_OUTOFMEMORY;
 
-    stdobjref->flags = SORF_NULL;
+    stdobjref->flags = (mshlflags & MSHLFLAGSP_FREETHREADED) ? SORFP_FREETHREADED : SORF_NULL;
     if (mshlflags & MSHLFLAGS_TABLEWEAK)
         stdobjref->flags |= SORFP_TABLEWEAK;
     if (mshlflags & MSHLFLAGS_NOPING)
@@ -2626,7 +2629,14 @@ static HRESULT WINAPI StdMarshalImpl_MarshalInterface(IMarshal *iface, IStream *
 
     TRACE("(...,%s,...)\n", debugstr_guid(riid));
 
-    if (!(apt = apartment_get_current_or_mta()))
+    if (mshlflags & MSHLFLAGSP_FREETHREADED)
+    {
+        if (!InternalIsProcessInitialized()) return CO_E_NOTINITIALIZED;
+        apt = apartment_get_neutral();
+    }
+    else
+        apt = apartment_get_current_or_mta();
+    if (!apt)
     {
         ERR("Apartment not initialized\n");
         return CO_E_NOTINITIALIZED;
@@ -2655,6 +2665,7 @@ HRESULT unmarshal_object(const STDOBJREF *stdobjref, struct apartment *apt, MSHC
         void *dest_context_data, REFIID riid, const OXID_INFO *oxid_info, void **object)
 {
     struct proxy_manager *proxy_manager = NULL;
+    struct apartment *free_threaded_apt = NULL;
     HRESULT hr = S_OK;
 
     assert(apt);
@@ -2664,6 +2675,14 @@ HRESULT unmarshal_object(const STDOBJREF *stdobjref, struct apartment *apt, MSHC
         wine_dbgstr_longlong(stdobjref->oxid),
         wine_dbgstr_longlong(stdobjref->oid),
         debugstr_guid(&stdobjref->ipid));
+
+    /* Free-threaded identities belong to neutral process storage, rather than the
+     * unmarshaling STA. Their lifetime still ends with COM teardown. */
+    if (stdobjref->flags & SORFP_FREETHREADED)
+    {
+        if (!(free_threaded_apt = apartment_get_neutral())) return E_OUTOFMEMORY;
+        apt = free_threaded_apt;
+    }
 
     /* create a new proxy manager if one doesn't already exist for the
      * object */
@@ -2688,7 +2707,8 @@ HRESULT unmarshal_object(const STDOBJREF *stdobjref, struct apartment *apt, MSHC
             IRpcChannelBuffer *chanbuf;
             hr = rpc_create_clientchannel(&stdobjref->oxid, &stdobjref->ipid,
                     &proxy_manager->oxid_info, riid, proxy_manager->dest_context,
-                    proxy_manager->dest_context_data, &chanbuf, apt);
+                    proxy_manager->dest_context_data, &chanbuf, apt,
+                    !!(stdobjref->flags & SORFP_FREETHREADED));
             if (hr == S_OK)
                 hr = proxy_manager_create_ifproxy(proxy_manager, stdobjref, riid, chanbuf, &ifproxy);
         }
@@ -2712,6 +2732,7 @@ HRESULT unmarshal_object(const STDOBJREF *stdobjref, struct apartment *apt, MSHC
      * will hold on to the remaining reference for us */
     if (proxy_manager) IMultiQI_Release(&proxy_manager->IMultiQI_iface);
 
+    if (free_threaded_apt) apartment_release(free_threaded_apt);
     return hr;
 }
 
