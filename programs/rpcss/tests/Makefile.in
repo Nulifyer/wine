@@ -1,6 +1,8 @@
 TESTDLL = rpcss.exe
-IMPORTS = rpcrt4 ole32 advapi32 uuid
+IMPORTS = rpcrt4 ole32 advapi32 ntdll uuid
 
 SOURCES = \
 	irpcss.idl \
-	registration.c
+	registration.c \
+	session.c \
+	stdactivator.idl

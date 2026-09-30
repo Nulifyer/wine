@@ -1,9 +1,11 @@
 MODULE    = rpcss.exe
-IMPORTS   = rpcrt4 advapi32
+IMPORTS   = rpcrt4 advapi32 wtsapi32
 
 EXTRADLLFLAGS = -mconsole -municode
 
 SOURCES = \
+	activation.c \
+	class.c \
 	epm.idl \
 	epmp.c \
 	irot.idl \

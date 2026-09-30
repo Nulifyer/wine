@@ -171,6 +171,8 @@ HRESULT apartment_disconnectproxies(struct apartment *apt);
 /* RpcSs interface */
 HRESULT rpcss_get_next_seqid(DWORD *id);
 HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj);
+HRESULT rpc_get_local_class_object_session(REFCLSID clsid, REFIID iid, DWORD session,
+                                         DWORD context, void **object);
 HRESULT rpc_register_local_server(REFCLSID clsid, IStream *stream, DWORD flags, unsigned int *cookie);
 HRESULT rpc_revoke_local_server(unsigned int cookie);
 HRESULT rpc_create_clientchannel(const OXID *oxid, const IPID *ipid, const OXID_INFO *oxid_info, const IID *iid,

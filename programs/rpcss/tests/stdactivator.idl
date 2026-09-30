@@ -1,0 +1,2 @@
+#pragma makedep header
+#include "../../../dlls/combase/stdactivator.idl"

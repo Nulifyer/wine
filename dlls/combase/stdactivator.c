@@ -70,44 +70,61 @@ static ULONG WINAPI activator_Release(IStandardActivator *iface)
     return refs;
 }
 
-/* Never silently route a requested foreign session through the existing
- * session-unaware RPCSS class registry.  Its authoritative selection and
- * launch policy need a separate implementation before this partition opens. */
-static HRESULT activation_context(struct standard_activator *activator, DWORD context)
+/* S_FALSE selects the shared registered-server owner. Other methods retain
+ * their guard until their explicit-session activation contracts are covered. */
+static HRESULT activation_context(struct standard_activator *activator, DWORD context,
+                                  BOOL allow_scoped, DWORD *target_session)
 {
-    BOOL present, console, impersonating;
+    BOOL present, console, remote, impersonating;
     DWORD session, current;
 
     AcquireSRWLockShared(&activator->lock);
     present = activator->properties_present;
     console = activator->console;
+    remote = activator->remote;
     impersonating = activator->impersonating;
     session = activator->session;
     ReleaseSRWLockShared(&activator->lock);
     if (!present) return S_OK;
-    if (context & (CLSCTX_LOCAL_SERVER | CLSCTX_REMOTE_SERVER))
-    {
-        TRACE("explicit session %lu console %d requires scoped activation, context %#lx\n", session, console, context);
-        return E_NOTIMPL;
-    }
     if (impersonating) return E_NOTIMPL;
-    if (console) session = WTSGetActiveConsoleSessionId();
-    if (session == ~0u) return E_NOTIMPL;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &current))
         return HRESULT_FROM_WIN32(GetLastError());
-    if (session != current) return E_NOTIMPL;
+    /* Native AddHydraSessionID uses the current process when the third
+     * property is false. Stored getters still return the original state. */
+    if (!remote)
+    {
+        session = current;
+        console = FALSE;
+    }
+    if (context & (CLSCTX_LOCAL_SERVER | CLSCTX_REMOTE_SERVER))
+    {
+        if (!allow_scoped || console || session == ~0u || !(context & CLSCTX_LOCAL_SERVER) ||
+            (context & ~(CLSCTX_INPROC_SERVER | CLSCTX_INPROC_HANDLER | CLSCTX_LOCAL_SERVER | CLSCTX_REMOTE_SERVER)))
+            return E_NOTIMPL;
+        *target_session = session;
+        return S_FALSE;
+    }
+    if (console) session = WTSGetActiveConsoleSessionId();
+    if (session == ~0u || session != current) return E_NOTIMPL;
     return S_OK;
 }
 
 static HRESULT WINAPI activator_StandardGetClassObject(IStandardActivator *iface, REFCLSID clsid,
         DWORD context, COSERVERINFO *server, REFIID iid, void **object)
 {
+    DWORD session;
     HRESULT hr;
 
     TRACE("class %s context %#lx iid %s\n", debugstr_guid(clsid), context, debugstr_guid(iid));
     if (!object) return E_POINTER;
     *object = NULL;
-    if (FAILED(hr = activation_context(impl_from_IStandardActivator(iface), context))) return hr;
+    hr = activation_context(impl_from_IStandardActivator(iface), context, TRUE, &session);
+    if (FAILED(hr)) return hr;
+    if (hr == S_FALSE)
+    {
+        if (server) return E_NOTIMPL;
+        return rpc_get_local_class_object_session(clsid, iid, session, context, object);
+    }
     return CoGetClassObject(clsid, context, server, iid, object);
 }
 
@@ -116,7 +133,7 @@ static HRESULT WINAPI activator_StandardCreateInstance(IStandardActivator *iface
 {
     HRESULT hr;
 
-    if (FAILED(hr = activation_context(impl_from_IStandardActivator(iface), context))) return hr;
+    if (FAILED(hr = activation_context(impl_from_IStandardActivator(iface), context, FALSE, NULL))) return hr;
     return CoCreateInstanceEx(clsid, outer, context, server, count, results);
 }
 
@@ -126,7 +143,7 @@ static HRESULT WINAPI activator_StandardGetInstanceFromFile(IStandardActivator *
 {
     HRESULT hr;
 
-    if (FAILED(hr = activation_context(impl_from_IStandardActivator(iface), context))) return hr;
+    if (FAILED(hr = activation_context(impl_from_IStandardActivator(iface), context, FALSE, NULL))) return hr;
     return CoGetInstanceFromFile(server, clsid, outer, context, mode, name, count, results);
 }
 
@@ -136,7 +153,7 @@ static HRESULT WINAPI activator_StandardGetInstanceFromIStorage(IStandardActivat
 {
     HRESULT hr;
 
-    if (FAILED(hr = activation_context(impl_from_IStandardActivator(iface), context))) return hr;
+    if (FAILED(hr = activation_context(impl_from_IStandardActivator(iface), context, FALSE, NULL))) return hr;
     return CoGetInstanceFromIStorage(server, clsid, outer, context, storage, count, results);
 }
 

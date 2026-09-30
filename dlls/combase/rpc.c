@@ -595,6 +595,14 @@ static HRESULT rpcss_get_class_object(REFCLSID rclsid, PMInterfacePointer *objre
     RPCSS_CALL_END
 }
 
+static HRESULT rpcss_get_class_object_session(REFCLSID clsid, DWORD session, DWORD context,
+                                               PMInterfacePointer *objref)
+{
+    RPCSS_CALL_START
+    hr = irpcss_get_class_object_session(get_irpcss_handle(), clsid, session, context, objref);
+    RPCSS_CALL_END
+}
+
 static DWORD start_local_service(const WCHAR *name, DWORD num, LPCWSTR *params)
 {
     SC_HANDLE handle, hsvc;
@@ -835,15 +843,45 @@ static HRESULT create_surrogate_server(REFCLSID rclsid, HANDLE *process)
     return S_OK;
 }
 
-HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj)
+static HRESULT unmarshal_local_class_object(REFCLSID rclsid, REFIID riid,
+                                            PMInterfacePointer objref, void **obj)
 {
-    PMInterfacePointer objref = NULL;
     IServiceProvider *local_server;
     IStream *stream = NULL;
     ULARGE_INTEGER newpos;
     LARGE_INTEGER seekto;
-    int tries = 0;
     ULONG length;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = CreateStreamOnHGlobal(0, TRUE, &stream)))
+        hr = IStream_Write(stream, objref->abData, objref->ulCntData, &length);
+
+    MIDL_user_free(objref);
+
+    if (SUCCEEDED(hr))
+    {
+        seekto.QuadPart = 0;
+        IStream_Seek(stream, seekto, STREAM_SEEK_SET, &newpos);
+
+        TRACE("Unmarshalling local server.\n");
+        hr = CoUnmarshalInterface(stream, &IID_IServiceProvider, (void **)&local_server);
+        if (SUCCEEDED(hr))
+        {
+            hr = IServiceProvider_QueryService(local_server, rclsid, riid, obj);
+            IServiceProvider_Release(local_server);
+        }
+    }
+
+    if (stream)
+        IStream_Release(stream);
+
+    return hr;
+}
+
+HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj)
+{
+    PMInterfacePointer objref = NULL;
+    int tries = 0;
     HRESULT hr;
     static const int MAXTRIES = 30; /* 30 seconds */
 
@@ -898,29 +936,19 @@ HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj)
     if (!objref || tries >= MAXTRIES)
         return E_NOINTERFACE;
 
-    if (SUCCEEDED(hr = CreateStreamOnHGlobal(0, TRUE, &stream)))
-        hr = IStream_Write(stream, objref->abData, objref->ulCntData, &length);
+    return unmarshal_local_class_object(rclsid, riid, objref, obj);
+}
 
-    MIDL_user_free(objref);
+HRESULT rpc_get_local_class_object_session(REFCLSID clsid, REFIID iid, DWORD session,
+                                           DWORD context, void **object)
+{
+    PMInterfacePointer objref = NULL;
+    HRESULT hr;
 
-    if (SUCCEEDED(hr))
-    {
-        seekto.QuadPart = 0;
-        IStream_Seek(stream, seekto, STREAM_SEEK_SET, &newpos);
-
-        TRACE("Unmarshalling local server.\n");
-        hr = CoUnmarshalInterface(stream, &IID_IServiceProvider, (void **)&local_server);
-        if (SUCCEEDED(hr))
-        {
-            hr = IServiceProvider_QueryService(local_server, rclsid, riid, obj);
-            IServiceProvider_Release(local_server);
-        }
-    }
-
-    if (stream)
-        IStream_Release(stream);
-
-    return hr;
+    hr = rpcss_get_class_object_session(clsid, session, context, &objref);
+    if (FAILED(hr)) return hr;
+    if (!objref) return E_NOINTERFACE;
+    return unmarshal_local_class_object(clsid, iid, objref, object);
 }
 
 HRESULT rpc_register_local_server(REFCLSID clsid, IStream *stream, DWORD flags, unsigned int *cookie)

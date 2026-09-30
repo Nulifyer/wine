@@ -160,13 +160,20 @@ static void test_activator(void)
             factory = (void *)0xdeadbeef;
             hr = IStandardActivator_StandardGetClassObject(activator, &test_clsid, CLSCTX_LOCAL_SERVER,
                                                          NULL, &IID_IClassFactory, (void **)&factory);
-            ok(hr == E_NOTIMPL && !factory, "Explicit session used unscoped registry, %#lx, %p.\n", hr, factory);
+            ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) && !factory,
+               "Missing machine class policy returned %#lx, %p.\n", hr, factory);
             hr = ISpecialSystemProperties_SetSessionId(properties, current + 1, FALSE, TRUE);
             ok(hr == S_OK, "Foreign-session setter returned %#lx.\n", hr);
             factory = (void *)0xdeadbeef;
             hr = IStandardActivator_StandardGetClassObject(activator, &test_clsid, CLSCTX_INPROC_SERVER,
                                                          NULL, &IID_IClassFactory, (void **)&factory);
             ok(hr == E_NOTIMPL && !factory, "Foreign session silently routed locally, %#lx, %p.\n", hr, factory);
+            hr = ISpecialSystemProperties_SetSessionId(properties, current + 1, FALSE, FALSE);
+            ok(hr == S_OK, "Current-process override setter returned %#lx.\n", hr);
+            hr = IStandardActivator_StandardGetClassObject(activator, &test_clsid, CLSCTX_INPROC_SERVER,
+                                                         NULL, &IID_IClassFactory, (void **)&factory);
+            ok(hr == S_OK && factory == &test_factory, "Third-BOOL routing returned %#lx.\n", hr);
+            if (SUCCEEDED(hr)) IClassFactory_Release(factory);
             hr = ISpecialSystemProperties_SetLUARunLevel(properties, 1, (ULONG_PTR)0x123456789abcdef0ULL);
             ok(hr == E_NOTIMPL, "Unimplemented LUA policy returned %#lx.\n", hr);
         }
