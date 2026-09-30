@@ -25,6 +25,7 @@ cpp_quote("#define IRPCSS_ENDPOINT {'i','r','p','c','s','s',0}")
 [
     uuid(85da4974-edc7-40ff-bad4-9c4525a8d044),
     version(0.0),
+    strict_context_handle
 ]
 interface Irpcss
 {
@@ -54,4 +55,18 @@ interface Irpcss
         [in] DWORD session,
         [in] DWORD context,
         [out] PMInterfacePointer *object);
+
+    typedef [context_handle] void *ExporterContext;
+
+    HRESULT irpcss_register_oxid([in] handle_t handle, [in] OXID oxid);
+    HRESULT irpcss_revoke_oxid([in] handle_t handle, [in] OXID oxid);
+    HRESULT irpcss_resolve_oxid(
+        [in] handle_t handle, [in] OXID oxid,
+        [out] ExporterContext *context, [out] DWORD *process_id,
+        [out] BOOL *app_silo, [out] HRESULT *app_silo_status);
+    HRESULT irpcss_query_exporter(
+        [in] handle_t handle, [in] ExporterContext context, [out] BOOL *alive);
+    HRESULT irpcss_release_exporter(
+        [in] handle_t handle, [in, out] ExporterContext *context);
+
 }

@@ -180,6 +180,18 @@ HRESULT rpc_create_clientchannel(const OXID *oxid, const IPID *ipid, const OXID_
 HRESULT rpc_create_serverchannel(DWORD dest_context, void *dest_context_data, IRpcChannelBuffer **chan);
 HRESULT rpc_register_interface(REFIID riid);
 void rpc_unregister_interface(REFIID riid, BOOL wait);
+struct exporter_identity
+{
+    void *context;
+    DWORD process_id;
+    BOOL app_silo;
+    HRESULT app_silo_status;
+};
+HRESULT rpc_register_exporter(OXID oxid);
+HRESULT rpc_resolve_exporter(OXID oxid, struct exporter_identity *identity);
+HRESULT rpc_query_exporter(void *context, BOOL *alive);
+void rpc_release_exporter(void **context);
+void rpc_revoke_exporter(OXID oxid);
 HRESULT rpc_resolve_oxid(OXID oxid, OXID_INFO *oxid_info);
 void rpc_start_remoting(struct apartment *apt);
 HRESULT rpc_register_channel_hook(REFGUID rguid, IChannelHook *hook);

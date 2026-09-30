@@ -1050,6 +1050,10 @@ HRESULT start_apartment_remote_unknown(struct apartment *apt)
     EnterCriticalSection(&apt->cs);
     if (!apt->remunk_exported)
     {
+        HRESULT identity_hr = rpc_register_exporter(apt->oxid);
+        if (FAILED(identity_hr))
+            WARN("Failed to register exporter %s, %#lx\n", wine_dbgstr_longlong(apt->oxid), identity_hr);
+
         /* create the IRundown object */
         hr = Rundown_Construct(&pRundown);
         if (hr == S_OK)

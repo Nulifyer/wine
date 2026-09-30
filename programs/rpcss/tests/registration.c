@@ -131,6 +131,9 @@ static void run_publisher(const char *guid_string, const char *pipe_string, DWOR
     hr = register_class(&clsid, REGCLS_MULTIPLEUSE, value, &cookie);
     ok(hr == S_OK, "Child registration returned %#lx.\n", hr);
     if (FAILED(hr)) ExitProcess(3);
+    hr = irpcss_register_oxid(binding, ((OXID)GetCurrentProcessId() << 32) | 0xffff0002);
+    ok(hr == S_OK, "Child exporter publication returned %#lx.\n", hr);
+    if (FAILED(hr)) ExitProcess(4);
     ok(WriteFile(pipe, &cookie, sizeof(cookie), &written, NULL) && written == sizeof(cookie),
        "Report cookie failed: %lu.\n", GetLastError());
     CloseHandle(pipe);
@@ -238,6 +241,61 @@ static void test_registration_ownership(void)
     }
 }
 
+static void test_exporter_ownership(void)
+{
+    OXID own = ((OXID)GetCurrentProcessId() << 32) | 0xffff0001, foreign;
+    ExporterContext context = NULL, missing = NULL;
+    PROCESS_INFORMATION child;
+    DWORD pid = 0xdeadbeef;
+    BOOL silo = TRUE, alive = FALSE;
+    HRESULT hr, silo_status = S_OK;
+    unsigned int cookie;
+    GUID clsid;
+
+    hr = irpcss_resolve_oxid(binding, own, &missing, &pid, &silo, &silo_status);
+    ok(hr == CO_E_OBJNOTCONNECTED && !missing && !pid && !silo && silo_status == CO_E_NOT_SUPPORTED,
+       "Unknown exporter %#lx/%p/%lu/%u/%#lx.\n", hr, missing, pid, silo, silo_status);
+    hr = irpcss_register_oxid(binding, own ^ ((OXID)4 << 32));
+    ok(hr == E_ACCESSDENIED, "Spoofed publisher returned %#lx.\n", hr);
+    hr = irpcss_register_oxid(binding, own);
+    ok(hr == S_OK, "Publish own exporter %#lx.\n", hr);
+    if (FAILED(hr)) return;
+    hr = irpcss_register_oxid(binding, own);
+    ok(hr == S_OK, "Repeat publication %#lx.\n", hr);
+    hr = irpcss_resolve_oxid(binding, own, &context, &pid, &silo, &silo_status);
+    ok(hr == S_OK && context && pid == GetCurrentProcessId(), "Own identity %#lx/%p/%lu.\n", hr, context, pid);
+    hr = irpcss_revoke_oxid(binding, own);
+    ok(hr == S_OK, "Revoke own exporter %#lx.\n", hr);
+    if (context)
+    {
+        hr = irpcss_query_exporter(binding, context, &alive);
+        ok(hr == S_OK && alive, "Retained revoked exporter %#lx/%u.\n", hr, alive);
+        hr = irpcss_release_exporter(binding, &context);
+        ok(hr == S_OK && !context, "Release own context %#lx/%p.\n", hr, context);
+    }
+    CoCreateGuid(&clsid);
+    if (!start_publisher(&clsid, 555, &child, &cookie)) return;
+    foreign = ((OXID)child.dwProcessId << 32) | 0xffff0002;
+    hr = irpcss_register_oxid(binding, foreign);
+    ok(hr == E_ACCESSDENIED, "Acquire foreign registration %#lx.\n", hr);
+    hr = irpcss_revoke_oxid(binding, foreign);
+    ok(hr == E_ACCESSDENIED, "Revoke foreign registration %#lx.\n", hr);
+    hr = irpcss_resolve_oxid(binding, foreign, &context, &pid, &silo, &silo_status);
+    ok(hr == S_OK && context && pid == child.dwProcessId, "Child identity %#lx/%p/%lu.\n", hr, context, pid);
+    stop_publisher(&child);
+    if (context)
+    {
+        alive = TRUE;
+        hr = irpcss_query_exporter(binding, context, &alive);
+        ok(hr == S_OK && !alive, "Exited exporter %#lx/%u.\n", hr, alive);
+        hr = irpcss_release_exporter(binding, &context);
+        ok(hr == S_OK && !context, "Release child context %#lx/%p.\n", hr, context);
+    }
+    hr = irpcss_resolve_oxid(binding, foreign, &missing, &pid, &silo, &silo_status);
+    ok(hr == CO_E_OBJNOTCONNECTED && !missing && !pid && !silo,
+       "Exited registration %#lx/%p/%lu/%u.\n", hr, missing, pid, silo);
+}
+
 static void test_failed_publication(void)
 {
     SECURITY_DESCRIPTOR descriptor;
@@ -302,6 +360,7 @@ START_TEST(registration)
     if (create_binding() && start_rpcss())
     {
         test_registration_ownership();
+        test_exporter_ownership();
         test_failed_publication();
         RpcBindingFree(&binding);
     }

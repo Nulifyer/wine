@@ -497,6 +497,60 @@ HRESULT rpcss_get_next_seqid(DWORD *id)
     RPCSS_CALL_END
 }
 
+HRESULT rpc_register_exporter(OXID oxid)
+{
+    RPCSS_CALL_START
+    hr = irpcss_register_oxid(get_irpcss_handle(), oxid);
+    RPCSS_CALL_END
+}
+
+static HRESULT rpcss_revoke_exporter(OXID oxid)
+{
+    RPCSS_CALL_START
+    hr = irpcss_revoke_oxid(get_irpcss_handle(), oxid);
+    RPCSS_CALL_END
+}
+
+void rpc_revoke_exporter(OXID oxid)
+{
+    HRESULT hr = rpcss_revoke_exporter(oxid);
+    if (FAILED(hr)) WARN("Failed to revoke exporter %s, %#lx\n", wine_dbgstr_longlong(oxid), hr);
+}
+
+HRESULT rpc_resolve_exporter(OXID oxid, struct exporter_identity *identity)
+{
+    RPCSS_CALL_START
+    hr = irpcss_resolve_oxid(get_irpcss_handle(), oxid, &identity->context,
+                            &identity->process_id, &identity->app_silo, &identity->app_silo_status);
+    RPCSS_CALL_END
+}
+
+HRESULT rpc_query_exporter(void *context, BOOL *alive)
+{
+    RPCSS_CALL_START
+    hr = irpcss_query_exporter(get_irpcss_handle(), context, alive);
+    RPCSS_CALL_END
+}
+
+static HRESULT rpcss_release_exporter(void **context)
+{
+    RPCSS_CALL_START
+    hr = irpcss_release_exporter(get_irpcss_handle(), context);
+    RPCSS_CALL_END
+}
+
+void rpc_release_exporter(void **context)
+{
+    HRESULT hr;
+    if (!*context) return;
+    hr = rpcss_release_exporter(context);
+    if (FAILED(hr))
+    {
+        WARN("Failed to release exporter context, %#lx\n", hr);
+        RpcSmDestroyClientContext(context);
+    }
+}
+
 HRESULT WINAPI InternalIrotRegister(const MonikerComparisonData *moniker_data,
         const InterfaceData *object, const InterfaceData *moniker,
         const FILETIME *time, DWORD flags, IrotCookie *cookie, IrotContextHandle *ctxt_handle)

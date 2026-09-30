@@ -520,6 +520,8 @@ void apartment_release(struct apartment *apt)
          * apartment, which it must do. */
         assert(list_empty(&apt->stubmgrs));
 
+        if (apt->remoting_started) rpc_revoke_exporter(apt->oxid);
+
         if (apt->filter) IMessageFilter_Release(apt->filter);
 
         /* free as many unused libraries as possible... */

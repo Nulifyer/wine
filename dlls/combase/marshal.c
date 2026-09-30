@@ -42,6 +42,21 @@ HRESULT WINAPI RPC_CreateClientChannel(const OXID *oxid, const IPID *ipid,
 /* private flag indicating that the object was marshaled as table-weak */
 #define SORFP_TABLEWEAK SORF_OXRES1
 
+/* Private local proxy interface, as declared by modern combase symbols. */
+typedef struct IProxyServerIdentity IProxyServerIdentity;
+typedef struct IProxyServerIdentityVtbl
+{
+    HRESULT (WINAPI *QueryInterface)(IProxyServerIdentity *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(IProxyServerIdentity *);
+    ULONG (WINAPI *Release)(IProxyServerIdentity *);
+    HRESULT (WINAPI *GetServerProcessId)(IProxyServerIdentity *, DWORD *);
+    HRESULT (WINAPI *GetServerProcessHandle)(IProxyServerIdentity *, DWORD, BOOL, HANDLE *);
+    HRESULT (WINAPI *IsAppSilo)(IProxyServerIdentity *, BOOL *);
+} IProxyServerIdentityVtbl;
+struct IProxyServerIdentity { const IProxyServerIdentityVtbl *lpVtbl; };
+static const GUID IID_ProxyServerIdentity =
+    {0x5524fe34, 0x8da7, 0x40a8, {0x81,0x65,0xe8,0xb3,0x7a,0x8b,0x4a,0x4b}};
+
 /* imported interface proxy */
 struct ifproxy
 {
@@ -61,6 +76,8 @@ struct proxy_manager
     IMultiQI IMultiQI_iface;
     IMarshal IMarshal_iface;
     IClientSecurity IClientSecurity_iface;
+    IProxyServerIdentity IProxyServerIdentity_iface;
+    struct exporter_identity exporter; /* retained local exporter process (CS cs) */
     struct apartment *parent; /* owning apartment (RO) */
     struct list entry;        /* entry in apartment (CS parent->cs) */
     OXID oxid;                /* object exported ID (RO) */
@@ -1955,6 +1972,115 @@ static void ifproxy_destroy(struct ifproxy * This)
     free(This);
 }
 
+static struct proxy_manager *impl_from_IProxyServerIdentity(IProxyServerIdentity *iface)
+{
+    return CONTAINING_RECORD(iface, struct proxy_manager, IProxyServerIdentity_iface);
+}
+
+static HRESULT WINAPI ProxyIdentity_QueryInterface(IProxyServerIdentity *iface, REFIID iid, void **object)
+{
+    struct proxy_manager *This = impl_from_IProxyServerIdentity(iface);
+    return IMultiQI_QueryInterface(&This->IMultiQI_iface, iid, object);
+}
+
+static ULONG WINAPI ProxyIdentity_AddRef(IProxyServerIdentity *iface)
+{
+    return IMultiQI_AddRef(&impl_from_IProxyServerIdentity(iface)->IMultiQI_iface);
+}
+
+static ULONG WINAPI ProxyIdentity_Release(IProxyServerIdentity *iface)
+{
+    return IMultiQI_Release(&impl_from_IProxyServerIdentity(iface)->IMultiQI_iface);
+}
+
+/* Resolve lazily: ordinary marshaling needs no additional resolver round trip.
+ * PID provenance and process generation belong to RPCSS, not the OXID encoding. */
+static HRESULT proxy_manager_resolve_exporter(struct proxy_manager *This)
+{
+    HRESULT hr;
+    if (!This->parent) return CO_E_OBJNOTCONNECTED;
+    if (This->exporter.context) return S_OK;
+    hr = rpc_resolve_exporter(This->oxid, &This->exporter);
+    if (SUCCEEDED(hr)) This->oxid_info.dwPid = This->exporter.process_id;
+    return hr;
+}
+
+static HRESULT WINAPI ProxyIdentity_GetServerProcessId(IProxyServerIdentity *iface, DWORD *process_id)
+{
+    struct proxy_manager *This = impl_from_IProxyServerIdentity(iface);
+    DWORD error = GetLastError();
+    HRESULT hr;
+
+    *process_id = 0;
+    EnterCriticalSection(&This->cs);
+    hr = proxy_manager_resolve_exporter(This);
+    if (SUCCEEDED(hr)) *process_id = This->exporter.process_id;
+    TRACE("oxid=%s, pid=%#lx, hr=%#lx\n", wine_dbgstr_longlong(This->oxid), *process_id, hr);
+    LeaveCriticalSection(&This->cs);
+    SetLastError(error);
+    return hr;
+}
+
+static HRESULT WINAPI ProxyIdentity_GetServerProcessHandle(IProxyServerIdentity *iface,
+        DWORD access, BOOL inherit, HANDLE *process)
+{
+    struct proxy_manager *This = impl_from_IProxyServerIdentity(iface);
+    BOOL alive;
+    HRESULT hr;
+
+    *process = NULL;
+    EnterCriticalSection(&This->cs);
+    hr = proxy_manager_resolve_exporter(This);
+    if (SUCCEEDED(hr)) hr = rpc_query_exporter(This->exporter.context, &alive);
+    if (SUCCEEDED(hr) && !alive) hr = HRESULT_FROM_WIN32(ERROR_INVALID_HANDLE);
+    if (SUCCEEDED(hr))
+    {
+        /* Open with the caller's requested rights, never a resolver's rights.
+         * The held exporter process prevents recycled-PID redirection. */
+        *process = OpenProcess(access, inherit, This->exporter.process_id);
+        if (!*process) hr = HRESULT_FROM_WIN32(GetLastError());
+        else
+        {
+            hr = rpc_query_exporter(This->exporter.context, &alive);
+            if (SUCCEEDED(hr) && !alive) hr = HRESULT_FROM_WIN32(ERROR_INVALID_HANDLE);
+            if (FAILED(hr))
+            {
+                CloseHandle(*process);
+                *process = NULL;
+            }
+        }
+    }
+    LeaveCriticalSection(&This->cs);
+    return hr;
+}
+
+static HRESULT WINAPI ProxyIdentity_IsAppSilo(IProxyServerIdentity *iface, BOOL *app_silo)
+{
+    struct proxy_manager *This = impl_from_IProxyServerIdentity(iface);
+    HRESULT hr;
+
+    *app_silo = FALSE;
+    EnterCriticalSection(&This->cs);
+    hr = proxy_manager_resolve_exporter(This);
+    if (SUCCEEDED(hr))
+    {
+        hr = This->exporter.app_silo_status;
+        if (SUCCEEDED(hr)) *app_silo = This->exporter.app_silo;
+    }
+    LeaveCriticalSection(&This->cs);
+    return hr;
+}
+
+static const IProxyServerIdentityVtbl ProxyIdentity_Vtbl =
+{
+    ProxyIdentity_QueryInterface,
+    ProxyIdentity_AddRef,
+    ProxyIdentity_Release,
+    ProxyIdentity_GetServerProcessId,
+    ProxyIdentity_GetServerProcessHandle,
+    ProxyIdentity_IsAppSilo,
+};
+
 static HRESULT proxy_manager_construct(
     struct apartment * apt, ULONG sorflags, OXID oxid, OID oid,
     const OXID_INFO *oxid_info, struct proxy_manager ** proxy_manager)
@@ -1991,6 +2117,9 @@ static HRESULT proxy_manager_construct(
     This->IMultiQI_iface.lpVtbl = &ClientIdentity_Vtbl;
     This->IMarshal_iface.lpVtbl = &ProxyMarshal_Vtbl;
     This->IClientSecurity_iface.lpVtbl = &ProxyCliSec_Vtbl;
+    This->IProxyServerIdentity_iface.lpVtbl = &ProxyIdentity_Vtbl;
+    memset(&This->exporter, 0, sizeof(This->exporter));
+    This->exporter.app_silo_status = CO_E_NOT_SUPPORTED;
 
     list_init(&This->entry);
     list_init(&This->interfaces);
@@ -2105,6 +2234,12 @@ static HRESULT proxy_manager_query_local_interface(struct proxy_manager * This, 
         IsEqualIID(riid, &IID_IMultiQI))
     {
         *ppv = &This->IMultiQI_iface;
+        IMultiQI_AddRef(&This->IMultiQI_iface);
+        return S_OK;
+    }
+    if (IsEqualIID(riid, &IID_ProxyServerIdentity))
+    {
+        *ppv = &This->IProxyServerIdentity_iface;
         IMultiQI_AddRef(&This->IMultiQI_iface);
         return S_OK;
     }
@@ -2372,6 +2507,7 @@ static void proxy_manager_destroy(struct proxy_manager * This)
 
     if (This->remunk) IRemUnknown_Release(This->remunk);
     CoTaskMemFree(This->oxid_info.psa);
+    rpc_release_exporter(&This->exporter.context);
 
     This->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&This->cs);

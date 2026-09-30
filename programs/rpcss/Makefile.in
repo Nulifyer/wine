@@ -8,6 +8,7 @@ SOURCES = \
 	class.c \
 	epm.idl \
 	epmp.c \
+	exporter.c \
 	irot.idl \
 	irotp.c \
 	irpcss.idl \

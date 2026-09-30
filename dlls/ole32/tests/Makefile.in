@@ -13,6 +13,7 @@ SOURCES = \
 	ole2.c \
 	ole_server.c \
 	propvariant.c \
+	proxy_identity.c \
 	stg_prop.c \
 	storage32.c \
 	testlib.c \
