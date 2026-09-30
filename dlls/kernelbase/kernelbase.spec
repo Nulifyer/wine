@@ -1227,17 +1227,19 @@
 @ stdcall PrivilegedServiceAuditAlarmW(wstr wstr long ptr long)
 @ stdcall ProcessIdToSessionId(long ptr)
 # @ stub ProductIdFromPackageFamilyName
-# @ stub PsmCreateKey
-# @ stub PsmCreateKeyWithDynamicId
-# @ stub PsmEqualApplication
-# @ stub PsmEqualPackage
-# @ stub PsmGetApplicationNameFromKey
+@ stdcall PsmCreateKey(wstr wstr ptr ptr)
+@ stdcall PsmCreateKeyWithDynamicId(wstr wstr ptr ptr ptr)
+@ stdcall PsmEqualApplication(wstr wstr)
+@ stdcall PsmEqualPackage(wstr wstr)
+@ stdcall PsmGetApplicationNameFromKey(wstr ptr ptr)
+@ stdcall PsmGetAumidFromKey(wstr ptr ptr)
+@ stdcall PsmGetDynamicIdFromKey(wstr ptr)
 # @ stub PsmGetKeyFromProcess
 # @ stub PsmGetKeyFromToken
-# @ stub PsmGetPackageFullNameFromKey
-# @ stub PsmIsChildKey
-# @ stub PsmIsDynamicKey
-# @ stub PsmIsValidKey
+@ stdcall PsmGetPackageFullNameFromKey(wstr ptr ptr)
+@ stdcall PsmIsChildKey(wstr wstr)
+@ stdcall PsmIsDynamicKey(wstr)
+@ stdcall PsmIsValidKey(wstr)
 @ stdcall PssCaptureSnapshot(ptr long long ptr)
 # @ stub PssDuplicateSnapshot
 @ stdcall PssFreeSnapshot(ptr ptr)

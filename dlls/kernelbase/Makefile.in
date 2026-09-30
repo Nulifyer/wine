@@ -22,6 +22,7 @@ SOURCES = \
 	package_graph.c \
 	path.c \
 	process.c \
+	psm.c \
 	registry.c \
 	security.c \
 	shellcom.c \

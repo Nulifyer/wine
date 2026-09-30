@@ -11,6 +11,7 @@ SOURCES = \
 	memory.c \
 	path.c \
 	process.c \
+	psm.c \
 	registry.c \
 	rsrc.rc \
 	security.c \
