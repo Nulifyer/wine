@@ -60,6 +60,8 @@
 #define WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE 0x41c6033fa3bc2075ULL
 #define WNF_HAM_SYSTEM_STATE_CHANGED 0x418b0f25a3bc0875ULL
 #define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
+#define WNF_SHEL_OOBE_USER_LOGON_COMPLETE 0x0d83063ea3bc2475ULL
+#define WNF_DEP_OOBE_STATE 0x41960b29a3bc0c75ULL
 #define WNF_SHEL_LOCKSCREEN_ACTIVE 0x0d83063ea3bc5835ULL
 #define WNF_THME_THEME_CHANGED 0x048b0639a3bc0875ULL
 #define WNF_TMCN_ISTABLETMODE 0x0f850339a3bc0835ULL
@@ -81,6 +83,7 @@ enum well_known_writer
     WNF_WRITER_USER,
     WNF_WRITER_SYSTEM,
     WNF_WRITER_RPC_SERVICE,
+    WNF_WRITER_DACL,
 };
 
 struct well_known_state
@@ -122,6 +125,8 @@ static const struct well_known_state well_known_states[] =
     { WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
     { WNF_HAM_SYSTEM_STATE_CHANGED, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
     { WNF_RPCF_FWMAN_RUNNING, sizeof(unsigned int), 0, 0, WNF_WRITER_RPC_SERVICE },
+    { WNF_SHEL_OOBE_USER_LOGON_COMPLETE, sizeof(unsigned int), 0, 0, WNF_WRITER_DACL },
+    { WNF_DEP_OOBE_STATE, sizeof(unsigned int), 0, 0, WNF_WRITER_DACL },
     { WNF_SHEL_LOCKSCREEN_ACTIVE, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
     { WNF_THME_THEME_CHANGED },
     { WNF_TMCN_ISTABLETMODE, sizeof(unsigned int) },
@@ -182,6 +187,54 @@ static const struct object_ops wnf_ops =
     .dump = wnf_dump, .destroy = wnf_destroy,
 };
 
+/* Both OOBE states use the source-image notification DACL. Keep access in
+ * the existing token owner so impersonation and restricting SIDs participate.
+ * They start empty; the genuine setup/logon producer publishes completion. */
+static struct security_descriptor *create_oobe_sd( unsigned __int64 name )
+{
+    static const struct sid authenticated_users =
+        { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_AUTHENTICATED_USER_RID } };
+    static const struct sid shell_capability =
+        { SID_REVISION, 10, {0,0,0,0,0,15},
+          {3,1024,2152139330u,3124897132u,671935159u,3762809077u,
+           3273429135u,2233686478u,1435376800u,2420532691u} };
+    static const struct sid shell_package =
+        { SID_REVISION, 8, {0,0,0,0,0,15},
+          {2,2916343524u,3430662180u,516348105u,118121672u,
+           2355345734u,3902897351u,118975284u} };
+    struct
+    {
+        struct security_descriptor sd;
+        unsigned char owner[12], group[12];
+        struct acl acl;
+        unsigned char aces[5 * sizeof(struct ace) + 12 + 12 + 16 + 48 + 40];
+    } descriptor = {0};
+    struct ace *ace = ace_first( &descriptor.acl );
+    int shell = name == WNF_SHEL_OOBE_USER_LOGON_COMPLETE;
+
+    ace = ace_next( set_ace( ace, &authenticated_users, ACCESS_ALLOWED_ACE_TYPE, 0, shell ? 3 : 1 ) );
+    ace = ace_next( set_ace( ace, &local_system_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 3 ) );
+    ace = ace_next( set_ace( ace, &builtin_admins_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 3 ) );
+    if (shell)
+    {
+        ace = ace_next( set_ace( ace, &shell_capability, ACCESS_ALLOWED_ACE_TYPE, 0, GENERIC_READ | GENERIC_WRITE ) );
+        ace = ace_next( set_ace( ace, &shell_package, ACCESS_ALLOWED_ACE_TYPE, 0, GENERIC_READ ) );
+    }
+    /* The source registry supplies a DACL without object owner/group fields.
+     * Wine requires a complete object descriptor. These machine states are
+     * server-owned, independent of the first process that queries them. */
+    descriptor.sd.owner_len = descriptor.sd.group_len = sid_len( &local_system_sid );
+    memcpy( descriptor.owner, &local_system_sid, descriptor.sd.owner_len );
+    memcpy( descriptor.group, &local_system_sid, descriptor.sd.group_len );
+    descriptor.sd.control = SE_DACL_PRESENT;
+    descriptor.sd.dacl_len = (char *)ace - (char *)&descriptor.acl;
+    descriptor.acl.revision = ACL_REVISION;
+    descriptor.acl.size = descriptor.sd.dacl_len;
+    descriptor.acl.count = shell ? 5 : 3;
+    return memdup( &descriptor, sizeof(descriptor.sd) + descriptor.sd.owner_len +
+                    descriptor.sd.group_len + descriptor.sd.dacl_len );
+}
+
 static struct wnf_state *create_well_known_state( const struct well_known_state *definition,
                                                   unsigned int session )
 {
@@ -205,6 +258,10 @@ static struct wnf_state *create_well_known_state( const struct well_known_state 
     {
         if (!(state->data = mem_alloc( state->size ))) { release_object( state ); return NULL; }
         memset( state->data, 0, state->size );
+    }
+    if (state->name == WNF_SHEL_OOBE_USER_LOGON_COMPLETE || state->name == WNF_DEP_OOBE_STATE)
+    {
+        if (!(state->obj.sd = create_oobe_sd( state->name ))) { release_object( state ); return NULL; }
     }
     list_add_tail( &states, &state->entry );
     return state;
@@ -332,6 +389,8 @@ static int can_write_well_known_state( const struct wnf_state *state )
     for (i = 0; i < sizeof(well_known_states) / sizeof(well_known_states[0]); i++)
         if (well_known_states[i].name == state->name) { definition = &well_known_states[i]; break; }
     if (!definition) { set_error( STATUS_ACCESS_DENIED ); return 0; }
+    /* check_state/check_object_access already enforced the published DACL. */
+    if (definition->writer == WNF_WRITER_DACL) return 1;
     token = current->token ? current->token : current->process->token;
     user = token ? token_get_user( token ) : NULL;
     if (user) switch (definition->writer)

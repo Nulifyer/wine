@@ -1299,6 +1299,7 @@
 @ stdcall RegisterWaitForInputIdle(ptr)
 @ stdcall RegisterWaitForSingleObject(ptr long ptr ptr long long)
 @ stdcall -import RegisterWaitForSingleObjectEx(long ptr ptr long long)
+@ stdcall RegisterWaitUntilOOBECompleted(ptr ptr ptr)
 @ stub RegisterWowBaseHandlers
 @ stub RegisterWowExec
 @ stdcall ReinitializeCriticalSection(ptr)
@@ -1602,6 +1603,7 @@
 # @ stub UnregisterConsoleIME
 @ stdcall UnregisterWait(long)
 @ stdcall -import UnregisterWaitEx(long long)
+@ stdcall UnregisterWaitUntilOOBECompleted(ptr)
 # @ stub UpdateCalendarDayOfWeek
 @ stdcall -import UpdateProcThreadAttribute(ptr long long ptr long ptr ptr)
 @ stdcall UpdateResourceA(long str str long ptr long)
