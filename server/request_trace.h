@@ -3963,6 +3963,7 @@ static void dump_alpc_open_sender_process_reply( const struct alpc_open_sender_p
 static void dump_alpc_disconnect_port_request( const struct alpc_disconnect_port_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", flags=%08x", req->flags );
 }
 
 static void dump_alpc_impersonate_client_request( const struct alpc_impersonate_client_request *req )

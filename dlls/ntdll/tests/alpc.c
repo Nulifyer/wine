@@ -501,6 +501,13 @@ static void test_power_port(void)
                                 NULL, NULL, NULL, NULL, NULL, NULL);
     ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
     if (!status) CloseHandle(handle);
+
+    handle = NULL;
+    status = pNtAlpcConnectPort(&handle, &name, NULL, &port_attr,
+                                ALPC_SYNC_CONNECTION | ALPC_PORTFLG_ALLOW_DUP_OBJECT,
+                                NULL, NULL, NULL, NULL, NULL, NULL);
+    ok(status == STATUS_SUCCESS, "Allow-duplicate-object connect returned %#lx.\n", status);
+    if (!status) CloseHandle(handle);
 }
 
 static void test_NtAlpcQueryInformation(void)

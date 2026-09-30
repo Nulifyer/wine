@@ -114,8 +114,17 @@ struct threadpool
     int                     min_workers;
     int                     num_workers;
     int                     num_busy_workers;
+    LONG                    base_priority;
+    struct list             workers;
     HANDLE                  compl_port;
     TP_POOL_STACK_INFORMATION stack_info;
+};
+
+struct threadpool_worker
+{
+    struct list entry;
+    struct threadpool *pool;
+    HANDLE thread;
 };
 
 enum threadpool_objtype
@@ -1233,17 +1242,37 @@ static void CALLBACK timerqueue_thread_proc( void *param )
  */
 static NTSTATUS tp_new_worker_thread( struct threadpool *pool )
 {
-    HANDLE thread;
+    struct threadpool_worker *worker;
     NTSTATUS status;
 
-    status = RtlCreateUserThread( GetCurrentProcess(), NULL, FALSE, 0,
+    if (!(worker = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*worker) ))) return STATUS_NO_MEMORY;
+    worker->pool = pool;
+    status = RtlCreateUserThread( GetCurrentProcess(), NULL, TRUE, 0,
                                   pool->stack_info.StackReserve, pool->stack_info.StackCommit,
-                                  threadpool_worker_proc, pool, &thread, NULL );
-    if (status == STATUS_SUCCESS)
+                                  threadpool_worker_proc, worker, &worker->thread, NULL );
+    if (!status && pool->base_priority)
+        status = NtSetInformationThread( worker->thread, ThreadBasePriority,
+                                         &pool->base_priority, sizeof(pool->base_priority) );
+    if (!status)
     {
         InterlockedIncrement( &pool->refcount );
         pool->num_workers++;
-        NtClose( thread );
+        list_add_tail( &pool->workers, &worker->entry );
+        if ((status = NtResumeThread( worker->thread, NULL )))
+        {
+            list_remove( &worker->entry );
+            pool->num_workers--;
+            InterlockedDecrement( &pool->refcount );
+        }
+    }
+    if (status)
+    {
+        if (worker->thread)
+        {
+            NtTerminateThread( worker->thread, status );
+            NtClose( worker->thread );
+        }
+        RtlFreeHeap( GetProcessHeap(), 0, worker );
     }
     return status;
 }
@@ -1821,6 +1850,8 @@ static NTSTATUS tp_threadpool_alloc( struct threadpool **out )
     pool->min_workers             = 0;
     pool->num_workers             = 0;
     pool->num_busy_workers        = 0;
+    pool->base_priority           = 0;
+    list_init( &pool->workers );
     pool->stack_info.StackReserve = nt->OptionalHeader.SizeOfStackReserve;
     pool->stack_info.StackCommit  = nt->OptionalHeader.SizeOfStackCommit;
 
@@ -2514,7 +2545,8 @@ skip_cleanup:
  */
 static void CALLBACK threadpool_worker_proc( void *param )
 {
-    struct threadpool *pool = param;
+    struct threadpool_worker *worker = param;
+    struct threadpool *pool = worker->pool;
     LARGE_INTEGER timeout;
     struct list *ptr;
 
@@ -2561,6 +2593,9 @@ static void CALLBACK threadpool_worker_proc( void *param )
         }
     }
     pool->num_workers--;
+    list_remove( &worker->entry );
+    NtClose( worker->thread );
+    RtlFreeHeap( GetProcessHeap(), 0, worker );
     RtlLeaveCriticalSection( &pool->cs );
 
     TRACE( "terminating worker thread for pool %p\n", pool );
@@ -3521,6 +3556,34 @@ VOID WINAPI TpWaitForWork( TP_WORK *work, BOOL cancel_pending )
     if (cancel_pending)
         tp_object_cancel( this );
     tp_object_wait( this, FALSE );
+}
+
+/***********************************************************************
+ *           TpSetPoolThreadBasePriority    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpSetPoolThreadBasePriority( TP_POOL *pool, LONG priority )
+{
+    struct threadpool *this = impl_from_TP_POOL( pool );
+    struct threadpool_worker *worker;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    if (!pool) return STATUS_INVALID_PARAMETER;
+    /* Native saturates the worker-factory increment at +/-16. The existing
+     * Wine thread owner represents those endpoints as idle/time-critical.
+     * Its wider intermediate increments are not supported yet. */
+    if (priority >= 15) priority = THREAD_PRIORITY_TIME_CRITICAL;
+    else if (priority <= -15) priority = THREAD_PRIORITY_IDLE;
+    else if (priority < THREAD_PRIORITY_LOWEST || priority > THREAD_PRIORITY_HIGHEST)
+        return STATUS_NOT_SUPPORTED;
+    RtlEnterCriticalSection( &this->cs );
+    LIST_FOR_EACH_ENTRY( worker, &this->workers, struct threadpool_worker, entry )
+        if ((status = NtSetInformationThread( worker->thread, ThreadBasePriority, &priority, sizeof(priority) ))) break;
+    if (!status) this->base_priority = priority;
+    else
+        LIST_FOR_EACH_ENTRY( worker, &this->workers, struct threadpool_worker, entry )
+            NtSetInformationThread( worker->thread, ThreadBasePriority, &this->base_priority, sizeof(this->base_priority) );
+    RtlLeaveCriticalSection( &this->cs );
+    return status;
 }
 
 /***********************************************************************

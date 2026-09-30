@@ -36,6 +36,7 @@
 #include "process.h"
 #include "thread.h"
 #include "security.h"
+#include "pdc.h"
 #include "request.h"
 #include "unicode.h"
 #include "user.h"
@@ -73,7 +74,8 @@ enum alpc_kernel_port
     ALPC_KERNEL_PORT_NONE,
     ALPC_KERNEL_POWER_PORT,
     ALPC_KERNEL_DWM_SESSION_PORT,
-    ALPC_KERNEL_COREMSG_PORT
+    ALPC_KERNEL_COREMSG_PORT,
+    ALPC_KERNEL_PDC_PORT
 };
 
 enum dwm_session_port_phase
@@ -128,6 +130,7 @@ struct alpc_port
     struct event            *composed_event;        /* session DwmComposedEvent generation */
     unsigned int            composition_id;
     struct coremsg_client_port *coremsg_client;      /* owned virtual-kernel client record */
+    struct pdc_client       *pdc_client;             /* owned by the server endpoint */
     struct token            *client_token;          /* captured connecting security */
     int                      impersonation_level, tracking_mode;
     struct thread           *thread;                /* thread owning the port */
@@ -310,6 +313,7 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     port->composed_event = NULL;
     port->composition_id = 0;
     port->coremsg_client = NULL;
+    port->pdc_client = NULL;
     port->thread      = (struct thread *)grab_object( current );
     list_init( &port->messages );
     list_init( &port->receive_waiters );
@@ -365,6 +369,7 @@ static void alpc_port_destroy( struct object *obj )
     struct alpc_message *message, *next;
 
     assert( obj->ops == &alpc_port_ops );
+    if (port->pdc_client) pdc_disconnect_client( port->pdc_client );
     if (port->coremsg_client)
     {
         disconnect_coremsg_client_port( port->coremsg_client );
@@ -1820,6 +1825,11 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
             return 0;
         }
         target = port->peer;
+        if (target && target->kernel_port == ALPC_KERNEL_PDC_PORT)
+        {
+            set_error( pdc_receive_message( target->pdc_client, data, size ) );
+            return 0;
+        }
         if (!id && target->kernel_port == ALPC_KERNEL_POWER_PORT)
         {
             /* The kernel power manager consumes policy updates without a
@@ -2368,6 +2378,7 @@ done:
  * acceptance completes. */
 DECL_HANDLER(alpc_connect_port)
 {
+    static const WCHAR pdc_port_name[] = {'\\','P','d','c','P','o','r','t'};
     static const WCHAR power_port_name[] = {'\\','P','o','w','e','r','P','o','r','t'};
     const struct alpc_security_qos *qos = get_req_data();
     const unsigned char *data = (const unsigned char *)(qos + 1);
@@ -2377,9 +2388,12 @@ DECL_HANDLER(alpc_connect_port)
     const struct security_descriptor *server_sd;
     struct alpc_port *listener = NULL, *client = NULL, *server = NULL;
     struct coremsg_kernel_port *coremsg_port = NULL;
+    struct pdc_client *pdc_client = NULL;
     struct alpc_message *message;
     enum alpc_kernel_port kernel_port = ALPC_KERNEL_PORT_NONE;
-    struct alpc_port_init_data init = { .type = COMMUNICATION_PORT, .flags = req->port_flags,
+    struct alpc_port_init_data init = { .type = COMMUNICATION_PORT,
+                                        .flags = req->port_flags |
+                                                 (req->flags & ALPC_PORTFLG_ALLOW_DUP_OBJECT),
                                         .max_msg_len = req->max_msg_len };
     struct alpc_port_init_data server_init = { .type = COMMUNICATION_PORT, .server = 1,
                                                .flags = req->port_flags,
@@ -2400,7 +2414,7 @@ DECL_HANDLER(alpc_connect_port)
         set_error( STATUS_INVALID_PARAMETER );
         return;
     }
-    if (req->flags & ~0x20000)
+    if (req->flags & ~(ALPC_SYNC_CONNECTION | ALPC_PORTFLG_ALLOW_DUP_OBJECT))
     {
         set_error( STATUS_NOT_IMPLEMENTED );
         return;
@@ -2431,6 +2445,10 @@ DECL_HANDLER(alpc_connect_port)
     if (!req->rootdir && !req->attributes && name.len == sizeof(power_port_name) &&
         !memcmp( name.str, power_port_name, sizeof(power_port_name) ))
         kernel_port = ALPC_KERNEL_POWER_PORT;
+    else if (!req->rootdir && !(req->attributes & ~OBJ_CASE_INSENSITIVE) && name.len == sizeof(pdc_port_name) &&
+             !(req->attributes & OBJ_CASE_INSENSITIVE ? memicmp_strW( name.str, pdc_port_name, name.len ) :
+                                                       memcmp( name.str, pdc_port_name, name.len )))
+        kernel_port = ALPC_KERNEL_PDC_PORT;
     else if (!req->rootdir && !(req->attributes & ~OBJ_CASE_INSENSITIVE) &&
              (coremsg_port = find_coremsg_listener( current->process, &name )))
     {
@@ -2442,10 +2460,19 @@ DECL_HANDLER(alpc_connect_port)
     if (kernel_port != ALPC_KERNEL_PORT_NONE)
     {
         if (req->sid_size || req->server_sd_size ||
-            (coremsg_port ? payload_size != COREMSG_CONNECTION_PARAMS_SIZE : payload_size))
+            (kernel_port != ALPC_KERNEL_PDC_PORT &&
+             (coremsg_port ? payload_size != COREMSG_CONNECTION_PARAMS_SIZE : payload_size)))
         {
             set_error( STATUS_INVALID_PARAMETER );
             goto done;
+        }
+        if (kernel_port == ALPC_KERNEL_PDC_PORT)
+        {
+            if (!(pdc_client = pdc_connect_client( current->process, thread_get_impersonation_token( current ),
+                                                   &alpc_port_type.mapping, data + req->name_size,
+                                                   payload_size, req->client_flags & 1 ))) goto done;
+            if (req->max_msg_len < sizeof(ALPC_PORT_MESSAGE) + payload_size)
+            { set_error( STATUS_PORT_MESSAGE_TOO_LONG ); goto done; }
         }
         if (!(client = create_named_object( &params ))) goto done;
         client->impersonation_level = qos->impersonation_level;
@@ -2470,6 +2497,8 @@ DECL_HANDLER(alpc_connect_port)
             goto done;
         }
         server->kernel_port = kernel_port;
+        server->pdc_client = pdc_client;
+        pdc_client = NULL;
         if (coremsg_port) server->kernel_session_id = coremsg_port->session_id;
         if (coremsg_port && !(server->coremsg_client = connect_coremsg_client_port(
                                  coremsg_port, current->process->id, current->id )))
@@ -2482,6 +2511,22 @@ DECL_HANDLER(alpc_connect_port)
         server->tracking_mode = client->tracking_mode;
         if (!client->tracking_mode)
             server->client_token = (struct token *)grab_object( client->client_token );
+        client->context = handle;
+        if (kernel_port == ALPC_KERNEL_PDC_PORT)
+        {
+            if (!(message = new_message( data + req->name_size, payload_size,
+                                          ALPC_MESSAGE_TYPE_CONNECTION_REPLY, 0, current )))
+            {
+                close_handle( current->process, client->connecting_wait_handle );
+                client->connecting_wait_handle = 0;
+                close_handle( current->process, handle );
+                handle = 0;
+                goto done;
+            }
+            set_message_destination( message, client, req->message_context );
+            client->want_reply = req->flags & ALPC_SYNC_CONNECTION;
+            client->connect_reply = message;
+        }
         server->peer = (struct alpc_port *)grab_object( client );
         client->peer = (struct alpc_port *)grab_object( server );
         server->status = client->status = CONNECTED;
@@ -2563,6 +2608,14 @@ DECL_HANDLER(alpc_connect_port)
     dispatch_receives( listener );
 
 done:
+    if (client && !reply->handle && client->connecting_wait_handle)
+    {
+        unsigned int status = get_error();
+        close_handle( current->process, client->connecting_wait_handle );
+        client->connecting_wait_handle = 0;
+        set_error( status );
+    }
+    if (pdc_client) pdc_disconnect_client( pdc_client );
     if (server) release_object( server );
     if (client) release_object( client );
     if (listener) release_object( listener );
@@ -2727,6 +2780,12 @@ DECL_HANDLER(alpc_disconnect_port)
                                                   ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
     if (port->thread->process != current->process) set_error( STATUS_ACCESS_DENIED );
     else if (port->status == DISCONNECTED) set_error( STATUS_PORT_DISCONNECTED );
+    /* Skip-pending-flush is currently supported only for PDC endpoints:
+     * they accept no operation that can leave a pending request/reply queue.
+     * Do not discard the flag on ordinary ports. */
+    else if (req->flags && (req->flags != 1 || !port->peer ||
+                            port->peer->kernel_port != ALPC_KERNEL_PDC_PORT))
+        set_error( STATUS_NOT_SUPPORTED );
     else
     {
         disconnect_message_requests( port );

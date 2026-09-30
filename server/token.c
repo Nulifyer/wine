@@ -1399,6 +1399,23 @@ const struct sid *token_get_user( struct token *token )
     return token->user;
 }
 
+const struct sid *token_get_integrity_sid( struct token *token )
+{
+    const struct acl *sacl;
+    const struct ace *ace;
+    unsigned int i;
+    int present;
+
+    if (token->obj.sd)
+    {
+        sacl = sd_get_sacl( token->obj.sd, &present );
+        if (present && sacl)
+            for (i = 0, ace = ace_first( sacl ); i < sacl->count; i++, ace = ace_next( ace ))
+                if (ace->type == SYSTEM_MANDATORY_LABEL_ACE_TYPE) return (const struct sid *)(ace + 1);
+    }
+    return &high_label_sid; /* preserve the existing unlabelled-token default */
+}
+
 int token_has_process_trust( struct token *token )
 {
     return token->trust_level != NULL;
@@ -2169,24 +2186,8 @@ DECL_HANDLER(get_token_sid)
             sid = token->trust_level;
             break;
         case TokenIntegrityLevel:
-        {
-            const struct acl *sacl;
-            const struct ace *ace;
-            unsigned int i;
-            int present;
-
-            sid = &high_label_sid; /* preserve the existing default for unlabelled tokens */
-            if (!token->obj.sd) break;
-            sacl = sd_get_sacl( token->obj.sd, &present );
-            if (!present || !sacl) break;
-            for (i = 0, ace = ace_first( sacl ); i < sacl->count; i++, ace = ace_next( ace ))
-                if (ace->type == SYSTEM_MANDATORY_LABEL_ACE_TYPE)
-                {
-                    sid = (const struct sid *)(ace + 1);
-                    break;
-                }
+            sid = token_get_integrity_sid( token );
             break;
-        }
         default:
             set_error( STATUS_INVALID_PARAMETER );
             break;

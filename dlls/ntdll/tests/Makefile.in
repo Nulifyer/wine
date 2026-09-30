@@ -27,6 +27,7 @@ SOURCES = \
 	path.c \
 	pipe.c \
 	port.c \
+	pdc_activation.c \
 	power_capabilities.c \
 	persisted_state.c \
 	privilege_audit.c \

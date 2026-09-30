@@ -230,7 +230,7 @@ static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
     unsigned int recv_attributes = receive_attributes( recv_msg_attr );
 
     if (!port_handle || !port_name) return STATUS_ACCESS_VIOLATION;
-    if (flags & ~ALPC_SYNC_CONNECTION || !port_attr ||
+    if (flags & ~(ALPC_SYNC_CONNECTION | ALPC_PORTFLG_ALLOW_DUP_OBJECT) || !port_attr ||
         (obj_attr && obj_attr->SecurityDescriptor))
         return STATUS_NOT_IMPLEMENTED;
     if ((status = validate_message_attributes( send_msg_attr, recv_msg_attr ))) return status;
@@ -449,10 +449,11 @@ NTSTATUS WINAPI NtAlpcCreatePort( HANDLE *port_handle, OBJECT_ATTRIBUTES *attr, 
 NTSTATUS WINAPI NtAlpcDisconnectPort( HANDLE port_handle, ULONG flags )
 {
     NTSTATUS status;
-    if (flags) return STATUS_NOT_IMPLEMENTED;
+    if (flags & ~1) return STATUS_NOT_SUPPORTED;
     SERVER_START_REQ( alpc_disconnect_port )
     {
         req->handle = wine_server_obj_handle( port_handle );
+        req->flags = flags;
         status = wine_server_call( req );
     }
     SERVER_END_REQ;

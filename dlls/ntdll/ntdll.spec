@@ -1287,6 +1287,7 @@
 @ stdcall TpSetPoolMaxThreads(ptr long)
 @ stdcall TpSetPoolMinThreads(ptr long)
 @ stdcall TpSetPoolStackInformation(ptr ptr)
+@ stdcall TpSetPoolThreadBasePriority(ptr long)
 @ stdcall TpSetTimer(ptr ptr long long)
 @ stdcall TpSetTimerEx(ptr ptr long long)
 @ stdcall TpSetWait(ptr long ptr)
@@ -1334,6 +1335,7 @@
 @ stdcall -private ZwAlpcConnectPort(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr) NtAlpcConnectPort
 @ stdcall -private ZwAlpcCreatePort(ptr ptr ptr) NtAlpcCreatePort
 @ stdcall -private ZwAlpcDisconnectPort(ptr long) NtAlpcDisconnectPort
+@ stdcall -private ZwAlpcQueryInformation(ptr long ptr long ptr) NtAlpcQueryInformation
 @ stdcall -private ZwAlpcSetInformation(ptr long ptr long) NtAlpcSetInformation
 @ stdcall -private ZwAlpcImpersonateClientOfPort(ptr ptr ptr) NtAlpcImpersonateClientOfPort
 @ stdcall -private ZwAlpcSendWaitReceivePort(ptr long ptr ptr ptr ptr ptr ptr) NtAlpcSendWaitReceivePort

@@ -80,6 +80,7 @@ extern void token_get_identity( struct token *token, struct token_identity *iden
 extern const struct acl *token_get_default_dacl( struct token *token );
 extern const struct sid *token_get_owner( struct token *token );
 extern const struct sid *token_get_user( struct token *token );
+extern const struct sid *token_get_integrity_sid( struct token *token );
 extern const struct sid *token_get_primary_group( struct token *token );
 extern int token_has_process_trust( struct token *token );
 extern unsigned int token_get_session_id( struct token *token );

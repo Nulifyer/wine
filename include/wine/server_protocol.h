@@ -6927,6 +6927,8 @@ struct alpc_disconnect_port_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    unsigned int flags;
+    char __pad_20[4];
 };
 struct alpc_disconnect_port_reply
 {
@@ -9544,6 +9546,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1077
+#define SERVER_PROTOCOL_VERSION 1078
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
