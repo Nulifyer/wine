@@ -33,6 +33,11 @@ SOURCES = \
 	resource.rc \
 	sync.c \
 	thread.c \
+	thread_callouts.c \
+	thread_callouts_plain.c \
+	thread_callouts_plain.spec \
+	thread_callouts_tls.c \
+	thread_callouts_tls.spec \
 	time.c \
 	timer.c \
 	toolhelp.c \

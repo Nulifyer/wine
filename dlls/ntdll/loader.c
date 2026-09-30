@@ -1943,10 +1943,11 @@ NTSTATUS WINAPI LdrDisableThreadCalloutsForDll(HMODULE hModule)
     RtlEnterCriticalSection( &loader_section );
 
     wm = get_modref( hModule );
-    if (!wm || wm->ldr.TlsIndex == -1)
+    if (!wm)
         ret = STATUS_DLL_NOT_FOUND;
-    else
+    else if (wm->ldr.TlsIndex != -1)
         wm->ldr.Flags |= LDR_NO_DLL_CALLS;
+    /* Loaded TLS modules succeed without disabling DLL or TLS callouts. */
 
     RtlLeaveCriticalSection( &loader_section );
 
