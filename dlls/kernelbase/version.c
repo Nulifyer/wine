@@ -1956,6 +1956,119 @@ static BOOL is_publisher_id_char(WCHAR ch)
     return !!wcschr(chars, ch);
 }
 
+static BOOL is_prohibited_application_package_name(const WCHAR *name, UINT32 length)
+{
+    static const WCHAR *reserved[] =
+    {
+        L"con", L"prn", L"aux", L"nul", L"com1", L"com2", L"com3", L"com4", L"com5",
+        L"com6", L"com7", L"com8", L"com9", L"lpt1", L"lpt2", L"lpt3", L"lpt4",
+        L"lpt5", L"lpt6", L"lpt7", L"lpt8", L"lpt9",
+    };
+    unsigned int i, count;
+
+    if (name[length - 1] == L'.') return TRUE;
+    if (length >= 4 && !wcsnicmp(name, L"xn--", 4)) return TRUE;
+    for (i = 0; i < ARRAY_SIZE(reserved); ++i)
+    {
+        count = wcslen(reserved[i]);
+        if (length >= count && !wcsnicmp(name, reserved[i], count) &&
+            (length == count || name[count] == L'.')) return TRUE;
+    }
+    for (i = 0; i + 5 <= length; ++i)
+        if (!wcsnicmp(name + i, L".xn--", 5)) return TRUE;
+    return FALSE;
+}
+
+static BOOL validate_application_family(const WCHAR *family, WCHAR delimiter, UINT32 *length)
+{
+    UINT32 name_length = 0, i;
+
+    while (family[name_length] != L'_')
+    {
+        if (name_length == PACKAGE_NAME_MAX_LENGTH || !family[name_length] ||
+            !is_package_name_char(family[name_length])) return FALSE;
+        ++name_length;
+    }
+    if (name_length < PACKAGE_NAME_MIN_LENGTH ||
+        is_prohibited_application_package_name(family, name_length)) return FALSE;
+    for (i = 0; i < PACKAGE_PUBLISHERID_MAX_LENGTH; ++i)
+        if (!family[name_length + 1 + i] ||
+            !is_publisher_id_char(family[name_length + 1 + i])) return FALSE;
+    *length = name_length + 1 + PACKAGE_PUBLISHERID_MAX_LENGTH;
+    return family[*length] == delimiter;
+}
+
+static BOOL validate_relative_application_id(const WCHAR *relative, UINT32 *length)
+{
+    UINT32 i = 0;
+    WCHAR ch;
+
+    while ((ch = relative[i]))
+    {
+        if (i == PACKAGE_RELATIVE_APPLICATION_ID_MAX_LENGTH - 1) return FALSE;
+        if (!((ch >= L'0' && ch <= L'9') || (ch >= L'A' && ch <= L'Z') ||
+              (ch >= L'a' && ch <= L'z') || ch == L'.')) return FALSE;
+        ++i;
+    }
+    *length = i;
+    return !!i;
+}
+
+/***********************************************************************
+ *         ParseApplicationUserModelId   (kernelbase.@)
+ */
+LONG WINAPI ParseApplicationUserModelId(const WCHAR *id, UINT32 *family_length, WCHAR *family,
+                                      UINT32 *relative_length, WCHAR *relative)
+{
+    UINT32 family_size, relative_size;
+
+    TRACE("%s, %p, %p, %p, %p.\n", debugstr_w(id), family_length, family, relative_length, relative);
+    if (!id || !family_length || (*family_length && !family) ||
+        !relative_length || (*relative_length && !relative)) return ERROR_INVALID_PARAMETER;
+    if (!validate_application_family(id, L'!', &family_size) ||
+        !validate_relative_application_id(id + family_size + 1, &relative_size)) return ERROR_INVALID_PARAMETER;
+    if (*family_length < family_size + 1 || *relative_length < relative_size + 1)
+    {
+        *family_length = family_size + 1;
+        *relative_length = relative_size + 1;
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
+    memcpy(family, id, family_size * sizeof(*family));
+    family[family_size] = 0;
+    *family_length = family_size + 1;
+    memcpy(relative, id + family_size + 1, relative_size * sizeof(*relative));
+    relative[relative_size] = 0;
+    *relative_length = relative_size + 1;
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *         FormatApplicationUserModelId   (kernelbase.@)
+ */
+LONG WINAPI FormatApplicationUserModelId(const WCHAR *family, const WCHAR *relative,
+                                       UINT32 *length, WCHAR *id)
+{
+    WCHAR buffer[APPLICATION_USER_MODEL_ID_MAX_LENGTH];
+    UINT32 family_size, relative_size, required;
+
+    TRACE("%s, %s, %p, %p.\n", debugstr_w(family), debugstr_w(relative), length, id);
+    if (!family || !relative || !length || (*length && !id)) return ERROR_INVALID_PARAMETER;
+    if (!validate_application_family(family, 0, &family_size) ||
+        !validate_relative_application_id(relative, &relative_size)) return ERROR_INVALID_PARAMETER;
+    required = family_size + relative_size + 2;
+    if (*length < required)
+    {
+        *length = required;
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
+    memcpy(buffer, family, family_size * sizeof(*buffer));
+    buffer[family_size] = L'!';
+    memcpy(buffer + family_size + 1, relative, (relative_size + 1) * sizeof(*buffer));
+    memcpy(id, buffer, required * sizeof(*id));
+    *length = required;
+    return ERROR_SUCCESS;
+}
+
 /***********************************************************************
  *         PackageNameAndPublisherIdFromFamilyName   (kernelbase.@)
  */

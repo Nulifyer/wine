@@ -2,6 +2,7 @@ TESTDLL   = kernelbase.dll
 IMPORTS   = advapi32
 
 SOURCES = \
+	appmodel_identity.c \
 	appmodel_state.c \
 	exit.c \
 	file.c \

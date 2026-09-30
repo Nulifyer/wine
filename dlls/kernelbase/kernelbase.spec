@@ -397,7 +397,7 @@
 @ stdcall FlushViewOfFile(ptr long)
 @ stdcall FoldStringW(long wstr long ptr long)
 @ stdcall ForceSyncFgPolicyInternal() gpapi.ForceSyncFgPolicyInternalWorker
-# @ stub FormatApplicationUserModelId
+@ stdcall FormatApplicationUserModelId(wstr wstr ptr ptr)
 @ stdcall FormatMessageA(long ptr long long ptr long ptr)
 @ stdcall FormatMessageW(long ptr long long ptr long ptr)
 @ stdcall FreeConsole()
@@ -1077,7 +1077,7 @@
 # @ stub PackageRelativeApplicationIdFromProductId
 # @ stub PackageSidFromFamilyName
 # @ stub PackageSidFromProductId
-# @ stub ParseApplicationUserModelId
+@ stdcall ParseApplicationUserModelId(wstr ptr ptr ptr ptr)
 @ stdcall ParseURLA(str ptr)
 @ stdcall ParseURLW(wstr ptr)
 @ stdcall PathAddBackslashA(str)

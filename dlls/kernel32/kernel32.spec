@@ -533,6 +533,7 @@
 @ stdcall FoldStringA(long str long ptr long)
 @ stdcall -import FoldStringW(long wstr long ptr long)
 @ stdcall -import FormatMessageA(long ptr long long ptr long ptr)
+@ stdcall FormatApplicationUserModelId(wstr wstr ptr ptr) kernelbase.FormatApplicationUserModelId
 @ stdcall -import FormatMessageW(long ptr long long ptr long ptr)
 @ stdcall -import FreeConsole()
 @ stdcall -import FreeEnvironmentStringsA(ptr)
@@ -1177,6 +1178,7 @@
 @ stdcall -import PeekConsoleInputA(ptr ptr long ptr)
 @ stdcall -import PeekConsoleInputW(ptr ptr long ptr)
 @ stdcall -import PeekNamedPipe(long ptr long ptr ptr ptr)
+@ stdcall ParseApplicationUserModelId(wstr ptr ptr ptr ptr) kernelbase.ParseApplicationUserModelId
 @ stdcall -import PostQueuedCompletionStatus(long long ptr ptr)
 @ stdcall -import PackageIdFromFullName(wstr long ptr ptr)
 @ stdcall -import PackageFamilyNameFromFullName(wstr ptr ptr)
