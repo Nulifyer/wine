@@ -605,6 +605,15 @@ static POINT map_event_coords( HWND hwnd, Window window, Window event_root, POIN
 static void send_mouse_input( HWND hwnd, POINT pos, UINT flags, UINT data, UINT time, const struct raw_mouse *raw )
 {
     INPUT input = { .type = INPUT_MOUSE };
+    static const UINT button_mask = MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP |
+            MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_MIDDLEDOWN |
+            MOUSEEVENTF_MIDDLEUP | MOUSEEVENTF_XDOWN | MOUSEEVENTF_XUP;
+
+    if (!hwnd && (flags & button_mask))
+    {
+        hwnd = NtUserQueryBSDRWindow();
+        if (hwnd) TRACE( "routing untargeted button input to BSDR window %p\n", hwnd );
+    }
 
     if ((flags & MOUSEEVENTF_ABSOLUTE) || pos.x || pos.y) flags |= MOUSEEVENTF_MOVE;
 
