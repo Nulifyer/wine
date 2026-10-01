@@ -24,6 +24,7 @@
 #include <oleauto.h>
 #include <secext.h>
 #include <rpcdce.h>
+#include <rpcasync.h>
 #include <netfw.h>
 #include "wine/test.h"
 #include "server.h"
@@ -53,6 +54,7 @@ static RPC_STATUS (WINAPI *pRpcServerRegisterIfEx)(RPC_IF_HANDLE,UUID*, RPC_MGR_
                    unsigned int,RPC_IF_CALLBACK_FN*);
 static RPC_STATUS (WINAPI *pRpcBindingSetAuthInfoExA)(RPC_BINDING_HANDLE, RPC_CSTR, ULONG, ULONG,
                                                       RPC_AUTH_IDENTITY_HANDLE, ULONG, RPC_SECURITY_QOS *);
+static RPC_STATUS (WINAPI *pI_RpcOpenClientProcess)(RPC_BINDING_HANDLE, DWORD, HANDLE *);
 
 static char *domain_and_user;
 
@@ -298,6 +300,7 @@ static void InitFunctionPointers(void)
     pNDRSContextUnmarshall2 = (void *)GetProcAddress(hrpcrt4, "NDRSContextUnmarshall2");
     pRpcServerRegisterIfEx = (void *)GetProcAddress(hrpcrt4, "RpcServerRegisterIfEx");
     pRpcBindingSetAuthInfoExA = (void *)GetProcAddress(hrpcrt4, "RpcBindingSetAuthInfoExA");
+    pI_RpcOpenClientProcess = (void *)GetProcAddress(hrpcrt4, "I_RpcOpenClientProcess");
 
     if (!pNDRSContextMarshall2) old_windows_version = TRUE;
 }
@@ -1220,12 +1223,20 @@ static DWORD CALLBACK test_I_RpcBindingInqLocalClientPID_thread_func(void *args)
 {
     struct test_thread_params *params = (struct test_thread_params *)args;
     RPC_STATUS status;
+    HANDLE process = (HANDLE)0xdeadbeef;
     ULONG pid;
 
     winetest_push_context("%s", client_test_name);
 
     status = I_RpcBindingInqLocalClientPID(NULL, &pid);
     ok(status == RPC_S_NO_CALL_ACTIVE, "Got unexpected %ld.\n", status);
+
+    if (pI_RpcOpenClientProcess)
+    {
+        status = pI_RpcOpenClientProcess(NULL, PROCESS_QUERY_LIMITED_INFORMATION, &process);
+        trace("I_RpcOpenClientProcess outside call returned %ld, process %p.\n", status, process);
+        ok(status == RPC_S_NO_CALL_ACTIVE, "Got unexpected %ld.\n", status);
+    }
 
     /* Other protocol sequences throw exceptions */
     if (params->protseq == RPC_PROTSEQ_LRPC)
@@ -1242,6 +1253,7 @@ static DWORD CALLBACK test_I_RpcBindingInqLocalClientPID_thread_func(void *args)
 void __cdecl s_test_I_RpcBindingInqLocalClientPID(unsigned int protseq, RPC_BINDING_HANDLE binding)
 {
     struct test_thread_params params;
+    RPC_CALL_ATTRIBUTES_V2_W attributes;
     RPC_STATUS status;
     HANDLE thread;
     ULONG pid;
@@ -1271,9 +1283,59 @@ void __cdecl s_test_I_RpcBindingInqLocalClientPID(unsigned int protseq, RPC_BIND
 
     if (protseq == RPC_PROTSEQ_LRPC) /* Other protocol sequences throw exceptions */
     {
+        HANDLE process = NULL;
+
         status = I_RpcBindingInqLocalClientPID(binding, &pid);
         ok(status == RPC_S_OK, "Got unexpected %ld.\n", status);
         ok(pid == client_info.dwProcessId, "Got unexpected pid.\n");
+
+        ok(!!pI_RpcOpenClientProcess, "I_RpcOpenClientProcess is unavailable.\n");
+        if (pI_RpcOpenClientProcess)
+        {
+            status = pI_RpcOpenClientProcess(NULL,
+                    SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_DUP_HANDLE, &process);
+            trace("I_RpcOpenClientProcess current call returned %ld, process %p.\n", status, process);
+            ok(status == RPC_S_OK, "Got unexpected %ld.\n", status);
+            ok(process != NULL, "Expected a process handle.\n");
+            if (process)
+            {
+                ok(GetProcessId(process) == client_info.dwProcessId,
+                   "Got unexpected pid: %lu client pid: %lu.\n",
+                   GetProcessId(process), client_info.dwProcessId);
+                CloseHandle(process);
+            }
+
+            process = NULL;
+            status = pI_RpcOpenClientProcess(binding, PROCESS_QUERY_LIMITED_INFORMATION, &process);
+            trace("I_RpcOpenClientProcess explicit binding returned %ld, process %p.\n", status, process);
+            ok(status == RPC_S_OK, "Got unexpected %ld.\n", status);
+            ok(process != NULL, "Expected a process handle.\n");
+            if (process)
+            {
+                ok(GetProcessId(process) == client_info.dwProcessId,
+                   "Got unexpected pid: %lu client pid: %lu.\n",
+                   GetProcessId(process), client_info.dwProcessId);
+                CloseHandle(process);
+            }
+        }
+
+        memset(&attributes, 0, sizeof(attributes));
+        attributes.Version = 2;
+        attributes.Flags = RPC_QUERY_CLIENT_PID;
+        status = RpcServerInqCallAttributesW(binding, &attributes);
+        ok(status == RPC_S_OK, "Got unexpected %ld.\n", status);
+        ok(HandleToULong(attributes.ClientPID) == client_info.dwProcessId,
+           "Got unexpected pid: %lu client pid: %lu.\n",
+           HandleToULong(attributes.ClientPID), client_info.dwProcessId);
+
+        memset(&attributes, 0, sizeof(attributes));
+        attributes.Version = 2;
+        attributes.Flags = RPC_QUERY_CLIENT_PID;
+        status = RpcServerInqCallAttributesW(NULL, &attributes);
+        ok(status == RPC_S_OK, "Got unexpected %ld.\n", status);
+        ok(HandleToULong(attributes.ClientPID) == client_info.dwProcessId,
+           "Got unexpected pid: %lu client pid: %lu.\n",
+           HandleToULong(attributes.ClientPID), client_info.dwProcessId);
     }
 
     params.protseq = protseq;

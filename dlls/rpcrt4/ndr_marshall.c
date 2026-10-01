@@ -40,6 +40,7 @@
 #include "ndr_misc.h"
 #include "rpcndr.h"
 #include "ndrtypes.h"
+#include "rpc_binding.h"
 
 #include "wine/debug.h"
 
@@ -145,6 +146,18 @@ static void WINAPI NdrRangeBufferSize(PMIDL_STUB_MESSAGE, unsigned char *, PFORM
 static ULONG WINAPI NdrRangeMemorySize(PMIDL_STUB_MESSAGE, PFORMAT_STRING);
 static void WINAPI NdrRangeFree(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
 
+static unsigned char *WINAPI NdrSupplementMarshall(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+static unsigned char *WINAPI NdrSupplementUnmarshall(PMIDL_STUB_MESSAGE, unsigned char **, PFORMAT_STRING, unsigned char);
+static void WINAPI NdrSupplementBufferSize(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+static ULONG WINAPI NdrSupplementMemorySize(PMIDL_STUB_MESSAGE, PFORMAT_STRING);
+static void WINAPI NdrSupplementFree(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+
+static unsigned char *WINAPI NdrSystemHandleMarshall(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+static unsigned char *WINAPI NdrSystemHandleUnmarshall(PMIDL_STUB_MESSAGE, unsigned char **, PFORMAT_STRING, unsigned char);
+static void WINAPI NdrSystemHandleBufferSize(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+static ULONG WINAPI NdrSystemHandleMemorySize(PMIDL_STUB_MESSAGE, PFORMAT_STRING);
+static void WINAPI NdrSystemHandleFree(PMIDL_STUB_MESSAGE, unsigned char *, PFORMAT_STRING);
+
 static ULONG WINAPI NdrByteCountPointerMemorySize(PMIDL_STUB_MESSAGE, PFORMAT_STRING);
 
 static unsigned char * ComplexBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
@@ -206,11 +219,12 @@ const NDR_MARSHALL NdrMarshaller[NDR_TABLE_SIZE] = {
   /* 0xb1 */
   0, 0, 0,
   NdrUserMarshalMarshall,
-  0, 0,
+  0, NdrSupplementMarshall,
   /* 0xb7 */
   NdrRangeMarshall,
   NdrBaseTypeMarshall,
-  NdrBaseTypeMarshall
+  NdrBaseTypeMarshall,
+  0, 0, NdrSystemHandleMarshall
 };
 const NDR_UNMARSHALL NdrUnmarshaller[NDR_TABLE_SIZE] = {
   0,
@@ -250,11 +264,12 @@ const NDR_UNMARSHALL NdrUnmarshaller[NDR_TABLE_SIZE] = {
   /* 0xb1 */
   0, 0, 0,
   NdrUserMarshalUnmarshall,
-  0, 0,
+  0, NdrSupplementUnmarshall,
   /* 0xb7 */
   NdrRangeUnmarshall,
   NdrBaseTypeUnmarshall,
-  NdrBaseTypeUnmarshall
+  NdrBaseTypeUnmarshall,
+  0, 0, NdrSystemHandleUnmarshall
 };
 const NDR_BUFFERSIZE NdrBufferSizer[NDR_TABLE_SIZE] = {
   0,
@@ -294,11 +309,12 @@ const NDR_BUFFERSIZE NdrBufferSizer[NDR_TABLE_SIZE] = {
   /* 0xb1 */
   0, 0, 0,
   NdrUserMarshalBufferSize,
-  0, 0,
+  0, NdrSupplementBufferSize,
   /* 0xb7 */
   NdrRangeBufferSize,
   NdrBaseTypeBufferSize,
-  NdrBaseTypeBufferSize
+  NdrBaseTypeBufferSize,
+  0, 0, NdrSystemHandleBufferSize
 };
 const NDR_MEMORYSIZE NdrMemorySizer[NDR_TABLE_SIZE] = {
   0,
@@ -338,11 +354,12 @@ const NDR_MEMORYSIZE NdrMemorySizer[NDR_TABLE_SIZE] = {
   /* 0xb1 */
   0, 0, 0,
   NdrUserMarshalMemorySize,
-  0, 0,
+  0, NdrSupplementMemorySize,
   /* 0xb7 */
   NdrRangeMemorySize,
   NdrBaseTypeMemorySize,
-  NdrBaseTypeMemorySize
+  NdrBaseTypeMemorySize,
+  0, 0, NdrSystemHandleMemorySize
 };
 const NDR_FREE NdrFreer[NDR_TABLE_SIZE] = {
   0,
@@ -381,11 +398,12 @@ const NDR_FREE NdrFreer[NDR_TABLE_SIZE] = {
   /* 0xb1 */
   0, 0, 0,
   NdrUserMarshalFree,
-  0, 0,
+  0, NdrSupplementFree,
   /* 0xb7 */
   NdrRangeFree,
   NdrBaseTypeFree,
-  NdrBaseTypeFree
+  NdrBaseTypeFree,
+  0, 0, NdrSystemHandleFree
 };
 
 typedef struct _NDR_MEMORY_LIST
@@ -6595,6 +6613,218 @@ static void WINAPI NdrRangeFree(PMIDL_STUB_MESSAGE pStubMsg,
    TRACE("pStubMsg %p pMemory %p type 0x%02x\n", pStubMsg, pMemory, *pFormat);
 
    /* nothing to do */
+}
+
+/* FC_BLKHOLE is the historical name for the modern FC_SUPPLEMENT descriptor.
+ * It carries a base type, a relative offset to the actual type descriptor, and
+ * two type-specific arguments.  The type descriptor controls the NDR wire
+ * representation; the extra arguments tighten validation (for example, a
+ * strict context-handle identifier or string bounds). */
+static PFORMAT_STRING supplement_type(PFORMAT_STRING pFormat)
+{
+    if (*pFormat != FC_BLKHOLE)
+    {
+        ERR("invalid supplement format type %x\n", *pFormat);
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    }
+
+    return pFormat + 2 + *(const SHORT *)(pFormat + 2);
+}
+
+static unsigned char *WINAPI NdrSupplementMarshall(PMIDL_STUB_MESSAGE pStubMsg,
+        unsigned char *pMemory, PFORMAT_STRING pFormat)
+{
+    PFORMAT_STRING type = supplement_type(pFormat);
+    NDR_MARSHALL marshaller = NdrMarshaller[*type & NDR_TABLE_MASK];
+
+    TRACE("supplement %p delegates to type 0x%02x\n", pFormat, *type);
+    if (!marshaller) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    return marshaller(pStubMsg, pMemory, type);
+}
+
+static unsigned char *WINAPI NdrSupplementUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
+        unsigned char **ppMemory, PFORMAT_STRING pFormat, unsigned char fMustAlloc)
+{
+    PFORMAT_STRING type = supplement_type(pFormat);
+    NDR_UNMARSHALL unmarshaller = NdrUnmarshaller[*type & NDR_TABLE_MASK];
+
+    TRACE("supplement %p delegates to type 0x%02x\n", pFormat, *type);
+    if (!unmarshaller) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    return unmarshaller(pStubMsg, ppMemory, type, fMustAlloc);
+}
+
+static void WINAPI NdrSupplementBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
+        unsigned char *pMemory, PFORMAT_STRING pFormat)
+{
+    PFORMAT_STRING type = supplement_type(pFormat);
+    NDR_BUFFERSIZE sizer = NdrBufferSizer[*type & NDR_TABLE_MASK];
+
+    TRACE("supplement %p delegates to type 0x%02x\n", pFormat, *type);
+    if (!sizer) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    sizer(pStubMsg, pMemory, type);
+}
+
+static ULONG WINAPI NdrSupplementMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
+        PFORMAT_STRING pFormat)
+{
+    PFORMAT_STRING type = supplement_type(pFormat);
+    NDR_MEMORYSIZE sizer = NdrMemorySizer[*type & NDR_TABLE_MASK];
+
+    TRACE("supplement %p delegates to type 0x%02x\n", pFormat, *type);
+    return sizer ? sizer(pStubMsg, type) : 0;
+}
+
+static void WINAPI NdrSupplementFree(PMIDL_STUB_MESSAGE pStubMsg,
+        unsigned char *pMemory, PFORMAT_STRING pFormat)
+{
+    PFORMAT_STRING type = supplement_type(pFormat);
+    NDR_FREE freer = NdrFreer[*type & NDR_TABLE_MASK];
+
+    TRACE("supplement %p delegates to type 0x%02x\n", pFormat, *type);
+    if (freer) freer(pStubMsg, pMemory, type);
+}
+
+/* FC_SYSTEM_HANDLE is valid only over local RPC.  Native LRPC carries the
+ * handle out of band in an ALPC handle attribute while the NDR stream contains
+ * an index and a reserved word.  Wine's ncalrpc transport is implemented with
+ * named pipes and has no equivalent ancillary-data channel, so carry the Wine
+ * handle value and its source process id in those two words.  Both endpoints
+ * still receive a distinct handle with the access requested by the format. */
+static BOOL system_handle_binding_is_local(PMIDL_STUB_MESSAGE pStubMsg)
+{
+    RpcBinding *binding;
+
+    if (!pStubMsg->RpcMsg || pStubMsg->pRpcChannelBuffer) return FALSE;
+    binding = pStubMsg->RpcMsg->Handle;
+    return binding && binding->Protseq && !strcmp(binding->Protseq, "ncalrpc");
+}
+
+static ULONG system_handle_access(PFORMAT_STRING pFormat)
+{
+    ULONG access;
+
+    memcpy(&access, pFormat + 2, sizeof(access));
+    return access;
+}
+
+static unsigned char *WINAPI NdrSystemHandleMarshall(
+    PMIDL_STUB_MESSAGE pStubMsg,
+    unsigned char *pMemory,
+    PFORMAT_STRING pFormat)
+{
+    HANDLE handle = *(HANDLE *)pMemory;
+    ULONG value = HandleToULong(handle), process_id = handle ? GetCurrentProcessId() : 0;
+
+    TRACE("pStubMsg %p, handle %p, resource %u, access %#lx\n",
+            pStubMsg, handle, pFormat[1], system_handle_access(pFormat));
+
+    if (*pFormat != FC_SYSTEM_HANDLE || pFormat[1] > 12)
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    if (!system_handle_binding_is_local(pStubMsg))
+        RpcRaiseException(RPC_S_INVALID_BINDING);
+
+    align_pointer_clear(&pStubMsg->Buffer, sizeof(ULONG));
+    NDR_LOCAL_UINT32_WRITE(pStubMsg->Buffer, value);
+    NDR_LOCAL_UINT32_WRITE(pStubMsg->Buffer + sizeof(ULONG), process_id);
+    pStubMsg->Buffer += 2 * sizeof(ULONG);
+    return NULL;
+}
+
+static unsigned char *WINAPI NdrSystemHandleUnmarshall(
+    PMIDL_STUB_MESSAGE pStubMsg,
+    unsigned char **ppMemory,
+    PFORMAT_STRING pFormat,
+    unsigned char fMustAlloc)
+{
+    ULONG value, source_pid, peer_pid, access, flags, status;
+    HANDLE source_process, handle = NULL;
+
+    TRACE("pStubMsg %p, ppMemory %p, resource %u, access %#lx\n",
+            pStubMsg, ppMemory, pFormat[1], system_handle_access(pFormat));
+
+    if (*pFormat != FC_SYSTEM_HANDLE || pFormat[1] > 12)
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    if (!system_handle_binding_is_local(pStubMsg))
+        RpcRaiseException(RPC_S_INVALID_BINDING);
+
+    align_pointer(&pStubMsg->Buffer, sizeof(ULONG));
+    validate_size(pStubMsg, pStubMsg->BufferEnd, 2 * sizeof(ULONG));
+    value = NDR_LOCAL_UINT32_READ(pStubMsg->Buffer);
+    source_pid = NDR_LOCAL_UINT32_READ(pStubMsg->Buffer + sizeof(ULONG));
+    pStubMsg->Buffer += 2 * sizeof(ULONG);
+
+    if (!!value != !!source_pid) RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    if (!pStubMsg->IsClient && value)
+    {
+        status = I_RpcBindingInqLocalClientPID(pStubMsg->RpcMsg->Handle, &peer_pid);
+        if (status != RPC_S_OK || peer_pid != source_pid)
+            RpcRaiseException(RPC_S_ACCESS_DENIED);
+    }
+
+    if (value)
+    {
+        source_process = OpenProcess(PROCESS_DUP_HANDLE, FALSE, source_pid);
+        if (!source_process) RpcRaiseException(GetLastError());
+
+        access = system_handle_access(pFormat);
+        flags = access ? 0 : DUPLICATE_SAME_ACCESS;
+        if (!DuplicateHandle(source_process, ULongToHandle(value), GetCurrentProcess(),
+                             &handle, access, FALSE, flags))
+        {
+            status = GetLastError();
+            CloseHandle(source_process);
+            RpcRaiseException(status);
+        }
+        CloseHandle(source_process);
+    }
+
+    if (fMustAlloc && !*ppMemory) *ppMemory = NdrAllocate(pStubMsg, sizeof(HANDLE));
+    if (!*ppMemory)
+    {
+        if (handle) CloseHandle(handle);
+        RpcRaiseException(RPC_X_NULL_REF_POINTER);
+    }
+    *(HANDLE *)*ppMemory = handle;
+    return NULL;
+}
+
+static void WINAPI NdrSystemHandleBufferSize(
+    PMIDL_STUB_MESSAGE pStubMsg,
+    unsigned char *pMemory,
+    PFORMAT_STRING pFormat)
+{
+    TRACE("pStubMsg %p, handle %p, resource %u\n",
+            pStubMsg, *(HANDLE *)pMemory, pFormat[1]);
+
+    if (*pFormat != FC_SYSTEM_HANDLE || pFormat[1] > 12)
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    align_length(&pStubMsg->BufferLength, sizeof(ULONG));
+    safe_buffer_length_increment(pStubMsg, 2 * sizeof(ULONG));
+}
+
+static ULONG WINAPI NdrSystemHandleMemorySize(
+    PMIDL_STUB_MESSAGE pStubMsg,
+    PFORMAT_STRING pFormat)
+{
+    if (*pFormat != FC_SYSTEM_HANDLE || pFormat[1] > 12)
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+
+    align_pointer(&pStubMsg->Buffer, sizeof(ULONG));
+    safe_buffer_increment(pStubMsg, 2 * sizeof(ULONG));
+    align_length(&pStubMsg->MemorySize, sizeof(HANDLE));
+    pStubMsg->MemorySize += sizeof(HANDLE);
+    return sizeof(HANDLE);
+}
+
+static void WINAPI NdrSystemHandleFree(
+    PMIDL_STUB_MESSAGE pStubMsg,
+    unsigned char *pMemory,
+    PFORMAT_STRING pFormat)
+{
+    HANDLE handle = *(HANDLE *)pMemory;
+
+    TRACE("pStubMsg %p, handle %p, resource %u\n", pStubMsg, handle, pFormat[1]);
+    if (handle) CloseHandle(handle);
 }
 
 /***********************************************************************

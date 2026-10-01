@@ -17,6 +17,7 @@ SOURCES = \
 	clipping.c \
 	cursoricon.c \
 	d3dkmt.c \
+	dcomposition.c \
 	dc.c \
 	dce.c \
 	defwnd.c \

@@ -1,5 +1,5 @@
 MODULE    = actxprxy.dll
-IMPORTS   = uuid oleaut32 ole32 rpcrt4
+IMPORTS   = uuid combase oleaut32 ole32 rpcrt4
 
 SOURCES = \
 	actxprxy_activscp.idl \
@@ -13,8 +13,8 @@ SOURCES = \
 	actxprxy_servprov.idl \
 	actxprxy_shldisp.idl \
 	actxprxy_shobjidl.idl \
-	actxprxy_winrt_shell.idl \
 	actxprxy_urlhist.idl \
+	actxprxy_winrt_shell.idl \
 	usrmarshal.c
 
 dlldata_EXTRADEFS = -DWINE_REGISTER_DLL -DPROXY_DELEGATION

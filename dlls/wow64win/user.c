@@ -31,6 +31,17 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wow);
 
+NTSTATUS WINAPI wow64_NtUserAcquireIAMKey( UINT *args )
+{
+    ULONG *key32 = get_ptr( &args );
+    ULONG_PTR key;
+    BOOL ret;
+
+    ret = NtUserAcquireIAMKey( key32 ? &key : NULL );
+    if (ret && key32) *key32 = key;
+    return ret;
+}
+
 NTSTATUS WINAPI wow64_NtUserDrainThreadCoreMessagingCompletions( UINT *args )
 {
     return NtUserDrainThreadCoreMessagingCompletions();
@@ -49,6 +60,14 @@ NTSTATUS WINAPI wow64_NtUserInitThreadCoreMessagingIocp2( UINT *args )
     DWORD *mode = get_ptr( &args );
 
     return HandleToUlong( NtUserInitThreadCoreMessagingIocp2( hwnd, mode ));
+}
+
+NTSTATUS WINAPI wow64_NtUserEnableIAMAccess( UINT *args )
+{
+    ULONG_PTR key = get_ulong( &args );
+    BOOL enable = get_ulong( &args );
+
+    return NtUserEnableIAMAccess( key, enable );
 }
 
 typedef struct
@@ -2216,6 +2235,15 @@ NTSTATUS WINAPI wow64_NtUserEnableScrollBar( UINT *args )
     return NtUserEnableScrollBar( hwnd, bar, flags );
 }
 
+NTSTATUS WINAPI wow64_NtUserEnableWindowResizeOptimization( UINT *args )
+{
+    UINT flags = get_ulong( &args );
+    UINT value = get_ulong( &args );
+    UINT timeout = get_ulong( &args );
+
+    return NtUserEnableWindowResizeOptimization( flags, value, timeout );
+}
+
 NTSTATUS WINAPI wow64_NtUserEnableWindow( UINT *args )
 {
     HWND hwnd = get_handle( &args );
@@ -3023,6 +3051,14 @@ NTSTATUS WINAPI wow64_NtUserGetProcessDpiAwarenessContext( UINT *args )
     return NtUserGetProcessDpiAwarenessContext( process );
 }
 
+NTSTATUS WINAPI wow64_NtUserGetProcessUIContextInformation( UINT *args )
+{
+    HANDLE process = get_handle( &args );
+    ULONG *context = get_ptr( &args );
+
+    return NtUserGetProcessUIContextInformation( process, context );
+}
+
 NTSTATUS WINAPI wow64_NtUserGetProcessWindowStation( UINT *args )
 {
     return HandleToUlong( NtUserGetProcessWindowStation() );
@@ -3041,6 +3077,11 @@ NTSTATUS WINAPI wow64_NtUserGetQueueStatus( UINT *args )
     UINT flags = get_ulong( &args );
 
     return NtUserGetQueueStatus( flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetQueueStatusReadonly( UINT *args )
+{
+    return NtUserGetQueueStatusReadonly();
 }
 
 NTSTATUS WINAPI wow64_NtUserGetRawInputBuffer( UINT *args )
@@ -4370,6 +4411,23 @@ NTSTATUS WINAPI wow64_NtUserSendInput( UINT *args )
     }
 
     return NtUserSendInput( count, inputs, sizeof(*inputs) );
+}
+
+NTSTATUS WINAPI wow64_NtUserSetBrokeredForeground( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+
+    return NtUserSetBrokeredForeground( hwnd );
+}
+
+NTSTATUS WINAPI wow64_NtUserSetWindowMessageCapability( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    UINT message = get_ulong( &args );
+    PSID sid = get_ptr( &args );
+    ULONG action = get_ulong( &args );
+
+    return NtUserSetWindowMessageCapability( hwnd, message, sid, action );
 }
 
 NTSTATUS WINAPI wow64_NtUserSetActiveWindow( UINT *args )

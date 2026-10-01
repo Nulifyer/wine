@@ -286,7 +286,7 @@ static ULONG WINAPI local_server_Release(IServiceProvider *iface)
 static HRESULT WINAPI local_server_QueryService(IServiceProvider *iface, REFGUID guid, REFIID riid, void **obj)
 {
     struct local_server *local_server = impl_from_IServiceProvider(iface);
-    struct apartment *apt = com_get_current_apt();
+    struct apartment *apt;
     HRESULT hr = E_FAIL;
     IUnknown *unk;
 
@@ -295,12 +295,16 @@ static HRESULT WINAPI local_server_QueryService(IServiceProvider *iface, REFGUID
     if (!local_server->apt)
         return E_UNEXPECTED;
 
+    if (!(apt = apartment_get_current_or_mta()))
+        return CO_E_NOTINITIALIZED;
+
     if ((unk = com_get_registered_class_object(apt, guid, CLSCTX_LOCAL_SERVER)))
     {
         hr = IUnknown_QueryInterface(unk, riid, obj);
         IUnknown_Release(unk);
     }
 
+    apartment_release(apt);
     return hr;
 }
 
@@ -561,7 +565,7 @@ static struct apartment *apartment_get_or_create(DWORD model)
             EnterCriticalSection(&apt_cs);
 
             apt = apartment_construct(model);
-            if (!main_sta)
+            if (!main_sta && !(model & (COINIT_INTERNAL_APPLICATION_STA | COINIT_INTERNAL_QUALIFIER_7)))
             {
                 main_sta = apt;
                 apt->main = TRUE;
@@ -1130,10 +1134,18 @@ HRESULT enter_apartment(struct tlsdata *data, DWORD model)
 {
     HRESULT hr = S_OK;
 
+    if (data->apt && (model & COINIT_INTERNAL_STRICT))
+        return CO_E_INIT_ONLY_SINGLE_THREADED;
+
     if (!data->apt)
     {
         if (!apartment_get_or_create(model))
             return E_OUTOFMEMORY;
+
+        if (model & COINIT_INTERNAL_APPLICATION_STA)
+            data->apartment_qualifier = APTTYPEQUALIFIER_APPLICATION_STA;
+        else if (model & COINIT_INTERNAL_QUALIFIER_7)
+            data->apartment_qualifier = (APTTYPEQUALIFIER)7;
     }
     else if (!apartment_is_model(data->apt, model))
     {
@@ -1163,6 +1175,7 @@ void leave_apartment(struct tlsdata *data)
             data->implicit_mta_cookie = NULL;
         }
         data->apt = NULL;
+        data->apartment_qualifier = APTTYPEQUALIFIER_NONE;
         data->flags &= ~(OLETLS_DISABLE_OLE1DDE | OLETLS_APARTMENTTHREADED | OLETLS_MULTITHREADED);
     }
 }

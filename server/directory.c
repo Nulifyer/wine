@@ -134,6 +134,7 @@ static struct type_descr *types[] =
     &completion_type,
     &file_type,
     &mapping_type,
+    &memory_partition_type,
     &key_type,
     &apc_reserve_type,
     &completion_reserve_type,
@@ -456,6 +457,9 @@ void init_directories( struct fd *intl_fd )
 
     for (i = 0; i < ARRAY_SIZE(types); i++)
         release_object( create_object_type( &dir_objtype->obj, i, OBJ_PERMANENT ));
+
+    create_system_memory_objects( &dir_kernel->obj );
+    create_system_alpc_objects( &root_directory->obj );
 
     /* symlinks */
     release_object( create_obj_symlink( &root_directory->obj, link_dosdev_str, OBJ_PERMANENT, &dir_global->obj, NULL ));

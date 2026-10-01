@@ -39,6 +39,22 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(nls);
 
+/***********************************************************************
+ *         OpenGlobalizationUserSettingsKey   (kernelbase.@)
+ */
+NTSTATUS WINAPI OpenGlobalizationUserSettingsKey( ACCESS_MASK access, const void *context, HANDLE *key )
+{
+    TRACE( "%#lx, %p, %p\n", access, context, key );
+    if (!key) return STATUS_INVALID_PARAMETER;
+    *key = NULL;
+    if (context)
+    {
+        FIXME( "Explicit globalization context is not supported.\n" );
+        return STATUS_NOT_IMPLEMENTED;
+    }
+    return RtlOpenCurrentUser( access, key );
+}
+
 #define CALINFO_MAX_YEAR 2029
 
 static HMODULE kernelbase_handle;

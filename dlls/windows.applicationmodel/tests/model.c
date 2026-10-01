@@ -594,7 +594,10 @@ static void test_PackageStatics(void)
 static void test_DesignMode(void)
 {
     static const WCHAR *class_name = RuntimeClass_Windows_ApplicationModel_DesignMode;
+    IDesignModeStatics2 *statics2;
+    IDesignModeStatics *statics;
     IActivationFactory *factory;
+    boolean value;
     HSTRING str;
     HRESULT hr;
     LONG ref;
@@ -617,6 +620,32 @@ static void test_DesignMode(void)
     check_interface( factory, &IID_IActivationFactory, TRUE, FALSE );
     check_interface( factory, &IID_IDesignModeStatics, TRUE, FALSE );
     check_interface( factory, &IID_IDesignModeStatics2, TRUE, TRUE );
+
+    hr = IActivationFactory_QueryInterface( factory, &IID_IDesignModeStatics, (void **)&statics );
+    ok( hr == S_OK, "got hr %#lx.\n", hr );
+    if (SUCCEEDED( hr ))
+    {
+        hr = IDesignModeStatics_get_DesignModeEnabled( statics, NULL );
+        ok( hr == E_INVALIDARG, "got hr %#lx.\n", hr );
+        value = TRUE;
+        hr = IDesignModeStatics_get_DesignModeEnabled( statics, &value );
+        ok( hr == S_OK, "got hr %#lx.\n", hr );
+        ok( !value, "got value %u.\n", value );
+        IDesignModeStatics_Release( statics );
+    }
+
+    hr = IActivationFactory_QueryInterface( factory, &IID_IDesignModeStatics2, (void **)&statics2 );
+    ok( hr == S_OK || broken( hr == E_NOINTERFACE ), "got hr %#lx.\n", hr );
+    if (SUCCEEDED( hr ))
+    {
+        hr = IDesignModeStatics2_get_DesignMode2Enabled( statics2, NULL );
+        ok( hr == E_INVALIDARG, "got hr %#lx.\n", hr );
+        value = TRUE;
+        hr = IDesignModeStatics2_get_DesignMode2Enabled( statics2, &value );
+        ok( hr == S_OK, "got hr %#lx.\n", hr );
+        ok( !value, "got value %u.\n", value );
+        IDesignModeStatics2_Release( statics2 );
+    }
 
     ref = IActivationFactory_Release( factory );
     ok( ref == 1, "got ref %ld.\n", ref );

@@ -20,8 +20,8 @@
 2506 stub @
 2507 stub -noname SetAutoRotation  # NtUserSetAutoRotation
 2508 stub -noname PromotePointer  # NtUserPromotePointer
-2509 stub -noname AcquireIAMKey  # NtUserAcquireIAMKey
-2510 stub @
+2509 stdcall -noname AcquireIAMKey(ptr) NtUserAcquireIAMKey
+2510 stdcall -noname EnableIAMAccess(long long) NtUserEnableIAMAccess
 2511 stub -noname SetFallbackForeground  # NtUserSetFallbackForeground
 2512 stub -noname GetDisplayAutoRotationPreferencesByProcessId  # NtUserGetDisplayAutoRotationPreferencesByProcessId
 2513 stub -noname SetActiveProcessForMonitor  # NtUserSetActiveProcessForMonitor
@@ -32,8 +32,8 @@
 2518 stub @
 2519 stub -noname EnableMouseInputForCursorSuppression  # NtUserEnableMouseInputForCursorSuppression
 2520 stub -noname IsMouseInputEnabled  # NtUserIsMouseInputEnabled
-2521 stub GetProcessUIContextInformation  # NtUserGetProcessUIContextInformation
-2522 stub -noname SetBrokeredForeground  # NtUserSetBrokeredForeground
+2521 stdcall GetProcessUIContextInformation(ptr ptr) NtUserGetProcessUIContextInformation
+2522 stdcall -noname SetBrokeredForeground(long) NtUserSetBrokeredForeground
 2523 stub @
 2524 stub @
 2525 stub @
@@ -45,14 +45,14 @@
 2531 stub -noname SetCalibrationData  # NtUserSetCalibrationData
 2532 stub -noname SetDisplayMapping  # NtUserSetDisplayMapping
 2533 stub -noname CanBrokerForceForeground  # NtUserCanBrokerForceForeground
-2534 stub @
+2534 stdcall -noname InternalClipCursor(long long)
 2535 stub @
-2536 stub @
+2536 stdcall -noname SetWindowServicesDestroyCallback(ptr ptr)
 2537 stub -noname SendEventMessage  # NtUserSendEventMessage
 2538 stub -noname LayoutCompleted  # NtUserLayoutCompleted
 2539 stub -noname HidePointerContactVisualization  # NtUserHidePointerContactVisualization
 2540 stub -noname SetCancelRotationDelayHintWindow  # NtUserSetCancelRotationDelayHintWindow
-2541 stub -noname GetQueueStatusReadonly  # NtUserGetQueueStatusReadonly
+2541 stdcall -noname GetQueueStatusReadonly() NtUserGetQueueStatusReadonly
 2542 stub SetCoveredWindowStates  # NtUserSetCoveredWindowStates
 
 2544 stub -noname EnableTouchPad  # NtUserEnableTouchPad
@@ -82,7 +82,7 @@
 2568 stub -noname SetModernAppWindow  # NtUserSetModernAppWindow
 2569 stub -noname GetModernAppWindow  # NtUserGetModernAppWindow
 2570 stub @
-2571 stub SetCoreWindow  # NtUserSetCoreWindow
+2571 stdcall SetCoreWindow(long long)
 2572 stub @
 2573 stub @
 2574 stub @
@@ -118,13 +118,13 @@
 2608 stub -noname ProcessInkFeedbackCommand  # NtUserProcessInkFeedbackCommand
 2609 stub -noname GetInteractiveCtrlSupportedWaveforms  # NtUserGetInteractiveCtrlSupportedWaveforms
 2610 stub -noname CompositionInputSinkViewInstanceIdFromPoint  # NtUserCompositionInputSinkViewInstanceIdFromPoint
-2611 stub -noname EnableWindowResizeOptimization  # NtUserEnableWindowResizeOptimization
+2611 stdcall -noname EnableWindowResizeOptimization(long long long) NtUserEnableWindowResizeOptimization
 2612 stub -noname InitThreadCoreMessagingIocp  # NtUserInitThreadCoreMessagingIocp
 2613 stdcall -noname DrainThreadCoreMessagingCompletions() NtUserDrainThreadCoreMessagingCompletions
 2614 stub -noname GetResizeDCompositionSynchronizationObject  # NtUserGetResizeDCompositionSynchronizationObject
-2615 stub -noname EnableResizeLayoutSynchronization  # NtUserEnableResizeLayoutSynchronization
+2615 stdcall -noname EnableResizeLayoutSynchronization(long)  # NtUserEnableResizeLayoutSynchronization
 2616 stub -noname BeginLayoutUpdate  # NtUserBeginLayoutUpdate
-2617 stub -noname IsResizeLayoutSynchronizationEnabled  # NtUserIsResizeLayoutSynchronizationEnabled
+2617 stdcall -noname IsResizeLayoutSynchronizationEnabled()  # NtUserIsResizeLayoutSynchronizationEnabled
 2618 stub @
 2619 stub @
 2620 stub @
@@ -133,7 +133,7 @@
 
 2627 stub -noname SetBridgeWindowChild  # NtUserSetBridgeWindowChild
 
-2633 stub -noname CreateActivationObject  # NtUserCreateActivationObject
+2633 stdcall -noname CreateActivationObject(long ptr ptr)  # NtUserCreateActivationObject
 2634 stub -noname SetTSFEventState  # NtUserSetTSFEventState
 2635 stub @
 2636 stub @
@@ -155,7 +155,7 @@
 2652 stub -noname GetUniformSpaceMapping  # NtUserGetUniformSpaceMapping
 2653 stub -noname GetPointerProprietaryId  # NtUserGetPointerProprietaryId
 
-2656 stub -noname EnableMouseInPointerForWindow  # NtUserEnableMouseInPointerForWindow
+2656 stdcall -noname EnableMouseInPointerForWindow(long long)
 2657 stub -noname SetProcessMousewheelRoutingMode  # NtUserSetProcessMousewheelRoutingMode
 2658 stub -noname SetDesktopVisualInputSink  # NtUserSetDesktopVisualInputSink
 2659 stub @
@@ -172,7 +172,7 @@
 2670 stdcall -noname DrainThreadCoreMessagingCompletions2(long) NtUserDrainThreadCoreMessagingCompletions2
 2671 stub ShellRegisterHotKey  # NtUserShellRegisterHotKey
 2672 stub SetUserObjectCapability  # NtUserSetUserObjectCapability
-2673 stub SetWindowMessageCapability  # NtUserSetWindowMessageCapability
+2673 stdcall SetWindowMessageCapability(long long ptr long) NtUserSetWindowMessageCapability
 2674 stub ShellForegroundBoostProcess  # NtUserShellForegroundBoostProcess
 2675 stub SuppressWindowActions  # NtUserSuppressWindowActions
 2676 stub GetSuppressedWindowActions  # NtUserGetSuppressedWindowActions
@@ -317,7 +317,7 @@
 @ stdcall CreateAcceleratorTableW(ptr long) NtUserCreateAcceleratorTable
 @ stdcall CreateCaret(long long long long) NtUserCreateCaret
 @ stdcall CreateCursor(long long long long long ptr ptr)
-# @ stub CreateDCompositionHwndTarget
+@ stdcall CreateDCompositionHwndTarget(long long ptr)
 @ stdcall CreateDesktopA(str str ptr long long ptr)
 # @ stub CreateDesktopExA
 # @ stub CreateDesktopExW
@@ -339,8 +339,8 @@
 # @ stub CreateSystemThreads
 @ stdcall CreateWindowExA(long str str long long long long long long long long ptr)
 @ stdcall CreateWindowExW(long wstr wstr long long long long long long long long ptr)
-@ stub -arch=win64 CreateWindowInBand
-# @ stub CreateWindowInBandEx
+@ stdcall -arch=win64 CreateWindowInBand(long wstr wstr long long long long long long long long ptr long)
+@ stdcall -arch=win64 CreateWindowInBandEx(long wstr wstr long long long long long long long long ptr long long)
 # @ stub CreateWindowIndirect
 @ stdcall CreateWindowStationA(str long long ptr)
 @ stdcall CreateWindowStationW(wstr long long ptr)
@@ -395,7 +395,7 @@
 @ stdcall DestroyAcceleratorTable(long) NtUserDestroyAcceleratorTable
 @ stdcall DestroyCaret() NtUserDestroyCaret
 @ stdcall DestroyCursor(long)
-# @ stub DestroyDCompositionHwndTarget
+@ stdcall DestroyDCompositionHwndTarget(long long)
 @ stdcall DestroyIcon(long)
 @ stdcall DestroyMenu(long) NtUserDestroyMenu
 # @ stub DestroyReasons
@@ -697,7 +697,7 @@
 # @ stub GetWinStationInfo
 @ stdcall GetWindow(long long)
 # @ stub GetWindowBand
-# @ stub GetWindowCompositionAttribute
+@ stdcall GetWindowCompositionAttribute(ptr ptr)
 # @ stub GetWindowCompositionInfo
 @ stdcall GetWindowContextHelpId(long) NtUserGetWindowContextHelpId
 @ stdcall GetWindowDC(long) NtUserGetWindowDC
@@ -790,7 +790,7 @@
 @ stdcall IsMenu(long)
 @ stdcall IsMouseInPointerEnabled() NtUserIsMouseInPointerEnabled
 # @ stub SetThreadCursorCreationScaling
-# @ stub IsOneCoreTransformMode
+@ stdcall IsOneCoreTransformMode()
 @ stdcall IsProcessDPIAware()
 @ stdcall IsRectEmpty(ptr)
 # @ stub IsSETEnabled
@@ -1024,6 +1024,7 @@
 @ stdcall -arch=win64 SetClassLongPtrW(long long long)
 @ stdcall SetClassLongW(long long long)
 @ stdcall SetClassWord(long long long) NtUserSetClassWord
+@ stdcall -arch=win64 SetClassScope(ptr ptr long)
 @ stdcall SetClipboardData(long long)
 @ stdcall SetClipboardViewer(long) NtUserSetClipboardViewer
 @ stdcall SetCoalescableTimer(long long long ptr long) NtUserSetTimer
@@ -1108,7 +1109,7 @@
 # @ stub SetWindowCompositionTransition
 @ stdcall SetWindowContextHelpId(long long) NtUserSetWindowContextHelpId
 @ stdcall SetWindowDisplayAffinity(long long)
-# @ stub SetWindowFeedbackSetting
+@ stdcall SetWindowFeedbackSetting(long long long long ptr)
 @ stdcall SetWindowLongA(long long long)
 @ stdcall -arch=win64 SetWindowLongPtrA(long long long)
 @ stdcall -arch=win64 SetWindowLongPtrW(long long long)

@@ -70,6 +70,11 @@ enum tlsdata_flags
     OLETLS_MULTITHREADED = 0x100,
 };
 
+/* Internal apartment initialization flags used by RoInitializeStrict. */
+#define COINIT_INTERNAL_QUALIFIER_7 0x20000000
+#define COINIT_INTERNAL_APPLICATION_STA 0x40000000
+#define COINIT_INTERNAL_STRICT 0x80000000
+
 /* this is what is stored in TEB->ReservedForOle */
 struct tlsdata
 {
@@ -86,6 +91,7 @@ struct tlsdata
     DWORD             unknown;
     IObjContext      *context_token; /* (+38h on x86) */
     IUnknown         *call_state;    /* current call context (+3Ch on x86) */
+    ULONG_PTR         outgoing_call_state;
     DWORD             unknown2[46];
     IUnknown         *cancel_object; /* cancel object set by CoSetCancelObject (+F8h on x86) */
     IUnknown         *state;         /* see CoSetState */
@@ -93,6 +99,7 @@ struct tlsdata
     DWORD             spies_lock;
     DWORD             cancelcount;
     CO_MTA_USAGE_COOKIE implicit_mta_cookie; /* mta referenced by roapi from sta thread */
+    APTTYPEQUALIFIER   apartment_qualifier;
 };
 
 extern HRESULT WINAPI InternalTlsAllocData(struct tlsdata **data);
@@ -121,6 +128,7 @@ HRESULT apartment_disconnectproxies(struct apartment *apt);
 /* RpcSs interface */
 HRESULT rpcss_get_next_seqid(DWORD *id);
 HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj);
+HRESULT rpc_get_registered_local_class_object(REFCLSID rclsid, REFIID riid, void **obj);
 HRESULT rpc_register_local_server(REFCLSID clsid, IStream *stream, DWORD flags, unsigned int *cookie);
 HRESULT rpc_revoke_local_server(unsigned int cookie);
 HRESULT rpc_create_clientchannel(const OXID *oxid, const IPID *ipid, const OXID_INFO *oxid_info, const IID *iid,
@@ -268,3 +276,5 @@ HRESULT ipid_get_dispatch_params(const IPID *ipid, struct apartment **stub_apt,
 HRESULT ipid_get_dest_context(const IPID *ipid, MSHCTX *dest_context, void **dest_context_data);
 HRESULT start_apartment_remote_unknown(struct apartment *apt);
 void get_process_secret(GUID *process_secret);
+HRESULT set_error_info(IErrorInfo *error_info);
+HRESULT get_error_info(IErrorInfo **error_info);

@@ -19,6 +19,8 @@
  */
 #include <stdarg.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -26,6 +28,75 @@
 #include "winsta.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winsta);
+
+static DWORD get_effective_session_id( ULONG *session )
+{
+    HANDLE token;
+    NTSTATUS status;
+
+    status = NtOpenThreadToken( GetCurrentThread(), TOKEN_QUERY, TRUE, &token );
+    if (status == STATUS_NO_TOKEN)
+        status = NtOpenProcessToken( GetCurrentProcess(), TOKEN_QUERY, &token );
+    if (status) return RtlNtStatusToDosError( status );
+    status = NtQueryInformationToken( token, TokenSessionId, session, sizeof(*session), NULL );
+    NtClose( token );
+    return RtlNtStatusToDosError( status );
+}
+
+BOOLEAN WINAPI WinStationIsCurrentSessionRemoteable( BOOLEAN *remoteable )
+{
+    ULONG session;
+    DWORD error;
+
+    TRACE( "%p\n", remoteable );
+
+    /* The output is a BOOLEAN, not a BOOL, and is cleared before querying. */
+    *remoteable = FALSE;
+    if ((error = get_effective_session_id( &session )))
+    {
+        SetLastError( error );
+        return FALSE;
+    }
+    /* Wine's service and interactive console sessions have no remote transport.
+     * Do not claim capabilities for other token session IDs. */
+    if (session > 1)
+    {
+        SetLastError( ERROR_NOT_SUPPORTED );
+        return FALSE;
+    }
+    SetLastError( ERROR_SUCCESS );
+    return TRUE;
+}
+
+BOOLEAN WINAPI WinStationIsSessionRemoteable( HANDLE server, ULONG session, BOOLEAN *remoteable )
+{
+    ULONG current;
+    DWORD error;
+
+    TRACE( "%p %lu %p\n", server, session, remoteable );
+
+    if (session == LOGONID_CURRENT) return WinStationIsCurrentSessionRemoteable( remoteable );
+    if ((error = get_effective_session_id( &current )))
+    {
+        SetLastError( error );
+        return FALSE;
+    }
+    /* Native current-session queries bypass the server handle entirely. */
+    if (session == current) return WinStationIsCurrentSessionRemoteable( remoteable );
+    if (server || !remoteable)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    *remoteable = FALSE;
+    if (session > 1)
+    {
+        SetLastError( session == (ULONG)-2 ? ERROR_FILE_NOT_FOUND : ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    SetLastError( ERROR_SUCCESS );
+    return TRUE;
+}
 
 BOOLEAN WINAPI WinStationQueryInformationA( HANDLE server, ULONG logon_id, WINSTATIONINFOCLASS class,
                                             void *info, ULONG len, ULONG *ret_len )

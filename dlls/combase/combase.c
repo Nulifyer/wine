@@ -23,6 +23,8 @@
 #include "objbase.h"
 #include "comsvcs.h"
 #include "ctxtcall.h"
+#include "servprov.h"
+#include "shobjidl.h"
 #include "oleauto.h"
 #include "dde.h"
 #include "winternl.h"
@@ -38,6 +40,691 @@ WINE_DEFAULT_DEBUG_CHANNEL(ole);
 HINSTANCE hProxyDll;
 
 static ULONG_PTR global_options[COMGLB_PROPERTIES_RESERVED3 + 1];
+
+/* The Windows app-model registrar is normally an out-of-process DCOM server.
+ * LinuxNT hosts the genuine implementation in-process while the app-model
+ * broker is being brought up, so its existing registration and package logic
+ * remains available without requiring Windows service processes. */
+static const CLSID CLSID_ActivatableApplicationRegistrar =
+    {0xdea794e0, 0x1c1d, 0x4363, {0xb1, 0x71, 0x98, 0xd0, 0xb1, 0x70, 0x35, 0x86}};
+static const CLSID CLSID_ActivationBrokerManager =
+    {0x3b17fd9c, 0xf7cf, 0x4736, {0xaf, 0x6b, 0x61, 0x6c, 0x2d, 0x1e, 0xd8, 0x54}};
+static const CLSID CLSID_ContextSwitcher =
+    {0x0000034e, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+static const CLSID CLSID_ShellServiceHostBrokerProvider =
+    {0x3480a401, 0xbde9, 0x4407, {0xbc, 0x02, 0x79, 0x8a, 0x86, 0x6a, 0xc0, 0x51}};
+static const IID IID_IActivatableApplicationRegistrar =
+    {0x036c57fc, 0xe73d, 0x4f3a, {0xb0, 0x95, 0x8b, 0x81, 0x3f, 0xa2, 0xf7, 0x64}};
+static const IID IID_IGetActivationFactory =
+    {0x4edb8ee2, 0x96dd, 0x49a7, {0x94, 0xf7, 0x46, 0x07, 0xdd, 0xab, 0x8e, 0x3c}};
+static const IID IID_IActivatableApplication =
+    {0x92696c00, 0x7578, 0x48e1, {0xac, 0x1a, 0x2c, 0xa9, 0x09, 0xe2, 0xc8, 0xcf}};
+static const IID IID_IServiceHostBrokerProvider =
+    {0x0f4accb1, 0xd8f9, 0x4011, {0xba, 0x37, 0x25, 0x57, 0x92, 0x5a, 0x78, 0xcf}};
+static const IID IID_IApplicationActivationBroker =
+    {0xd98fd14a, 0x522a, 0x4d59, {0xb8, 0x75, 0x81, 0x1e, 0x83, 0x91, 0x9a, 0x9e}};
+static const IID IID_ISplashScreen =
+    {0xca4d975c, 0xd4d6, 0x43f0, {0x97, 0xc0, 0x08, 0x33, 0xc6, 0x39, 0x1c, 0x24}};
+static const IID IID_IActivatedEventArgs =
+    {0xcf651713, 0xcd08, 0x4fd8, {0xb6, 0x97, 0xa2, 0x81, 0xb6, 0x54, 0x4e, 0x2e}};
+static const IID IID_IInitializeActivatedEventArgs =
+    {0x99fc44e3, 0xce9a, 0x4284, {0xbf, 0x04, 0x76, 0x33, 0x1d, 0x1b, 0x17, 0x88}};
+static const IID IID_LinuxNT_IInspectable =
+    {0xaf86e2e0, 0xb12d, 0x4c6a, {0x9c, 0x5a, 0xd7, 0xaa, 0x65, 0x10, 0x1e, 0x90}};
+
+struct linuxnt_inspectable;
+
+struct linuxnt_inspectable_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct linuxnt_inspectable *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct linuxnt_inspectable *);
+    ULONG (WINAPI *Release)(struct linuxnt_inspectable *);
+    HRESULT (WINAPI *GetIids)(struct linuxnt_inspectable *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(struct linuxnt_inspectable *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(struct linuxnt_inspectable *, INT32 *);
+};
+
+struct linuxnt_inspectable
+{
+    const struct linuxnt_inspectable_vtbl *lpVtbl;
+};
+
+HRESULT WINAPI WindowsDeleteString(HSTRING string);
+HRESULT WINAPI WindowsCreateString(const WCHAR *source, UINT32 length, HSTRING *string);
+PCWSTR WINAPI WindowsGetStringRawBuffer(HSTRING string, UINT32 *length);
+
+struct activatable_application_registrar;
+
+struct activatable_application_registrar_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct activatable_application_registrar *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct activatable_application_registrar *);
+    ULONG (WINAPI *Release)(struct activatable_application_registrar *);
+    HRESULT (WINAPI *RegisterActivatableApplication)(struct activatable_application_registrar *,
+            struct linuxnt_inspectable *);
+};
+
+struct activatable_application_registrar
+{
+    const struct activatable_application_registrar_vtbl *lpVtbl;
+};
+
+static struct linuxnt_inspectable *registered_activatable_application;
+static struct linuxnt_inspectable *registered_application_instance;
+
+static struct linuxnt_inspectable *get_launch_activated_event_args(void);
+
+struct activatable_application
+{
+    const struct activatable_application_vtbl
+    {
+        HRESULT (WINAPI *QueryInterface)(struct activatable_application *, REFIID, void **);
+        ULONG (WINAPI *AddRef)(struct activatable_application *);
+        ULONG (WINAPI *Release)(struct activatable_application *);
+        HRESULT (WINAPI *GetIids)(struct activatable_application *, ULONG *, IID **);
+        HRESULT (WINAPI *GetRuntimeClassName)(struct activatable_application *, HSTRING *);
+        HRESULT (WINAPI *GetTrustLevel)(struct activatable_application *, INT32 *);
+        HRESULT (WINAPI *Activate)(struct activatable_application *, HSTRING, HSTRING, HSTRING,
+                HSTRING, struct linuxnt_inspectable *, UINT64, UINT64);
+    } *lpVtbl;
+};
+
+static DWORD WINAPI activate_registered_application(void *param)
+{
+    static const WCHAR * const candidates[] =
+    {
+        L"Calculator.App",
+        L"Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+        L"Microsoft.WindowsCalculator_11.2502.2.0_x64__8wekyb3d8bbwe",
+        L"Microsoft.WindowsCalculator_8wekyb3d8bbwe",
+        L"App",
+        L"CalculatorApp.exe",
+    };
+    struct activatable_application *application = param;
+    HSTRING strings[4] = {0};
+    unsigned int candidate, position;
+    HRESULT hr;
+
+    Sleep(250);
+    for (candidate = 0; candidate < ARRAY_SIZE(candidates); ++candidate)
+    {
+        HSTRING string = NULL;
+
+        hr = WindowsCreateString(candidates[candidate], wcslen(candidates[candidate]), &string);
+        if (FAILED(hr)) break;
+        for (position = 0; position < ARRAY_SIZE(strings); ++position)
+        {
+            strings[position] = string;
+            hr = application->lpVtbl->Activate(application, strings[0], strings[1], strings[2],
+                    strings[3], get_launch_activated_event_args(), 0, 0);
+            WARN("IActivatableApplication::Activate candidate %s at position %u returned %#lx\n",
+                    debugstr_w(candidates[candidate]), position, hr);
+            strings[position] = NULL;
+            if (SUCCEEDED(hr)) break;
+        }
+        WindowsDeleteString(string);
+        if (SUCCEEDED(hr)) break;
+    }
+    application->lpVtbl->Release(application);
+    return 0;
+}
+
+static HRESULT WINAPI activatable_application_registrar_QueryInterface(
+        struct activatable_application_registrar *iface, REFIID riid, void **obj)
+{
+    TRACE("IActivatableApplicationRegistrar %s, %p\n", debugstr_guid(riid), obj);
+    if (!obj) return E_POINTER;
+    *obj = NULL;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IActivatableApplicationRegistrar))
+    {
+        *obj = iface;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI activatable_application_registrar_AddRef(struct activatable_application_registrar *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI activatable_application_registrar_Release(struct activatable_application_registrar *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI activatable_application_registrar_RegisterActivatableApplication(
+        struct activatable_application_registrar *iface, struct linuxnt_inspectable *application)
+{
+    typedef HRESULT (WINAPI *activate_instance_fn)(struct linuxnt_inspectable *,
+            struct linuxnt_inspectable **);
+    typedef HRESULT (WINAPI *get_activation_factory_fn)(struct linuxnt_inspectable *, HSTRING,
+            struct linuxnt_inspectable **);
+    static const WCHAR calculator_class[] = L"Calculator.App";
+    struct linuxnt_inspectable *class_router = NULL, *class_factory = NULL;
+    HSTRING runtime_class = NULL;
+    IID *iids = NULL;
+    ULONG iid_count = 0, i;
+    BOOL has_activation_factory = FALSE;
+    struct activatable_application *activatable_application = NULL;
+    HANDLE activation_thread;
+    HRESULT hr;
+
+    TRACE("IActivatableApplicationRegistrar %p, application %p\n", iface, application);
+    if (!application) return E_INVALIDARG;
+
+    if (registered_activatable_application)
+        registered_activatable_application->lpVtbl->Release(registered_activatable_application);
+    registered_activatable_application = application;
+    registered_activatable_application->lpVtbl->AddRef(registered_activatable_application);
+
+    hr = application->lpVtbl->GetRuntimeClassName(application, &runtime_class);
+    TRACE("activation object runtime class hr %#lx, %s\n", hr,
+            SUCCEEDED(hr) ? debugstr_w(WindowsGetStringRawBuffer(runtime_class, NULL)) : "<unavailable>");
+    if (runtime_class) WindowsDeleteString(runtime_class);
+
+    hr = application->lpVtbl->GetIids(application, &iid_count, &iids);
+    TRACE("activation object GetIids hr %#lx, count %lu\n", hr, iid_count);
+    if (SUCCEEDED(hr))
+        for (i = 0; i < iid_count; ++i)
+        {
+            static const IID IID_IActivationFactory =
+                    {0x00000035, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+
+            TRACE("activation object iid[%lu] %s\n", i, debugstr_guid(&iids[i]));
+            if (IsEqualIID(&iids[i], &IID_IActivationFactory)) has_activation_factory = TRUE;
+        }
+    CoTaskMemFree(iids);
+
+    hr = application->lpVtbl->QueryInterface(application, &IID_IActivatableApplication,
+            (void **)&activatable_application);
+    TRACE("activation object IActivatableApplication hr %#lx, interface %p\n", hr,
+            activatable_application);
+    if (SUCCEEDED(hr))
+    {
+        activation_thread = CreateThread(NULL, 0, activate_registered_application,
+                activatable_application, 0, NULL);
+        if (activation_thread) CloseHandle(activation_thread);
+        else
+        {
+            WARN("failed to create activation thread, error %lu\n", GetLastError());
+            activatable_application->lpVtbl->Release(activatable_application);
+        }
+    }
+
+    hr = application->lpVtbl->QueryInterface(application, &IID_IGetActivationFactory,
+            (void **)&class_router);
+    TRACE("activation object IGetActivationFactory hr %#lx, router %p\n", hr, class_router);
+    if (SUCCEEDED(hr))
+    {
+        hr = WindowsCreateString(calculator_class, ARRAY_SIZE(calculator_class) - 1, &runtime_class);
+        if (SUCCEEDED(hr))
+            hr = ((get_activation_factory_fn)((void **)class_router->lpVtbl)[6])(class_router,
+                    runtime_class, &class_factory);
+        TRACE("GetActivationFactory(%s) hr %#lx, factory %p\n", debugstr_w(calculator_class),
+                hr, class_factory);
+        WindowsDeleteString(runtime_class);
+        runtime_class = NULL;
+
+        if (SUCCEEDED(hr) && class_factory)
+        {
+            if (registered_application_instance)
+                registered_application_instance->lpVtbl->Release(registered_application_instance);
+            registered_application_instance = NULL;
+            hr = ((activate_instance_fn)((void **)class_factory->lpVtbl)[6])(class_factory,
+                    &registered_application_instance);
+            TRACE("Calculator.App ActivateInstance hr %#lx, instance %p\n", hr,
+                    registered_application_instance);
+            if (SUCCEEDED(hr) && registered_application_instance)
+            {
+                iids = NULL;
+                iid_count = 0;
+                hr = registered_application_instance->lpVtbl->GetIids(registered_application_instance,
+                        &iid_count, &iids);
+                TRACE("application instance GetIids hr %#lx, count %lu\n", hr, iid_count);
+                if (SUCCEEDED(hr))
+                    for (i = 0; i < iid_count; ++i)
+                        TRACE("application instance iid[%lu] %s\n", i, debugstr_guid(&iids[i]));
+                CoTaskMemFree(iids);
+            }
+            class_factory->lpVtbl->Release(class_factory);
+        }
+        class_router->lpVtbl->Release(class_router);
+    }
+    else if (has_activation_factory)
+    {
+        WARN("activation object exposes IActivationFactory but not IGetActivationFactory\n");
+    }
+    return S_OK;
+}
+
+static const struct activatable_application_registrar_vtbl activatable_application_registrar_vtbl =
+{
+    activatable_application_registrar_QueryInterface,
+    activatable_application_registrar_AddRef,
+    activatable_application_registrar_Release,
+    activatable_application_registrar_RegisterActivatableApplication,
+};
+
+static struct activatable_application_registrar activatable_application_registrar =
+        {&activatable_application_registrar_vtbl};
+
+struct service_host_broker_provider;
+
+struct service_host_broker_provider_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct service_host_broker_provider *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct service_host_broker_provider *);
+    ULONG (WINAPI *Release)(struct service_host_broker_provider *);
+    HRESULT (WINAPI *GetBroker)(struct service_host_broker_provider *, REFGUID, REFIID, void **);
+};
+
+struct service_host_broker_provider
+{
+    const struct service_host_broker_provider_vtbl *lpVtbl;
+};
+
+struct splash_screen_adapter;
+
+struct splash_screen_adapter_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct splash_screen_adapter *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct splash_screen_adapter *);
+    ULONG (WINAPI *Release)(struct splash_screen_adapter *);
+    HRESULT (WINAPI *GetIids)(struct splash_screen_adapter *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(struct splash_screen_adapter *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(struct splash_screen_adapter *, INT32 *);
+    HRESULT (WINAPI *get_ImageLocation)(struct splash_screen_adapter *, void *);
+    HRESULT (WINAPI *add_Dismissed)(struct splash_screen_adapter *, void *, LONGLONG *);
+    HRESULT (WINAPI *remove_Dismissed)(struct splash_screen_adapter *, LONGLONG);
+};
+
+struct splash_screen_adapter
+{
+    const struct splash_screen_adapter_vtbl *lpVtbl;
+};
+
+struct launch_activated_event_args;
+struct initialize_activated_event_args;
+
+struct launch_activated_event_args_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct launch_activated_event_args *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct launch_activated_event_args *);
+    ULONG (WINAPI *Release)(struct launch_activated_event_args *);
+    HRESULT (WINAPI *GetIids)(struct launch_activated_event_args *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(struct launch_activated_event_args *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(struct launch_activated_event_args *, INT32 *);
+    HRESULT (WINAPI *get_Kind)(struct launch_activated_event_args *, INT32 *);
+    HRESULT (WINAPI *get_PreviousExecutionState)(struct launch_activated_event_args *, INT32 *);
+    HRESULT (WINAPI *get_SplashScreen)(struct launch_activated_event_args *, void **);
+};
+
+struct launch_activated_event_args
+{
+    const struct launch_activated_event_args_vtbl *lpVtbl;
+};
+
+struct initialize_activated_event_args_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct initialize_activated_event_args *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct initialize_activated_event_args *);
+    ULONG (WINAPI *Release)(struct initialize_activated_event_args *);
+    HRESULT (WINAPI *GetIids)(struct initialize_activated_event_args *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(struct initialize_activated_event_args *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(struct initialize_activated_event_args *, INT32 *);
+    HRESULT (WINAPI *Initialize)(struct initialize_activated_event_args *, UINT64, HSTRING,
+            INT32, BYTE, BYTE, UINT64, GUID);
+    HRESULT (WINAPI *InitializeViewDependent)(struct initialize_activated_event_args *, INT32,
+            INT, void *, BYTE);
+};
+
+struct initialize_activated_event_args
+{
+    const struct initialize_activated_event_args_vtbl *lpVtbl;
+};
+
+static struct splash_screen_adapter splash_screen_adapter;
+static struct launch_activated_event_args launch_activated_event_args;
+static struct initialize_activated_event_args initialize_activated_event_args;
+
+static HRESULT WINAPI splash_screen_adapter_QueryInterface(
+        struct splash_screen_adapter *iface, REFIID riid, void **obj)
+{
+    WARN("ISplashScreen::QueryInterface %s, %p\n", debugstr_guid(riid), obj);
+    if (!obj) return E_POINTER;
+    *obj = NULL;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_LinuxNT_IInspectable) ||
+            IsEqualIID(riid, &IID_ISplashScreen))
+    {
+        *obj = iface;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI splash_screen_adapter_AddRef(struct splash_screen_adapter *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI splash_screen_adapter_Release(struct splash_screen_adapter *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI splash_screen_adapter_GetIids(struct splash_screen_adapter *iface,
+        ULONG *iid_count, IID **iids)
+{
+    if (!iid_count || !iids) return E_POINTER;
+    *iid_count = 0;
+    *iids = NULL;
+    return S_OK;
+}
+
+static HRESULT WINAPI splash_screen_adapter_GetRuntimeClassName(
+        struct splash_screen_adapter *iface, HSTRING *class_name)
+{
+    if (!class_name) return E_POINTER;
+    *class_name = NULL;
+    return S_OK;
+}
+
+static HRESULT WINAPI splash_screen_adapter_GetTrustLevel(
+        struct splash_screen_adapter *iface, INT32 *trust_level)
+{
+    if (!trust_level) return E_POINTER;
+    *trust_level = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI splash_screen_adapter_get_ImageLocation(
+        struct splash_screen_adapter *iface, void *location)
+{
+    WARN("ISplashScreen::get_ImageLocation %p\n", location);
+    if (!location) return E_POINTER;
+    memset(location, 0, sizeof(float) * 4);
+    return S_OK;
+}
+
+static HRESULT WINAPI splash_screen_adapter_add_Dismissed(
+        struct splash_screen_adapter *iface, void *handler, LONGLONG *cookie)
+{
+    WARN("ISplashScreen::add_Dismissed handler %p, cookie %p\n", handler, cookie);
+    if (!cookie) return E_POINTER;
+    *cookie = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI splash_screen_adapter_remove_Dismissed(
+        struct splash_screen_adapter *iface, LONGLONG cookie)
+{
+    WARN("ISplashScreen::remove_Dismissed cookie %#I64x\n", cookie);
+    return S_OK;
+}
+
+static const struct splash_screen_adapter_vtbl splash_screen_adapter_vtbl =
+{
+    splash_screen_adapter_QueryInterface,
+    splash_screen_adapter_AddRef,
+    splash_screen_adapter_Release,
+    splash_screen_adapter_GetIids,
+    splash_screen_adapter_GetRuntimeClassName,
+    splash_screen_adapter_GetTrustLevel,
+    splash_screen_adapter_get_ImageLocation,
+    splash_screen_adapter_add_Dismissed,
+    splash_screen_adapter_remove_Dismissed,
+};
+
+static struct splash_screen_adapter splash_screen_adapter = {&splash_screen_adapter_vtbl};
+
+static HRESULT WINAPI launch_activated_event_args_QueryInterface(
+        struct launch_activated_event_args *iface, REFIID riid, void **obj)
+{
+    WARN("IActivatedEventArgs::QueryInterface %s, %p\n", debugstr_guid(riid), obj);
+    if (!obj) return E_POINTER;
+    *obj = NULL;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_LinuxNT_IInspectable) ||
+            IsEqualIID(riid, &IID_IActivatedEventArgs))
+    {
+        *obj = iface;
+        return S_OK;
+    }
+    if (IsEqualIID(riid, &IID_IInitializeActivatedEventArgs))
+    {
+        *obj = &initialize_activated_event_args;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI launch_activated_event_args_AddRef(struct launch_activated_event_args *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI launch_activated_event_args_Release(struct launch_activated_event_args *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI launch_activated_event_args_GetIids(struct launch_activated_event_args *iface,
+        ULONG *iid_count, IID **iids)
+{
+    if (!iid_count || !iids) return E_POINTER;
+    *iid_count = 0;
+    *iids = NULL;
+    return S_OK;
+}
+
+static HRESULT WINAPI launch_activated_event_args_GetRuntimeClassName(
+        struct launch_activated_event_args *iface, HSTRING *class_name)
+{
+    if (!class_name) return E_POINTER;
+    *class_name = NULL;
+    return S_OK;
+}
+
+static HRESULT WINAPI launch_activated_event_args_GetTrustLevel(
+        struct launch_activated_event_args *iface, INT32 *trust_level)
+{
+    if (!trust_level) return E_POINTER;
+    *trust_level = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI launch_activated_event_args_get_Kind(
+        struct launch_activated_event_args *iface, INT32 *kind)
+{
+    WARN("IActivatedEventArgs::get_Kind %p\n", kind);
+    if (!kind) return E_POINTER;
+    *kind = 0; /* ActivationKind_Launch */
+    return S_OK;
+}
+
+static HRESULT WINAPI launch_activated_event_args_get_PreviousExecutionState(
+        struct launch_activated_event_args *iface, INT32 *state)
+{
+    WARN("IActivatedEventArgs::get_PreviousExecutionState %p\n", state);
+    if (!state) return E_POINTER;
+    *state = 0; /* ApplicationExecutionState_NotRunning */
+    return S_OK;
+}
+
+static HRESULT WINAPI launch_activated_event_args_get_SplashScreen(
+        struct launch_activated_event_args *iface, void **splash_screen)
+{
+    WARN("IActivatedEventArgs::get_SplashScreen %p\n", splash_screen);
+    if (!splash_screen) return E_POINTER;
+    *splash_screen = &splash_screen_adapter;
+    splash_screen_adapter_AddRef(&splash_screen_adapter);
+    return S_OK;
+}
+
+static const struct launch_activated_event_args_vtbl launch_activated_event_args_vtbl =
+{
+    launch_activated_event_args_QueryInterface,
+    launch_activated_event_args_AddRef,
+    launch_activated_event_args_Release,
+    launch_activated_event_args_GetIids,
+    launch_activated_event_args_GetRuntimeClassName,
+    launch_activated_event_args_GetTrustLevel,
+    launch_activated_event_args_get_Kind,
+    launch_activated_event_args_get_PreviousExecutionState,
+    launch_activated_event_args_get_SplashScreen,
+};
+
+static struct launch_activated_event_args launch_activated_event_args =
+        {&launch_activated_event_args_vtbl};
+
+static HRESULT WINAPI initialize_activated_event_args_QueryInterface(
+        struct initialize_activated_event_args *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IInitializeActivatedEventArgs))
+    {
+        if (!obj) return E_POINTER;
+        *obj = iface;
+        return S_OK;
+    }
+    return launch_activated_event_args_QueryInterface(&launch_activated_event_args, riid, obj);
+}
+
+static ULONG WINAPI initialize_activated_event_args_AddRef(
+        struct initialize_activated_event_args *iface)
+{
+    return launch_activated_event_args_AddRef(&launch_activated_event_args);
+}
+
+static ULONG WINAPI initialize_activated_event_args_Release(
+        struct initialize_activated_event_args *iface)
+{
+    return launch_activated_event_args_Release(&launch_activated_event_args);
+}
+
+static HRESULT WINAPI initialize_activated_event_args_GetIids(
+        struct initialize_activated_event_args *iface, ULONG *iid_count, IID **iids)
+{
+    return launch_activated_event_args_GetIids(&launch_activated_event_args, iid_count, iids);
+}
+
+static HRESULT WINAPI initialize_activated_event_args_GetRuntimeClassName(
+        struct initialize_activated_event_args *iface, HSTRING *class_name)
+{
+    return launch_activated_event_args_GetRuntimeClassName(&launch_activated_event_args, class_name);
+}
+
+static HRESULT WINAPI initialize_activated_event_args_GetTrustLevel(
+        struct initialize_activated_event_args *iface, INT32 *trust_level)
+{
+    return launch_activated_event_args_GetTrustLevel(&launch_activated_event_args, trust_level);
+}
+
+static HRESULT WINAPI initialize_activated_event_args_Initialize(
+        struct initialize_activated_event_args *iface, UINT64 view_id, HSTRING application,
+        INT32 previous_state, BYTE prelaunch, BYTE foreground, UINT64 user_context,
+        GUID activation_id)
+{
+    WARN("IInitializeActivatedEventArgs::Initialize view %#I64x, application %s, state %d, "
+            "prelaunch %u, foreground %u, user %#I64x, activation %s\n", view_id,
+            debugstr_w(WindowsGetStringRawBuffer(application, NULL)), previous_state, prelaunch,
+            foreground, user_context, debugstr_guid(&activation_id));
+    return S_OK;
+}
+
+static HRESULT WINAPI initialize_activated_event_args_InitializeViewDependent(
+        struct initialize_activated_event_args *iface, INT32 previous_state, INT view_id,
+        void *splash_screen, BYTE foreground)
+{
+    WARN("IInitializeActivatedEventArgs::InitializeViewDependent state %d, view %d, "
+            "splash %p, foreground %u\n", previous_state, view_id, splash_screen, foreground);
+    return S_OK;
+}
+
+static const struct initialize_activated_event_args_vtbl initialize_activated_event_args_vtbl =
+{
+    initialize_activated_event_args_QueryInterface,
+    initialize_activated_event_args_AddRef,
+    initialize_activated_event_args_Release,
+    initialize_activated_event_args_GetIids,
+    initialize_activated_event_args_GetRuntimeClassName,
+    initialize_activated_event_args_GetTrustLevel,
+    initialize_activated_event_args_Initialize,
+    initialize_activated_event_args_InitializeViewDependent,
+};
+
+static struct initialize_activated_event_args initialize_activated_event_args =
+        {&initialize_activated_event_args_vtbl};
+
+static struct linuxnt_inspectable *get_launch_activated_event_args(void)
+{
+    return (struct linuxnt_inspectable *)&launch_activated_event_args;
+}
+
+static HRESULT WINAPI service_host_broker_provider_QueryInterface(
+        struct service_host_broker_provider *iface, REFIID riid, void **obj)
+{
+    TRACE("IServiceHostBrokerProvider %s, %p\n", debugstr_guid(riid), obj);
+    if (!obj) return E_POINTER;
+    *obj = NULL;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IServiceHostBrokerProvider))
+    {
+        *obj = iface;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI service_host_broker_provider_AddRef(struct service_host_broker_provider *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI service_host_broker_provider_Release(struct service_host_broker_provider *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI service_host_broker_provider_GetBroker(struct service_host_broker_provider *iface,
+        REFGUID service, REFIID riid, void **obj)
+{
+    struct service_host_broker_provider *native_provider = NULL;
+    HRESULT hr;
+
+    WARN("IServiceHostBrokerProvider::GetBroker service %s, interface %s\n",
+            debugstr_guid(service), debugstr_guid(riid));
+    if (!obj) return E_POINTER;
+    *obj = NULL;
+    if (IsEqualGUID(service, &IID_IApplicationActivationBroker) &&
+            IsEqualIID(riid, &IID_IApplicationActivationBroker))
+    {
+        /* ActivationManager.dll already contains the complete Windows broker and ViewActivator.
+         * It can run in-process under Wine once the service-host boundary is supplied here. */
+        hr = CoCreateInstance(&CLSID_ActivationBrokerManager, NULL, CLSCTX_INPROC_SERVER,
+                &IID_IServiceHostBrokerProvider, (void **)&native_provider);
+        WARN("native Activation Broker Manager returned %#lx, provider %p\n", hr, native_provider);
+        if (SUCCEEDED(hr) && native_provider)
+        {
+            hr = native_provider->lpVtbl->GetBroker(native_provider, service, riid, obj);
+            native_provider->lpVtbl->Release(native_provider);
+            WARN("native activation broker returned %#lx, interface %p\n", hr, *obj);
+            return hr;
+        }
+        return hr;
+    }
+    return E_NOINTERFACE;
+}
+
+static const struct service_host_broker_provider_vtbl service_host_broker_provider_vtbl =
+{
+    service_host_broker_provider_QueryInterface,
+    service_host_broker_provider_AddRef,
+    service_host_broker_provider_Release,
+    service_host_broker_provider_GetBroker,
+};
+
+static struct service_host_broker_provider service_host_broker_provider =
+        {&service_host_broker_provider_vtbl};
+
 
 /* Ole32 exports */
 extern void WINAPI DestroyRunningObjectTable(void);
@@ -394,6 +1081,7 @@ HRESULT WINAPI InternalTlsAllocData(struct tlsdata **data)
     if (!(*data = calloc(1, sizeof(**data))))
         return E_OUTOFMEMORY;
 
+    (*data)->outgoing_call_state = ~(ULONG_PTR)0;
     list_init(&(*data)->spies);
     NtCurrentTeb()->ReservedForOle = *data;
 
@@ -542,10 +1230,26 @@ static const IClassFactoryVtbl global_options_factory_vtbl =
 
 static IClassFactory global_options_factory = { &global_options_factory_vtbl };
 
+static HRESULT WINAPI context_switcher_CreateInstance(IClassFactory *iface, IUnknown *outer,
+        REFIID riid, void **obj);
+
+static const IClassFactoryVtbl context_switcher_factory_vtbl =
+{
+    class_factory_QueryInterface,
+    class_factory_AddRef,
+    class_factory_Release,
+    context_switcher_CreateInstance,
+    class_factory_LockServer
+};
+
+static IClassFactory context_switcher_factory = { &context_switcher_factory_vtbl };
+
 static HRESULT get_builtin_class_factory(REFCLSID rclsid, REFIID riid, void **obj)
 {
     if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
         return IClassFactory_QueryInterface(&global_options_factory, riid, obj);
+    if (IsEqualCLSID(rclsid, &CLSID_ContextSwitcher))
+        return IClassFactory_QueryInterface(&context_switcher_factory, riid, obj);
     return E_UNEXPECTED;
 }
 
@@ -1092,6 +1796,56 @@ HRESULT WINAPI CoImpersonateClient(void)
 }
 
 /***********************************************************************
+ *           CoImpersonateClientOfObject        (combase.@)
+ */
+HRESULT WINAPI CoImpersonateClientOfObject(IUnknown *server, BOOL *found)
+{
+    IServerSecurity *server_security;
+    HRESULT hr;
+
+    TRACE("%p, %p.\n", server, found);
+
+    *found = FALSE;
+    hr = CoGetCallContext(&IID_IServerSecurity, (void **)&server_security);
+    if (FAILED(hr)) return S_OK;
+
+    hr = IServerSecurity_ImpersonateClient(server_security);
+    IServerSecurity_Release(server_security);
+    if (SUCCEEDED(hr)) *found = TRUE;
+    return hr;
+}
+
+/***********************************************************************
+ *           CoGetCallContextOfObject        (combase.@)
+ *
+ * Private helper used by Windows service-host components.  A normal
+ * in-process object has no incoming call context; Windows returns success
+ * with a null interface for that case, including a null object.
+ */
+HRESULT WINAPI CoGetCallContextOfObject(IUnknown *server, REFIID iid, void **out)
+{
+    TRACE("%p, %s, %p.\n", server, debugstr_guid(iid), out);
+
+    *out = NULL;
+    return S_OK;
+}
+
+/***********************************************************************
+ *           CoGetCallLocality        (combase.@)
+ *
+ * COM_CALL_LOCALITY_SAME_PROCESS is zero.  This is the Windows result for
+ * ordinary in-process objects and for a null object outside an incoming
+ * server call.
+ */
+HRESULT WINAPI CoGetCallLocality(IUnknown *server, INT *locality)
+{
+    TRACE("%p, %p.\n", server, locality);
+
+    *locality = 0;
+    return S_OK;
+}
+
+/***********************************************************************
  *           CoRevertToSelf        (combase.@)
  */
 HRESULT WINAPI CoRevertToSelf(void)
@@ -1160,6 +1914,24 @@ HRESULT WINAPI CoGetCallState(int arg1, ULONG *arg2)
     FIXME("%d, %p.\n", arg1, arg2);
 
     return E_NOTIMPL;
+}
+
+/***********************************************************************
+ *          CoSetOutgoingCallState        (combase.@)
+ */
+HRESULT WINAPI CoSetOutgoingCallState(const ULONG_PTR *state, ULONG_PTR *old_state)
+{
+    struct tlsdata *tlsdata;
+    HRESULT hr;
+
+    TRACE("%p, %p.\n", state, old_state);
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+        return hr;
+
+    if (old_state) *old_state = tlsdata->outgoing_call_state;
+    tlsdata->outgoing_call_state = *state;
+    return S_OK;
 }
 
 /***********************************************************************
@@ -1444,6 +2216,22 @@ static HRESULT clsid_from_string_reg(LPCOLESTR progid, CLSID *clsid)
 }
 
 /******************************************************************************
+ *                CLSIDFromOle1Class       (combase.@)
+ *
+ * This private compatibility entry point accepts the same ProgID form as
+ * CLSIDFromProgID.  Modern Windows components still use it while probing old
+ * OLE registrations; failing the lookup is preferable to the generated OLE 1
+ * class allocation performed by Windows, since Wine has no OLE 1 server to
+ * activate for such a generated class.
+ */
+HRESULT WINAPI CLSIDFromOle1Class(LPCOLESTR progid, CLSID *clsid, BOOL force_assign)
+{
+    TRACE("(%s, %p, %d)\n", debugstr_w(progid), clsid, force_assign);
+    if (!progid || !clsid) return E_INVALIDARG;
+    return clsid_from_string_reg(progid, clsid);
+}
+
+/******************************************************************************
  *                CLSIDFromProgID        (combase.@)
  */
 HRESULT WINAPI DECLSPEC_HOTPATCH CLSIDFromProgID(LPCOLESTR progid, CLSID *clsid)
@@ -1705,6 +2493,18 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstance(REFCLSID rclsid, IUnknown *out
     if (!obj)
         return E_POINTER;
 
+    if (IsEqualCLSID(rclsid, &CLSID_ActivatableApplicationRegistrar))
+    {
+        TRACE("providing the LinuxNT activatable-application registrar\n");
+        return activatable_application_registrar_QueryInterface(&activatable_application_registrar, riid, obj);
+    }
+
+    if (IsEqualCLSID(rclsid, &CLSID_ShellServiceHostBrokerProvider))
+    {
+        TRACE("providing the LinuxNT shell-service broker provider\n");
+        return service_host_broker_provider_QueryInterface(&service_host_broker_provider, riid, obj);
+    }
+
     hr = CoCreateInstanceEx(rclsid, outer, cls_context, NULL, 1, &multi_qi);
     *obj = multi_qi.pItf;
     return hr;
@@ -1723,9 +2523,195 @@ HRESULT WINAPI CoCreateInstanceFromApp(REFCLSID rclsid, IUnknown *outer, DWORD c
             count, results);
 }
 
+struct shared_service_entry
+{
+    struct list entry;
+    DWORD id;
+    LONG refs;
+};
+
+static struct list shared_services = LIST_INIT(shared_services);
+static CRITICAL_SECTION shared_services_cs;
+static CRITICAL_SECTION_DEBUG shared_services_cs_debug =
+{
+    0, 0, &shared_services_cs,
+    { &shared_services_cs_debug.ProcessLocksList, &shared_services_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": shared_services_cs") }
+};
+static CRITICAL_SECTION shared_services_cs = { &shared_services_cs_debug, -1, 0, 0, 0, 0 };
+
+static struct shared_service_entry *find_shared_service(DWORD id)
+{
+    struct shared_service_entry *entry;
+
+    LIST_FOR_EACH_ENTRY(entry, &shared_services, struct shared_service_entry, entry)
+        if (entry->id == id) return entry;
+    return NULL;
+}
+
+/* Windows 11 COMBASE identifies a service hosted in a shared process with the
+ * low DWORD of the current thread's service tag.  The reference functions
+ * return the resulting signed count, or -1 when the tag is unknown. */
+HRESULT WINAPI CoGetSharedServiceId(DWORD *id)
+{
+    struct shared_service_entry *entry;
+    DWORD current_id;
+
+    TRACE("%p\n", id);
+    if (!id) return E_INVALIDARG;
+
+    current_id = (DWORD)(ULONG_PTR)NtCurrentTeb()->SubProcessTag;
+    *id = current_id;
+
+    EnterCriticalSection(&shared_services_cs);
+    entry = find_shared_service(current_id);
+    if (!entry && (entry = malloc(sizeof(*entry))))
+    {
+        entry->id = current_id;
+        entry->refs = 0;
+        list_add_tail(&shared_services, &entry->entry);
+    }
+    LeaveCriticalSection(&shared_services_cs);
+
+    return entry ? S_OK : E_OUTOFMEMORY;
+}
+
+LONG WINAPI CoAddRefSharedService(DWORD id)
+{
+    struct shared_service_entry *entry;
+    LONG refs = -1;
+
+    TRACE("%lu\n", id);
+    EnterCriticalSection(&shared_services_cs);
+    if ((entry = find_shared_service(id))) refs = ++entry->refs;
+    LeaveCriticalSection(&shared_services_cs);
+    return refs;
+}
+
+LONG WINAPI CoReleaseSharedService(DWORD id)
+{
+    struct shared_service_entry *entry;
+    LONG refs = -1;
+
+    TRACE("%lu\n", id);
+    EnterCriticalSection(&shared_services_cs);
+    if ((entry = find_shared_service(id))) refs = --entry->refs;
+    LeaveCriticalSection(&shared_services_cs);
+    return refs;
+}
+
+/* Windows 11 COMBASE exposes these private service and message-pump helpers
+ * by ordinal.
+ * Their state block is deliberately opaque; callers allocate 0x60 bytes and
+ * COMBASE owns its contents.  Wine does not need the Windows ASTA scheduler,
+ * but must preserve the ordinal ABI used by inbox Windows.UI.dll. */
+HRESULT WINAPI CoRegisterServerShutdownDelay(void *callback, DWORD delay)
+{
+    TRACE("%p, %lu\n", callback, delay);
+    if (!callback && delay) return E_INVALIDARG;
+    return S_OK;
+}
+
+HRESULT WINAPI CoBeginProcessEvents(void *state)
+{
+    TRACE("%p\n", state);
+    if (!state) return E_INVALIDARG;
+    memset(state, 0, 0x60);
+    return S_OK;
+}
+
+DWORD WINAPI CoMsgWaitInProcessEvents(void *state, DWORD count, const HANDLE *handles,
+        DWORD timeout, DWORD wake_mask, DWORD flags)
+{
+    TRACE("%p, %lu, %p, %lu, %#lx, %#lx\n", state, count, handles, timeout,
+            wake_mask, flags);
+
+    /* The ordinary native path is a direct MsgWaitForMultipleObjectsEx call.
+     * Native rejects more than MAXIMUM_WAIT_OBJECTS - 8 handles and bit zero
+     * in the final flags argument.  The opaque state is used only by its ASTA
+     * scheduler path, which Wine does not currently implement. */
+    if (!state || count > MAXIMUM_WAIT_OBJECTS - 8 || (flags & 1))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return WAIT_FAILED;
+    }
+    return MsgWaitForMultipleObjectsEx(count, handles, timeout, wake_mask, flags);
+}
+
+HRESULT WINAPI CoEndProcessEvents(void *state)
+{
+    TRACE("%p\n", state);
+    return state ? S_OK : E_INVALIDARG;
+}
+
+HRESULT WINAPI RoGetDesignMode(UINT32 *mode)
+{
+    TRACE("%p\n", mode);
+    if (!mode) return E_INVALIDARG;
+    *mode = 0;
+    return S_OK;
+}
+
+void WINAPI CoSignalPendingGitRegistrationWaits(void)
+{
+    /* Native COMBASE wakes waiters for pending Global Interface Table
+     * registrations here. Wine's GIT implementation completes registration
+     * synchronously, so there are no deferred waiters to signal. */
+    TRACE("\n");
+}
+
+void WINAPI CoSetMessageDispatcher(IUnknown *dispatcher)
+{
+    TRACE("%p\n", dispatcher);
+}
+
+void WINAPI CoHandlePriorityEventsFromMessagePump(void)
+{
+    TRACE("\n");
+}
+
+BOOL WINAPI RoIsASTAWorkScheduledAtPriorityOrHigher(UINT32 priority)
+{
+    TRACE("%u\n", priority);
+    return FALSE;
+}
+
+HRESULT WINAPI RoGetDesignModeV2(UINT32 *mode)
+{
+    TRACE("%p\n", mode);
+    if (!mode) return E_INVALIDARG;
+    *mode = 0;
+    return S_OK;
+}
+
+/***********************************************************************
+ *           CoCreateObjectInContext     [COMBASE.@]
+ */
+HRESULT WINAPI CoCreateObjectInContext(IUnknown *object, IUnknown *context, REFIID riid,
+        void **out)
+{
+    TRACE("%p, %p, %s, %p\n", object, context, debugstr_guid(riid), out);
+
+    /* The private api-ms-win-core-com-private contracts expose an unavailable
+     * API thunk under this same name on current Windows builds. Some inbox
+     * components reach this export through that contract and pass a flags
+     * value in r9, where the public COMBASE ABI expects the result pointer.
+     * Match the private thunk's failure instead of dereferencing that value. */
+    if ((ULONG_PTR)out < 0x10000) return E_FAIL;
+    if (!object || !context || !riid || !out) return E_INVALIDARG;
+    *out = NULL;
+
+    /* Windows creates a context-aware proxy for object.  Wine's in-process
+     * free-threaded marshaler already makes this object callable across the
+     * apartments used here, so retain the requested interface identity. */
+    return IUnknown_QueryInterface(object, riid, out);
+}
+
 static HRESULT com_get_class_object(REFCLSID rclsid, DWORD clscontext,
         COSERVERINFO *server_info, REFIID riid, void **obj)
 {
+    static const CLSID activation_manager_shim_clsid =
+            {0x6c3ee638, 0xb588, 0x4d7d, {0xb3, 0x0a, 0xe7, 0xe3, 0x67, 0x59, 0x30, 0x5d}};
     struct class_reg_data clsreg = { 0 };
     HRESULT hr = E_UNEXPECTED;
     IUnknown *registered_obj;
@@ -1745,16 +2731,42 @@ static HRESULT com_get_class_object(REFCLSID rclsid, DWORD clscontext,
     if (server_info)
         FIXME("server_info name %s, authinfo %p\n", debugstr_w(server_info->pwszName), server_info->pAuthInfo);
 
+    /* Windows registers the Activation Manager Shim FTM in
+     * activationmanager.dll but twinui.appcore requests it with
+     * CLSCTX_LOCAL_SERVER. COMBASE gives this system class special activation
+     * treatment. Keep the exception class-specific so ordinary COM context
+     * selection remains unchanged. */
+    if ((clscontext & CLSCTX_LOCAL_SERVER) && IsEqualCLSID(rclsid, &activation_manager_shim_clsid))
+    {
+        HKEY hkey;
+
+        hr = open_key_for_clsid(rclsid, L"InprocServer32", KEY_READ, &hkey);
+        if (SUCCEEDED(hr))
+        {
+            clsreg.u.hkey = hkey;
+            clsreg.origin = CLASS_REG_REGISTRY;
+            hr = apartment_get_inproc_class_object(apt, &clsreg, rclsid, riid,
+                    CLSCTX_INPROC_SERVER, obj);
+            RegCloseKey(hkey);
+            if (SUCCEEDED(hr))
+            {
+                apartment_release(apt);
+                return hr;
+            }
+        }
+    }
+
     if (clscontext & CLSCTX_INPROC_SERVER)
     {
         if (IsEqualCLSID(rclsid, &CLSID_InProcFreeMarshaler) ||
                 IsEqualCLSID(rclsid, &CLSID_GlobalOptions) ||
+                IsEqualCLSID(rclsid, &CLSID_ContextSwitcher) ||
                 (!(clscontext & CLSCTX_APPCONTAINER) && IsEqualCLSID(rclsid, &CLSID_ManualResetEvent)) ||
                 IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
         {
             apartment_release(apt);
 
-            if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
+            if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher))
                 return get_builtin_class_factory(rclsid, riid, obj);
             else
                 return Ole32DllGetClassObject(rclsid, riid, obj);
@@ -1906,6 +2918,13 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstanceEx(REFCLSID rclsid, IUnknown *o
 
     if (server_info)
         FIXME("Server info is not supported.\n");
+
+    if ((cls_context & CLSCTX_LOCAL_SERVER) &&
+            IsEqualCLSID(rclsid, &CLSID_ActivatableApplicationRegistrar))
+    {
+        TRACE("hosting the app-model registrar in-process\n");
+        cls_context |= CLSCTX_INPROC_SERVER;
+    }
 
     init_multi_qi(count, results, E_NOINTERFACE);
 
@@ -2429,6 +3448,7 @@ static struct thread_context
     LONG ref;
     LONG reported_ref;
     OXID oxid;
+    BOOL context_switcher;
 } *mta_context;
 
 static inline struct thread_context *impl_from_IComThreadingInfo(IComThreadingInfo *iface)
@@ -2581,6 +3601,19 @@ static const IComThreadingInfoVtbl thread_context_info_vtbl =
 static HRESULT WINAPI thread_context_callback_QueryInterface(IContextCallback *iface, REFIID riid, void **obj)
 {
     struct thread_context *context = impl_from_IContextCallback(iface);
+
+    if (context->context_switcher)
+    {
+        *obj = NULL;
+        if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IContextCallback))
+        {
+            *obj = iface;
+            IContextCallback_AddRef(iface);
+            return S_OK;
+        }
+        return E_NOINTERFACE;
+    }
+
     return IComThreadingInfo_QueryInterface(&context->IComThreadingInfo_iface, riid, obj);
 }
 
@@ -2622,6 +3655,36 @@ static HRESULT WINAPI thread_context_callback_ContextCallback(IContextCallback *
         ERR("apartment not initialised\n");
         return CO_E_NOTINITIALIZED;
     }
+
+    if (context->context_switcher && context->oxid == apt->oxid)
+    {
+        struct tlsdata *tlsdata;
+        IObjContext *previous_context;
+
+        apartment_release(apt);
+        if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+            return hr;
+
+        previous_context = tlsdata->context_token;
+        InterlockedIncrement(&context->ref);
+        tlsdata->context_token = &context->IObjContext_iface;
+
+        __TRY
+        {
+            hr = callback(param);
+        }
+        __EXCEPT_ALL
+        {
+            hr = RPC_E_SERVERFAULT;
+        }
+        __ENDTRY
+
+        tlsdata->context_token = previous_context;
+        context_token_release(&context->IObjContext_iface);
+        TRACE("context-switcher callback returned %lx\n", hr);
+        return hr;
+    }
+
     rpc_start_remoting(apt);
 
     if (&context->IObjContext_iface == current_context)
@@ -2795,6 +3858,43 @@ static const IObjContextVtbl thread_object_context_vtbl =
     thread_object_context_Reserved7
 };
 
+static HRESULT WINAPI context_switcher_CreateInstance(IClassFactory *iface, IUnknown *outer,
+        REFIID riid, void **obj)
+{
+    struct thread_context *context;
+    struct apartment *apt;
+
+    TRACE("%p, %s, %p\n", outer, debugstr_guid(riid), obj);
+
+    if (!obj) return E_POINTER;
+    *obj = NULL;
+    if (outer) return CLASS_E_NOAGGREGATION;
+    if (!IsEqualIID(riid, &IID_IUnknown) && !IsEqualIID(riid, &IID_IContextCallback))
+        return E_NOINTERFACE;
+
+    if (!(apt = apartment_get_current_or_mta()))
+        return CO_E_NOTINITIALIZED;
+
+    context = calloc(1, sizeof(*context));
+    if (!context)
+    {
+        apartment_release(apt);
+        return E_OUTOFMEMORY;
+    }
+
+    context->IComThreadingInfo_iface.lpVtbl = &thread_context_info_vtbl;
+    context->IContextCallback_iface.lpVtbl = &thread_context_callback_vtbl;
+    context->IObjContext_iface.lpVtbl = &thread_object_context_vtbl;
+    context->ref = 1;
+    context->reported_ref = 1;
+    context->oxid = apt->oxid;
+    context->context_switcher = TRUE;
+    apartment_release(apt);
+
+    *obj = &context->IContextCallback_iface;
+    return S_OK;
+}
+
 /***********************************************************************
  *           CoGetContextToken    (combase.@)
  */
@@ -2821,7 +3921,7 @@ HRESULT WINAPI CoGetContextToken(ULONG_PTR *token)
     if (tlsdata->context_token)
     {
         struct thread_context *context = impl_from_IObjContext(tlsdata->context_token);
-        if ((apt->multi_threaded && context != mta_context) ||
+        if ((apt->multi_threaded && context != mta_context && !context->context_switcher) ||
             (!apt->multi_threaded && context == mta_context))
         {
             context_token_release(tlsdata->context_token);
@@ -3122,7 +4222,7 @@ HRESULT WINAPI CoGetApartmentType(APTTYPE *type, APTTYPEQUALIFIER *qualifier)
     else
         *type = APTTYPE_STA;
 
-    *qualifier = APTTYPEQUALIFIER_NONE;
+    *qualifier = tlsdata->apt ? tlsdata->apartment_qualifier : APTTYPEQUALIFIER_NONE;
 
     if (!tlsdata->apt && (apt = apartment_get_mta()))
     {
@@ -3675,8 +4775,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj)
 
     *obj = NULL;
 
-    if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
-        return IClassFactory_QueryInterface(&global_options_factory, riid, obj);
+    if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions) || IsEqualCLSID(rclsid, &CLSID_ContextSwitcher))
+        return get_builtin_class_factory(rclsid, riid, obj);
 
     return CLASS_E_CLASSNOTAVAILABLE;
 }

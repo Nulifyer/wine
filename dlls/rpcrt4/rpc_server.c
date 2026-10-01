@@ -31,6 +31,8 @@
 #include "winerror.h"
 
 #include "rpc.h"
+#include "rpcasync.h"
+#include "rpcdcep.h"
 #include "rpcndr.h"
 #include "excpt.h"
 
@@ -105,6 +107,57 @@ static LONG listen_count;
 static HANDLE listen_done_event;
 
 static UUID uuid_nil;
+
+static RPC_STATUS server_inq_call_attributes(RPC_BINDING_HANDLE binding, void *attributes)
+{
+    RPC_CALL_ATTRIBUTES_V1_W *v1 = attributes;
+    RPC_STATUS status;
+    ULONG client_pid;
+
+    if (!attributes) return RPC_S_INVALID_ARG;
+    TRACE("version %u, flags %#lx\n", v1->Version, v1->Flags);
+    /* Windows 11 app-model components use version 3 when querying the client
+     * PID.  Its 0x70-byte call-attributes record retains the version 2 prefix
+     * through ClientPID; no public version 3 definition is available yet. */
+    if (v1->Version < 1 || v1->Version > 3) return RPC_S_INVALID_ARG;
+
+    v1->ServerPrincipalNameBufferLength = 0;
+    v1->ClientPrincipalNameBufferLength = 0;
+    v1->AuthenticationLevel = RPC_C_AUTHN_LEVEL_NONE;
+    v1->AuthenticationService = RPC_C_AUTHN_NONE;
+    v1->NullSession = FALSE;
+    if (v1->Version >= 2)
+    {
+        RPC_CALL_ATTRIBUTES_V2_W *v2 = attributes;
+
+        v2->KernelModeCaller = FALSE;
+        v2->ProtocolSequence = 0;
+        v2->IsClientLocal = rcclLocal;
+        if (v1->Flags & RPC_QUERY_CLIENT_PID)
+        {
+            status = I_RpcBindingInqLocalClientPID(binding, &client_pid);
+            if (status != RPC_S_OK) return status;
+            v2->ClientPID = ULongToHandle(client_pid);
+        }
+        v2->CallStatus = 1; /* RPC_CALL_STATUS_IN_PROGRESS */
+        v2->CallType = rctNormal;
+        v2->OpNum = 0;
+        v2->InterfaceUuid = uuid_nil;
+    }
+    return RPC_S_OK;
+}
+
+RPC_STATUS RPC_ENTRY RpcServerInqCallAttributesA(RPC_BINDING_HANDLE binding, void *attributes)
+{
+    TRACE("%p, %p\n", binding, attributes);
+    return server_inq_call_attributes(binding, attributes);
+}
+
+RPC_STATUS RPC_ENTRY RpcServerInqCallAttributesW(RPC_BINDING_HANDLE binding, void *attributes)
+{
+    TRACE("%p, %p\n", binding, attributes);
+    return server_inq_call_attributes(binding, attributes);
+}
 
 static inline RpcObjTypeMap *LookupObjTypeMap(UUID *ObjUuid)
 {
@@ -905,7 +958,22 @@ RPC_STATUS WINAPI RpcServerInqBindings( RPC_BINDING_VECTOR** BindingVector )
     status = RPC_S_NO_BINDINGS;
   }
   LeaveCriticalSection(&server_cs);
+  ERR("linuxnt RPC probe: RpcServerInqBindings status %lu count %lu\n", status,
+      status == RPC_S_OK ? (*BindingVector)->Count : 0);
   return status;
+}
+
+/***********************************************************************
+ *             RpcServerInqBindingsEx (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerInqBindingsEx( void *SecurityDescriptor,
+                                          RPC_BINDING_VECTOR **BindingVector )
+{
+  TRACE("(%p, %p)\n", SecurityDescriptor, BindingVector);
+
+  /* Wine does not yet apply endpoint ACLs, so the security descriptor does
+   * not change the set of bindings returned by the RPC runtime. */
+  return RpcServerInqBindings(BindingVector);
 }
 
 /***********************************************************************
@@ -1196,6 +1264,10 @@ RPC_STATUS WINAPI RpcServerRegisterIf3( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid,
 
   if (sif->Flags & RPC_IF_AUTOLISTEN)
       RPCRT4_start_listen(TRUE);
+
+  ERR("linuxnt RPC probe: registered interface %s %u.%u flags %#x\n",
+      debugstr_guid(&If->InterfaceId.SyntaxGUID), If->InterfaceId.SyntaxVersion.MajorVersion,
+      If->InterfaceId.SyntaxVersion.MinorVersion, Flags);
 
   return RPC_S_OK;
 }

@@ -1794,6 +1794,49 @@ NTSTATUS WINAPI RtlConvertSidToUnicodeString(
 }
 
 /******************************************************************************
+ * RtlGetAppContainerNamedObjectPath (NTDLL.@)
+ *
+ * Return the object-manager namespace used by the supplied token.  Wine does
+ * not currently create AppContainer tokens, so every token it can return is a
+ * desktop token and uses the process session's BaseNamedObjects directory.
+ */
+NTSTATUS WINAPI RtlGetAppContainerNamedObjectPath( HANDLE token, PSID appcontainer_sid,
+                                                   BOOLEAN relative, UNICODE_STRING *path )
+{
+    static const WCHAR base_named_objectsW[] = L"\\BaseNamedObjects";
+    ULONG is_appcontainer = FALSE, len;
+    NTSTATUS status;
+
+    TRACE( "token %p, appcontainer_sid %p, relative %u, path %p\n",
+           token, appcontainer_sid, relative, path );
+
+    if (!path) return STATUS_INVALID_PARAMETER;
+    if (token && appcontainer_sid) return STATUS_INVALID_PARAMETER_MIX;
+
+    path->Length = path->MaximumLength = 0;
+    path->Buffer = NULL;
+
+    if (appcontainer_sid)
+    {
+        FIXME( "AppContainer SID namespaces are not supported yet\n" );
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    if (!token) token = GetCurrentThreadEffectiveToken();
+    status = NtQueryInformationToken( token, TokenIsAppContainer, &is_appcontainer,
+                                      sizeof(is_appcontainer), &len );
+    if (status) return status;
+    if (is_appcontainer)
+    {
+        FIXME( "AppContainer token namespaces are not supported yet\n" );
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    if (!RtlCreateUnicodeString( path, base_named_objectsW )) return STATUS_NO_MEMORY;
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
  * RtlQueryInformationAcl (NTDLL.@)
  */
 NTSTATUS WINAPI RtlQueryInformationAcl(
@@ -1943,5 +1986,48 @@ NTSTATUS WINAPI RtlDeriveCapabilitySidsFromName( UNICODE_STRING *cap_name, PSID 
     sid->SubAuthority[0] = SECURITY_BUILTIN_DOMAIN_RID;
     memcpy( sid->SubAuthority + 1, hash, sizeof(hash) );
 
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ * RtlCapabilityCheck (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlCapabilityCheck( HANDLE token, const UNICODE_STRING *cap_name, BOOLEAN *has_capability )
+{
+    TOKEN_TYPE type;
+    ULONG size;
+    NTSTATUS status;
+
+    TRACE( "token %p, cap_name %s, has_capability %p.\n", token, debugstr_us(cap_name), has_capability );
+
+    if (!has_capability) return STATUS_INVALID_PARAMETER;
+    *has_capability = FALSE;
+
+    if (token)
+    {
+        status = NtQueryInformationToken( token, TokenType, &type, sizeof(type), &size );
+        if (status) return status;
+        if (type == TokenPrimary) return STATUS_NO_IMPERSONATION_TOKEN;
+    }
+
+    /* Wine does not expose app-container tokens yet.  Windows treats a
+     * full-trust effective or impersonation token as having every named
+     * capability; capability-name SID matching is only needed for an
+     * app-container token. */
+    *has_capability = TRUE;
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ * RtlCheckSandboxedToken (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlCheckSandboxedToken( HANDLE token, BOOLEAN *is_sandboxed )
+{
+    TRACE( "token %p, is_sandboxed %p.\n", token, is_sandboxed );
+
+    if (!is_sandboxed) return STATUS_INVALID_PARAMETER;
+
+    /* Wine currently provides full-trust tokens, not low-integrity sandboxes. */
+    *is_sandboxed = FALSE;
     return STATUS_SUCCESS;
 }

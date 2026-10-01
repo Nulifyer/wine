@@ -145,7 +145,7 @@
 @ stub GetSelectionStateFromItemArray
 @ stub GetSystemPersistedStorageItemList
 @ stub GetSystemPersistedStorageItemListForUser
-@ stub GetThreadFlags
+@ stdcall GetThreadFlags(long ptr)
 @ stub Global_WindowsStorage_MaxIcons
 @ stub Global_WindowsStorage_Untyped_FileClassSRWLock
 @ stub Global_WindowsStorage_Untyped_MountPoint
@@ -172,7 +172,7 @@
 @ stub Global_WindowsStorage_nImageManagerVersion
 @ stub Global_WindowsStorage_tlsChangeClientProxy
 @ stub Global_WindowsStorage_tlsIconCache
-@ stub Global_WindowsStorage_tlsThreadFlags
+@ stdcall Global_WindowsStorage_tlsThreadFlags()
 @ stub Global_WindowsStorage_ulNextID
 @ stub GrantPathAccess_FullTrustCaller_ForPackage
 @ stub GrantWorkingDirectoryAccess_FullTrustCaller_ForPackage
@@ -204,12 +204,12 @@
 @ stdcall SHAssocEnumHandlers(wstr long ptr)
 @ stdcall SHAssocEnumHandlersForProtocolByApplication(wstr ptr ptr)
 @ stdcall SHBindToFolderIDListParent(ptr ptr ptr ptr ptr)
-@ stub SHBindToFolderIDListParentEx
+@ stdcall SHBindToFolderIDListParentEx(ptr ptr ptr ptr ptr ptr) shell32.SHBindToFolderIDListParentEx
 @ stdcall SHBindToObject(ptr ptr ptr ptr ptr)
 @ stdcall SHBindToParent(ptr ptr ptr ptr)
 @ stdcall SHChangeNotify(long long ptr ptr)
-@ stub SHChangeNotifyRegisterThread
-@ stub SHCoCreateInstanceWorker
+@ stdcall SHChangeNotifyRegisterThread(long) shell32.SHChangeNotifyRegisterThread
+@ stdcall SHCoCreateInstanceWorker(wstr ptr ptr ptr ptr)
 @ stub SHCreateAssocHandler
 @ stdcall SHCreateAssociationRegistration(ptr ptr)
 @ stdcall SHCreateDataObject(ptr long ptr ptr ptr ptr)
@@ -311,7 +311,7 @@
 @ stub STORAGE_SHValidateMSUri
 @ stub SendNotificationsForLibraryItem
 @ stub SerializeLinkToText
-@ stub SetThreadFlags
+@ stdcall SetThreadFlags(long long)
 @ stdcall SetExplorerServerMode(long)
 @ stdcall ShellExecuteA(long str str str str long)
 @ stdcall ShellExecuteExW(long)

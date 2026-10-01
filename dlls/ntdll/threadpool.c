@@ -113,6 +113,7 @@ struct threadpool
     int                     min_workers;
     int                     num_workers;
     int                     num_busy_workers;
+    ULONG                   base_priority;
     HANDLE                  compl_port;
     TP_POOL_STACK_INFORMATION stack_info;
 };
@@ -225,6 +226,18 @@ struct threadpool_instance
         HMODULE             library;
     } cleanup;
 };
+
+struct tp_alpc
+{
+    struct list entry;
+    TP_WAIT *wait;
+    HANDLE port;
+    PTP_ALPC_CALLBACK callback;
+    void *context;
+};
+
+static RTL_SRWLOCK tp_alpc_lock = RTL_SRWLOCK_INIT;
+static struct list tp_alpc_objects = LIST_INIT( tp_alpc_objects );
 
 /* internal threadpool group representation */
 struct threadpool_group
@@ -1780,6 +1793,7 @@ static NTSTATUS tp_threadpool_alloc( struct threadpool **out )
     pool->min_workers             = 0;
     pool->num_workers             = 0;
     pool->num_busy_workers        = 0;
+    pool->base_priority           = THREAD_PRIORITY_NORMAL;
     pool->stack_info.StackReserve = nt->OptionalHeader.SizeOfStackReserve;
     pool->stack_info.StackCommit  = nt->OptionalHeader.SizeOfStackCommit;
 
@@ -2438,11 +2452,19 @@ skip_cleanup:
 static void CALLBACK threadpool_worker_proc( void *param )
 {
     struct threadpool *pool = param;
+    ULONG base_priority;
+    NTSTATUS status;
     LARGE_INTEGER timeout;
     struct list *ptr;
 
     TRACE( "starting worker thread for pool %p\n", pool );
     set_thread_name(L"wine_threadpool_worker");
+
+    base_priority = InterlockedCompareExchange( (LONG *)&pool->base_priority, 0, 0 );
+    status = NtSetInformationThread( GetCurrentThread(), ThreadBasePriority,
+                                     &base_priority, sizeof(base_priority) );
+    if (status) WARN( "failed to set worker thread base priority %lu, status %#lx\n",
+                      base_priority, status );
 
     RtlEnterCriticalSection( &pool->cs );
     for (;;)
@@ -2631,6 +2653,71 @@ static NTSTATUS tp_alloc_wait( TP_WAIT **out, PTP_WAIT_CALLBACK callback, PVOID 
     tp_object_initialize( object, pool, userdata, environment );
 
     *out = (TP_WAIT *)object;
+    return STATUS_SUCCESS;
+}
+
+static void CALLBACK tp_alpc_wait_callback( TP_CALLBACK_INSTANCE *instance, void *userdata,
+                                            TP_WAIT *wait, TP_WAIT_RESULT result )
+{
+    struct tp_alpc *alpc = userdata;
+
+    if (result == WAIT_OBJECT_0)
+        alpc->callback( instance, alpc->context, (TP_ALPC *)alpc );
+}
+
+/***********************************************************************
+ *           TpAllocAlpcCompletion    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpAllocAlpcCompletion( TP_ALPC **out, HANDLE port, PTP_ALPC_CALLBACK callback,
+                                       void *context, TP_CALLBACK_ENVIRON *environment )
+{
+    struct tp_alpc *alpc, *candidate;
+    NTSTATUS status;
+
+    TRACE( "%p %p %p %p %p\n", out, port, callback, context, environment );
+
+    if (!out || !port || !callback) return STATUS_INVALID_PARAMETER;
+    *out = NULL;
+
+    alpc = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*alpc) );
+    if (!alpc) return STATUS_NO_MEMORY;
+
+    status = NtDuplicateObject( NtCurrentProcess(), port, NtCurrentProcess(), &alpc->port,
+                                0, 0, DUPLICATE_SAME_ACCESS );
+    if (status)
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, alpc );
+        return status;
+    }
+
+    RtlAcquireSRWLockExclusive( &tp_alpc_lock );
+    LIST_FOR_EACH_ENTRY( candidate, &tp_alpc_objects, struct tp_alpc, entry )
+    {
+        if (!NtCompareObjects( candidate->port, port ))
+        {
+            RtlReleaseSRWLockExclusive( &tp_alpc_lock );
+            NtClose( alpc->port );
+            RtlFreeHeap( GetProcessHeap(), 0, alpc );
+            return STATUS_PORT_ALREADY_SET;
+        }
+    }
+
+    alpc->callback = callback;
+    alpc->context = context;
+    status = tp_alloc_wait( &alpc->wait, tp_alpc_wait_callback, alpc, environment, 0 );
+    if (status)
+    {
+        RtlReleaseSRWLockExclusive( &tp_alpc_lock );
+        NtClose( alpc->port );
+        RtlFreeHeap( GetProcessHeap(), 0, alpc );
+        return status;
+    }
+
+    TpSetWait( alpc->wait, alpc->port, NULL );
+    list_add_tail( &tp_alpc_objects, &alpc->entry );
+    RtlReleaseSRWLockExclusive( &tp_alpc_lock );
+
+    *out = (TP_ALPC *)alpc;
     return STATUS_SUCCESS;
 }
 
@@ -3013,6 +3100,26 @@ VOID WINAPI TpReleaseWait( TP_WAIT *wait )
 }
 
 /***********************************************************************
+ *           TpReleaseAlpcCompletion    (NTDLL.@)
+ */
+VOID WINAPI TpReleaseAlpcCompletion( TP_ALPC *opaque )
+{
+    struct tp_alpc *alpc = (struct tp_alpc *)opaque;
+
+    TRACE( "%p\n", alpc );
+
+    RtlAcquireSRWLockExclusive( &tp_alpc_lock );
+    list_remove( &alpc->entry );
+    RtlReleaseSRWLockExclusive( &tp_alpc_lock );
+
+    TpSetWait( alpc->wait, NULL, NULL );
+    TpWaitForWait( alpc->wait, TRUE );
+    TpReleaseWait( alpc->wait );
+    NtClose( alpc->port );
+    RtlFreeHeap( GetProcessHeap(), 0, alpc );
+}
+
+/***********************************************************************
  *           TpReleaseWork    (NTDLL.@)
  */
 VOID WINAPI TpReleaseWork( TP_WORK *work )
@@ -3068,6 +3175,19 @@ BOOL WINAPI TpSetPoolMinThreads( TP_POOL *pool, DWORD minimum )
 
     RtlLeaveCriticalSection( &this->cs );
     return !status;
+}
+
+/***********************************************************************
+ *           TpSetPoolThreadBasePriority    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpSetPoolThreadBasePriority( TP_POOL *pool, ULONG base_priority )
+{
+    struct threadpool *this = impl_from_TP_POOL( pool );
+
+    TRACE( "%p %lu\n", pool, base_priority );
+
+    InterlockedExchange( (LONG *)&this->base_priority, base_priority );
+    return STATUS_SUCCESS;
 }
 
 static BOOL tp_set_timer( TP_TIMER *timer, LARGE_INTEGER *timeout, LONG period, LONG window_length )
@@ -3244,6 +3364,21 @@ VOID WINAPI TpSetWait( TP_WAIT *wait, HANDLE handle, LARGE_INTEGER *timeout )
 }
 
 /***********************************************************************
+ *           TpSetWaitEx    (NTDLL.@)
+ */
+BOOL WINAPI TpSetWaitEx( TP_WAIT *wait, HANDLE handle, LARGE_INTEGER *timeout, void *reserved )
+{
+    TRACE( "%p %p %p %p\n", wait, handle, timeout, reserved );
+
+    /* The fourth argument selects a private Windows wait-completion mode.
+     * Inbox threadpoolwinrt uses the normal NULL mode. Wine's TpSetWait
+     * performs the corresponding registration synchronously. */
+    if (reserved) FIXME( "private completion mode %p is not implemented\n", reserved );
+    TpSetWait( wait, handle, timeout );
+    return FALSE;
+}
+
+/***********************************************************************
  *           TpSimpleTryPost    (NTDLL.@)
  */
 NTSTATUS WINAPI TpSimpleTryPost( PTP_SIMPLE_CALLBACK callback, PVOID userdata,
@@ -3329,6 +3464,17 @@ VOID WINAPI TpWaitForWait( TP_WAIT *wait, BOOL cancel_pending )
     if (cancel_pending)
         tp_object_cancel( this );
     tp_object_wait( this, FALSE );
+}
+
+/***********************************************************************
+ *           TpWaitForAlpcCompletion    (NTDLL.@)
+ */
+VOID WINAPI TpWaitForAlpcCompletion( TP_ALPC *opaque )
+{
+    struct tp_alpc *alpc = (struct tp_alpc *)opaque;
+
+    TRACE( "%p\n", alpc );
+    TpWaitForWait( alpc->wait, FALSE );
 }
 
 /***********************************************************************

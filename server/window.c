@@ -37,6 +37,7 @@
 #include "unicode.h"
 
 static const struct ratio no_dpi;
+static client_ptr_t next_iam_key = 0x4e540001;
 
 /* a window property */
 struct property
@@ -2175,7 +2176,12 @@ void free_window_handle( struct window *win )
     }
 
     /* reset global window pointers, if the corresponding window is destroyed */
-    if (win == win->desktop->shell_window) win->desktop->shell_window = NULL;
+    if (win == win->desktop->shell_window)
+    {
+        win->desktop->shell_window = NULL;
+        win->desktop->iam_key = 0;
+        win->desktop->iam_key_acquired = 0;
+    }
     if (win == win->desktop->shell_listview) win->desktop->shell_listview = NULL;
     if (win == win->desktop->progman_window) win->desktop->progman_window = NULL;
     if (win == win->desktop->taskman_window) win->desktop->taskman_window = NULL;
@@ -3279,12 +3285,50 @@ DECL_HANDLER(set_desktop_shell_windows)
     {
         if (!get_new_shell_window( &new_taskman_window, req->taskman_window )) goto done;
     }
+    if (desktop->shell_window != new_shell_window)
+    {
+        desktop->iam_key = new_shell_window ? next_iam_key++ : 0;
+        if (!desktop->iam_key && new_shell_window) desktop->iam_key = next_iam_key++;
+        desktop->iam_key_acquired = 0;
+    }
     desktop->shell_window   = new_shell_window;
     desktop->shell_listview = new_shell_listview;
     desktop->progman_window = new_progman_window;
     desktop->taskman_window = new_taskman_window;
 
 done:
+    release_object( desktop );
+}
+
+/* Return the desktop IAM key once, and only to the process that owns the shell window. */
+DECL_HANDLER(acquire_desktop_iam_key)
+{
+    struct desktop *desktop;
+
+    if (!(desktop = get_desktop_obj( current->process, current->desktop, 0 ))) return;
+    if (!desktop->shell_window || desktop->shell_window->thread->process != current->process ||
+        !desktop->iam_key || desktop->iam_key_acquired)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+    }
+    else
+    {
+        reply->key = desktop->iam_key;
+        desktop->iam_key_acquired = 1;
+    }
+    release_object( desktop );
+}
+
+/* IAM access is a thread property and is valid only for the current desktop key. */
+DECL_HANDLER(enable_thread_iam_access)
+{
+    struct desktop *desktop;
+
+    if (!(desktop = get_desktop_obj( current->process, current->desktop, 0 ))) return;
+    if (!desktop->iam_key_acquired || !desktop->iam_key || req->key != desktop->iam_key)
+        set_error( STATUS_ACCESS_DENIED );
+    else
+        current->iam_key = req->enable ? req->key : 0;
     release_object( desktop );
 }
 

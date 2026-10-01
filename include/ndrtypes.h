@@ -205,7 +205,7 @@ typedef enum
 
     FC_UNUSED2, /* 0x3a */
     FC_UNUSED3, /* 0x3b */
-    FC_UNUSED4, /* 0x3c */
+    FC_SYSTEM_HANDLE, /* 0x3c (was FC_UNUSED4) */
 
     FC_STRUCTPAD1, /* 0x3d */
     FC_STRUCTPAD2, /* 0x3e */

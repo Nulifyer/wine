@@ -51,7 +51,29 @@ static void format_clsid( WCHAR *buffer, const CLSID *clsid )
 static BOOL FindProxyInfo(const ProxyFileInfo **pProxyFileList, REFIID riid, const ProxyFileInfo **pProxyInfo, int *pIndex)
 {
   while (*pProxyFileList) {
-    if ((*pProxyFileList)->pIIDLookupRtn(riid, pIndex)) {
+    const ProxyFileInfo *info = *pProxyFileList;
+    BOOL found = FALSE;
+
+    /* Compact proxy/stub descriptors omit the generated IID lookup routine;
+     * -1 tells rpcrt4 to look through the descriptor table.  Current system
+     * proxy DLLs use this sentinel with both version 16 and version 2 files. */
+    if (info->pIIDLookupRtn == (PIIDLookup)~(ULONG_PTR)0)
+    {
+      unsigned int i;
+
+      for (i = 0; i < info->TableSize; i++)
+      {
+        if (IsEqualIID(info->pStubVtblList[i]->header.piid, riid))
+        {
+          *pIndex = i;
+          found = TRUE;
+          break;
+        }
+      }
+    }
+    else found = info->pIIDLookupRtn(riid, pIndex);
+
+    if (found) {
       *pProxyInfo = *pProxyFileList;
       TRACE("found: ProxyInfo %p Index %d\n", *pProxyInfo, *pIndex);
       return TRUE;
@@ -114,19 +136,26 @@ static HRESULT WINAPI CStdPSFactory_CreateStub(LPPSFACTORYBUFFER iface,
 {
   CStdPSFactoryBuffer *This = (CStdPSFactoryBuffer *)iface;
   const ProxyFileInfo *ProxyInfo;
+  PCInterfaceName name;
   int Index;
   TRACE("(%p)->CreateStub(%s,%p,%p)\n",iface,debugstr_guid(riid),
        pUnkServer,ppStub);
   if (!FindProxyInfo(This->pProxyFileList,riid,&ProxyInfo,&Index))
     return E_NOINTERFACE;
 
-  if(ProxyInfo->pDelegatedIIDs && ProxyInfo->pDelegatedIIDs[Index])
-    return  CStdStubBuffer_Delegating_Construct(riid, pUnkServer, ProxyInfo->pNamesArray[Index],
-                                                ProxyInfo->pStubVtblList[Index], ProxyInfo->pDelegatedIIDs[Index],
-                                                iface, ppStub);
+  /* Compact system proxy descriptors are allowed to omit the optional names
+   * array.  It is only diagnostic metadata and must not be required to
+   * construct a functioning stub. */
+  name = ProxyInfo->pNamesArray ? ProxyInfo->pNamesArray[Index] : NULL;
 
-  return CStdStubBuffer_Construct(riid, pUnkServer, ProxyInfo->pNamesArray[Index],
-                                  ProxyInfo->pStubVtblList[Index], iface, ppStub);
+  if(ProxyInfo->pDelegatedIIDs && ProxyInfo->pDelegatedIIDs[Index])
+    return  CStdStubBuffer_Delegating_Construct(riid, pUnkServer, name,
+                                                ProxyInfo->pStubVtblList[Index], ProxyInfo->TableVersion,
+                                                ProxyInfo->pDelegatedIIDs[Index], iface, ppStub);
+
+  return CStdStubBuffer_Construct(riid, pUnkServer, name,
+                                  ProxyInfo->pStubVtblList[Index], ProxyInfo->TableVersion,
+                                  iface, ppStub);
 }
 
 static const IPSFactoryBufferVtbl CStdPSFactory_Vtbl =
@@ -151,18 +180,47 @@ static void init_psfactory( CStdPSFactoryBuffer *psfac, const ProxyFileInfo **fi
         const PCInterfaceProxyVtblList *proxies = file_list[i]->pProxyVtblList;
         const PCInterfaceStubVtblList *stubs = file_list[i]->pStubVtblList;
 
+        TRACE("proxy file %lu: version %u, size %u, proxies %p, stubs %p\n", i,
+              file_list[i]->TableVersion, file_list[i]->TableSize, proxies, stubs);
+
+        /* Version 16 stores a single -1 sentinel instead of an embedded
+         * IRpcStubBufferVtbl.  Its descriptors are read-only and packed
+         * consecutively, so treating the sentinel as the first of ten
+         * writable methods corrupts following descriptors. */
+        if (file_list[i]->TableVersion == 16) continue;
+
         for (j = 0; j < file_list[i]->TableSize; j++)
         {
+            MEMORY_BASIC_INFORMATION memory_info;
             /* FIXME: i think that different vtables should be copied for
              * async interfaces */
             void * const *pSrcRpcStubVtbl = (void * const *)&CStdStubBuffer_Vtbl;
             void **pRpcStubVtbl = (void **)&stubs[j]->Vtbl;
 
+            /* System proxy/stub DLLs commonly place their generated vtables
+             * in read-only image sections.  Their required entries are
+             * already populated; only optional debug slots are NULL.  Older
+             * Wine code tried to fill every NULL slot in place and faulted
+             * while loading those descriptors. */
+            if (VirtualQuery( pRpcStubVtbl, &memory_info, sizeof(memory_info) ) &&
+                !(memory_info.Protect & (PAGE_READWRITE | PAGE_WRITECOPY |
+                                         PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
+            {
+                TRACE("leaving read-only stub vtable %p unchanged\n", pRpcStubVtbl);
+                continue;
+            }
+
             if (file_list[i]->pDelegatedIIDs && file_list[i]->pDelegatedIIDs[j])
             {
                 void **vtbl = proxies[j]->Vtbl;
                 if (file_list[i]->TableVersion > 1) vtbl++;
-                fill_delegated_proxy_table( (IUnknownVtbl *)vtbl, stubs[j]->header.DispatchTableCount );
+                if (VirtualQuery( vtbl, &memory_info, sizeof(memory_info) ) &&
+                    (memory_info.Protect & (PAGE_READWRITE | PAGE_WRITECOPY |
+                                            PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
+                    fill_delegated_proxy_table( (IUnknownVtbl *)vtbl,
+                                                stubs[j]->header.DispatchTableCount );
+                else
+                    TRACE("leaving read-only delegated proxy vtable %p unchanged\n", vtbl);
                 pSrcRpcStubVtbl = (void * const *)&CStdStubBuffer_Delegating_Vtbl;
             }
 
@@ -240,7 +298,7 @@ HRESULT WINAPI NdrDllRegisterProxy(HMODULE hDll,
     unsigned u;
     for (u=0; u<(*pProxyFileList)->TableSize; u++) {
       CInterfaceStubVtbl *proxy = (*pProxyFileList)->pStubVtblList[u];
-      PCInterfaceName name = (*pProxyFileList)->pNamesArray[u];
+      PCInterfaceName name = (*pProxyFileList)->pNamesArray ? (*pProxyFileList)->pNamesArray[u] : NULL;
 
       TRACE("registering %s %s => %s\n",
             debugstr_a(name), debugstr_guid(proxy->header.piid), debugstr_w(clsid));
@@ -303,7 +361,7 @@ HRESULT WINAPI NdrDllUnregisterProxy(HMODULE hDll,
     unsigned u;
     for (u=0; u<(*pProxyFileList)->TableSize; u++) {
       CInterfaceStubVtbl *proxy = (*pProxyFileList)->pStubVtblList[u];
-      PCInterfaceName name = (*pProxyFileList)->pNamesArray[u];
+      PCInterfaceName name = (*pProxyFileList)->pNamesArray ? (*pProxyFileList)->pNamesArray[u] : NULL;
 
       TRACE("unregistering %s %s\n", debugstr_a(name), debugstr_guid(proxy->header.piid));
 

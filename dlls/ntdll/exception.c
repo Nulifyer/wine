@@ -378,6 +378,22 @@ void DECLSPEC_NORETURN WINAPI RtlRaiseStatus( NTSTATUS status )
 }
 
 
+/***********************************************************************
+ *            RtlReportException  (NTDLL.@)
+ *
+ * Windows sends the supplied exception to its error-reporting service.
+ * Wine has no equivalent service, so report that the operation is not
+ * supported while preserving the exception for the caller's own handler.
+ */
+NTSTATUS WINAPI RtlReportException( EXCEPTION_RECORD *record, CONTEXT *context, ULONG flags )
+{
+    TRACE( "%p, %p, %#lx.\n", record, context, flags );
+
+    if (flags & ~0x1f) return STATUS_INVALID_PARAMETER;
+    return STATUS_NOT_SUPPORTED;
+}
+
+
 /*******************************************************************
  *		KiRaiseUserExceptionDispatcher  (NTDLL.@)
  */

@@ -21,15 +21,126 @@
 #include <assert.h>
 #include <stdarg.h>
 
+#include "ntstatus.h"
 #define WINADVAPI
 #include "windef.h"
 #include "winbase.h"
+#include "winreg.h"
+#include "winternl.h"
 #include "sddl.h"
 #include "iads.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(security);
+
+enum lsa_user_account_type
+{
+    LsaUnknownUserAccountType,
+    LsaLocalUserAccountType,
+    LsaPrimaryDomainUserAccountType,
+    LsaExternalDomainUserAccountType,
+    LsaLocalConnectedUserAccountType,
+    LsaAADUserAccountType,
+    LsaInternetUserAccountType
+};
+
+/***********************************************************************
+ *           LsaLookupUserAccountType   (SECHOST.@)
+ */
+NTSTATUS WINAPI LsaLookupUserAccountType(PSID sid, ULONG *account_type)
+{
+    SID_IDENTIFIER_AUTHORITY *authority;
+    TOKEN_USER *token_user = NULL;
+    DWORD size = 0;
+    HANDLE token = NULL;
+    NTSTATUS status = STATUS_SUCCESS;
+    SID *account_sid;
+
+    TRACE("%p, %p.\n", sid, account_type);
+
+    if (!account_type) return STATUS_INVALID_PARAMETER;
+    *account_type = LsaUnknownUserAccountType;
+
+    if (!sid)
+    {
+        if ((status = NtOpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))) return status;
+        status = NtQueryInformationToken(token, TokenUser, NULL, 0, &size);
+        if (status != STATUS_BUFFER_TOO_SMALL || !(token_user = malloc(size)))
+        {
+            if (status == STATUS_BUFFER_TOO_SMALL) status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        if ((status = NtQueryInformationToken(token, TokenUser, token_user, size, &size))) goto done;
+        sid = token_user->User.Sid;
+    }
+
+    if (!IsValidSid(sid))
+    {
+        status = STATUS_INVALID_PARAMETER;
+        goto done;
+    }
+
+    authority = GetSidIdentifierAuthority(sid);
+    if (!authority)
+    {
+        status = STATUS_INVALID_PARAMETER;
+        goto done;
+    }
+
+    account_sid = sid;
+
+    /* Azure AD user SIDs use identifier authority 12. */
+    if (!memcmp(authority->Value, (BYTE[]){0, 0, 0, 0, 0, 12}, sizeof(authority->Value)))
+        *account_type = LsaAADUserAccountType;
+    else if (!memcmp(authority->Value, (BYTE[])SECURITY_NT_AUTHORITY, sizeof(authority->Value)) &&
+             account_sid->SubAuthorityCount >= 1 &&
+             account_sid->SubAuthority[0] == SECURITY_BUILTIN_DOMAIN_RID)
+        *account_type = LsaLocalUserAccountType;
+    else if (!memcmp(authority->Value, (BYTE[])SECURITY_NT_AUTHORITY, sizeof(authority->Value)) &&
+             account_sid->SubAuthorityCount >= 4 &&
+             account_sid->SubAuthority[0] == SECURITY_NT_NON_UNIQUE)
+    {
+        if (!account_sid->SubAuthority[1] && !account_sid->SubAuthority[2] &&
+            !account_sid->SubAuthority[3])
+            *account_type = LsaLocalUserAccountType;
+        else
+            *account_type = LsaExternalDomainUserAccountType;
+    }
+
+done:
+    free(token_user);
+    if (token) NtClose(token);
+    return status;
+}
+
+/***********************************************************************
+ *           CapabilityCheck   (SECHOST.@)
+ */
+NTSTATUS WINAPI CapabilityCheck(HANDLE token, const WCHAR *capability, BOOLEAN *has_capability)
+{
+    TOKEN_TYPE type;
+    DWORD size;
+
+    TRACE("%p, %s, %p.\n", token, debugstr_w(capability), has_capability);
+
+    if (!capability || !has_capability) return STATUS_INVALID_PARAMETER;
+    *has_capability = FALSE;
+
+    if (token)
+    {
+        if (!GetTokenInformation(token, TokenType, &type, sizeof(type), &size))
+            return STATUS_INVALID_HANDLE;
+        if (type != TokenImpersonation) return STATUS_NO_IMPERSONATION_TOKEN;
+    }
+
+    /* Wine does not currently create AppContainer-restricted tokens.  Windows
+     * treats an unrestricted token as having every named capability, including
+     * unknown and empty names; capability SID membership only becomes relevant
+     * for an AppContainer token. */
+    *has_capability = TRUE;
+    return STATUS_SUCCESS;
+}
 
 static const struct
 {
@@ -837,6 +948,9 @@ static BYTE parse_ace_type( const WCHAR **string_ptr )
     }
     ace_types[] =
     {
+        { L"XA", ACCESS_ALLOWED_CALLBACK_ACE_TYPE },
+        { L"XD", ACCESS_DENIED_CALLBACK_ACE_TYPE },
+        { L"XU", SYSTEM_AUDIT_CALLBACK_ACE_TYPE },
         { L"AL", SYSTEM_ALARM_ACE_TYPE },
         { L"AU", SYSTEM_AUDIT_ACE_TYPE },
         { L"A",  ACCESS_ALLOWED_ACE_TYPE },
@@ -954,13 +1068,170 @@ static DWORD parse_ace_rights( const WCHAR **string_ptr )
     return rights;
 }
 
+struct condition_parser
+{
+    const WCHAR *string;
+    BYTE *output;
+    DWORD size;
+};
+
+static BOOL condition_write_byte( struct condition_parser *parser, BYTE value )
+{
+    if (parser->size == MAXDWORD) return FALSE;
+    if (parser->output) parser->output[parser->size] = value;
+    parser->size++;
+    return TRUE;
+}
+
+static BOOL condition_write_dword( struct condition_parser *parser, DWORD value )
+{
+    unsigned int i;
+
+    for (i = 0; i < sizeof(value); ++i)
+        if (!condition_write_byte( parser, value >> (i * 8) )) return FALSE;
+    return TRUE;
+}
+
+static BOOL condition_write_string( struct condition_parser *parser, BYTE token,
+                                    const WCHAR *string, DWORD length )
+{
+    DWORD i;
+
+    if (length > (MAXDWORD - 5) / sizeof(WCHAR)) return FALSE;
+    if (!condition_write_byte( parser, token ) ||
+        !condition_write_dword( parser, length * sizeof(WCHAR) )) return FALSE;
+    for (i = 0; i < length; ++i)
+    {
+        if (!condition_write_byte( parser, string[i] & 0xff ) ||
+            !condition_write_byte( parser, string[i] >> 8 )) return FALSE;
+    }
+    return TRUE;
+}
+
+static void condition_skip_spaces( struct condition_parser *parser )
+{
+    while (*parser->string == ' ') parser->string++;
+}
+
+static BOOL parse_condition_or( struct condition_parser *parser );
+
+static BOOL parse_condition_primary( struct condition_parser *parser )
+{
+    const WCHAR *start;
+    BYTE token = 0xf8; /* Local attribute. */
+    DWORD length;
+
+    condition_skip_spaces( parser );
+    if (*parser->string == '(')
+    {
+        parser->string++;
+        if (!parse_condition_or( parser )) return FALSE;
+        condition_skip_spaces( parser );
+        if (*parser->string != ')') return FALSE;
+        parser->string++;
+        return TRUE;
+    }
+
+    if (!wcsncmp( parser->string, L"@User.", 6 ))
+    {
+        token = 0xf9;
+        parser->string += 6;
+    }
+    else if (!wcsncmp( parser->string, L"@Resource.", 10 ))
+    {
+        token = 0xfa;
+        parser->string += 10;
+    }
+    else if (!wcsncmp( parser->string, L"@Device.", 8 ))
+    {
+        token = 0xfb;
+        parser->string += 8;
+    }
+
+    start = parser->string;
+    while (*parser->string && *parser->string != ' ' && *parser->string != ')' &&
+           *parser->string != '!' && *parser->string != '&' && *parser->string != '|')
+        parser->string++;
+    length = parser->string - start;
+    return length && condition_write_string( parser, token, start, length );
+}
+
+static BOOL parse_condition_unary( struct condition_parser *parser )
+{
+    condition_skip_spaces( parser );
+    if (*parser->string == '!')
+    {
+        parser->string++;
+        return parse_condition_unary( parser ) && condition_write_byte( parser, 0xa2 );
+    }
+    return parse_condition_primary( parser );
+}
+
+static BOOL parse_condition_and( struct condition_parser *parser )
+{
+    if (!parse_condition_unary( parser )) return FALSE;
+    for (;;)
+    {
+        condition_skip_spaces( parser );
+        if (parser->string[0] != '&' || parser->string[1] != '&') return TRUE;
+        parser->string += 2;
+        if (!parse_condition_unary( parser ) || !condition_write_byte( parser, 0xa0 ))
+            return FALSE;
+    }
+}
+
+static BOOL parse_condition_or( struct condition_parser *parser )
+{
+    if (!parse_condition_and( parser )) return FALSE;
+    for (;;)
+    {
+        condition_skip_spaces( parser );
+        if (parser->string[0] != '|' || parser->string[1] != '|') return TRUE;
+        parser->string += 2;
+        if (!parse_condition_and( parser ) || !condition_write_byte( parser, 0xa1 ))
+            return FALSE;
+    }
+}
+
+static BOOL compile_condition( const WCHAR **string_ptr, BYTE *output, DWORD *size )
+{
+    struct condition_parser parser = { *string_ptr, output, 0 };
+    static const BYTE signature[] = {'a', 'r', 't', 'x'};
+    unsigned int i;
+
+    if (*parser.string != '(') goto invalid;
+    parser.string++;
+    for (i = 0; i < ARRAY_SIZE(signature); ++i)
+        if (!condition_write_byte( &parser, signature[i] )) goto invalid;
+    if (!parse_condition_or( &parser )) goto invalid;
+    condition_skip_spaces( &parser );
+    if (*parser.string != ')') goto invalid;
+
+    *string_ptr = parser.string + 1;
+    *size = parser.size;
+    return TRUE;
+
+invalid:
+    SetLastError( ERROR_INVALID_ACE_CONDITION );
+    return FALSE;
+}
+
+static BOOL is_callback_ace( BYTE type )
+{
+    return type == ACCESS_ALLOWED_CALLBACK_ACE_TYPE ||
+           type == ACCESS_DENIED_CALLBACK_ACE_TYPE ||
+           type == SYSTEM_AUDIT_CALLBACK_ACE_TYPE;
+}
+
 static BOOL parse_acl( const WCHAR *string, DWORD *flags, ACL *acl, DWORD *ret_size )
 {
     DWORD val;
     DWORD sidlen;
     DWORD length = sizeof(ACL);
     DWORD acesize = 0;
+    DWORD condition_size;
     DWORD acecount = 0;
+    BYTE ace_type;
     ACCESS_ALLOWED_ACE *ace = NULL; /* pointer to current ACE */
 
     TRACE("%s\n", debugstr_w(string));
@@ -977,9 +1248,9 @@ static BOOL parse_acl( const WCHAR *string, DWORD *flags, ACL *acl, DWORD *ret_s
         string++;
 
         /* Parse ACE type */
-        val = parse_ace_type( &string );
+        ace_type = parse_ace_type( &string );
         if (ace)
-            ace->Header.AceType = val;
+            ace->Header.AceType = ace_type;
         if (*string != ';')
         {
             SetLastError( RPC_S_INVALID_STRING_UUID );
@@ -1030,6 +1301,21 @@ static BOOL parse_acl( const WCHAR *string, DWORD *flags, ACL *acl, DWORD *ret_s
         while (*string == ' ')
             string++;
 
+        condition_size = 0;
+        if (is_callback_ace( ace_type ))
+        {
+            BYTE *condition = ace ? (BYTE *)&ace->SidStart + sidlen : NULL;
+
+            if (*string != ';') goto err;
+            string++;
+            if (!compile_condition( &string, condition, &condition_size ))
+            {
+                WARN("Invalid conditional ACE expression\n");
+                return FALSE;
+            }
+            while (*string == ' ') string++;
+        }
+
         if (*string != ')')
             goto err;
         string++;
@@ -1037,10 +1323,18 @@ static BOOL parse_acl( const WCHAR *string, DWORD *flags, ACL *acl, DWORD *ret_s
         while (*string == ' ')
             string++;
 
-        acesize = sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + sidlen;
+        if (condition_size > 0xffff - (sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD)) - sidlen)
+        {
+            ERR("ACE too large\n");
+            goto err;
+        }
+        acesize = sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + sidlen + condition_size;
+        acesize = (acesize + sizeof(DWORD) - 1) & ~(sizeof(DWORD) - 1);
         length += acesize;
         if (ace)
         {
+            memset( (BYTE *)ace + sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + sidlen + condition_size,
+                    0, acesize - (sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + sidlen + condition_size) );
             ace->Header.AceSize = acesize;
             ace = (ACCESS_ALLOWED_ACE *)((BYTE *)ace + acesize);
         }
@@ -1110,11 +1404,21 @@ static BOOL parse_sd( const WCHAR *string, SECURITY_DESCRIPTOR_RELATIVE *sd, DWO
 
         /* Extract token */
         lptoken = string;
-        while (*lptoken && *lptoken != ':')
-            lptoken++;
+        {
+            unsigned int depth = 0;
+            BOOL quoted = FALSE;
 
-        if (*lptoken)
-            lptoken--;
+            while (*lptoken)
+            {
+                if (*lptoken == '"') quoted = !quoted;
+                else if (!quoted && *lptoken == '(') depth++;
+                else if (!quoted && *lptoken == ')' && depth) depth--;
+                else if (!quoted && !depth && lptoken[1] == ':' &&
+                         (*lptoken == 'O' || *lptoken == 'G' ||
+                          *lptoken == 'D' || *lptoken == 'S')) break;
+                lptoken++;
+            }
+        }
 
         len = lptoken - string;
         memcpy( tok, string, len * sizeof(WCHAR) );
@@ -1263,4 +1567,179 @@ BOOL WINAPI DECLSPEC_HOTPATCH ConvertStringSecurityDescriptorToSecurityDescripto
 
     if (ret_size) *ret_size = size;
     return TRUE;
+}
+
+static NTSTATUS registry_error_to_status( LSTATUS error )
+{
+    switch (error)
+    {
+    case ERROR_SUCCESS:
+        return STATUS_SUCCESS;
+    case ERROR_FILE_NOT_FOUND:
+        return STATUS_OBJECT_NAME_NOT_FOUND;
+    case ERROR_PATH_NOT_FOUND:
+        return STATUS_OBJECT_PATH_NOT_FOUND;
+    case ERROR_ACCESS_DENIED:
+        return STATUS_ACCESS_DENIED;
+    case ERROR_NOT_ENOUGH_MEMORY:
+    case ERROR_OUTOFMEMORY:
+        return STATUS_NO_MEMORY;
+    case ERROR_MORE_DATA:
+    case ERROR_INSUFFICIENT_BUFFER:
+        return STATUS_BUFFER_TOO_SMALL;
+    default:
+        return STATUS_UNSUCCESSFUL;
+    }
+}
+
+static const WCHAR *transient_object_prefix( ULONG type )
+{
+    static const WCHAR *const prefixes[] =
+    {
+        L"%5C%5C.%5CMutex%5C",
+        L"%5C%5C.%5CEvent%5C",
+        L"%5C%5C.%5CSemaphore%5C",
+        L"%5C%5C.%5CWaitableTimer%5C",
+        L"%5C%5C.%5CJobObject%5C",
+        L"%5C%5C.%5CFileMapping%5C",
+        L"%5C%5C.%5CNamedPipe%5C",
+        NULL,
+        L"%5C%5C.%5CAlpcPort%5C",
+        L"%5C%5C.%5CRpc%5C",
+        L"%5C%5C.%5CWnf%5C",
+        L"%5C%5C.%5CTemplate%5C",
+        NULL,
+        L"%5C%5C.%5CPrivate%5C",
+    };
+
+    if (type >= ARRAY_SIZE(prefixes)) return NULL;
+    return prefixes[type];
+}
+
+/***********************************************************************
+ *     FreeTransientObjectSecurityDescriptor   (sechost.@)
+ */
+void WINAPI FreeTransientObjectSecurityDescriptor( PSECURITY_DESCRIPTOR descriptor )
+{
+    if (descriptor) HeapFree( GetProcessHeap(), 0, descriptor );
+}
+
+/***********************************************************************
+ *     QueryTransientObjectSecurityDescriptor   (sechost.@)
+ *
+ * Transient kernel-object descriptors are stored below SecurityManager's
+ * TransientObjects key.  Object names use the same backslash escaping as
+ * Windows ("%5C").  Registry values may contain either a self-relative
+ * descriptor or its SDDL representation.
+ */
+NTSTATUS WINAPI QueryTransientObjectSecurityDescriptor( ULONG type, const WCHAR *name,
+                                                         PSECURITY_DESCRIPTOR *descriptor )
+{
+    static const WCHAR root[] = L"Software\\Microsoft\\SecurityManager\\TransientObjects\\";
+    static const WCHAR value_name[] = L"SecurityDescriptor";
+    const WCHAR *prefix = transient_object_prefix( type );
+    PSECURITY_DESCRIPTOR converted = NULL, result = NULL;
+    SIZE_T root_len, prefix_len, name_len, escaped_len, i;
+    DWORD value_type, size = 0, descriptor_size;
+    WCHAR *key_name, *p;
+    BYTE *data = NULL;
+    LSTATUS error;
+    NTSTATUS status;
+    HKEY key;
+
+    TRACE("%lu, %s, %p\n", type, debugstr_w(name), descriptor);
+
+    if (!name || !descriptor) return STATUS_INVALID_PARAMETER;
+    *descriptor = NULL;
+    if (!prefix) return STATUS_INVALID_PARAMETER;
+
+    root_len = lstrlenW( root );
+    prefix_len = lstrlenW( prefix );
+    name_len = lstrlenW( name );
+    escaped_len = name_len;
+    for (i = 0; i < name_len; ++i)
+        if (name[i] == '\\') escaped_len += 2;
+    if (escaped_len < name_len || root_len + prefix_len > ~(SIZE_T)0 - escaped_len - 1)
+        return STATUS_NAME_TOO_LONG;
+
+    key_name = HeapAlloc( GetProcessHeap(), 0,
+                          (root_len + prefix_len + escaped_len + 1) * sizeof(*key_name) );
+    if (!key_name) return STATUS_NO_MEMORY;
+
+    memcpy( key_name, root, root_len * sizeof(*key_name) );
+    memcpy( key_name + root_len, prefix, prefix_len * sizeof(*key_name) );
+    p = key_name + root_len + prefix_len;
+    for (i = 0; i < name_len; ++i)
+    {
+        if (name[i] == '\\')
+        {
+            *p++ = '%';
+            *p++ = '5';
+            *p++ = 'C';
+        }
+        else *p++ = name[i];
+    }
+    *p = 0;
+
+    error = RegOpenKeyExW( HKEY_LOCAL_MACHINE, key_name, 0, KEY_QUERY_VALUE, &key );
+    HeapFree( GetProcessHeap(), 0, key_name );
+    if (error) return registry_error_to_status( error );
+
+    error = RegQueryValueExW( key, value_name, NULL, &value_type, NULL, &size );
+    if (error) goto done;
+    if (value_type != REG_BINARY && value_type != REG_SZ)
+    {
+        status = STATUS_INVALID_PARAMETER;
+        goto close;
+    }
+
+    if (!(data = HeapAlloc( GetProcessHeap(), 0, size + sizeof(WCHAR) )))
+    {
+        status = STATUS_NO_MEMORY;
+        goto close;
+    }
+    error = RegQueryValueExW( key, value_name, NULL, &value_type, data, &size );
+    if (error) goto done;
+
+    if (value_type == REG_BINARY)
+    {
+        descriptor_size = size;
+        if (!descriptor_size || !(result = HeapAlloc( GetProcessHeap(), 0, descriptor_size )))
+        {
+            status = descriptor_size ? STATUS_NO_MEMORY : STATUS_INVALID_PARAMETER;
+            goto close;
+        }
+        memcpy( result, data, descriptor_size );
+    }
+    else
+    {
+        ((WCHAR *)data)[size / sizeof(WCHAR)] = 0;
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW( (WCHAR *)data, SDDL_REVISION_1,
+                                                                    &converted, NULL ))
+        {
+            status = registry_error_to_status( GetLastError() );
+            goto close;
+        }
+        descriptor_size = GetSecurityDescriptorLength( converted );
+        if (!(result = HeapAlloc( GetProcessHeap(), 0, descriptor_size )))
+        {
+            status = STATUS_NO_MEMORY;
+            goto close;
+        }
+        memcpy( result, converted, descriptor_size );
+    }
+
+    *descriptor = result;
+    result = NULL;
+    status = STATUS_SUCCESS;
+    goto close;
+
+done:
+    status = registry_error_to_status( error );
+close:
+    if (converted) LocalFree( converted );
+    if (result) HeapFree( GetProcessHeap(), 0, result );
+    HeapFree( GetProcessHeap(), 0, data );
+    RegCloseKey( key );
+    return status;
 }

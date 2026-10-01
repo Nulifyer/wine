@@ -74,6 +74,8 @@ struct desktop
     struct window       *shell_listview;   /* shell list view window for this desktop */
     struct window       *progman_window;   /* progman window for this desktop */
     struct window       *taskman_window;   /* taskman window for this desktop */
+    client_ptr_t         iam_key;           /* opaque key generated for the desktop shell */
+    unsigned char        iam_key_acquired;  /* whether the shell has consumed the key */
     struct hook_table   *global_hooks;     /* table of global hooks on this desktop */
     struct list          hotkeys;          /* list of registered hotkeys */
     struct list          pointers;         /* list of active pointers */

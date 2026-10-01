@@ -234,6 +234,11 @@ BOOLEAN WINAPI PsIsSystemThread(PETHREAD);
 NTSTATUS WINAPI PsLookupProcessByProcessId(HANDLE,PEPROCESS*);
 NTSTATUS WINAPI PsLookupThreadByThreadId(HANDLE,PETHREAD*);
 void WINAPI PsRevertToSelf(void);
+BOOLEAN WINAPI RtlIsCloudFilesPlaceholder(ULONG,ULONG);
+BOOLEAN WINAPI RtlIsPartialPlaceholder(ULONG,ULONG);
 char WINAPI RtlQueryProcessPlaceholderCompatibilityMode(void);
+char WINAPI RtlQueryThreadPlaceholderCompatibilityMode(void);
+char WINAPI RtlSetProcessPlaceholderCompatibilityMode(char);
+char WINAPI RtlSetThreadPlaceholderCompatibilityMode(char);
 
 #endif

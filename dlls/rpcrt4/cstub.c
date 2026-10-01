@@ -39,6 +39,15 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
+struct compact_stub_buffer
+{
+    CStdStubBuffer stub_buffer;
+    const CInterfaceStubHeader *header;
+};
+
+static const IRpcStubBufferVtbl compact_stub_vtbl;
+static const IRpcStubBufferVtbl compact_delegating_stub_vtbl;
+
 static LONG WINAPI stub_filter(EXCEPTION_POINTERS *eptr)
 {
     if (eptr->ExceptionRecord->ExceptionFlags & EXCEPTION_NONCONTINUABLE)
@@ -58,7 +67,14 @@ static inline cstdstubbuffer_delegating_t *impl_from_delegating( IRpcStubBuffer 
 
 static const CInterfaceStubHeader *get_stub_header(const CStdStubBuffer *stub)
 {
-    const CInterfaceStubVtbl *vtbl = CONTAINING_RECORD(stub->lpVtbl, CInterfaceStubVtbl, Vtbl);
+    const CInterfaceStubVtbl *vtbl;
+
+    if (stub->lpVtbl == &compact_stub_vtbl)
+        return CONTAINING_RECORD(stub, struct compact_stub_buffer, stub_buffer)->header;
+    if (stub->lpVtbl == &compact_delegating_stub_vtbl)
+        return CONTAINING_RECORD(stub, cstdstubbuffer_delegating_t, stub_buffer)->header;
+
+    vtbl = CONTAINING_RECORD(stub->lpVtbl, CInterfaceStubVtbl, Vtbl);
 
     return &vtbl->header;
 }
@@ -67,10 +83,12 @@ HRESULT CStdStubBuffer_Construct(REFIID riid,
                                  LPUNKNOWN pUnkServer,
                                  PCInterfaceName name,
                                  CInterfaceStubVtbl *vtbl,
+                                 unsigned short table_version,
                                  LPPSFACTORYBUFFER pPSFactory,
                                  LPRPCSTUBBUFFER *ppStub)
 {
   CStdStubBuffer *This;
+  struct compact_stub_buffer *compact;
   IUnknown *pvServer;
   HRESULT r;
   TRACE("(%p,%p,%p,%p) %s\n", pUnkServer, vtbl, pPSFactory, ppStub, name);
@@ -86,13 +104,30 @@ HRESULT CStdStubBuffer_Construct(REFIID riid,
   if(FAILED(r))
     return r;
 
-  This = calloc(1, sizeof(CStdStubBuffer));
+  /* Version 16 proxy descriptors contain only a -2 sentinel where older
+   * descriptors embed a complete IRpcStubBufferVtbl.  Keep the descriptor
+   * header separately and provide rpcrt4's implementation vtable at runtime. */
+  if (table_version == 16)
+  {
+    compact = calloc(1, sizeof(*compact));
+    This = compact ? &compact->stub_buffer : NULL;
+  }
+  else
+  {
+    compact = NULL;
+    This = calloc(1, sizeof(*This));
+  }
   if (!This) {
     IUnknown_Release(pvServer);
     return E_OUTOFMEMORY;
   }
 
-  This->lpVtbl = &vtbl->Vtbl;
+  if (compact)
+  {
+    compact->header = &vtbl->header;
+    This->lpVtbl = &compact_stub_vtbl;
+  }
+  else This->lpVtbl = &vtbl->Vtbl;
   This->RefCount = 1;
   This->pvServerObject = pvServer;
   This->pPSFactory = pPSFactory;
@@ -135,6 +170,7 @@ HRESULT CStdStubBuffer_Delegating_Construct(REFIID riid,
                                             LPUNKNOWN pUnkServer,
                                             PCInterfaceName name,
                                             CInterfaceStubVtbl *vtbl,
+                                            unsigned short table_version,
                                             REFIID delegating_iid,
                                             LPPSFACTORYBUFFER pPSFactory,
                                             LPRPCSTUBBUFFER *ppStub)
@@ -172,7 +208,12 @@ HRESULT CStdStubBuffer_Delegating_Construct(REFIID riid,
         return r;
     }
 
-    This->stub_buffer.lpVtbl = &vtbl->Vtbl;
+    if (table_version == 16)
+    {
+        This->header = &vtbl->header;
+        This->stub_buffer.lpVtbl = &compact_delegating_stub_vtbl;
+    }
+    else This->stub_buffer.lpVtbl = &vtbl->Vtbl;
     This->stub_buffer.RefCount = 1;
     This->stub_buffer.pvServerObject = pvServer;
     This->stub_buffer.pPSFactory = pPSFactory;
@@ -292,8 +333,23 @@ HRESULT WINAPI CStdStubBuffer_Invoke(LPRPCSTUBBUFFER iface,
 
   __TRY
   {
-    if (header->pDispatchTable)
+    if (This->lpVtbl == &compact_delegating_stub_vtbl)
+    {
+      cstdstubbuffer_delegating_t *delegating = impl_from_delegating(iface);
+      CStdStubBuffer *base = impl_from_IRpcStubBuffer(delegating->base_stub);
+
+      if (pMsg->iMethod < get_stub_header(base)->DispatchTableCount)
+        hr = IRpcStubBuffer_Invoke(delegating->base_stub, pMsg, pChannel);
+      else
+        NdrStubCall3(iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
+    }
+    else if (This->lpVtbl == &compact_stub_vtbl)
+      NdrStubCall3(iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
+    else if (header->pDispatchTable &&
+        header->pDispatchTable[pMsg->iMethod] != (PRPC_STUB_FUNCTION)~(ULONG_PTR)0)
       header->pDispatchTable[pMsg->iMethod](iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
+    else if (header->pDispatchTable)
+      NdrStubCall3(iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
     else /* pure interpreted */
       NdrStubCall2(iface, pChannel, (PRPC_MESSAGE)pMsg, &dwPhase);
   }
@@ -359,6 +415,27 @@ const IRpcStubBufferVtbl CStdStubBuffer_Vtbl =
     CStdStubBuffer_DebugServerRelease
 };
 
+static ULONG WINAPI compact_stub_Release(LPRPCSTUBBUFFER iface)
+{
+    CStdStubBuffer *stub = impl_from_IRpcStubBuffer(iface);
+
+    return NdrCStdStubBuffer_Release(iface, stub->pPSFactory);
+}
+
+static const IRpcStubBufferVtbl compact_stub_vtbl =
+{
+    CStdStubBuffer_QueryInterface,
+    CStdStubBuffer_AddRef,
+    compact_stub_Release,
+    CStdStubBuffer_Connect,
+    CStdStubBuffer_Disconnect,
+    CStdStubBuffer_Invoke,
+    CStdStubBuffer_IsIIDSupported,
+    CStdStubBuffer_CountRefs,
+    CStdStubBuffer_DebugServerQueryInterface,
+    CStdStubBuffer_DebugServerRelease
+};
+
 static HRESULT WINAPI CStdStubBuffer_Delegating_Connect(LPRPCSTUBBUFFER iface,
                                                         LPUNKNOWN lpUnkServer)
 {
@@ -399,6 +476,27 @@ const IRpcStubBufferVtbl CStdStubBuffer_Delegating_Vtbl =
     CStdStubBuffer_QueryInterface,
     CStdStubBuffer_AddRef,
     NULL,
+    CStdStubBuffer_Delegating_Connect,
+    CStdStubBuffer_Delegating_Disconnect,
+    CStdStubBuffer_Invoke,
+    CStdStubBuffer_IsIIDSupported,
+    CStdStubBuffer_Delegating_CountRefs,
+    CStdStubBuffer_DebugServerQueryInterface,
+    CStdStubBuffer_DebugServerRelease
+};
+
+static ULONG WINAPI compact_delegating_stub_Release(LPRPCSTUBBUFFER iface)
+{
+    CStdStubBuffer *stub = impl_from_IRpcStubBuffer(iface);
+
+    return NdrCStdStubBuffer2_Release(iface, stub->pPSFactory);
+}
+
+static const IRpcStubBufferVtbl compact_delegating_stub_vtbl =
+{
+    CStdStubBuffer_QueryInterface,
+    CStdStubBuffer_AddRef,
+    compact_delegating_stub_Release,
     CStdStubBuffer_Delegating_Connect,
     CStdStubBuffer_Delegating_Disconnect,
     CStdStubBuffer_Invoke,

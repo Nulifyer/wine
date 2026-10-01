@@ -834,6 +834,8 @@ static BOOL create_icon_frame( const BITMAPINFO *bmi, DWORD maxsize, POINT hotsp
         if (!height) height = bmi_height/2;
     }
     do_stretch = (bmi_height/2 != height) || (bmi_width != width);
+    TRACE( "frame size %ldx%ld target %dx%d bpp %u maxsize %lu\n",
+           bmi_width, bmi_height / 2, width, height, bpp, maxsize );
 
     /* Scale the hotspot */
     if (is_icon)
@@ -953,7 +955,11 @@ static HICON create_cursoricon_object( struct cursoricon_desc *desc, BOOL is_ico
     UNICODE_STRING res_str = { 0 };
     HICON handle;
 
-    if (!(handle = NtUserCreateCursorIcon( is_icon ))) return 0;
+    if (!(handle = NtUserCreateCursorIcon( is_icon )))
+    {
+        ERR( "failed to allocate %s handle, error %lu\n", is_icon ? "icon" : "cursor", GetLastError() );
+        return 0;
+    }
 
     if (module) LdrGetDllFullName( module, &module_name );
 
@@ -967,6 +973,8 @@ static HICON create_cursoricon_object( struct cursoricon_desc *desc, BOOL is_ico
 
     if (!NtUserSetCursorIconData( handle, &module_name, &res_str, desc ))
     {
+        ERR( "failed to set %s data on %p, error %lu\n",
+             is_icon ? "icon" : "cursor", handle, GetLastError() );
         NtUserDestroyCursor( handle, 0 );
         return 0;
     }
@@ -991,7 +999,11 @@ static HICON create_icon_from_bmi( const BITMAPINFO *bmi, DWORD maxsize, HMODULE
     };
     HICON ret;
 
-    if (!create_icon_frame( bmi, maxsize, hotspot, bIcon, width, height, flags, &frame )) return 0;
+    if (!create_icon_frame( bmi, maxsize, hotspot, bIcon, width, height, flags, &frame ))
+    {
+        ERR( "failed to create %s frame, error %lu\n", bIcon ? "icon" : "cursor", GetLastError() );
+        return 0;
+    }
 
     ret = create_cursoricon_object( &desc, bIcon, module, resname, rsrc );
     if (!ret) free_icon_frame( &frame );

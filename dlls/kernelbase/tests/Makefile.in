@@ -1,7 +1,9 @@
 TESTDLL   = kernelbase.dll
+IMPORTS   = advapi32
 
 SOURCES = \
 	file.c \
+	loader.c \
 	memory.c \
 	path.c \
 	process.c \

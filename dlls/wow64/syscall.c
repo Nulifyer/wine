@@ -549,6 +549,57 @@ NTSTATUS WINAPI wow64_NtAlpcConnectPort( UINT *args )
 }
 
 /**********************************************************************
+ *           wow64_NtAlpcConnectPortEx
+ */
+NTSTATUS WINAPI wow64_NtAlpcConnectPortEx( UINT *args )
+{
+    ULONG *handle_ptr = get_ptr( &args );
+    OBJECT_ATTRIBUTES32 *connection_attr32 = get_ptr( &args );
+    OBJECT_ATTRIBUTES32 *client_attr32 = get_ptr( &args );
+    ALPC_PORT_ATTRIBUTES32 *port_attr32 = get_ptr( &args );
+    ULONG flags = get_ulong( &args );
+    SECURITY_DESCRIPTOR *server_security = get_ptr( &args );
+    ALPC_PORT_MESSAGE32 *msg32 = get_ptr( &args );
+    ULONG *size32 = get_ptr( &args );
+    ALPC_MESSAGE_ATTRIBUTES32 *send_msg_attr32 = get_ptr( &args );
+    ALPC_MESSAGE_ATTRIBUTES32 *recv_msg_attr32 = get_ptr( &args );
+    LARGE_INTEGER *timeout = get_ptr( &args );
+    NTSTATUS status;
+
+    HANDLE handle = 0;
+    struct object_attr64 connection_attr, client_attr;
+    ALPC_PORT_ATTRIBUTES port_attr;
+    ALPC_PORT_MESSAGE *msg;
+    SIZE_T size = size32 ? (*size32 + sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)) : 65535;
+    ALPC_MESSAGE_ATTRIBUTES *send_msg_attr;
+    ALPC_MESSAGE_ATTRIBUTES *recv_msg_attr;
+
+    if (!handle_ptr) return STATUS_OBJECT_NAME_NOT_FOUND;
+
+    if (port_attr32 && (!port_attr32->MaxMessageLength
+                        || port_attr32->MaxMessageLength > (65535 - (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)))))
+        return STATUS_INVALID_PARAMETER;
+
+    status = NtAlpcConnectPortEx( &handle, objattr_32to64( &connection_attr, connection_attr32 ),
+                                  objattr_32to64( &client_attr, client_attr32 ),
+                                  alpc_port_attributes_32to64( &port_attr, port_attr32 ), flags,
+                                  server_security, alpc_port_message_32to64( &msg, size, msg32, TRUE ), &size,
+                                  alpc_port_message_attributes_32to64( &send_msg_attr, send_msg_attr32, TRUE ),
+                                  alpc_port_message_attributes_32to64( &recv_msg_attr, recv_msg_attr32, FALSE ), timeout );
+    if (status == STATUS_SUCCESS)
+    {
+        put_handle( handle_ptr, handle );
+        alpc_port_message_64to32( msg32, msg );
+        alpc_port_message_attributes_64to32( recv_msg_attr32, recv_msg_attr );
+    }
+    else if (status == STATUS_BUFFER_TOO_SMALL && size32)
+    {
+        put_size( size32, size - (sizeof(ALPC_PORT_MESSAGE) - sizeof(ALPC_PORT_MESSAGE32)) );
+    }
+    return status;
+}
+
+/**********************************************************************
  *           wow64_NtAlpcCreatePort
  */
 NTSTATUS WINAPI wow64_NtAlpcCreatePort( UINT *args )
@@ -593,6 +644,43 @@ NTSTATUS WINAPI wow64_NtAlpcImpersonateClientOfPort( UINT *args )
     ALPC_PORT_MESSAGE *msg;
 
     return NtAlpcImpersonateClientOfPort( handle, alpc_port_message_32to64( &msg, msg32 ? (sizeof(*msg) + msg32->DataLength) : 0, msg32, TRUE ), reserved );
+}
+
+/**********************************************************************
+ *           wow64_NtAlpcQueryInformation
+ */
+NTSTATUS WINAPI wow64_NtAlpcQueryInformation( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    ALPC_PORT_INFORMATION_CLASS class = get_ulong( &args );
+    void *buffer = get_ptr( &args );
+    ULONG length = get_ulong( &args );
+    ULONG *return_length = get_ptr( &args );
+    NTSTATUS status;
+
+    if (class == AlpcBasicInformation)
+    {
+        struct
+        {
+            ULONG Flags;
+            ULONG SequenceNo;
+            ULONG PortContext;
+        } *info32 = buffer;
+        ALPC_BASIC_INFORMATION info;
+
+        if (return_length) *return_length = sizeof(*info32);
+        if (length < sizeof(*info32)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info32) return STATUS_ACCESS_VIOLATION;
+        status = NtAlpcQueryInformation( handle, class, &info, sizeof(info), NULL );
+        if (!status)
+        {
+            info32->Flags = info.Flags;
+            info32->SequenceNo = info.SequenceNo;
+            info32->PortContext = PtrToUlong( info.PortContext );
+        }
+        return status;
+    }
+    return NtAlpcQueryInformation( handle, class, buffer, length, return_length );
 }
 
 /**********************************************************************

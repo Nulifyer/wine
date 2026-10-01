@@ -33,6 +33,7 @@ typedef struct
     IUnknown *base_object;
     IRpcProxyBuffer *base_proxy;
     PCInterfaceName name;
+    void **owned_vtbl;
     IPSFactoryBuffer *pPSFactory;
     IRpcChannelBuffer *pChannel;
 } StdProxyImpl;
@@ -42,6 +43,7 @@ typedef struct
     IUnknown base_obj;
     IRpcStubBuffer *base_stub;
     CStdStubBuffer stub_buffer;
+    const CInterfaceStubHeader *header;
 } cstdstubbuffer_delegating_t;
 
 HRESULT StdProxy_Construct(REFIID riid, LPUNKNOWN pUnkOuter, const ProxyFileInfo *ProxyInfo,
@@ -53,12 +55,13 @@ HRESULT WINAPI StdProxy_Connect(IRpcProxyBuffer *iface, IRpcChannelBuffer *chann
 void WINAPI StdProxy_Disconnect(IRpcProxyBuffer *iface);
 
 HRESULT CStdStubBuffer_Construct(REFIID riid, LPUNKNOWN pUnkServer, PCInterfaceName name,
-                                 CInterfaceStubVtbl *vtbl, LPPSFACTORYBUFFER pPSFactory,
-                                 LPRPCSTUBBUFFER *ppStub);
+                                 CInterfaceStubVtbl *vtbl, unsigned short table_version,
+                                 LPPSFACTORYBUFFER pPSFactory, LPRPCSTUBBUFFER *ppStub);
 
 HRESULT CStdStubBuffer_Delegating_Construct(REFIID riid, LPUNKNOWN pUnkServer, PCInterfaceName name,
-                                            CInterfaceStubVtbl *vtbl, REFIID delegating_iid,
-                                            LPPSFACTORYBUFFER pPSFactory, LPRPCSTUBBUFFER *ppStub);
+                                            CInterfaceStubVtbl *vtbl, unsigned short table_version,
+                                            REFIID delegating_iid, LPPSFACTORYBUFFER pPSFactory,
+                                            LPRPCSTUBBUFFER *ppStub);
 
 const MIDL_SERVER_INFO *CStdStubBuffer_GetServerInfo(IRpcStubBuffer *iface);
 

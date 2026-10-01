@@ -22,7 +22,9 @@
 @ stdcall AddConsoleAliasA(str str str)
 @ stdcall AddConsoleAliasW(wstr wstr wstr)
 @ stdcall AddDllDirectory(wstr)
-@ stdcall AddDependencyToProcessPackageGraph(wstr int64 long long)
+@ stdcall -arch=win64 AddDependencyToProcessPackageGraph(wstr wstr long long)
+@ stdcall -arch=win64 AddPackageNameAliasesByPackageFullName(wstr long ptr)
+@ stdcall -arch=win64 GetPackageNameAliasesByPackageFullName(wstr ptr ptr)
 @ stdcall AddMandatoryAce(ptr long long long ptr)
 @ stdcall AddRefActCtx(ptr)
 # @ stub AddResourceAttributeAce
@@ -54,7 +56,7 @@
 # @ stub AppXFreeMemory
 # @ stub AppXGetApplicationData
 # @ stub AppXGetDevelopmentMode
-# @ stub AppXGetOSMaxVersionTested
+@ stdcall AppXGetOSMaxVersionTested(wstr ptr)
 # @ stub AppXGetOSMinVersion
 # @ stub AppXGetPackageCapabilities
 # @ stub AppXGetPackageSid
@@ -130,9 +132,9 @@
 @ stub CheckGroupPolicyEnabled
 # @ stub CheckIfStateChangeNotificationExists
 @ stdcall CheckRemoteDebuggerPresent(long ptr)
-# @ stub CheckTokenCapability
+@ stdcall CheckTokenCapability(long ptr ptr)
 @ stdcall CheckTokenMembership(long ptr ptr)
-# @ stub CheckTokenMembershipEx
+@ stdcall CheckTokenMembershipEx(long ptr long ptr)
 @ stdcall ChrCmpIA(long long)
 @ stdcall ChrCmpIW(long long)
 @ stdcall ClearCommBreak(long)
@@ -142,10 +144,10 @@
 # @ stub ClosePackageInfo
 # @ stub ClosePrivateNamespace
 @ stdcall ClosePseudoConsole(ptr)
-# @ stub CloseState
+@ stdcall -arch=win64 CloseState(ptr)
 # @ stub CloseStateAtom
-# @ stub CloseStateChangeNotification
-# @ stub CloseStateContainer
+@ stdcall -arch=win64 CloseStateChangeNotification(ptr)
+@ stdcall -arch=win64 CloseStateContainer(ptr)
 # @ stub CloseStateLock
 @ stdcall CloseThreadpool(ptr) ntdll.TpReleasePool
 @ stdcall CloseThreadpoolCleanupGroup(ptr) ntdll.TpReleaseCleanupGroup
@@ -225,8 +227,8 @@
 @ stdcall CreateSemaphoreExW(ptr long long wstr long long)
 @ stdcall CreateSemaphoreW(ptr long long wstr)
 # @ stub CreateStateAtom
-# @ stub CreateStateChangeNotification
-# @ stub CreateStateContainer
+@ stdcall -arch=win64 CreateStateChangeNotification(ptr)
+@ stdcall -arch=win64 CreateStateContainer(ptr long wstr long)
 # @ stub CreateStateLock
 # @ stub CreateStateSubcontainer
 @ stdcall CreateSymbolicLinkW(wstr wstr long)
@@ -289,7 +291,7 @@
 # @ stub DsUnBindW
 # @ stub DsWriteNgcKeyW
 @ stdcall DuplicateHandle(long long long ptr long long long)
-# @ stub DuplicateStateContainerHandle
+@ stdcall -arch=win64 DuplicateStateContainerHandle(ptr)
 @ stdcall DuplicateToken(long long ptr)
 @ stdcall DuplicateTokenEx(long long ptr long long ptr)
 @ stdcall EmptyWorkingSet(long)
@@ -381,7 +383,7 @@
 @ stdcall FindNextFileW(long ptr)
 @ stdcall FindNextStreamW(long ptr)
 @ stdcall FindNextVolumeW(long ptr long)
-@ stub -arch=win64 FindPackagesByPackageFamily
+@ stdcall -arch=win64 FindPackagesByPackageFamily(wstr long ptr ptr ptr ptr ptr)
 @ stdcall FindResourceExW(long wstr wstr long)
 @ stdcall FindResourceW(long wstr wstr)
 @ stdcall FindStringOrdinal(long wstr long wstr long long)
@@ -426,8 +428,8 @@
 # @ stub GetAppModelVersion
 # @ stub GetApplicationRecoveryCallback
 @ stdcall GetApplicationRestartSettings(long ptr ptr ptr)
-# @ stub GetApplicationUserModelId
-# @ stub GetApplicationUserModelIdFromToken
+@ stdcall GetApplicationUserModelId(long ptr ptr)
+@ stdcall GetApplicationUserModelIdFromToken(long ptr ptr)
 # @ stub GetAppliedGPOListInternalA
 # @ stub GetAppliedGPOListInternalW
 @ stub GetCPFileNameFromRegistry
@@ -480,6 +482,9 @@
 @ stdcall GetConsoleTitleA(ptr long)
 @ stdcall GetConsoleTitleW(ptr long)
 @ stdcall GetConsoleWindow()
+@ stdcall CoCreateObjectInContext(ptr ptr ptr ptr)
+@ stdcall CoRegisterInitializeSpy(ptr ptr)
+@ stdcall CoRevokeInitializeSpy(int64)
 @ stdcall GetCurrencyFormatEx(wstr long wstr ptr ptr long)
 @ stdcall GetCurrencyFormatW(long long wstr ptr ptr long)
 @ stdcall GetCurrentActCtx(ptr)
@@ -489,12 +494,15 @@
 @ stdcall GetCurrentDirectoryA(long ptr)
 @ stdcall GetCurrentDirectoryW(long ptr)
 # @ stub GetCurrentPackageApplicationContext
-# @ stub GetCurrentPackageApplicationResourcesContext
+@ stdcall GetCurrentPackageApplicationResourcesContext(long long ptr)
 # @ stub GetCurrentPackageContext
+@ stdcall GetCurrentPackageGlobalizationContext(long long ptr)
 @ stdcall GetCurrentPackageFamilyName(ptr ptr)
 @ stdcall GetCurrentPackageFullName(ptr ptr)
 @ stdcall GetCurrentPackageId(ptr ptr)
 @ stdcall GetCurrentPackageInfo(long ptr ptr ptr)
+@ stdcall GetCurrentPackageInfo2(long long ptr ptr ptr)
+@ stdcall GetCurrentPackageInfo3(long long ptr ptr ptr)
 @ stdcall GetCurrentPackagePath(ptr ptr)
 # @ stub GetCurrentPackageResourcesContext
 # @ stub GetCurrentPackageSecurityContext
@@ -524,7 +532,7 @@
 # @ stub GetDurationFormatEx
 @ stdcall GetDynamicTimeZoneInformation(ptr)
 @ stdcall GetDynamicTimeZoneInformationEffectiveYears(ptr ptr ptr)
-# @ stub GetEffectivePackageStatusForUser
+@ stdcall GetEffectivePackageStatusForUser(ptr wstr ptr)
 # @ stub GetEightBitStringToUnicodeSizeRoutine
 # @ stub GetEightBitStringToUnicodeStringRoutine
 @ stdcall -ret64 -arch=i386,x86_64 GetEnabledXStateFeatures()
@@ -560,6 +568,8 @@
 @ stdcall GetFileVersionInfoSizeExW(long wstr ptr)
 @ stdcall GetFileVersionInfoSizeW(wstr ptr)
 @ stdcall GetFileVersionInfoW(wstr long long ptr)
+@ stdcall -ret64 GetFeatureToggleConfiguration(long int64) ntdll.RtlGetFeatureToggleConfiguration
+@ stdcall GetFeatureTogglesChangeToken() ntdll.RtlGetFeatureTogglesChangeToken
 @ stdcall GetFinalPathNameByHandleA(long ptr long long)
 @ stdcall GetFinalPathNameByHandleW(long ptr long long)
 @ stdcall GetFullPathNameA(str long ptr ptr)
@@ -640,6 +650,7 @@
 # @ stub GetPackageOSMaxVersionTested
 # @ stub GetPackagePath
 @ stdcall GetPackagePathByFullName(wstr ptr wstr)
+@ stdcall GetPackagePathByFullName2(wstr long ptr ptr)
 # @ stub GetPackagePathOnVolume
 # @ stub GetPackageProperty
 # @ stub GetPackagePropertyString
@@ -647,7 +658,7 @@
 # @ stub GetPackageResourcesProperty
 # @ stub GetPackageSecurityContext
 # @ stub GetPackageSecurityProperty
-# @ stub GetPackageStatus
+@ stdcall GetPackageStatus(wstr ptr)
 # @ stub GetPackageStatusForUser
 # @ stub GetPackageTargetPlatformProperty
 # @ stub GetPackageVolumeSisPath
@@ -702,11 +713,12 @@
 @ stdcall GetSidLengthRequired(long)
 @ stdcall GetSidSubAuthority(ptr long)
 @ stdcall GetSidSubAuthorityCount(ptr)
-# @ stub GetStagedPackageOrigin
-# @ stub GetStagedPackagePathByFullName
+@ stdcall GetStagedPackageOrigin(wstr ptr)
+@ stdcall GetStagedPackagePathByFullName(wstr ptr ptr)
+@ stdcall GetStagedPackagePathByFullName2(wstr long ptr ptr)
 @ stdcall GetStartupInfoW(ptr)
 # @ stub GetStateContainerDepth
-# @ stub GetStateFolder
+@ stdcall -arch=win64 GetStateFolder(ptr long ptr ptr)
 # @ stub GetStateRootFolder
 # @ stub GetStateRootFolderBase
 # @ stub GetStateSettingsFolder
@@ -901,7 +913,7 @@
 @ stdcall IsDBCSLeadByte(long)
 @ stdcall IsDBCSLeadByteEx(long long)
 @ stdcall IsDebuggerPresent()
-# @ stub IsDeveloperModeEnabled
+@ stdcall IsDeveloperModeEnabled(ptr)
 # @ stub IsDeveloperModePolicyApplied
 # @ stub IsEnclaveTypeSupported
 # @ stub IsGlobalizationUserSettingsKeyRedirected
@@ -1020,6 +1032,7 @@
 @ stub NlsWriteEtwEvent
 @ stdcall NormalizeString(long wstr long ptr long)
 @ stub NotifyMountMgr
+@ stdcall NotifyFeatureToggleUsage(long int64 long) ntdll.RtlNotifyFeatureToggleUsage
 @ stub NotifyRedirectedStringChange
 @ stdcall ObjectCloseAuditAlarmW(wstr ptr long)
 @ stdcall ObjectDeleteAuditAlarmW(wstr ptr long)
@@ -1031,7 +1044,7 @@
 @ stdcall OpenFileById(long ptr long long ptr long)
 @ stdcall OpenFileMappingFromApp(long long wstr)
 @ stdcall OpenFileMappingW(long long wstr)
-# @ stub OpenGlobalizationUserSettingsKey
+@ stdcall OpenGlobalizationUserSettingsKey(long ptr ptr)
 @ stdcall OpenMutexW(long long wstr)
 # @ stub OpenPackageInfoByFullName
 # @ stub OpenPackageInfoByFullNameForUser
@@ -1040,29 +1053,29 @@
 @ stdcall OpenProcessToken(long long ptr)
 @ stub OpenRegKey
 @ stdcall OpenSemaphoreW(long long wstr)
-# @ stub OpenState
+@ stdcall -arch=win64 OpenState()
 # @ stub OpenStateAtom
 # @ stub OpenStateExplicit
 # @ stub OpenStateExplicitForUserSid
-# @ stub OpenStateExplicitForUserSidString
+@ stdcall -arch=win64 OpenStateExplicitForUserSidString(wstr wstr)
 @ stdcall OpenThread(long long long)
 @ stdcall OpenThreadToken(long long long ptr)
 @ stdcall OpenWaitableTimerW(long long wstr)
 @ stdcall OutputDebugStringA(str)
 @ stdcall OutputDebugStringW(wstr)
 # @ stub OverrideRoamingDataModificationTimesInRange
-# @ stub PackageFamilyNameFromFullName
-# @ stub PackageFamilyNameFromId
+@ stdcall PackageFamilyNameFromFullName(wstr ptr ptr)
+@ stdcall PackageFamilyNameFromId(ptr ptr ptr)
 # @ stub PackageFamilyNameFromProductId
 # @ stub PackageFullNameFromId
 # @ stub PackageFullNameFromProductId
 @ stdcall PackageIdFromFullName(wstr long ptr ptr)
 # @ stub PackageIdFromProductId
-# @ stub PackageNameAndPublisherIdFromFamilyName
+@ stdcall PackageNameAndPublisherIdFromFamilyName(wstr ptr ptr ptr ptr)
 # @ stub PackageRelativeApplicationIdFromProductId
 # @ stub PackageSidFromFamilyName
 # @ stub PackageSidFromProductId
-# @ stub ParseApplicationUserModelId
+@ stdcall ParseApplicationUserModelId(wstr ptr ptr ptr ptr)
 @ stdcall ParseURLA(str ptr)
 @ stdcall ParseURLW(wstr ptr)
 @ stdcall PathAddBackslashA(str)
@@ -1211,15 +1224,16 @@
 @ stdcall PrivilegeCheck(ptr ptr ptr)
 @ stdcall PrivilegedServiceAuditAlarmW(wstr wstr long ptr long)
 @ stdcall ProcessIdToSessionId(long ptr)
+@ stdcall PsmQueryBackgroundActivationType()
 # @ stub ProductIdFromPackageFamilyName
-# @ stub PsmCreateKey
+@ stdcall PsmCreateKey(wstr wstr ptr ptr)
 # @ stub PsmCreateKeyWithDynamicId
 # @ stub PsmEqualApplication
 # @ stub PsmEqualPackage
-# @ stub PsmGetApplicationNameFromKey
-# @ stub PsmGetKeyFromProcess
-# @ stub PsmGetKeyFromToken
-# @ stub PsmGetPackageFullNameFromKey
+@ stdcall PsmGetApplicationNameFromKey(wstr ptr ptr)
+@ stdcall PsmGetKeyFromProcess(long ptr ptr ptr)
+@ stdcall PsmGetKeyFromToken(long ptr ptr ptr)
+@ stdcall PsmGetPackageFullNameFromKey(wstr ptr ptr)
 # @ stub PsmIsChildKey
 # @ stub PsmIsDynamicKey
 # @ stub PsmIsValidKey
@@ -1258,7 +1272,7 @@
 @ stub QuerySecurityAccessMask
 # @ stub QueryStateAtomValueInfo
 # @ stub QueryStateContainerCreatedNew
-# @ stub QueryStateContainerItemInfo
+@ stdcall -arch=win64 QueryStateContainerItemInfo(ptr wstr ptr)
 @ stdcall QueryThreadCycleTime(long ptr)
 @ stdcall QueryThreadpoolStackInformation(ptr ptr)
 @ stdcall QueryUnbiasedInterruptTime(ptr) ntdll.RtlQueryUnbiasedInterruptTime
@@ -1274,7 +1288,7 @@
 @ stdcall QuirkIsEnabled(ptr)
 # @ stub QuirkIsEnabled2
 @ stdcall QuirkIsEnabled3(ptr ptr)
-# @ stub QuirkIsEnabledForPackage
+@ stdcall QuirkIsEnabledForPackage(ptr wstr long ptr)
 # @ stub QuirkIsEnabledForPackage2
 # @ stub QuirkIsEnabledForPackage3
 # @ stub QuirkIsEnabledForPackage4
@@ -1299,7 +1313,7 @@
 @ stdcall ReadFileScatter(long ptr long ptr ptr)
 @ stdcall ReadProcessMemory(long ptr ptr long ptr)
 # @ stub ReadStateAtomValue
-# @ stub ReadStateContainerValue
+@ stdcall -arch=win64 ReadStateContainerValue(ptr wstr ptr ptr ptr)
 # @ stub ReclaimVirtualMemory
 # @ stub RefreshPolicyExInternal
 # @ stub RefreshPolicyInternal
@@ -1399,7 +1413,7 @@
 @ stdcall ResumeThread(long)
 @ stdcall RevertToSelf()
 # @ stub RsopLoggingEnabledInternal
-# @ stub SHCoCreateInstance
+@ stdcall SHCoCreateInstance(wstr ptr ptr ptr ptr)
 @ stdcall SHExpandEnvironmentStringsA(str ptr long) ExpandEnvironmentStringsA
 @ stdcall SHExpandEnvironmentStringsW(wstr ptr long) ExpandEnvironmentStringsW
 @ stdcall SHLoadIndirectString(wstr ptr long ptr)
@@ -1640,7 +1654,7 @@
 @ stdcall StrTrimW(wstr wstr)
 @ stdcall SubmitThreadpoolWork(ptr) ntdll.TpPostWork
 # @ stub SubscribeEdpEnabledStateChange
-# @ stub SubscribeStateChangeNotification
+@ stdcall -arch=win64 SubscribeStateChangeNotification(ptr ptr ptr)
 @ stdcall SuspendThread(long)
 @ stdcall SwitchToFiber(ptr)
 @ stdcall SwitchToThread()
@@ -1678,7 +1692,7 @@
 @ stdcall UnregisterTraceGuids(int64) ntdll.EtwUnregisterTraceGuids
 @ stdcall UnregisterWaitEx(long long)
 # @ stub UnsubscribeEdpEnabledStateChange
-# @ stub UnsubscribeStateChangeNotification
+@ stdcall -arch=win64 UnsubscribeStateChangeNotification(ptr)
 # @ stub UpdatePackageStatus
 # @ stub UpdatePackageStatusForUser
 @ stdcall UpdateProcThreadAttribute(ptr long long ptr long ptr ptr)
@@ -1737,8 +1751,8 @@
 @ stdcall VirtualQuery(ptr ptr long)
 @ stdcall VirtualQueryEx(long ptr ptr long)
 @ stdcall VirtualUnlock(ptr long)
-# @ stub WTSGetServiceSessionId
-# @ stub WTSIsServerContainer
+@ stdcall WTSGetServiceSessionId()
+@ stdcall WTSIsServerContainer()
 @ stdcall WaitCommEvent(long ptr ptr)
 @ stdcall WaitForDebugEvent(ptr long)
 @ stdcall WaitForDebugEventEx(ptr long)
@@ -1776,7 +1790,7 @@
 @ stdcall Wow64GetThreadContext(long ptr)
 @ stdcall Wow64RevertWow64FsRedirection(ptr)
 @ stdcall Wow64SetThreadContext(long ptr)
-# @ stub Wow64SetThreadDefaultGuestMachine
+@ stdcall Wow64SetThreadDefaultGuestMachine(long)
 # @ stub Wow64SuspendThread
 # @ stub -arch=i386 Wow64Transition
 @ stdcall WriteConsoleA(long ptr long ptr ptr)
@@ -1793,7 +1807,7 @@
 @ stdcall WriteFileGather(long ptr long ptr ptr)
 @ stdcall WriteProcessMemory(long ptr ptr long ptr)
 # @ stub WriteStateAtomValue
-# @ stub WriteStateContainerValue
+@ stdcall -arch=win64 WriteStateContainerValue(ptr wstr long ptr long ptr)
 @ stdcall ZombifyActCtx(ptr)
 # @ stub _AddMUIStringToCache
 # @ stub _GetMUIStringFromCache

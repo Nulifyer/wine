@@ -4782,6 +4782,7 @@ typedef struct _SID_AND_ATTRIBUTES_HASH {
 #define DOMAIN_USER_RID_ADMIN                   __MSABI_LONG(0x000001F4)
 #define DOMAIN_USER_RID_GUEST                   __MSABI_LONG(0x000001F5)
 #define DOMAIN_USER_RID_KRBTGT                  __MSABI_LONG(0x000001F6)
+#define DOMAIN_USER_RID_DEFAULT_ACCOUNT         __MSABI_LONG(0x000001F7)
 #define DOMAIN_USER_RID_MAX                     __MSABI_LONG(0x000003E7)
 
 #define DOMAIN_GROUP_RID_ADMINS                 __MSABI_LONG(0x00000200)
@@ -4849,6 +4850,7 @@ typedef struct _SID_AND_ATTRIBUTES_HASH {
 #define DOMAIN_ALIAS_RID_NON_CACHEABLE_PRINCIPALS_GROUP __MSABI_LONG(0x0000023C)
 #define DOMAIN_ALIAS_RID_EVENT_LOG_READERS_GROUP __MSABI_LONG(0x0000023D)
 #define DOMAIN_ALIAS_RID_CERTSVC_DCOM_ACCESS_GROUP __MSABI_LONG(0x0000023E)
+#define DOMAIN_ALIAS_RID_DEFAULT_ACCOUNT         __MSABI_LONG(0x00000245)
 
 #define SECURITY_SERVER_LOGON_RID		SECURITY_ENTERPRISE_CONTROLLERS_RID
 
@@ -4979,6 +4981,10 @@ typedef enum {
     WinLocalAccountSid                          = 105,
     WinLocalAccountAndAdministratorSid          = 106,
     WinAccountProtectedUsersSid                 = 107,
+    WinCapabilityAppointmentsSid                = 108,
+    WinCapabilityContactsSid                    = 109,
+    WinAccountDefaultSystemManagedSid           = 110,
+    WinBuiltinDefaultSystemManagedGroupSid      = 111,
 } WELL_KNOWN_SID_TYPE;
 
 /*
@@ -5620,6 +5626,8 @@ typedef struct _QUOTA_LIMITS_EX {
 #define FILE_ATTRIBUTE_VIRTUAL             0x00010000
 #define FILE_ATTRIBUTE_NO_SCRUB_DATA       0x00020000
 #define FILE_ATTRIBUTE_EA                  0x00040000
+#define FILE_ATTRIBUTE_RECALL_ON_OPEN      0x00040000
+#define FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS 0x00400000
 
 /* File notification flags */
 #define FILE_NOTIFY_CHANGE_FILE_NAME    0x00000001
@@ -5790,8 +5798,15 @@ typedef enum _POWER_INFORMATION_LEVEL {
         ProcessorPowerPolicyDc,
         VerifyProcessorPowerPolicyAc,
         VerifyProcessorPowerPolicyDc,
-        ProcessorPowerPolicyCurrent
+        ProcessorPowerPolicyCurrent,
+        PlatformInformation = 66,
+        PlatformRole = 75,
+        PowerInformationInternal = 87
 } POWER_INFORMATION_LEVEL;
+
+typedef struct _POWER_PLATFORM_INFORMATION {
+    BOOLEAN AoAc;
+} POWER_PLATFORM_INFORMATION, *PPOWER_PLATFORM_INFORMATION;
 
 typedef struct _ADMINISTRATOR_POWER_POLICY {
 	SYSTEM_POWER_STATE MinSleep;
@@ -7055,6 +7070,7 @@ typedef struct _TP_CALLBACK_ENVIRON_V3
 
 typedef struct _TP_WORK TP_WORK, *PTP_WORK;
 typedef struct _TP_TIMER TP_TIMER, *PTP_TIMER;
+typedef struct _TP_ALPC TP_ALPC, *PTP_ALPC;
 
 typedef DWORD TP_WAIT_RESULT;
 typedef struct _TP_WAIT TP_WAIT, *PTP_WAIT;
@@ -7066,6 +7082,7 @@ typedef TP_CALLBACK_ENVIRON_V1 TP_CALLBACK_ENVIRON, *PTP_CALLBACK_ENVIRON;
 typedef VOID (CALLBACK *PTP_WORK_CALLBACK)(PTP_CALLBACK_INSTANCE,PVOID,PTP_WORK);
 typedef VOID (CALLBACK *PTP_TIMER_CALLBACK)(PTP_CALLBACK_INSTANCE,PVOID,PTP_TIMER);
 typedef VOID (CALLBACK *PTP_WAIT_CALLBACK)(PTP_CALLBACK_INSTANCE,PVOID,PTP_WAIT,TP_WAIT_RESULT);
+typedef VOID (CALLBACK *PTP_ALPC_CALLBACK)(PTP_CALLBACK_INSTANCE,PVOID,PTP_ALPC);
 
 
 NTSYSAPI BOOLEAN NTAPI RtlGetProductInfo(DWORD,DWORD,DWORD,DWORD,PDWORD);

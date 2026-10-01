@@ -254,6 +254,14 @@ extern struct keyed_event *get_keyed_event_obj( struct process *process, obj_han
 extern void set_event( struct event *event );
 extern void reset_event( struct event *event );
 
+/* memory partition functions */
+
+extern void create_system_memory_objects( struct object *kernel_dir );
+
+/* system ALPC functions */
+
+extern void create_system_alpc_objects( struct object *root );
+
 /* mutex functions */
 
 extern void abandon_mutexes( struct thread *thread );
@@ -384,6 +392,7 @@ extern struct type_descr device_type;
 extern struct type_descr completion_type;
 extern struct type_descr file_type;
 extern struct type_descr mapping_type;
+extern struct type_descr memory_partition_type;
 extern struct type_descr key_type;
 extern struct type_descr apc_reserve_type;
 extern struct type_descr completion_reserve_type;

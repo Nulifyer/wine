@@ -363,3 +363,67 @@ NTSTATUS WINAPI RtlFindMessage( HMODULE hmod, ULONG type, ULONG lang,
     }
     return STATUS_MESSAGE_NOT_FOUND;
 }
+
+/**********************************************************************
+ *              RtlLoadString  (NTDLL.@)
+ *
+ * Return a view of a string-table entry in a loaded module.  The returned
+ * pointer remains owned by the module, matching the native API contract.
+ */
+NTSTATUS WINAPI RtlLoadString( void *dll_handle, ULONG string_id, const WCHAR *string_language,
+                               ULONG flags, const WCHAR **return_string, USHORT *return_string_len,
+                               WCHAR *return_language_name, ULONG *return_language_len )
+{
+    const IMAGE_RESOURCE_DATA_ENTRY *entry;
+    const WCHAR *cursor, *end;
+    LDR_RESOURCE_INFO info;
+    LCID lcid = 0;
+    ULONG size;
+    NTSTATUS status;
+    unsigned int index;
+
+    TRACE( "handle %p, id %lu, language %s, flags %#lx, string %p, len %p, language_name %p, language_len %p\n",
+           dll_handle, string_id, debugstr_w(string_language), flags, return_string,
+           return_string_len, return_language_name, return_language_len );
+
+    if (!return_string) return STATUS_INVALID_PARAMETER;
+    *return_string = NULL;
+    if (return_string_len) *return_string_len = 0;
+
+    if (string_language && (status = RtlLocaleNameToLcid( string_language, &lcid, 2 ))) return status;
+
+    info.Type = 6; /* RT_STRING */
+    info.Name = (string_id >> 4) + 1;
+    info.Language = LANGIDFROMLCID( lcid );
+    if ((status = LdrFindResource_U( dll_handle, &info, 3, &entry ))) return status;
+    if ((status = LdrAccessResource( dll_handle, entry, (void **)&cursor, &size ))) return status;
+
+    end = (const WCHAR *)((const char *)cursor + size);
+    index = string_id & 15;
+    while (index--)
+    {
+        if (cursor >= end || *cursor >= end - cursor) return STATUS_RESOURCE_DATA_NOT_FOUND;
+        cursor += *cursor + 1;
+    }
+    if (cursor >= end || *cursor > end - cursor - 1) return STATUS_RESOURCE_DATA_NOT_FOUND;
+
+    *return_string = cursor + 1;
+    if (return_string_len) *return_string_len = *cursor;
+
+    if (return_language_len)
+    {
+        ULONG capacity = *return_language_len;
+        ULONG length = string_language ? wcslen( string_language ) : 0;
+
+        *return_language_len = length + 1;
+        if (return_language_name && capacity)
+        {
+            ULONG copy = min( length, capacity - 1 );
+            if (copy) memcpy( return_language_name, string_language, copy * sizeof(WCHAR) );
+            return_language_name[copy] = 0;
+        }
+    }
+
+    if (flags) FIXME( "flags %#lx are not implemented\n", flags );
+    return STATUS_SUCCESS;
+}

@@ -1783,6 +1783,11 @@ ULONG SYSCALL_API NtUserGetProcessDpiAwarenessContext( HANDLE process )
     SYSCALL_FUNC( NtUserGetProcessDpiAwarenessContext );
 }
 
+BOOL SYSCALL_API NtUserGetProcessUIContextInformation( HANDLE process, ULONG *context )
+{
+    SYSCALL_FUNC( NtUserGetProcessUIContextInformation );
+}
+
 HWINSTA SYSCALL_API NtUserGetProcessWindowStation(void)
 {
     SYSCALL_FUNC( NtUserGetProcessWindowStation );
@@ -1796,6 +1801,11 @@ HANDLE SYSCALL_API NtUserGetProp( HWND hwnd, const WCHAR *str )
 DWORD SYSCALL_API NtUserGetQueueStatus( UINT flags )
 {
     SYSCALL_FUNC( NtUserGetQueueStatus );
+}
+
+DWORD SYSCALL_API NtUserGetQueueStatusReadonly(void)
+{
+    SYSCALL_FUNC( NtUserGetQueueStatusReadonly );
 }
 
 UINT SYSCALL_API NtUserGetRawInputBuffer( RAWINPUT *data, UINT *data_size, UINT header_size )

@@ -420,8 +420,20 @@ void WINAPI DECLSPEC_HOTPATCH RaiseFailFastException( EXCEPTION_RECORD *record, 
 {
     EXCEPTION_RECORD rec;
     CONTEXT ctx;
+    void *frames[32];
+    USHORT frame_count, i;
 
     WARN( "(%p, %p, %lx)\n", record, context, flags );
+    if (record)
+    {
+        WARN( "fail-fast record code %#lx flags %#lx address %p parameters %lu\n",
+              record->ExceptionCode, record->ExceptionFlags, record->ExceptionAddress,
+              record->NumberParameters );
+        for (i = 0; i < record->NumberParameters && i < EXCEPTION_MAXIMUM_PARAMETERS; ++i)
+            WARN( "fail-fast parameter %u: %#Ix\n", i, record->ExceptionInformation[i] );
+    }
+    frame_count = RtlCaptureStackBackTrace( 0, ARRAY_SIZE(frames), frames, NULL );
+    for (i = 0; i < frame_count; ++i) WARN( "fail-fast frame %u: %p\n", i, frames[i] );
 
     if (flags & FAIL_FAST_NO_HARD_ERROR_DLG)
         TerminateProcess( GetCurrentProcess(), STATUS_FAIL_FAST_EXCEPTION );

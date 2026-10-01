@@ -192,6 +192,14 @@ static DWORD calc_arg_size(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
     case FC_USER_MARSHAL:
         size = *(const WORD*)(pFormat + 4);
         break;
+    case FC_SYSTEM_HANDLE:
+        size = sizeof(HANDLE);
+        break;
+    case FC_BLKHOLE: /* FC_SUPPLEMENT */
+        /* Supplemented types are represented by a pointer-sized argument.
+         * The signed offset is relative to the offset field itself. */
+        size = sizeof(void *);
+        break;
     case FC_CSTRING:
         size = *(const WORD*)(pFormat + 2);
         break;
@@ -227,6 +235,13 @@ static DWORD calc_arg_size(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
         break;
     }
     return size;
+}
+
+static const unsigned char *effective_type_format(const unsigned char *pFormat)
+{
+    while (*pFormat == FC_BLKHOLE) /* FC_SUPPLEMENT */
+        pFormat = pFormat + 2 + *(const SHORT *)(pFormat + 2);
+    return pFormat;
 }
 
 void WINAPI NdrRpcSmSetClientToOsf(PMIDL_STUB_MESSAGE pMessage)
@@ -1144,6 +1159,7 @@ static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
     {
         unsigned char *pArg = pStubMsg->StackTop + params[i].stack_offset;
         const unsigned char *pTypeFormat = &pStubMsg->StubDesc->pFormatTypes[params[i].u.type_offset];
+        const unsigned char *pEffectiveTypeFormat = effective_type_format(pTypeFormat);
 
         TRACE("param[%d]: %p -> %p type %02x %s\n", i,
               pArg, *(unsigned char **)pArg,
@@ -1170,15 +1186,15 @@ static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
             else if (param_needs_alloc(params[i].attr) &&
                      (!params[i].attr.MustFree || params[i].attr.IsSimpleRef))
             {
-                if (*pTypeFormat != FC_BIND_CONTEXT) pStubMsg->pfnFree(*(void **)pArg);
+                if (*pEffectiveTypeFormat != FC_BIND_CONTEXT) pStubMsg->pfnFree(*(void **)pArg);
             }
             break;
         case STUBLESS_INITOUT:
             if (param_needs_alloc(params[i].attr) && !params[i].attr.ServerAllocSize)
             {
-                if (*pTypeFormat == FC_BIND_CONTEXT)
+                if (*pEffectiveTypeFormat == FC_BIND_CONTEXT)
                 {
-                    NDR_SCONTEXT ctxt = NdrContextHandleInitialize(pStubMsg, pTypeFormat);
+                    NDR_SCONTEXT ctxt = NdrContextHandleInitialize(pStubMsg, (PFORMAT_STRING)pEffectiveTypeFormat);
                     *(void **)pArg = NDRSContextValue(ctxt);
                     if (params[i].attr.IsReturn) retval_ptr = (LONG_PTR *)NDRSContextValue(ctxt);
                 }
@@ -1490,6 +1506,20 @@ void WINAPI NdrServerCall2(PRPC_MESSAGE pRpcMsg)
  */
 LONG WINAPI NdrStubCall( struct IRpcStubBuffer *This, struct IRpcChannelBuffer *channel,
                          PRPC_MESSAGE msg, DWORD *phase )
+{
+    return NdrStubCall2( This, channel, msg, phase );
+}
+
+/***********************************************************************
+ *            NdrStubCall3 [RPCRT4.@]
+ *
+ * The third-generation entry point uses the same NDR32 server interpreter
+ * as NdrStubCall2.  Modern MIDL proxy/stub DLLs use this name for their
+ * x64 dispatch tables even when their selected transfer syntax is classic
+ * NDR32.  NDR64 needs a separate interpreter and is not supported yet.
+ */
+LONG WINAPI NdrStubCall3( struct IRpcStubBuffer *This, struct IRpcChannelBuffer *channel,
+                          PRPC_MESSAGE msg, DWORD *phase )
 {
     return NdrStubCall2( This, channel, msg, phase );
 }

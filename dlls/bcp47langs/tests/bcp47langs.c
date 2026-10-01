@@ -25,6 +25,8 @@
 
 HRESULT WINAPI GetFontFallbackLanguageList(const WCHAR *, size_t, WCHAR *, size_t *);
 DWORD WINAPI GetUserLanguages(WCHAR, HSTRING *);
+HRESULT WINAPI GetApplicationLanguages(void *, WCHAR, HSTRING *);
+HRESULT WINAPI LanguageListAsMuiForm(WCHAR, HSTRING, WCHAR, HSTRING *);
 
 static void test_GetFontFallbackLanguageList(void)
 {
@@ -40,6 +42,11 @@ static void test_GetFontFallbackLanguageList(void)
 
     hr = GetFontFallbackLanguageList(L"en-US", 0, buffer, &required_size);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    required_size = 0xdeadbeef;
+    hr = GetFontFallbackLanguageList(L"en-US", 0, NULL, &required_size);
+    ok(hr == E_NOT_SUFFICIENT_BUFFER, "Got unexpected hr %#lx.\n", hr);
+    ok(required_size == 6, "Got unexpected size %Iu.\n", required_size);
 
     required_size = 0;
     hr = GetFontFallbackLanguageList(L"en-US", 1, buffer, &required_size);
@@ -65,6 +72,12 @@ static void test_GetFontFallbackLanguageList(void)
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!wcsncmp(buffer, L"en-US", wcslen(L"en-US")), "Got unexpected %s.\n", wine_dbgstr_w(buffer));
     ok(required_size >= (wcslen(L"en-US") + 1), "Got unexpected size %Iu.\n", required_size);
+
+    required_size = 0;
+    hr = GetFontFallbackLanguageList(L"en", ARRAY_SIZE(buffer), buffer, &required_size);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"en;en-US"), "Got unexpected %s.\n", wine_dbgstr_w(buffer));
+    ok(required_size == 9, "Got unexpected size %Iu.\n", required_size);
 }
 
 static void test_GetUserLanguages(void)
@@ -87,8 +100,51 @@ static void test_GetUserLanguages(void)
     WindowsDeleteString(usrlangs);
 }
 
+static void test_GetApplicationLanguages(void)
+{
+    HSTRING languages = NULL;
+    const WCHAR *buffer;
+    UINT32 length;
+    HRESULT hr;
+
+    hr = GetApplicationLanguages((void *)0xdeadbeef, 0, &languages);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!!languages, "Expected an application language.\n");
+    if (languages)
+    {
+        buffer = WindowsGetStringRawBuffer(languages, &length);
+        ok(length > 0, "Expected a non-empty language tag.\n");
+        ok(!!buffer, "Expected a language buffer.\n");
+        WindowsDeleteString(languages);
+    }
+
+    hr = GetApplicationLanguages(NULL, ';', NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+}
+
+static void test_LanguageListAsMuiForm(void)
+{
+    HSTRING input = NULL, output = NULL;
+    const WCHAR *buffer;
+    HRESULT hr;
+
+    hr = WindowsCreateString(L"en-US;fr-FR", 11, &input);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = LanguageListAsMuiForm(';', input, '|', &output);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    buffer = WindowsGetStringRawBuffer(output, NULL);
+    ok(!wcscmp(buffer, L"en-US|fr-FR"), "Got unexpected %s.\n", wine_dbgstr_w(buffer));
+    WindowsDeleteString(output);
+    WindowsDeleteString(input);
+
+    hr = LanguageListAsMuiForm(';', NULL, '|', &output);
+    ok(hr == E_POINTER, "Got unexpected hr %#lx.\n", hr);
+}
+
 START_TEST(bcp47langs)
 {
     test_GetFontFallbackLanguageList();
     test_GetUserLanguages();
+    test_GetApplicationLanguages();
+    test_LanguageListAsMuiForm();
 }

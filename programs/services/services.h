@@ -100,7 +100,7 @@ void notify_service_state(struct service_entry *service);
 struct process_entry *grab_process(struct process_entry *process);
 void release_process(struct process_entry *process);
 BOOL process_send_control(struct process_entry *process, BOOL winedevice, const WCHAR *name,
-                          DWORD control, const BYTE *data, DWORD data_size, DWORD *result);
+                          DWORD control, DWORD event_type, const BYTE *data, DWORD data_size, DWORD *result);
 void process_terminate(struct process_entry *process);
 
 extern DWORD service_pipe_timeout;

@@ -912,13 +912,89 @@ error:
     return ERROR_NOT_ENOUGH_SERVER_MEMORY;
 }
 
+/* Set the enabled state of privileges already present in the child token.
+ * This does not supply LocalSystem identity, missing privileges, or session 0. */
+static DWORD set_service_privileges(HANDLE process)
+{
+    static const struct
+    {
+        DWORD privilege;
+        BOOL enabled;
+    } defaults[] =
+    {
+        { SE_CHANGE_NOTIFY_PRIVILEGE, TRUE },
+        { SE_TCB_PRIVILEGE, TRUE },
+        { SE_SECURITY_PRIVILEGE, FALSE },
+        { SE_BACKUP_PRIVILEGE, FALSE },
+        { SE_RESTORE_PRIVILEGE, FALSE },
+        { SE_SYSTEMTIME_PRIVILEGE, FALSE },
+        { SE_SHUTDOWN_PRIVILEGE, FALSE },
+        { SE_TAKE_OWNERSHIP_PRIVILEGE, FALSE },
+        { SE_DEBUG_PRIVILEGE, TRUE },
+        { SE_SYSTEM_ENVIRONMENT_PRIVILEGE, FALSE },
+        { SE_SYSTEM_PROFILE_PRIVILEGE, TRUE },
+        { SE_PROF_SINGLE_PROCESS_PRIVILEGE, TRUE },
+        { SE_INC_BASE_PRIORITY_PRIVILEGE, TRUE },
+        { SE_LOAD_DRIVER_PRIVILEGE, FALSE },
+        { SE_CREATE_PAGEFILE_PRIVILEGE, TRUE },
+        { SE_INCREASE_QUOTA_PRIVILEGE, FALSE },
+        { SE_UNDOCK_PRIVILEGE, FALSE },
+        { SE_MANAGE_VOLUME_PRIVILEGE, FALSE },
+        { SE_IMPERSONATE_PRIVILEGE, TRUE },
+        { SE_CREATE_GLOBAL_PRIVILEGE, TRUE },
+    };
+    TOKEN_PRIVILEGES *privileges;
+    DWORD size = 0, err, i, j;
+    HANDLE token;
+
+    if (!OpenProcessToken(process, TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES, &token))
+        return GetLastError();
+    GetTokenInformation(token, TokenPrivileges, NULL, 0, &size);
+    if (!size)
+    {
+        err = GetLastError();
+        CloseHandle(token);
+        return err;
+    }
+    if (!(privileges = malloc(size)))
+    {
+        CloseHandle(token);
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
+    if (!GetTokenInformation(token, TokenPrivileges, privileges, size, &size))
+        err = GetLastError();
+    else
+    {
+        for (i = 0; i < privileges->PrivilegeCount; ++i)
+        {
+            LUID_AND_ATTRIBUTES *privilege = &privileges->Privileges[i];
+            if (privilege->Luid.HighPart) continue;
+            for (j = 0; j < ARRAY_SIZE(defaults); ++j)
+            {
+                if (privilege->Luid.LowPart != defaults[j].privilege) continue;
+                privilege->Attributes = defaults[j].enabled ? SE_PRIVILEGE_ENABLED : 0;
+                break;
+            }
+        }
+        SetLastError(ERROR_SUCCESS);
+        if (!AdjustTokenPrivileges(token, FALSE, privileges, 0, NULL, NULL) ||
+            GetLastError() == ERROR_NOT_ALL_ASSIGNED)
+            err = GetLastError();
+        else
+            err = ERROR_SUCCESS;
+    }
+    free(privileges);
+    CloseHandle(token);
+    return err;
+}
+
 static DWORD service_start_process(struct service_entry *service_entry, struct process_entry **new_process,
                                    BOOL *shared_process)
 {
     struct process_entry *process;
     PROCESS_INFORMATION pi;
     STARTUPINFOW si;
-    BOOL is_wow64 = FALSE;
+    BOOL is_wow64 = FALSE, local_system;
     HANDLE token;
     WCHAR *path;
     DWORD err;
@@ -1054,9 +1130,12 @@ found:
     service_entry->process = grab_process(process);
     service_entry->shared_process = *shared_process = FALSE;
     process->use_count++;
+    local_system = !wcsicmp(service_entry->config.lpServiceStartName, L"LocalSystem") ||
+                   !wcsicmp(service_entry->config.lpServiceStartName, L".\\LocalSystem");
     service_unlock(service_entry);
 
-    r = CreateProcessW(NULL, path, NULL, NULL, FALSE, CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS, environment, NULL, &si, &pi);
+    r = CreateProcessW(NULL, path, NULL, NULL, FALSE, CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS |
+                      (local_system ? CREATE_SUSPENDED : 0), environment, NULL, &si, &pi);
     free(path);
     if (!r)
     {
@@ -1070,6 +1149,18 @@ found:
 
     process->process_id = pi.dwProcessId;
     process->process = pi.hProcess;
+    if (local_system)
+    {
+        err = set_service_privileges(pi.hProcess);
+        if (!err && ResumeThread(pi.hThread) == (DWORD)-1) err = GetLastError();
+        if (err)
+        {
+            CloseHandle(pi.hThread);
+            process_terminate(process);
+            release_process(process);
+            return err;
+        }
+    }
     CloseHandle( pi.hThread );
 
     *new_process = process;
@@ -1147,7 +1238,7 @@ static DWORD process_send_start_message(struct process_entry *process, BOOL shar
     *p = 0;
 
     if (!process_send_control(process, shared_process, name,
-                              SERVICE_CONTROL_START, (const BYTE *)str, len, &result))
+                              SERVICE_CONTROL_START, 0, (const BYTE *)str, len, &result))
         result = ERROR_SERVICE_REQUEST_TIMEOUT;
 
     free(str);
@@ -1279,10 +1370,11 @@ static DWORD WINAPI process_monitor_thread_proc( void *arg )
 int __cdecl main(int argc, char *argv[])
 {
     static const WCHAR autostart_phase1_done_event[] = L"Global\\SC_AutoStartPhase1Done";
+    static const WCHAR scm_created_event_name[] = L"Global\\ScmCreatedEvent";
     static const WCHAR svcctl_started_event[] = SVCCTL_STARTED_EVENT;
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_limit;
     JOBOBJECT_ASSOCIATE_COMPLETION_PORT port_info;
-    HANDLE autostart_event, started_event, process_monitor_thread;
+    HANDLE autostart_event, scm_created_event, started_event, process_monitor_thread;
     DWORD err;
 
     job_object = CreateJobObjectW(NULL, NULL);
@@ -1307,6 +1399,15 @@ int __cdecl main(int argc, char *argv[])
     {
         err = GetLastError();
         WINE_ERR("Failed to create auto-start phase event, err %lu.\n", err);
+        return err;
+    }
+
+    scm_created_event = CreateEventW(NULL, TRUE, TRUE, scm_created_event_name);
+    if (!scm_created_event)
+    {
+        err = GetLastError();
+        WINE_ERR("Failed to create SCM readiness event, err %lu.\n", err);
+        CloseHandle(autostart_event);
         return err;
     }
 
@@ -1351,6 +1452,7 @@ int __cdecl main(int argc, char *argv[])
     scmdatabase_destroy(active_database);
     if (environment)
         DestroyEnvironmentBlock(environment);
+    CloseHandle(scm_created_event);
     CloseHandle(autostart_event);
 
     WINE_TRACE("services.exe exited with code %ld\n", err);

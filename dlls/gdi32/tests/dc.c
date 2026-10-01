@@ -1727,7 +1727,6 @@ static void test_SetPixel(void)
     ok(c == ~0, "SetPixel returned: %lx\n", c);
 }
 
-
 START_TEST(dc)
 {
     test_dc_values();

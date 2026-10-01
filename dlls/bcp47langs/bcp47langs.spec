@@ -9,7 +9,7 @@
 @ stub Bcp47FromLcid
 @ stub Bcp47GetAbbreviation
 @ stub Bcp47GetDirectionality
-@ stub Bcp47GetDistance
+@ stdcall Bcp47GetDistance(ptr ptr ptr)
 @ stub Bcp47GetExtensionSingletons
 @ stub Bcp47GetExtensionSubstring
 @ stub Bcp47GetIsoLanguageCode
@@ -31,7 +31,7 @@
 @ stub DllGetActivationFactory
 @ stub DllGetClassObject
 @ stub GetApplicationLanguageOverride
-@ stub GetApplicationLanguages
+@ stdcall GetApplicationLanguages(ptr long ptr)
 @ stub GetApplicationManifestLanguages
 @ stub GetAppropriateUserLocaleForUserLanguages
 @ stub GetAppropriateUserPreferredAndDisplayLanguagesForUser
@@ -53,7 +53,7 @@
 @ stub GetUserLanguagesForUser
 @ stub GetUserLocaleFromLanguageProfileOptOut
 @ stub IsTransientLcid
-@ stub LanguageListAsMuiForm
+@ stdcall LanguageListAsMuiForm(long ptr long ptr)
 @ stub LcidFromBcp47
 @ stub RemoveInputsForAllLanguagesInternal
 @ stub RemoveUserLanguageInputMethods

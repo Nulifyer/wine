@@ -2,7 +2,7 @@
 
 #define ALL_SYSCALLS32 \
     SYSCALL_ENTRY( 0x1000, NtBindCompositionSurface, 0 ) \
-    SYSCALL_ENTRY( 0x1001, NtCloseCompositionInputSink, 0 ) \
+    SYSCALL_ENTRY( 0x1001, NtCloseCompositionInputSink, 4 ) \
     SYSCALL_ENTRY( 0x1002, NtCompositionInputThread, 0 ) \
     SYSCALL_ENTRY( 0x1003, NtCompositionSetDropTarget, 0 ) \
     SYSCALL_ENTRY( 0x1004, NtCompositorNotifyExitWindows, 0 ) \
@@ -10,7 +10,7 @@
     SYSCALL_ENTRY( 0x1006, NtCompositorUpdateLastInputTime, 0 ) \
     SYSCALL_ENTRY( 0x1007, NtConfigureInputSpace, 0 ) \
     SYSCALL_ENTRY( 0x1008, NtConfirmCompositionSurfaceIndependentFlipEntry, 0 ) \
-    SYSCALL_ENTRY( 0x1009, NtCreateCompositionInputSink, 0 ) \
+    SYSCALL_ENTRY( 0x1009, NtCreateCompositionInputSink, 8 ) \
     SYSCALL_ENTRY( 0x100a, NtCreateCompositionSurfaceHandle, 0 ) \
     SYSCALL_ENTRY( 0x100b, NtCreateImplicitCompositionInputSink, 0 ) \
     SYSCALL_ENTRY( 0x100c, NtDCompositionAddCrossDeviceVisualChild, 0 ) \
@@ -21,7 +21,7 @@
     SYSCALL_ENTRY( 0x1011, NtDCompositionConfirmFrame, 0 ) \
     SYSCALL_ENTRY( 0x1012, NtDCompositionConnectPipe, 0 ) \
     SYSCALL_ENTRY( 0x1013, NtDCompositionCreateAndBindSharedSection, 0 ) \
-    SYSCALL_ENTRY( 0x1014, NtDCompositionCreateChannel, 0 ) \
+    SYSCALL_ENTRY( 0x1014, NtDCompositionCreateChannel, 12 ) \
     SYSCALL_ENTRY( 0x1015, NtDCompositionCreateConnection, 0 ) \
     SYSCALL_ENTRY( 0x1016, NtDCompositionCreateDwmChannel, 0 ) \
     SYSCALL_ENTRY( 0x1017, NtDCompositionCreateSharedResourceHandle, 0 ) \
@@ -32,20 +32,20 @@
     SYSCALL_ENTRY( 0x101c, NtDCompositionDuplicateHandleToProcess, 0 ) \
     SYSCALL_ENTRY( 0x101d, NtDCompositionDuplicateSwapchainHandleToDwm, 0 ) \
     SYSCALL_ENTRY( 0x101e, NtDCompositionEnableMMCSS, 0 ) \
-    SYSCALL_ENTRY( 0x101f, NtDCompositionGetBatchId, 0 ) \
+    SYSCALL_ENTRY( 0x101f, NtDCompositionGetBatchId, 12 ) \
     SYSCALL_ENTRY( 0x1020, NtDCompositionGetChannels, 0 ) \
     SYSCALL_ENTRY( 0x1021, NtDCompositionGetConnectionBatch, 0 ) \
     SYSCALL_ENTRY( 0x1022, NtDCompositionGetDeletedResources, 0 ) \
     SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 0 ) \
     SYSCALL_ENTRY( 0x1024, NtDCompositionGetFrameIdFromBatchId, 0 ) \
     SYSCALL_ENTRY( 0x1025, NtDCompositionGetFrameLegacyTokens, 0 ) \
-    SYSCALL_ENTRY( 0x1026, NtDCompositionGetFrameStatistics, 0 ) \
+    SYSCALL_ENTRY( 0x1026, NtDCompositionGetFrameStatistics, 8 ) \
     SYSCALL_ENTRY( 0x1027, NtDCompositionGetFrameSurfaceUpdates, 0 ) \
     SYSCALL_ENTRY( 0x1028, NtDCompositionGetMaterialProperty, 0 ) \
     SYSCALL_ENTRY( 0x1029, NtDCompositionGetStatistics, 0 ) \
     SYSCALL_ENTRY( 0x102a, NtDCompositionGetTargetStatistics, 0 ) \
     SYSCALL_ENTRY( 0x102b, NtDCompositionNotifySuperWetInkWork, 0 ) \
-    SYSCALL_ENTRY( 0x102c, NtDCompositionProcessChannelBatchBuffer, 0 ) \
+    SYSCALL_ENTRY( 0x102c, NtDCompositionProcessChannelBatchBuffer, 16 ) \
     SYSCALL_ENTRY( 0x102d, NtDCompositionReferenceSharedResourceOnDwmChannel, 0 ) \
     SYSCALL_ENTRY( 0x102e, NtDCompositionRegisterThumbnailVisual, 0 ) \
     SYSCALL_ENTRY( 0x102f, NtDCompositionRegisterVirtualDesktopVisual, 0 ) \
@@ -54,7 +54,7 @@
     SYSCALL_ENTRY( 0x1032, NtDCompositionRetireFrame, 0 ) \
     SYSCALL_ENTRY( 0x1033, NtDCompositionSetBlurredWallpaperSurface, 0 ) \
     SYSCALL_ENTRY( 0x1034, NtDCompositionSetChannelCommitCompletionEvent, 0 ) \
-    SYSCALL_ENTRY( 0x1035, NtDCompositionSetChannelConnectionId, 0 ) \
+    SYSCALL_ENTRY( 0x1035, NtDCompositionSetChannelConnectionId, 4 ) \
     SYSCALL_ENTRY( 0x1036, NtDCompositionSetChildRootVisual, 0 ) \
     SYSCALL_ENTRY( 0x1037, NtDCompositionSetDebugCounter, 0 ) \
     SYSCALL_ENTRY( 0x1038, NtDCompositionSetMaterialProperty, 0 ) \
@@ -286,7 +286,7 @@
     SYSCALL_ENTRY( 0x111a, NtGdiDdDDIGetSharedResourceAdapterLuid, 0 ) \
     SYSCALL_ENTRY( 0x111b, NtGdiDdDDIGetSharedResourceAdapterLuidFlipManager, 0 ) \
     SYSCALL_ENTRY( 0x111c, NtGdiDdDDIGetSwapChainSurfacePhysicalAddress, 0 ) \
-    SYSCALL_ENTRY( 0x111d, NtGdiDdDDIGetYieldPercentage, 0 ) \
+    SYSCALL_ENTRY( 0x111d, NtGdiDdDDIGetYieldPercentage, 4 ) \
     SYSCALL_ENTRY( 0x111e, NtGdiDdDDIInvalidateActiveVidPn, 0 ) \
     SYSCALL_ENTRY( 0x111f, NtGdiDdDDIInvalidateCache, 0 ) \
     SYSCALL_ENTRY( 0x1120, NtGdiDdDDILock, 0 ) \
@@ -742,7 +742,7 @@
     SYSCALL_ENTRY( 0x12e2, NtQueryCompositionInputIsImplicit, 0 ) \
     SYSCALL_ENTRY( 0x12e3, NtQueryCompositionInputQueueAndTransform, 0 ) \
     SYSCALL_ENTRY( 0x12e4, NtQueryCompositionInputSink, 0 ) \
-    SYSCALL_ENTRY( 0x12e5, NtQueryCompositionInputSinkLuid, 0 ) \
+    SYSCALL_ENTRY( 0x12e5, NtQueryCompositionInputSinkLuid, 8 ) \
     SYSCALL_ENTRY( 0x12e6, NtQueryCompositionInputSinkViewId, 0 ) \
     SYSCALL_ENTRY( 0x12e7, NtQueryCompositionSurfaceBinding, 0 ) \
     SYSCALL_ENTRY( 0x12e8, NtQueryCompositionSurfaceFrameRate, 0 ) \
@@ -792,7 +792,7 @@
     SYSCALL_ENTRY( 0x1314, NtTokenManagerThread, 0 ) \
     SYSCALL_ENTRY( 0x1315, NtUnBindCompositionSurface, 0 ) \
     SYSCALL_ENTRY( 0x1316, NtUpdateInputSinkTransforms, 0 ) \
-    SYSCALL_ENTRY( 0x1317, NtUserAcquireIAMKey, 0 ) \
+    SYSCALL_ENTRY( 0x1317, NtUserAcquireIAMKey, 4 ) \
     SYSCALL_ENTRY( 0x1318, NtUserAcquireInteractiveControlBackgroundAccess, 0 ) \
     SYSCALL_ENTRY( 0x1319, NtUserActivateKeyboardLayout, 8 ) \
     SYSCALL_ENTRY( 0x131a, NtUserAddClipboardFormatListener, 4 ) \
@@ -935,7 +935,7 @@
     SYSCALL_ENTRY( 0x13a3, NtUserDwmWindowNotificationsEnabled, 0 ) \
     SYSCALL_ENTRY( 0x13a4, NtUserEmptyClipboard, 0 ) \
     SYSCALL_ENTRY( 0x13a5, NtUserEnableChildWindowDpiMessage, 0 ) \
-    SYSCALL_ENTRY( 0x13a6, NtUserEnableIAMAccess, 0 ) \
+    SYSCALL_ENTRY( 0x13a6, NtUserEnableIAMAccess, 8 ) \
     SYSCALL_ENTRY( 0x13a7, NtUserEnableMenuItem, 12 ) \
     SYSCALL_ENTRY( 0x13a8, NtUserEnableModernAppWindowKeyboardIntercept, 0 ) \
     SYSCALL_ENTRY( 0x13a9, NtUserEnableMouseInPointer, 4 ) \
@@ -953,7 +953,7 @@
     SYSCALL_ENTRY( 0x13b5, NtUserEnableWindow, 8 ) \
     SYSCALL_ENTRY( 0x13b6, NtUserEnableWindowGDIScaledDpiMessage, 0 ) \
     SYSCALL_ENTRY( 0x13b7, NtUserEnableWindowGroupPolicy, 0 ) \
-    SYSCALL_ENTRY( 0x13b8, NtUserEnableWindowResizeOptimization, 0 ) \
+    SYSCALL_ENTRY( 0x13b8, NtUserEnableWindowResizeOptimization, 12 ) \
     SYSCALL_ENTRY( 0x13b9, NtUserEnableWindowShellWindowManagementBehavior, 0 ) \
     SYSCALL_ENTRY( 0x13ba, NtUserEndDeferWindowPosEx, 8 ) \
     SYSCALL_ENTRY( 0x13bb, NtUserEndMenu, 0 ) \
@@ -1079,7 +1079,7 @@
     SYSCALL_ENTRY( 0x1433, NtUserGetPriorityClipboardFormat, 8 ) \
     SYSCALL_ENTRY( 0x1434, NtUserGetProcessDefaultLayout, 4 ) \
     SYSCALL_ENTRY( 0x1435, NtUserGetProcessDpiAwarenessContext, 4 ) \
-    SYSCALL_ENTRY( 0x1436, NtUserGetProcessUIContextInformation, 0 ) \
+    SYSCALL_ENTRY( 0x1436, NtUserGetProcessUIContextInformation, 8 ) \
     SYSCALL_ENTRY( 0x1437, NtUserGetProcessWindowStation, 0 ) \
     SYSCALL_ENTRY( 0x1438, NtUserGetProp, 8 ) \
     SYSCALL_ENTRY( 0x1439, NtUserGetProp2, 0 ) \
@@ -1336,7 +1336,7 @@
     SYSCALL_ENTRY( 0x1534, NtUserSetAppImeLevel, 0 ) \
     SYSCALL_ENTRY( 0x1535, NtUserSetAutoRotation, 0 ) \
     SYSCALL_ENTRY( 0x1536, NtUserSetBridgeWindowChild, 0 ) \
-    SYSCALL_ENTRY( 0x1537, NtUserSetBrokeredForeground, 0 ) \
+    SYSCALL_ENTRY( 0x1537, NtUserSetBrokeredForeground, 4 ) \
     SYSCALL_ENTRY( 0x1538, NtUserSetCalibrationData, 0 ) \
     SYSCALL_ENTRY( 0x1539, NtUserSetCancelRotationDelayHintWindow, 0 ) \
     SYSCALL_ENTRY( 0x153a, NtUserSetCapture, 4 ) \
@@ -1446,7 +1446,7 @@
     SYSCALL_ENTRY( 0x15a2, NtUserSetWindowGroup, 0 ) \
     SYSCALL_ENTRY( 0x15a3, NtUserSetWindowLong, 16 ) \
     SYSCALL_ENTRY( 0x15a4, NtUserSetWindowLongPtr, 16 ) \
-    SYSCALL_ENTRY( 0x15a5, NtUserSetWindowMessageCapability, 0 ) \
+    SYSCALL_ENTRY( 0x15a5, NtUserSetWindowMessageCapability, 16 ) \
     SYSCALL_ENTRY( 0x15a6, NtUserSetWindowPlacement, 8 ) \
     SYSCALL_ENTRY( 0x15a7, NtUserSetWindowPos, 28 ) \
     SYSCALL_ENTRY( 0x15a8, NtUserSetWindowRgn, 12 ) \
@@ -1544,7 +1544,7 @@
 #ifdef _WIN64
 #define ALL_SYSCALLS \
     SYSCALL_ENTRY( 0x1000, NtBindCompositionSurface, 0 ) \
-    SYSCALL_ENTRY( 0x1001, NtCloseCompositionInputSink, 0 ) \
+    SYSCALL_ENTRY( 0x1001, NtCloseCompositionInputSink, 8 ) \
     SYSCALL_ENTRY( 0x1002, NtCompositionInputThread, 0 ) \
     SYSCALL_ENTRY( 0x1003, NtCompositionSetDropTarget, 0 ) \
     SYSCALL_ENTRY( 0x1004, NtCompositorNotifyExitWindows, 0 ) \
@@ -1552,7 +1552,7 @@
     SYSCALL_ENTRY( 0x1006, NtCompositorUpdateLastInputTime, 0 ) \
     SYSCALL_ENTRY( 0x1007, NtConfigureInputSpace, 0 ) \
     SYSCALL_ENTRY( 0x1008, NtConfirmCompositionSurfaceIndependentFlipEntry, 0 ) \
-    SYSCALL_ENTRY( 0x1009, NtCreateCompositionInputSink, 0 ) \
+    SYSCALL_ENTRY( 0x1009, NtCreateCompositionInputSink, 16 ) \
     SYSCALL_ENTRY( 0x100a, NtCreateCompositionSurfaceHandle, 0 ) \
     SYSCALL_ENTRY( 0x100b, NtCreateImplicitCompositionInputSink, 0 ) \
     SYSCALL_ENTRY( 0x100c, NtDCompositionAddCrossDeviceVisualChild, 0 ) \
@@ -1563,7 +1563,7 @@
     SYSCALL_ENTRY( 0x1011, NtDCompositionConfirmFrame, 0 ) \
     SYSCALL_ENTRY( 0x1012, NtDCompositionConnectPipe, 0 ) \
     SYSCALL_ENTRY( 0x1013, NtDCompositionCreateAndBindSharedSection, 0 ) \
-    SYSCALL_ENTRY( 0x1014, NtDCompositionCreateChannel, 0 ) \
+    SYSCALL_ENTRY( 0x1014, NtDCompositionCreateChannel, 24 ) \
     SYSCALL_ENTRY( 0x1015, NtDCompositionCreateConnection, 0 ) \
     SYSCALL_ENTRY( 0x1016, NtDCompositionCreateDwmChannel, 0 ) \
     SYSCALL_ENTRY( 0x1017, NtDCompositionCreateSharedResourceHandle, 0 ) \
@@ -1574,20 +1574,20 @@
     SYSCALL_ENTRY( 0x101c, NtDCompositionDuplicateHandleToProcess, 0 ) \
     SYSCALL_ENTRY( 0x101d, NtDCompositionDuplicateSwapchainHandleToDwm, 0 ) \
     SYSCALL_ENTRY( 0x101e, NtDCompositionEnableMMCSS, 0 ) \
-    SYSCALL_ENTRY( 0x101f, NtDCompositionGetBatchId, 0 ) \
+    SYSCALL_ENTRY( 0x101f, NtDCompositionGetBatchId, 24 ) \
     SYSCALL_ENTRY( 0x1020, NtDCompositionGetChannels, 0 ) \
     SYSCALL_ENTRY( 0x1021, NtDCompositionGetConnectionBatch, 0 ) \
     SYSCALL_ENTRY( 0x1022, NtDCompositionGetDeletedResources, 0 ) \
     SYSCALL_ENTRY( 0x1023, NtDCompositionGetFrameId, 0 ) \
     SYSCALL_ENTRY( 0x1024, NtDCompositionGetFrameIdFromBatchId, 0 ) \
     SYSCALL_ENTRY( 0x1025, NtDCompositionGetFrameLegacyTokens, 0 ) \
-    SYSCALL_ENTRY( 0x1026, NtDCompositionGetFrameStatistics, 0 ) \
+    SYSCALL_ENTRY( 0x1026, NtDCompositionGetFrameStatistics, 16 ) \
     SYSCALL_ENTRY( 0x1027, NtDCompositionGetFrameSurfaceUpdates, 0 ) \
     SYSCALL_ENTRY( 0x1028, NtDCompositionGetMaterialProperty, 0 ) \
     SYSCALL_ENTRY( 0x1029, NtDCompositionGetStatistics, 0 ) \
     SYSCALL_ENTRY( 0x102a, NtDCompositionGetTargetStatistics, 0 ) \
     SYSCALL_ENTRY( 0x102b, NtDCompositionNotifySuperWetInkWork, 0 ) \
-    SYSCALL_ENTRY( 0x102c, NtDCompositionProcessChannelBatchBuffer, 0 ) \
+    SYSCALL_ENTRY( 0x102c, NtDCompositionProcessChannelBatchBuffer, 32 ) \
     SYSCALL_ENTRY( 0x102d, NtDCompositionReferenceSharedResourceOnDwmChannel, 0 ) \
     SYSCALL_ENTRY( 0x102e, NtDCompositionRegisterThumbnailVisual, 0 ) \
     SYSCALL_ENTRY( 0x102f, NtDCompositionRegisterVirtualDesktopVisual, 0 ) \
@@ -1596,7 +1596,7 @@
     SYSCALL_ENTRY( 0x1032, NtDCompositionRetireFrame, 0 ) \
     SYSCALL_ENTRY( 0x1033, NtDCompositionSetBlurredWallpaperSurface, 0 ) \
     SYSCALL_ENTRY( 0x1034, NtDCompositionSetChannelCommitCompletionEvent, 0 ) \
-    SYSCALL_ENTRY( 0x1035, NtDCompositionSetChannelConnectionId, 0 ) \
+    SYSCALL_ENTRY( 0x1035, NtDCompositionSetChannelConnectionId, 8 ) \
     SYSCALL_ENTRY( 0x1036, NtDCompositionSetChildRootVisual, 0 ) \
     SYSCALL_ENTRY( 0x1037, NtDCompositionSetDebugCounter, 0 ) \
     SYSCALL_ENTRY( 0x1038, NtDCompositionSetMaterialProperty, 0 ) \
@@ -1828,7 +1828,7 @@
     SYSCALL_ENTRY( 0x111a, NtGdiDdDDIGetSharedResourceAdapterLuid, 0 ) \
     SYSCALL_ENTRY( 0x111b, NtGdiDdDDIGetSharedResourceAdapterLuidFlipManager, 0 ) \
     SYSCALL_ENTRY( 0x111c, NtGdiDdDDIGetSwapChainSurfacePhysicalAddress, 0 ) \
-    SYSCALL_ENTRY( 0x111d, NtGdiDdDDIGetYieldPercentage, 0 ) \
+    SYSCALL_ENTRY( 0x111d, NtGdiDdDDIGetYieldPercentage, 8 ) \
     SYSCALL_ENTRY( 0x111e, NtGdiDdDDIInvalidateActiveVidPn, 0 ) \
     SYSCALL_ENTRY( 0x111f, NtGdiDdDDIInvalidateCache, 0 ) \
     SYSCALL_ENTRY( 0x1120, NtGdiDdDDILock, 0 ) \
@@ -2284,7 +2284,7 @@
     SYSCALL_ENTRY( 0x12e2, NtQueryCompositionInputIsImplicit, 0 ) \
     SYSCALL_ENTRY( 0x12e3, NtQueryCompositionInputQueueAndTransform, 0 ) \
     SYSCALL_ENTRY( 0x12e4, NtQueryCompositionInputSink, 0 ) \
-    SYSCALL_ENTRY( 0x12e5, NtQueryCompositionInputSinkLuid, 0 ) \
+    SYSCALL_ENTRY( 0x12e5, NtQueryCompositionInputSinkLuid, 16 ) \
     SYSCALL_ENTRY( 0x12e6, NtQueryCompositionInputSinkViewId, 0 ) \
     SYSCALL_ENTRY( 0x12e7, NtQueryCompositionSurfaceBinding, 0 ) \
     SYSCALL_ENTRY( 0x12e8, NtQueryCompositionSurfaceFrameRate, 0 ) \
@@ -2334,7 +2334,7 @@
     SYSCALL_ENTRY( 0x1314, NtTokenManagerThread, 0 ) \
     SYSCALL_ENTRY( 0x1315, NtUnBindCompositionSurface, 0 ) \
     SYSCALL_ENTRY( 0x1316, NtUpdateInputSinkTransforms, 0 ) \
-    SYSCALL_ENTRY( 0x1317, NtUserAcquireIAMKey, 0 ) \
+    SYSCALL_ENTRY( 0x1317, NtUserAcquireIAMKey, 8 ) \
     SYSCALL_ENTRY( 0x1318, NtUserAcquireInteractiveControlBackgroundAccess, 0 ) \
     SYSCALL_ENTRY( 0x1319, NtUserActivateKeyboardLayout, 16 ) \
     SYSCALL_ENTRY( 0x131a, NtUserAddClipboardFormatListener, 8 ) \
@@ -2477,7 +2477,7 @@
     SYSCALL_ENTRY( 0x13a3, NtUserDwmWindowNotificationsEnabled, 0 ) \
     SYSCALL_ENTRY( 0x13a4, NtUserEmptyClipboard, 0 ) \
     SYSCALL_ENTRY( 0x13a5, NtUserEnableChildWindowDpiMessage, 0 ) \
-    SYSCALL_ENTRY( 0x13a6, NtUserEnableIAMAccess, 0 ) \
+    SYSCALL_ENTRY( 0x13a6, NtUserEnableIAMAccess, 16 ) \
     SYSCALL_ENTRY( 0x13a7, NtUserEnableMenuItem, 24 ) \
     SYSCALL_ENTRY( 0x13a8, NtUserEnableModernAppWindowKeyboardIntercept, 0 ) \
     SYSCALL_ENTRY( 0x13a9, NtUserEnableMouseInPointer, 8 ) \
@@ -2495,7 +2495,7 @@
     SYSCALL_ENTRY( 0x13b5, NtUserEnableWindow, 16 ) \
     SYSCALL_ENTRY( 0x13b6, NtUserEnableWindowGDIScaledDpiMessage, 0 ) \
     SYSCALL_ENTRY( 0x13b7, NtUserEnableWindowGroupPolicy, 0 ) \
-    SYSCALL_ENTRY( 0x13b8, NtUserEnableWindowResizeOptimization, 0 ) \
+    SYSCALL_ENTRY( 0x13b8, NtUserEnableWindowResizeOptimization, 24 ) \
     SYSCALL_ENTRY( 0x13b9, NtUserEnableWindowShellWindowManagementBehavior, 0 ) \
     SYSCALL_ENTRY( 0x13ba, NtUserEndDeferWindowPosEx, 16 ) \
     SYSCALL_ENTRY( 0x13bb, NtUserEndMenu, 0 ) \
@@ -2621,7 +2621,7 @@
     SYSCALL_ENTRY( 0x1433, NtUserGetPriorityClipboardFormat, 16 ) \
     SYSCALL_ENTRY( 0x1434, NtUserGetProcessDefaultLayout, 8 ) \
     SYSCALL_ENTRY( 0x1435, NtUserGetProcessDpiAwarenessContext, 8 ) \
-    SYSCALL_ENTRY( 0x1436, NtUserGetProcessUIContextInformation, 0 ) \
+    SYSCALL_ENTRY( 0x1436, NtUserGetProcessUIContextInformation, 16 ) \
     SYSCALL_ENTRY( 0x1437, NtUserGetProcessWindowStation, 0 ) \
     SYSCALL_ENTRY( 0x1438, NtUserGetProp, 16 ) \
     SYSCALL_ENTRY( 0x1439, NtUserGetProp2, 0 ) \
@@ -2878,7 +2878,7 @@
     SYSCALL_ENTRY( 0x1534, NtUserSetAppImeLevel, 0 ) \
     SYSCALL_ENTRY( 0x1535, NtUserSetAutoRotation, 0 ) \
     SYSCALL_ENTRY( 0x1536, NtUserSetBridgeWindowChild, 0 ) \
-    SYSCALL_ENTRY( 0x1537, NtUserSetBrokeredForeground, 0 ) \
+    SYSCALL_ENTRY( 0x1537, NtUserSetBrokeredForeground, 8 ) \
     SYSCALL_ENTRY( 0x1538, NtUserSetCalibrationData, 0 ) \
     SYSCALL_ENTRY( 0x1539, NtUserSetCancelRotationDelayHintWindow, 0 ) \
     SYSCALL_ENTRY( 0x153a, NtUserSetCapture, 8 ) \
@@ -2988,7 +2988,7 @@
     SYSCALL_ENTRY( 0x15a2, NtUserSetWindowGroup, 0 ) \
     SYSCALL_ENTRY( 0x15a3, NtUserSetWindowLong, 32 ) \
     SYSCALL_ENTRY( 0x15a4, NtUserSetWindowLongPtr, 32 ) \
-    SYSCALL_ENTRY( 0x15a5, NtUserSetWindowMessageCapability, 0 ) \
+    SYSCALL_ENTRY( 0x15a5, NtUserSetWindowMessageCapability, 32 ) \
     SYSCALL_ENTRY( 0x15a6, NtUserSetWindowPlacement, 16 ) \
     SYSCALL_ENTRY( 0x15a7, NtUserSetWindowPos, 56 ) \
     SYSCALL_ENTRY( 0x15a8, NtUserSetWindowRgn, 24 ) \
@@ -3088,7 +3088,6 @@
 #endif
 #define ALL_SYSCALL_STUBS \
     SYSCALL_STUB( NtBindCompositionSurface ) \
-    SYSCALL_STUB( NtCloseCompositionInputSink ) \
     SYSCALL_STUB( NtCompositionInputThread ) \
     SYSCALL_STUB( NtCompositionSetDropTarget ) \
     SYSCALL_STUB( NtCompositorNotifyExitWindows ) \
@@ -3096,7 +3095,6 @@
     SYSCALL_STUB( NtCompositorUpdateLastInputTime ) \
     SYSCALL_STUB( NtConfigureInputSpace ) \
     SYSCALL_STUB( NtConfirmCompositionSurfaceIndependentFlipEntry ) \
-    SYSCALL_STUB( NtCreateCompositionInputSink ) \
     SYSCALL_STUB( NtCreateCompositionSurfaceHandle ) \
     SYSCALL_STUB( NtCreateImplicitCompositionInputSink ) \
     SYSCALL_STUB( NtDCompositionAddCrossDeviceVisualChild ) \
@@ -3107,7 +3105,6 @@
     SYSCALL_STUB( NtDCompositionConfirmFrame ) \
     SYSCALL_STUB( NtDCompositionConnectPipe ) \
     SYSCALL_STUB( NtDCompositionCreateAndBindSharedSection ) \
-    SYSCALL_STUB( NtDCompositionCreateChannel ) \
     SYSCALL_STUB( NtDCompositionCreateConnection ) \
     SYSCALL_STUB( NtDCompositionCreateDwmChannel ) \
     SYSCALL_STUB( NtDCompositionCreateSharedResourceHandle ) \
@@ -3118,20 +3115,17 @@
     SYSCALL_STUB( NtDCompositionDuplicateHandleToProcess ) \
     SYSCALL_STUB( NtDCompositionDuplicateSwapchainHandleToDwm ) \
     SYSCALL_STUB( NtDCompositionEnableMMCSS ) \
-    SYSCALL_STUB( NtDCompositionGetBatchId ) \
     SYSCALL_STUB( NtDCompositionGetChannels ) \
     SYSCALL_STUB( NtDCompositionGetConnectionBatch ) \
     SYSCALL_STUB( NtDCompositionGetDeletedResources ) \
     SYSCALL_STUB( NtDCompositionGetFrameId ) \
     SYSCALL_STUB( NtDCompositionGetFrameIdFromBatchId ) \
     SYSCALL_STUB( NtDCompositionGetFrameLegacyTokens ) \
-    SYSCALL_STUB( NtDCompositionGetFrameStatistics ) \
     SYSCALL_STUB( NtDCompositionGetFrameSurfaceUpdates ) \
     SYSCALL_STUB( NtDCompositionGetMaterialProperty ) \
     SYSCALL_STUB( NtDCompositionGetStatistics ) \
     SYSCALL_STUB( NtDCompositionGetTargetStatistics ) \
     SYSCALL_STUB( NtDCompositionNotifySuperWetInkWork ) \
-    SYSCALL_STUB( NtDCompositionProcessChannelBatchBuffer ) \
     SYSCALL_STUB( NtDCompositionReferenceSharedResourceOnDwmChannel ) \
     SYSCALL_STUB( NtDCompositionRegisterThumbnailVisual ) \
     SYSCALL_STUB( NtDCompositionRegisterVirtualDesktopVisual ) \
@@ -3140,7 +3134,6 @@
     SYSCALL_STUB( NtDCompositionRetireFrame ) \
     SYSCALL_STUB( NtDCompositionSetBlurredWallpaperSurface ) \
     SYSCALL_STUB( NtDCompositionSetChannelCommitCompletionEvent ) \
-    SYSCALL_STUB( NtDCompositionSetChannelConnectionId ) \
     SYSCALL_STUB( NtDCompositionSetChildRootVisual ) \
     SYSCALL_STUB( NtDCompositionSetDebugCounter ) \
     SYSCALL_STUB( NtDCompositionSetMaterialProperty ) \
@@ -3320,7 +3313,6 @@
     SYSCALL_STUB( NtGdiDdDDIGetSharedResourceAdapterLuid ) \
     SYSCALL_STUB( NtGdiDdDDIGetSharedResourceAdapterLuidFlipManager ) \
     SYSCALL_STUB( NtGdiDdDDIGetSwapChainSurfacePhysicalAddress ) \
-    SYSCALL_STUB( NtGdiDdDDIGetYieldPercentage ) \
     SYSCALL_STUB( NtGdiDdDDIInvalidateActiveVidPn ) \
     SYSCALL_STUB( NtGdiDdDDIInvalidateCache ) \
     SYSCALL_STUB( NtGdiDdDDILock ) \
@@ -3618,7 +3610,6 @@
     SYSCALL_STUB( NtQueryCompositionInputIsImplicit ) \
     SYSCALL_STUB( NtQueryCompositionInputQueueAndTransform ) \
     SYSCALL_STUB( NtQueryCompositionInputSink ) \
-    SYSCALL_STUB( NtQueryCompositionInputSinkLuid ) \
     SYSCALL_STUB( NtQueryCompositionInputSinkViewId ) \
     SYSCALL_STUB( NtQueryCompositionSurfaceBinding ) \
     SYSCALL_STUB( NtQueryCompositionSurfaceFrameRate ) \
@@ -3668,7 +3659,6 @@
     SYSCALL_STUB( NtTokenManagerThread ) \
     SYSCALL_STUB( NtUnBindCompositionSurface ) \
     SYSCALL_STUB( NtUpdateInputSinkTransforms ) \
-    SYSCALL_STUB( NtUserAcquireIAMKey ) \
     SYSCALL_STUB( NtUserAcquireInteractiveControlBackgroundAccess ) \
     SYSCALL_STUB( NtUserAddVisualIdentifier ) \
     SYSCALL_STUB( NtUserAllowForegroundActivation ) \
@@ -3754,7 +3744,6 @@
     SYSCALL_STUB( NtUserDwmValidateWindow ) \
     SYSCALL_STUB( NtUserDwmWindowNotificationsEnabled ) \
     SYSCALL_STUB( NtUserEnableChildWindowDpiMessage ) \
-    SYSCALL_STUB( NtUserEnableIAMAccess ) \
     SYSCALL_STUB( NtUserEnableModernAppWindowKeyboardIntercept ) \
     SYSCALL_STUB( NtUserEnableMouseInPointerForWindow ) \
     SYSCALL_STUB( NtUserEnableMouseInputForCursorSuppression ) \
@@ -3767,7 +3756,6 @@
     SYSCALL_STUB( NtUserEnableTouchPad ) \
     SYSCALL_STUB( NtUserEnableWindowGDIScaledDpiMessage ) \
     SYSCALL_STUB( NtUserEnableWindowGroupPolicy ) \
-    SYSCALL_STUB( NtUserEnableWindowResizeOptimization ) \
     SYSCALL_STUB( NtUserEnableWindowShellWindowManagementBehavior ) \
     SYSCALL_STUB( NtUserEnsureDpiDepSysMetCacheForPlateau ) \
     SYSCALL_STUB( NtUserEvent ) \
@@ -3834,10 +3822,8 @@
     SYSCALL_STUB( NtUserGetPointerInputTransform ) \
     SYSCALL_STUB( NtUserGetPointerProprietaryId ) \
     SYSCALL_STUB( NtUserGetPrecisionTouchPadConfiguration ) \
-    SYSCALL_STUB( NtUserGetProcessUIContextInformation ) \
     SYSCALL_STUB( NtUserGetProp2 ) \
     SYSCALL_STUB( NtUserGetQueueIocp ) \
-    SYSCALL_STUB( NtUserGetQueueStatusReadonly ) \
     SYSCALL_STUB( NtUserGetRawPointerDeviceData ) \
     SYSCALL_STUB( NtUserGetRequiredCursorSizes ) \
     SYSCALL_STUB( NtUserGetResizeDCompositionSynchronizationObject ) \
@@ -4010,7 +3996,6 @@
     SYSCALL_STUB( NtUserSetAppImeLevel ) \
     SYSCALL_STUB( NtUserSetAutoRotation ) \
     SYSCALL_STUB( NtUserSetBridgeWindowChild ) \
-    SYSCALL_STUB( NtUserSetBrokeredForeground ) \
     SYSCALL_STUB( NtUserSetCalibrationData ) \
     SYSCALL_STUB( NtUserSetCancelRotationDelayHintWindow ) \
     SYSCALL_STUB( NtUserSetChildWindowNoActivate ) \
@@ -4080,7 +4065,6 @@
     SYSCALL_STUB( NtUserSetWindowDisplayAffinity ) \
     SYSCALL_STUB( NtUserSetWindowFeedbackSetting ) \
     SYSCALL_STUB( NtUserSetWindowGroup ) \
-    SYSCALL_STUB( NtUserSetWindowMessageCapability ) \
     SYSCALL_STUB( NtUserSetWindowRgnEx ) \
     SYSCALL_STUB( NtUserSetWindowShowState ) \
     SYSCALL_STUB( NtUserSetWindowState ) \

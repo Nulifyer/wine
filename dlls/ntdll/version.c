@@ -573,6 +573,14 @@ BOOLEAN WINAPI RtlGetProductInfo(DWORD dwOSMajorVersion, DWORD dwOSMinorVersion,
 }
 
 /***********************************************************************
+ *         RtlGetSuiteMask   (NTDLL.@)
+ */
+ULONG WINAPI RtlGetSuiteMask(void)
+{
+    return user_shared_data->SuiteMask;
+}
+
+/***********************************************************************
  *         RtlGetVersion   (NTDLL.@)
  */
 NTSTATUS WINAPI RtlGetVersion( RTL_OSVERSIONINFOEXW *info )
@@ -625,6 +633,46 @@ BOOLEAN WINAPI RtlGetNtProductType( LPDWORD type )
 {
     if (type) *type = current_version->wProductType;
     return TRUE;
+}
+
+/******************************************************************************
+ *  RtlGetCurrentServiceSessionId   (NTDLL.@)
+ */
+ULONG WINAPI RtlGetCurrentServiceSessionId(void)
+{
+    /* Wine currently exposes one Windows service session.  The Windows 11
+     * service-hosted oracle identifies that session as zero. */
+    return 0;
+}
+
+/******************************************************************************
+ *  RtlIsMultiSessionSku   (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlIsMultiSessionSku(void)
+{
+    /* Windows 11 client reports this product-policy value as true.  It does
+     * not assert that more than one interactive Wine session is available. */
+    return TRUE;
+}
+
+/******************************************************************************
+ *  RtlIsStateSeparationEnabled   (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlIsStateSeparationEnabled(void)
+{
+    /* The Windows 11 workstation profile used by LinuxNT reports that state
+     * separation is disabled.  This is a process-policy query, not a probe of
+     * the host filesystem or desktop session. */
+    return FALSE;
+}
+
+/******************************************************************************
+ *  RtlIsMultiUsersInSessionSku   (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlIsMultiUsersInSessionSku(void)
+{
+    /* Windows 11 Pro reports that this is not a multi-user-in-one-session SKU. */
+    return FALSE;
 }
 
 static inline UCHAR version_update_condition(UCHAR *last_condition, UCHAR condition)

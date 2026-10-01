@@ -2142,6 +2142,59 @@ static void test_CreateWellKnownSid(void)
     FreeSid(domainsid);
 }
 
+static void test_CreateWellKnownSid_system_managed(void)
+{
+    SID_IDENTIFIER_AUTHORITY authority = { SECURITY_NT_AUTHORITY };
+    struct
+    {
+        SID sid;
+        DWORD sub_authority[5];
+    } domain_sid;
+    char sid_buffer[SECURITY_MAX_SID_SIZE];
+    DWORD size = sizeof(sid_buffer);
+    char *sid_string;
+    BOOL ret;
+
+    ret = InitializeSid(&domain_sid.sid, &authority, 6);
+    ok(ret, "InitializeSid failed: %lu\n", GetLastError());
+    if (!ret) return;
+    *GetSidSubAuthority(&domain_sid.sid, 0) = SECURITY_NT_NON_UNIQUE;
+    *GetSidSubAuthority(&domain_sid.sid, 1) = 12;
+    *GetSidSubAuthority(&domain_sid.sid, 2) = 23;
+    *GetSidSubAuthority(&domain_sid.sid, 3) = 34;
+    *GetSidSubAuthority(&domain_sid.sid, 4) = 45;
+    *GetSidSubAuthority(&domain_sid.sid, 5) = 56;
+
+    ret = CreateWellKnownSid(WinAccountDefaultSystemManagedSid, &domain_sid.sid,
+                             sid_buffer, &size);
+    ok(ret, "CreateWellKnownSid(default account) failed: %lu\n", GetLastError());
+    if (ret)
+    {
+        ret = ConvertSidToStringSidA(sid_buffer, &sid_string);
+        ok(ret, "ConvertSidToStringSidA failed: %lu\n", GetLastError());
+        if (ret)
+        {
+            ok(!strcmp(sid_string, "S-1-5-21-12-23-34-45-56-503"),
+               "got unexpected SID %s\n", sid_string);
+            LocalFree(sid_string);
+        }
+    }
+    size = sizeof(sid_buffer);
+    ret = CreateWellKnownSid(WinBuiltinDefaultSystemManagedGroupSid, NULL, sid_buffer, &size);
+    ok(ret, "CreateWellKnownSid failed: %lu\n", GetLastError());
+    if (!ret) return;
+
+    ok(IsWellKnownSid(sid_buffer, WinBuiltinDefaultSystemManagedGroupSid),
+       "SID was not recognized as the system-managed accounts group\n");
+    ret = ConvertSidToStringSidA(sid_buffer, &sid_string);
+    ok(ret, "ConvertSidToStringSidA failed: %lu\n", GetLastError());
+    if (ret)
+    {
+        ok(!strcmp(sid_string, "S-1-5-32-581"), "got unexpected SID %s\n", sid_string);
+        LocalFree(sid_string);
+    }
+}
+
 static void test_LookupAccountSid(void)
 {
     SID_IDENTIFIER_AUTHORITY SIDAuthNT = { SECURITY_NT_AUTHORITY };
@@ -4138,6 +4191,16 @@ static void test_GetNamedSecurityInfoA(void)
 
 static void test_ConvertStringSecurityDescriptor(void)
 {
+    static const BYTE expected_condition[] =
+    {
+        'a', 'r', 't', 'x', 0xf8, 46, 0, 0, 0,
+        'W', 0, 'I', 0, 'N', 0, ':', 0, '/', 0, '/', 0,
+        'I', 0, 'S', 0, 'M', 0, 'U', 0, 'L', 0, 'T', 0, 'I', 0,
+        'S', 0, 'E', 0, 'S', 0, 'S', 0, 'I', 0, 'O', 0, 'N', 0,
+        'S', 0, 'K', 0, 'U', 0, 0xa2
+    };
+    static const WCHAR conditional_sddl[] =
+        L"O:PSG:BUD:(A;;3;;;PS)(XA;;3;;;AU;(!(WIN://ISMULTISESSIONSKU)))";
     BOOL ret;
     PSECURITY_DESCRIPTOR pSD;
     static const WCHAR Blank[] = { 0 };
@@ -4225,6 +4288,43 @@ static void test_ConvertStringSecurityDescriptor(void)
             }
             LocalFree(pSD);
         }
+    }
+
+    size = 0;
+    ret = ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            conditional_sddl, SDDL_REVISION_1, &pSD, &size );
+    ok( ret, "conditional descriptor conversion failed, error %lu.\n", GetLastError() );
+    if (ret)
+    {
+        ACCESS_ALLOWED_CALLBACK_ACE *callback;
+        ACCESS_ALLOWED_ACE *allowed;
+        BOOL present, defaulted;
+
+        ret = GetSecurityDescriptorDacl( pSD, &present, &acl, &defaulted );
+        ok( ret, "GetSecurityDescriptorDacl failed, error %lu.\n", GetLastError() );
+        ok( present, "DACL is not present.\n" );
+        ok( acl && acl->AceCount == 2, "got ACE count %u.\n", acl ? acl->AceCount : 0 );
+        ret = acl && GetAce( acl, 0, (void **)&allowed );
+        ok( ret, "GetAce(0) failed, error %lu.\n", GetLastError() );
+        if (ret) ok( allowed->Header.AceType == ACCESS_ALLOWED_ACE_TYPE,
+                     "got ACE type %u.\n", allowed->Header.AceType );
+        ret = acl && GetAce( acl, 1, (void **)&callback );
+        ok( ret, "GetAce(1) failed, error %lu.\n", GetLastError() );
+        if (ret)
+        {
+            BYTE *condition = (BYTE *)&callback->SidStart + GetLengthSid( &callback->SidStart );
+            DWORD condition_size = callback->Header.AceSize - (condition - (BYTE *)callback);
+
+            ok( callback->Header.AceType == ACCESS_ALLOWED_CALLBACK_ACE_TYPE,
+                "got ACE type %u.\n", callback->Header.AceType );
+            ok( callback->Mask == 3, "got mask %#lx.\n", callback->Mask );
+            ok( condition_size == sizeof(expected_condition), "got condition size %lu.\n",
+                condition_size );
+            if (condition_size == sizeof(expected_condition))
+                ok( !memcmp( condition, expected_condition, sizeof(expected_condition) ),
+                    "condition bytecode does not match Windows.\n" );
+        }
+        LocalFree( pSD );
     }
 
     /* test behaviour with NULL parameters */
@@ -8740,6 +8840,8 @@ START_TEST(security)
             test_duplicate_handle_access_child();
         else if (!strcmp(myARGV[2], "restricted"))
             test_create_process_token_child();
+        else if (!strcmp(myARGV[2], "system_managed_sid"))
+            test_CreateWellKnownSid_system_managed();
         return;
     }
     test_kernel_objects_security();
@@ -8749,6 +8851,7 @@ START_TEST(security)
     test_lookupPrivilegeName();
     test_lookupPrivilegeValue();
     test_CreateWellKnownSid();
+    test_CreateWellKnownSid_system_managed();
     test_FileSecurity();
     test_AccessCheck();
     test_token_attr();

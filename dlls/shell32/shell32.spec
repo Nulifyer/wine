@@ -273,7 +273,7 @@
  753 stub -noname CheckStagingArea
  764 stub -noname AssocCreateElement
  866 stub -noname SHExtCoCreateInstance
- 885 stub -noname RunInstallUninstallStubs
+ 885 stdcall -noname RunInstallUninstallStubs(wstr)
  896 stub -noname ClearDestinationsForAllApps
  899 stdcall -noname SetExplorerServerMode(long) windows.storage.dll.SetExplorerServerMode
  900 stdcall -noname GetAppIDRoot(ptr ptr ptr ptr)

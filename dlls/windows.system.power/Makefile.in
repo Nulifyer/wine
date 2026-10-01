@@ -1,0 +1,6 @@
+MODULE = windows.system.power.dll
+IMPORTS = combase
+
+SOURCES = \
+	classes.idl \
+	main.c

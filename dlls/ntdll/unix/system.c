@@ -2727,6 +2727,123 @@ static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
     info->TotalCommitLimit    = (totalram + totalswap) / page_size;
 }
 
+static NTSTATUS validate_memory_partition_handle( HANDLE handle )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( query_memory_partition )
+    {
+        req->handle = wine_server_obj_handle( handle );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+static NTSTATUS open_memory_condition_event( HANDLE *handle, ACCESS_MASK access, ULONG attributes,
+                                             const WCHAR *name, USHORT name_len )
+{
+    UNICODE_STRING string = { name_len, name_len, (WCHAR *)name };
+    OBJECT_ATTRIBUTES attr;
+
+    InitializeObjectAttributes( &attr, &string, attributes, 0, NULL );
+    return NtOpenEvent( handle, access, &attr );
+}
+
+/******************************************************************************
+ *              NtManagePartition  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtManagePartition( HANDLE target, HANDLE source, PARTITION_INFORMATION_CLASS class,
+                                   void *buffer, ULONG length )
+{
+    NTSTATUS status;
+
+    TRACE( "target %p, source %p, class %u, buffer %p, length %u\n",
+           target, source, class, buffer, length );
+
+    if ((status = validate_memory_partition_handle( target ))) return status;
+    if (source) return STATUS_NOT_SUPPORTED;
+
+    switch (class)
+    {
+    case SystemMemoryPartitionInformation:
+    {
+        MEMORY_PARTITION_CONFIGURATION_INFORMATION *info = buffer;
+        SYSTEM_PERFORMANCE_INFORMATION performance;
+        SYSTEM_BASIC_INFORMATION basic;
+        ULONG flags, numa_node, channel;
+
+        if (length != sizeof(*info)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info) return STATUS_ACCESS_VIOLATION;
+
+        flags = info->Flags;
+        numa_node = info->NumaNode;
+        channel = info->Channel;
+        if (numa_node != ~0u || channel != ~0u) return STATUS_INVALID_PARAMETER;
+
+        get_performance_info( &performance );
+        virtual_get_system_info( &basic, FALSE );
+
+        memset( info, 0, sizeof(*info) );
+        info->Flags = flags;
+        info->NumaNode = numa_node;
+        info->Channel = channel;
+        info->NumberOfNumaNodes = 1;
+        info->ResidentAvailablePages = performance.AvailablePages;
+        info->CommittedPages = performance.TotalCommittedPages;
+        info->CommitLimit = performance.TotalCommitLimit;
+        info->PeakCommitment = performance.PeakCommitment;
+        info->TotalNumberOfPages = basic.MmNumberOfPhysicalPages;
+        info->AvailablePages = performance.AvailablePages;
+        info->FreePages = performance.AvailablePages;
+        info->MaximumCommitLimit = performance.TotalCommitLimit;
+        return STATUS_SUCCESS;
+    }
+
+    case SystemMemoryPartitionGetMemoryEvents:
+    {
+        static const WCHAR lowW[] = {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s','\\',
+                                     'L','o','w','C','o','m','m','i','t','C','o','n','d','i','t','i','o','n'};
+        static const WCHAR highW[] = {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s','\\',
+                                      'H','i','g','h','C','o','m','m','i','t','C','o','n','d','i','t','i','o','n'};
+        static const WCHAR maximumW[] = {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s','\\',
+                                         'M','a','x','i','m','u','m','C','o','m','m','i','t','C','o','n','d','i','t','i','o','n'};
+        MEMORY_PARTITION_MEMORY_EVENTS_INFORMATION *info = buffer;
+
+        if (length != sizeof(*info)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info) return STATUS_ACCESS_VIOLATION;
+        if (!(info->Flags & 1) || (info->Flags & ~1u)) return STATUS_INVALID_PARAMETER;
+
+        info->LowCommitCondition = 0;
+        info->HighCommitCondition = 0;
+        info->MaximumCommitCondition = 0;
+        status = open_memory_condition_event( &info->LowCommitCondition, info->DesiredAccess,
+                                              info->HandleAttributes, lowW, sizeof(lowW) );
+        if (!status)
+            status = open_memory_condition_event( &info->HighCommitCondition, info->DesiredAccess,
+                                                  info->HandleAttributes, highW,
+                                                  sizeof(highW) );
+        if (!status)
+            status = open_memory_condition_event( &info->MaximumCommitCondition, info->DesiredAccess,
+                                                  info->HandleAttributes, maximumW,
+                                                  sizeof(maximumW) );
+        if (status)
+        {
+            if (info->LowCommitCondition) NtClose( info->LowCommitCondition );
+            if (info->HighCommitCondition) NtClose( info->HighCommitCondition );
+            if (info->MaximumCommitCondition) NtClose( info->MaximumCommitCondition );
+            info->LowCommitCondition = 0;
+            info->HighCommitCondition = 0;
+            info->MaximumCommitCondition = 0;
+        }
+        return status;
+    }
+
+    default:
+        return STATUS_INVALID_INFO_CLASS;
+    }
+}
+
 #ifdef linux
 
 static void get_cpu_idle_cycle_times( ULONG64 *times )
@@ -4685,6 +4802,47 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
         if (input != NULL) return STATUS_INVALID_PARAMETER;
         /* FIXME: The actual state should be the value set by SetThreadExecutionState which is not currently implemented. */
         *state = ES_USER_PRESENT;
+        return STATUS_SUCCESS;
+    }
+
+    case PlatformInformation:
+    {
+        POWER_PLATFORM_INFORMATION *info = output;
+
+        if ((input && in_size) || !output || out_size < sizeof(*info))
+            return STATUS_INVALID_PARAMETER;
+
+        /* LinuxNT does not currently expose Windows connected standby. */
+        info->AoAc = FALSE;
+        return STATUS_SUCCESS;
+    }
+
+    case PlatformRole:
+    {
+        POWER_PLATFORM_ROLE *role = output;
+
+        if (!output || !out_size) return STATUS_INVALID_PARAMETER;
+        if (out_size < sizeof(*role)) return STATUS_BUFFER_TOO_SMALL;
+
+        /* LinuxNT presents the workstation as a conventional desktop.  This
+         * matches both PowerDeterminePlatformRole() and the Windows 11 power
+         * service oracle for this information level. */
+        *role = PlatformRoleDesktop;
+        return STATUS_SUCCESS;
+    }
+
+    case PowerInformationInternal:
+    {
+        const ULONG *request = input;
+
+        /* Windows 11 UMPO uses internal request 4 to query a one-byte system
+         * power property during service initialization. */
+        if (!input || in_size != 2 * sizeof(*request) || request[0] != 4 || request[1])
+            return STATUS_NOT_IMPLEMENTED;
+        if (!output) return STATUS_INVALID_PARAMETER;
+        if (out_size < sizeof(BYTE)) return STATUS_BUFFER_TOO_SMALL;
+
+        *(BYTE *)output = FALSE;
         return STATUS_SUCCESS;
     }
 

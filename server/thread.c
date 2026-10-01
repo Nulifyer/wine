@@ -373,6 +373,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->dbg_hidden      = 0;
     thread->bypass_proc_suspend = 0;
     thread->is_system       = 0;
+    thread->iam_key         = 0;
     thread->desktop_users   = 0;
     thread->token           = NULL;
     thread->desc            = NULL;
@@ -1350,7 +1351,7 @@ int is_obj_signaled( struct object *obj )
     struct object *sync;
     int signaled;
 
-    sync = obj->ops->get_sync( obj );
+    sync = obj->ops->get_sync ? obj->ops->get_sync( obj ) : grab_object( obj );
     signaled = sync->ops->signaled( sync, NULL );
     if (signaled)
         sync->ops->satisfied( sync, NULL );

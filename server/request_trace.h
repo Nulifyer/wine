@@ -649,6 +649,9 @@ static void dump_open_file_object_request( const struct open_file_object_request
     fprintf( stderr, ", rootdir=%04x", req->rootdir );
     fprintf( stderr, ", sharing=%08x", req->sharing );
     fprintf( stderr, ", options=%08x", req->options );
+    fprintf( stderr, ", impersonation_level=%d", req->impersonation_level );
+    fprintf( stderr, ", context_tracking=%d", req->context_tracking );
+    fprintf( stderr, ", effective_only=%d", req->effective_only );
     dump_varargs_unicode_str( ", filename=", cur_size );
 }
 
@@ -2625,6 +2628,21 @@ static void dump_set_desktop_shell_windows_reply( const struct set_desktop_shell
     fprintf( stderr, ", old_taskman_window=%08x", req->old_taskman_window );
 }
 
+static void dump_acquire_desktop_iam_key_request( const struct acquire_desktop_iam_key_request *req )
+{
+}
+
+static void dump_acquire_desktop_iam_key_reply( const struct acquire_desktop_iam_key_reply *req )
+{
+    dump_uint64( " key=", &req->key );
+}
+
+static void dump_enable_thread_iam_access_request( const struct enable_thread_iam_access_request *req )
+{
+    dump_uint64( " key=", &req->key );
+    fprintf( stderr, ", enable=%d", req->enable );
+}
+
 static void dump_adjust_token_privileges_request( const struct adjust_token_privileges_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -3110,6 +3128,12 @@ static void dump_open_completion_reply( const struct open_completion_reply *req 
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_register_coremessaging_completion_request( const struct register_coremessaging_completion_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", window=%08x", req->window );
+}
+
 static void dump_add_completion_request( const struct add_completion_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -3162,6 +3186,39 @@ static void dump_set_completion_info_request( const struct set_completion_info_r
     fprintf( stderr, " handle=%04x", req->handle );
     dump_uint64( ", ckey=", &req->ckey );
     fprintf( stderr, ", chandle=%04x", req->chandle );
+}
+
+static void dump_create_completion_packet_request( const struct create_completion_packet_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
+}
+
+static void dump_create_completion_packet_reply( const struct create_completion_packet_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_associate_completion_packet_request( const struct associate_completion_packet_request *req )
+{
+    fprintf( stderr, " packet=%04x", req->packet );
+    fprintf( stderr, ", completion=%04x", req->completion );
+    fprintf( stderr, ", target=%04x", req->target );
+    dump_uint64( ", ckey=", &req->ckey );
+    dump_uint64( ", cvalue=", &req->cvalue );
+    dump_uint64( ", information=", &req->information );
+    fprintf( stderr, ", status=%08x", req->status );
+}
+
+static void dump_associate_completion_packet_reply( const struct associate_completion_packet_reply *req )
+{
+    fprintf( stderr, " already_signaled=%d", req->already_signaled );
+}
+
+static void dump_cancel_completion_packet_request( const struct cancel_completion_packet_request *req )
+{
+    fprintf( stderr, " packet=%04x", req->packet );
+    fprintf( stderr, ", remove_signaled=%d", req->remove_signaled );
 }
 
 static void dump_add_fd_completion_request( const struct add_fd_completion_request *req )
@@ -3310,6 +3367,73 @@ static void dump_open_job_request( const struct open_job_request *req )
 static void dump_open_job_reply( const struct open_job_reply *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_open_memory_partition_request( const struct open_memory_partition_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, ", rootdir=%04x", req->rootdir );
+    dump_varargs_unicode_str( ", name=", cur_size );
+}
+
+static void dump_open_memory_partition_reply( const struct open_memory_partition_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_query_memory_partition_request( const struct query_memory_partition_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_create_wnf_state_name_request( const struct create_wnf_state_name_request *req )
+{
+    fprintf( stderr, " name_lifetime=%08x", req->name_lifetime );
+    fprintf( stderr, ", data_scope=%08x", req->data_scope );
+    fprintf( stderr, ", maximum_size=%08x", req->maximum_size );
+    fprintf( stderr, ", persist_data=%d", req->persist_data );
+    fprintf( stderr, ", type_id=%d", req->type_id );
+    fprintf( stderr, ", security_descriptor=%d", req->security_descriptor );
+}
+
+static void dump_create_wnf_state_name_reply( const struct create_wnf_state_name_reply *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+}
+
+static void dump_delete_wnf_state_name_request( const struct delete_wnf_state_name_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+}
+
+static void dump_query_wnf_state_data_request( const struct query_wnf_state_data_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+    fprintf( stderr, ", session_id=%08x", req->session_id );
+    fprintf( stderr, ", explicit_scope=%d", req->explicit_scope );
+}
+
+static void dump_query_wnf_state_data_reply( const struct query_wnf_state_data_reply *req )
+{
+    fprintf( stderr, " change_stamp=%08x", req->change_stamp );
+    fprintf( stderr, ", total=%u", req->total );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_update_wnf_state_data_request( const struct update_wnf_state_data_request *req )
+{
+    dump_uint64( " state_name=", &req->state_name );
+    fprintf( stderr, ", matching_stamp=%08x", req->matching_stamp );
+    fprintf( stderr, ", check_stamp=%d", req->check_stamp );
+    fprintf( stderr, ", session_id=%08x", req->session_id );
+    fprintf( stderr, ", explicit_scope=%d", req->explicit_scope );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_update_wnf_state_data_reply( const struct update_wnf_state_data_reply *req )
+{
+    fprintf( stderr, " change_stamp=%08x", req->change_stamp );
 }
 
 static void dump_assign_job_request( const struct assign_job_request *req )
@@ -3536,6 +3660,105 @@ static void dump_alpc_create_port_request( const struct alpc_create_port_request
 static void dump_alpc_create_port_reply( const struct alpc_create_port_reply *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_connect_port_request( const struct alpc_connect_port_request *req )
+{
+    fprintf( stderr, " flags=%08x", req->flags );
+    fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, ", rootdir=%04x", req->rootdir );
+    dump_uint64( ", max_msg_len=", &req->max_msg_len );
+    fprintf( stderr, ", name_size=%u", req->name_size );
+    dump_varargs_unicode_str( ", name=", min( cur_size, req->name_size ));
+    dump_varargs_bytes( ", message=", cur_size );
+}
+
+static void dump_alpc_connect_port_reply( const struct alpc_connect_port_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+}
+
+static void dump_alpc_get_connect_result_request( const struct alpc_get_connect_result_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_get_connect_result_reply( const struct alpc_get_connect_result_reply *req )
+{
+    fprintf( stderr, " status=%08x", req->status );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", message_size=%u", req->message_size );
+    dump_varargs_bytes( ", message=", cur_size );
+}
+
+static void dump_alpc_accept_connect_port_request( const struct alpc_accept_connect_port_request *req )
+{
+    fprintf( stderr, " connection=%04x", req->connection );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, ", accept=%08x", req->accept );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    dump_uint64( ", max_msg_len=", &req->max_msg_len );
+    dump_uint64( ", port_context=", &req->port_context );
+    dump_uint64( ", message_context=", &req->message_context );
+    dump_varargs_bytes( ", message=", cur_size );
+}
+
+static void dump_alpc_accept_connect_port_reply( const struct alpc_accept_connect_port_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_send_receive_request( const struct alpc_send_receive_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", send_size=%u", req->send_size );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", valid_attributes=%08x", req->valid_attributes );
+    dump_uint64( ", message_context=", &req->message_context );
+    dump_uint64( ", work_on_behalf=", &req->work_on_behalf );
+    dump_varargs_bytes( ", message=", cur_size );
+}
+
+static void dump_alpc_send_receive_reply( const struct alpc_send_receive_reply *req )
+{
+    fprintf( stderr, " pending=%08x", req->pending );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", sender_pid=%04x", req->sender_pid );
+    fprintf( stderr, ", sender_tid=%04x", req->sender_tid );
+    fprintf( stderr, ", message_type=%08x", req->message_type );
+    fprintf( stderr, ", message_size=%u", req->message_size );
+    dump_uint64( ", port_context=", &req->port_context );
+    dump_uint64( ", message_context=", &req->message_context );
+    fprintf( stderr, ", valid_attributes=%08x", req->valid_attributes );
+    dump_uint64( ", work_on_behalf=", &req->work_on_behalf );
+    dump_varargs_bytes( ", message=", cur_size );
+}
+
+static void dump_alpc_disconnect_port_request( const struct alpc_disconnect_port_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", flags=%08x", req->flags );
+}
+
+static void dump_alpc_query_information_request( const struct alpc_query_information_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_query_information_reply( const struct alpc_query_information_reply *req )
+{
+    fprintf( stderr, " flags=%08x", req->flags );
+    fprintf( stderr, ", sequence=%08x", req->sequence );
+    dump_uint64( ", context=", &req->context );
+}
+
+static void dump_alpc_impersonate_client_request( const struct alpc_impersonate_client_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
 }
 
 typedef void (*dump_func)( const void *req );
@@ -3765,6 +3988,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_token_request,
     (dump_func)dump_open_token_request,
     (dump_func)dump_set_desktop_shell_windows_request,
+    (dump_func)dump_acquire_desktop_iam_key_request,
+    (dump_func)dump_enable_thread_iam_access_request,
     (dump_func)dump_adjust_token_privileges_request,
     (dump_func)dump_get_token_privileges_request,
     (dump_func)dump_check_token_privileges_request,
@@ -3808,11 +4033,15 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_linked_token_request,
     (dump_func)dump_create_completion_request,
     (dump_func)dump_open_completion_request,
+    (dump_func)dump_register_coremessaging_completion_request,
     (dump_func)dump_add_completion_request,
     (dump_func)dump_remove_completion_request,
     (dump_func)dump_get_thread_completion_request,
     (dump_func)dump_query_completion_request,
     (dump_func)dump_set_completion_info_request,
+    (dump_func)dump_create_completion_packet_request,
+    (dump_func)dump_associate_completion_packet_request,
+    (dump_func)dump_cancel_completion_packet_request,
     (dump_func)dump_add_fd_completion_request,
     (dump_func)dump_set_fd_completion_mode_request,
     (dump_func)dump_set_fd_disp_info_request,
@@ -3828,6 +4057,12 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_update_rawinput_devices_request,
     (dump_func)dump_create_job_request,
     (dump_func)dump_open_job_request,
+    (dump_func)dump_open_memory_partition_request,
+    (dump_func)dump_query_memory_partition_request,
+    (dump_func)dump_create_wnf_state_name_request,
+    (dump_func)dump_delete_wnf_state_name_request,
+    (dump_func)dump_query_wnf_state_data_request,
+    (dump_func)dump_update_wnf_state_data_request,
     (dump_func)dump_assign_job_request,
     (dump_func)dump_process_in_job_request,
     (dump_func)dump_set_job_limits_request,
@@ -3850,6 +4085,13 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_mutex_acquire_request,
     (dump_func)dump_d3dkmt_mutex_release_request,
     (dump_func)dump_alpc_create_port_request,
+    (dump_func)dump_alpc_connect_port_request,
+    (dump_func)dump_alpc_get_connect_result_request,
+    (dump_func)dump_alpc_accept_connect_port_request,
+    (dump_func)dump_alpc_send_receive_request,
+    (dump_func)dump_alpc_disconnect_port_request,
+    (dump_func)dump_alpc_query_information_request,
+    (dump_func)dump_alpc_impersonate_client_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -4077,6 +4319,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_token_reply,
     (dump_func)dump_open_token_reply,
     (dump_func)dump_set_desktop_shell_windows_reply,
+    (dump_func)dump_acquire_desktop_iam_key_reply,
+    NULL,
     (dump_func)dump_adjust_token_privileges_reply,
     (dump_func)dump_get_token_privileges_reply,
     (dump_func)dump_check_token_privileges_reply,
@@ -4121,9 +4365,13 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_completion_reply,
     (dump_func)dump_open_completion_reply,
     NULL,
+    NULL,
     (dump_func)dump_remove_completion_reply,
     (dump_func)dump_get_thread_completion_reply,
     (dump_func)dump_query_completion_reply,
+    NULL,
+    (dump_func)dump_create_completion_packet_reply,
+    (dump_func)dump_associate_completion_packet_reply,
     NULL,
     NULL,
     NULL,
@@ -4140,6 +4388,12 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_create_job_reply,
     (dump_func)dump_open_job_reply,
+    (dump_func)dump_open_memory_partition_reply,
+    NULL,
+    (dump_func)dump_create_wnf_state_name_reply,
+    NULL,
+    (dump_func)dump_query_wnf_state_data_reply,
+    (dump_func)dump_update_wnf_state_data_reply,
     NULL,
     NULL,
     NULL,
@@ -4162,6 +4416,13 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_mutex_acquire_reply,
     NULL,
     (dump_func)dump_alpc_create_port_reply,
+    (dump_func)dump_alpc_connect_port_reply,
+    (dump_func)dump_alpc_get_connect_result_reply,
+    (dump_func)dump_alpc_accept_connect_port_reply,
+    (dump_func)dump_alpc_send_receive_reply,
+    NULL,
+    (dump_func)dump_alpc_query_information_reply,
+    NULL,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -4389,6 +4650,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "create_token",
     "open_token",
     "set_desktop_shell_windows",
+    "acquire_desktop_iam_key",
+    "enable_thread_iam_access",
     "adjust_token_privileges",
     "get_token_privileges",
     "check_token_privileges",
@@ -4432,11 +4695,15 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "create_linked_token",
     "create_completion",
     "open_completion",
+    "register_coremessaging_completion",
     "add_completion",
     "remove_completion",
     "get_thread_completion",
     "query_completion",
     "set_completion_info",
+    "create_completion_packet",
+    "associate_completion_packet",
+    "cancel_completion_packet",
     "add_fd_completion",
     "set_fd_completion_mode",
     "set_fd_disp_info",
@@ -4452,6 +4719,12 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "update_rawinput_devices",
     "create_job",
     "open_job",
+    "open_memory_partition",
+    "query_memory_partition",
+    "create_wnf_state_name",
+    "delete_wnf_state_name",
+    "query_wnf_state_data",
+    "update_wnf_state_data",
     "assign_job",
     "process_in_job",
     "set_job_limits",
@@ -4474,6 +4747,13 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "d3dkmt_mutex_acquire",
     "d3dkmt_mutex_release",
     "alpc_create_port",
+    "alpc_connect_port",
+    "alpc_get_connect_result",
+    "alpc_accept_connect_port",
+    "alpc_send_receive",
+    "alpc_disconnect_port",
+    "alpc_query_information",
+    "alpc_impersonate_client",
 };
 
 static const struct
@@ -4494,6 +4774,7 @@ static const struct
     { "BUFFER_TOO_SMALL",            STATUS_BUFFER_TOO_SMALL },
     { "CANCELLED",                   STATUS_CANCELLED },
     { "CANNOT_DELETE",               STATUS_CANNOT_DELETE },
+    { "CANNOT_IMPERSONATE",          STATUS_CANNOT_IMPERSONATE },
     { "CANT_OPEN_ANONYMOUS",         STATUS_CANT_OPEN_ANONYMOUS },
     { "CHILD_MUST_BE_VOLATILE",      STATUS_CHILD_MUST_BE_VOLATILE },
     { "CONNECTION_ABORTED",          STATUS_CONNECTION_ABORTED },
@@ -4549,8 +4830,11 @@ static const struct
     { "INVALID_LOCK_SEQUENCE",       STATUS_INVALID_LOCK_SEQUENCE },
     { "INVALID_OWNER",               STATUS_INVALID_OWNER },
     { "INVALID_PARAMETER",           STATUS_INVALID_PARAMETER },
+    { "INVALID_PARAMETER_1",         STATUS_INVALID_PARAMETER_1 },
     { "INVALID_PARAMETER_2",         STATUS_INVALID_PARAMETER_2 },
+    { "INVALID_PARAMETER_3",         STATUS_INVALID_PARAMETER_3 },
     { "INVALID_PIPE_STATE",          STATUS_INVALID_PIPE_STATE },
+    { "INVALID_PORT_HANDLE",         STATUS_INVALID_PORT_HANDLE },
     { "INVALID_READ_MODE",           STATUS_INVALID_READ_MODE },
     { "INVALID_SECURITY_DESCR",      STATUS_INVALID_SECURITY_DESCR },
     { "INVALID_STATE_TRANSITION",    STATUS_INVALID_STATE_TRANSITION },
@@ -4601,6 +4885,9 @@ static const struct
     { "PIPE_EMPTY",                  STATUS_PIPE_EMPTY },
     { "PIPE_LISTENING",              STATUS_PIPE_LISTENING },
     { "PIPE_NOT_AVAILABLE",          STATUS_PIPE_NOT_AVAILABLE },
+    { "PORT_CONNECTION_REFUSED",     STATUS_PORT_CONNECTION_REFUSED },
+    { "PORT_DISCONNECTED",           STATUS_PORT_DISCONNECTED },
+    { "PORT_MESSAGE_TOO_LONG",       STATUS_PORT_MESSAGE_TOO_LONG },
     { "PORT_NOT_SET",                STATUS_PORT_NOT_SET },
     { "PREDEFINED_HANDLE",           STATUS_PREDEFINED_HANDLE },
     { "PRIVILEGE_NOT_HELD",          STATUS_PRIVILEGE_NOT_HELD },
@@ -4609,6 +4896,7 @@ static const struct
     { "PROCESS_NOT_IN_JOB",          STATUS_PROCESS_NOT_IN_JOB },
     { "RANGE_NOT_LOCKED",            STATUS_RANGE_NOT_LOCKED },
     { "REPARSE_POINT_NOT_RESOLVED",  STATUS_REPARSE_POINT_NOT_RESOLVED },
+    { "REPLY_MESSAGE_MISMATCH",      STATUS_REPLY_MESSAGE_MISMATCH },
     { "SECTION_TOO_BIG",             STATUS_SECTION_TOO_BIG },
     { "SEMAPHORE_LIMIT_EXCEEDED",    STATUS_SEMAPHORE_LIMIT_EXCEEDED },
     { "SHARING_VIOLATION",           STATUS_SHARING_VIOLATION },

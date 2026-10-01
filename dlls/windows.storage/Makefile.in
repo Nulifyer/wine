@@ -2,8 +2,10 @@ MODULE  = windows.storage.dll
 IMPORTS = shell32 combase
 
 SOURCES = \
+	appdatapaths.c \
 	async.c \
 	async_private.idl \
 	classes.idl \
 	main.c \
-	streams.c
+	streams.c \
+	thread_flags.c

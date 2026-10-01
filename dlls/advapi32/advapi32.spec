@@ -95,6 +95,7 @@
 @ stdcall -import ChangeServiceConfigW(long long long long wstr wstr ptr wstr wstr wstr wstr)
 # @ stub CheckForHiberboot
 @ stdcall -import CheckTokenMembership(long ptr ptr)
+@ stdcall -import CheckTokenCapability(long ptr ptr)
 @ stdcall ClearEventLogA (long str)
 @ stdcall ClearEventLogW (long wstr)
 # @ stub CloseCodeAuthzLevel
@@ -470,6 +471,8 @@
 # @ stub LsaICLookupSidsWithCreds
 @ stdcall LsaLookupNames(long long ptr ptr ptr)
 @ stdcall LsaLookupNames2(ptr long long ptr ptr ptr)
+@ stdcall -private LsaLookupGetDomainInfo(ptr long ptr)
+@ stdcall -private LsaLookupOpenLocalPolicy(ptr long ptr)
 @ stdcall LsaLookupPrivilegeDisplayName(long ptr ptr ptr)
 @ stdcall LsaLookupPrivilegeName(long ptr ptr)
 # @ stub LsaLookupPrivilegeValue

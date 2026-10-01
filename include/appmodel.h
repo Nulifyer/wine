@@ -124,12 +124,52 @@ typedef struct PACKAGE_ID
 }
 PACKAGE_ID;
 
+typedef enum PackagePathType
+{
+    PackagePathType_Install = 0,
+    PackagePathType_Mutable = 1,
+    PackagePathType_Effective = 2,
+    PackagePathType_MachineExternal = 3,
+    PackagePathType_UserExternal = 4,
+    PackagePathType_EffectiveExternal = 5
+} PackagePathType;
+
+typedef enum PackageOrigin
+{
+    PackageOrigin_Unknown = 0,
+    PackageOrigin_Unsigned = 1,
+    PackageOrigin_Inbox = 2,
+    PackageOrigin_Store = 3,
+    PackageOrigin_DeveloperUnsigned = 4,
+    PackageOrigin_DeveloperSigned = 5,
+    PackageOrigin_LineOfBusiness = 6,
+    PackageOrigin_SignedSBOM = 7
+} PackageOrigin;
+
+#include <pshpack4.h>
+typedef struct PACKAGE_INFO
+{
+    UINT32 reserved;
+    UINT32 flags;
+    WCHAR *path;
+    WCHAR *packageFullName;
+    WCHAR *packageFamilyName;
+    PACKAGE_ID packageId;
+} PACKAGE_INFO;
+#include <poppack.h>
+
 LONG WINAPI AppPolicyGetMediaFoundationCodecLoading(HANDLE token, AppPolicyMediaFoundationCodecLoading *policy);
 LONG WINAPI AppPolicyGetProcessTerminationMethod(HANDLE token, AppPolicyProcessTerminationMethod *policy);
 LONG WINAPI AppPolicyGetShowDeveloperDiagnostic(HANDLE token, AppPolicyShowDeveloperDiagnostic *policy);
 LONG WINAPI AppPolicyGetThreadInitializationType(HANDLE token, AppPolicyThreadInitializationType *policy);
 LONG WINAPI AppPolicyGetWindowingModel(HANDLE processToken, AppPolicyWindowingModel *policy);
 LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *buffer_length, BYTE *buffer);
+LONG WINAPI GetStagedPackageOrigin(const WCHAR *package_full_name, PackageOrigin *origin);
+LONG WINAPI ParseApplicationUserModelId(const WCHAR *application_user_model_id,
+                                        UINT32 *package_family_name_length,
+                                        WCHAR *package_family_name,
+                                        UINT32 *package_relative_application_id_length,
+                                        WCHAR *package_relative_application_id);
 
 #if defined(__cplusplus)
 }

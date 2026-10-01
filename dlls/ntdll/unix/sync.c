@@ -1449,6 +1449,42 @@ NTSTATUS WINAPI NtOpenJobObject( HANDLE *handle, ACCESS_MASK access, const OBJEC
 
 
 /**************************************************************************
+ *              NtOpenPartition (NTDLL.@)
+ */
+NTSTATUS WINAPI NtOpenPartition( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
+{
+    const char *debug_pause;
+    unsigned int ret;
+
+    TRACE( "access %#x, name %s\n", access, attr ? debugstr_us(attr->ObjectName) : "(null)" );
+
+    *handle = 0;
+    if ((ret = validate_open_object_attributes( attr ))) return ret;
+
+    SERVER_START_REQ( open_memory_partition )
+    {
+        req->access = access;
+        req->attributes = attr->Attributes;
+        req->rootdir = wine_server_obj_handle( attr->RootDirectory );
+        if (attr->ObjectName)
+            wine_server_add_data( req, attr->ObjectName->Buffer, attr->ObjectName->Length );
+        ret = wine_server_call( req );
+        *handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+
+    /* Temporary LinuxNT native-PSM diagnostic boundary.  This is deliberately
+     * opt-in and is removed once the failing return has been identified. */
+    if ((debug_pause = getenv( "LINUXNT_DEBUG_PAUSE_OPEN_PARTITION" )) && debug_pause[0] == '1')
+    {
+        TRACE( "pausing after NtOpenPartition for native PSM debugger attachment\n" );
+        while (!faccessat( AT_FDCWD, "/tmp/linuxnt-psm-debug.pause", F_OK, 0 )) usleep( 10000 );
+    }
+    return ret;
+}
+
+
+/**************************************************************************
  *		NtTerminateJobObject (NTDLL.@)
  */
 NTSTATUS WINAPI NtTerminateJobObject( HANDLE handle, NTSTATUS status )
@@ -3745,7 +3781,7 @@ NTSTATUS WINAPI NtCreateWaitCompletionPacket( HANDLE *handle, ACCESS_MASK access
     TRACE( "%p, %08x, %p\n", handle, (int)access, attr );
 
     *handle = 0;
-    if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
+    if ((ret = wine_server_alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     SERVER_START_REQ( create_completion_packet )
     {

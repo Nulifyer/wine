@@ -107,6 +107,7 @@ static ULONGLONG (FASTCALL *pRtlUlonglongByteSwap)(ULONGLONG source);
 static void *    (WINAPI *pRtlGetElementGenericTable)(PRTL_GENERIC_TABLE, ULONG);
 static DWORD     (WINAPI *pRtlGetThreadErrorMode)(void);
 static NTSTATUS  (WINAPI *pRtlSetThreadErrorMode)(DWORD, LPDWORD);
+static ULONG     (WINAPI *pRtlAllocateWnfSerializationGroup)(void);
 static PVOID     (WINAPI *pRtlInsertElementGenericTable)(PRTL_GENERIC_TABLE, PVOID, CLONG, PBOOLEAN);
 static NTSTATUS  (WINAPI *pRtlIpv4AddressToStringExA)(const IN_ADDR *, USHORT, LPSTR, PULONG);
 static NTSTATUS  (WINAPI *pRtlIpv4StringToAddressExA)(PCSTR, BOOLEAN, IN_ADDR *, PUSHORT);
@@ -127,11 +128,16 @@ static NTSTATUS  (WINAPI *pLdrEnumerateLoadedModules)(void *, void *, void *);
 static NTSTATUS  (WINAPI *pLdrRegisterDllNotification)(ULONG, PLDR_DLL_NOTIFICATION_FUNCTION, void *, void **);
 static NTSTATUS  (WINAPI *pLdrUnregisterDllNotification)(void *);
 static VOID      (WINAPI *pRtlGetDeviceFamilyInfoEnum)(ULONGLONG *,DWORD *,DWORD *);
+static ULONGLONG (WINAPI *pRtlGetFeatureToggleConfiguration)(ULONG, ULONGLONG);
+static ULONG     (WINAPI *pRtlGetFeatureTogglesChangeToken)(void);
+static NTSTATUS  (WINAPI *pRtlNotifyFeatureToggleUsage)(ULONG, ULONGLONG, ULONG);
 static void      (WINAPI *pRtlRbInsertNodeEx)(RTL_RB_TREE *, RTL_BALANCED_NODE *, BOOLEAN, RTL_BALANCED_NODE *);
 static void      (WINAPI *pRtlRbRemoveNode)(RTL_RB_TREE *, RTL_BALANCED_NODE *);
 static DWORD     (WINAPI *pRtlConvertDeviceFamilyInfoToString)(DWORD *, DWORD *, WCHAR *, WCHAR *);
+static NTSTATUS  (WINAPI *pRtlCapabilityCheck)(HANDLE, const UNICODE_STRING *, BOOLEAN *);
 static NTSTATUS  (WINAPI *pRtlCreateServiceSid)(PUNICODE_STRING, PSID, PULONG);
 static NTSTATUS  (WINAPI *pRtlDeriveCapabilitySidsFromName)(UNICODE_STRING *, PSID, PSID);
+static NTSTATUS  (WINAPI *pRtlQueryResourcePolicy)(ULONG, ULONG, ULONG *, SIZE_T);
 static NTSTATUS  (WINAPI *pRtlInitializeNtUserPfn)( const UINT64 *client_procsA, ULONG procsA_size,
                                                     const UINT64 *client_procsW, ULONG procsW_size,
                                                     const void *client_workers, ULONG workers_size );
@@ -183,6 +189,7 @@ static void InitFunctionPtrs(void)
         pRtlGetElementGenericTable = (void *)GetProcAddress(hntdll, "RtlGetElementGenericTable");
         pRtlGetThreadErrorMode = (void *)GetProcAddress(hntdll, "RtlGetThreadErrorMode");
         pRtlSetThreadErrorMode = (void *)GetProcAddress(hntdll, "RtlSetThreadErrorMode");
+        pRtlAllocateWnfSerializationGroup = (void *)GetProcAddress(hntdll, "RtlAllocateWnfSerializationGroup");
         pRtlInsertElementGenericTable = (void *)GetProcAddress(hntdll, "RtlInsertElementGenericTable");
         pRtlIpv4AddressToStringExA = (void *)GetProcAddress(hntdll, "RtlIpv4AddressToStringExA");
         pRtlIpv4StringToAddressExA = (void *)GetProcAddress(hntdll, "RtlIpv4StringToAddressExA");
@@ -200,9 +207,14 @@ static void InitFunctionPtrs(void)
         pLdrEnumerateLoadedModules = (void *)GetProcAddress(hntdll, "LdrEnumerateLoadedModules");
         pLdrRegisterDllNotification = (void *)GetProcAddress(hntdll, "LdrRegisterDllNotification");
         pLdrUnregisterDllNotification = (void *)GetProcAddress(hntdll, "LdrUnregisterDllNotification");
+        pRtlCapabilityCheck = (void *)GetProcAddress(hntdll, "RtlCapabilityCheck");
         pRtlCreateServiceSid = (void *)GetProcAddress(hntdll, "RtlCreateServiceSid");
         pRtlDeriveCapabilitySidsFromName = (void *)GetProcAddress(hntdll, "RtlDeriveCapabilitySidsFromName");
+        pRtlQueryResourcePolicy = (void *)GetProcAddress(hntdll, "RtlQueryResourcePolicy");
         pRtlGetDeviceFamilyInfoEnum = (void *)GetProcAddress(hntdll, "RtlGetDeviceFamilyInfoEnum");
+        pRtlGetFeatureToggleConfiguration = (void *)GetProcAddress(hntdll, "RtlGetFeatureToggleConfiguration");
+        pRtlGetFeatureTogglesChangeToken = (void *)GetProcAddress(hntdll, "RtlGetFeatureTogglesChangeToken");
+        pRtlNotifyFeatureToggleUsage = (void *)GetProcAddress(hntdll, "RtlNotifyFeatureToggleUsage");
         pRtlRbInsertNodeEx = (void *)GetProcAddress(hntdll, "RtlRbInsertNodeEx");
         pRtlRbRemoveNode = (void *)GetProcAddress(hntdll, "RtlRbRemoveNode");
         pRtlConvertDeviceFamilyInfoToString = (void *)GetProcAddress(hntdll, "RtlConvertDeviceFamilyInfoToString");
@@ -222,6 +234,43 @@ static void InitFunctionPtrs(void)
     }
     strcpy((char*)src_aligned_block, src_src);
     ok(strlen(src) == 15, "Source must be 16 bytes long!\n");
+}
+
+static void test_RtlAllocateWnfSerializationGroup(void)
+{
+    ULONG first, second;
+
+    if (!pRtlAllocateWnfSerializationGroup)
+    {
+        win_skip("RtlAllocateWnfSerializationGroup is not available\n");
+        return;
+    }
+
+    first = pRtlAllocateWnfSerializationGroup();
+    second = pRtlAllocateWnfSerializationGroup();
+    ok(first != 0, "got a zero serialization group\n");
+    ok(second == first + 1 || (first == ~0u && second == 1),
+       "expected consecutive serialization groups, got %#lx and %#lx\n", first, second);
+}
+
+static void test_feature_toggle_configuration(void)
+{
+    const ULONGLONG default_configuration = 0x0800000000000000ULL;
+    ULONGLONG configuration;
+    NTSTATUS status;
+
+    if (!pRtlGetFeatureToggleConfiguration || !pRtlGetFeatureTogglesChangeToken ||
+        !pRtlNotifyFeatureToggleUsage)
+    {
+        win_skip("Feature-toggle APIs are not available\n");
+        return;
+    }
+
+    configuration = pRtlGetFeatureToggleConfiguration( ~0u, default_configuration );
+    ok(configuration == default_configuration, "got configuration %#I64x\n", configuration);
+    ok(pRtlGetFeatureTogglesChangeToken() == 1, "unexpected feature-toggle change token\n");
+    status = pRtlNotifyFeatureToggleUsage( ~0u, default_configuration, 1 );
+    ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
 }
 
 static void test_RtlQueryProcessDebugInformation(void)
@@ -5499,6 +5548,96 @@ static void test_RtlDeriveCapabilitySidsFromName(void)
     free( group_sid );
 }
 
+static void test_RtlCapabilityCheck(void)
+{
+    UNICODE_STRING capability_name;
+    HANDLE process_token, token;
+    BOOLEAN has_capability;
+    NTSTATUS status;
+    BOOL ret;
+
+    if (!pRtlCapabilityCheck)
+    {
+        win_skip("RtlCapabilityCheck is not available.\n");
+        return;
+    }
+
+    RtlInitUnicodeString(&capability_name, L"LinuxNT.Arbitrary.Capability");
+    has_capability = FALSE;
+    status = pRtlCapabilityCheck(NULL, &capability_name, &has_capability);
+    ok(status == STATUS_SUCCESS, "got status %#lx.\n", status);
+    ok(has_capability, "full-trust effective token lacks capability.\n");
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &process_token);
+    ok(ret, "OpenProcessToken failed, error %lu.\n", GetLastError());
+
+    has_capability = TRUE;
+    status = pRtlCapabilityCheck(process_token, &capability_name, &has_capability);
+    ok(status == STATUS_NO_IMPERSONATION_TOKEN, "got status %#lx.\n", status);
+    ok(!has_capability, "primary token result was not cleared.\n");
+
+    ret = DuplicateToken(process_token, SecurityImpersonation, &token);
+    ok(ret, "DuplicateToken failed, error %lu.\n", GetLastError());
+    has_capability = FALSE;
+    status = pRtlCapabilityCheck(token, &capability_name, &has_capability);
+    ok(status == STATUS_SUCCESS, "got status %#lx.\n", status);
+    ok(has_capability, "full-trust impersonation token lacks capability.\n");
+
+    has_capability = TRUE;
+    status = pRtlCapabilityCheck((HANDLE)0xdeadbeef, &capability_name, &has_capability);
+    ok(status == STATUS_INVALID_HANDLE, "got status %#lx.\n", status);
+    ok(!has_capability, "invalid-token result was not cleared.\n");
+
+    CloseHandle(token);
+    CloseHandle(process_token);
+}
+
+static void test_RtlQueryResourcePolicy(void)
+{
+    static const ULONG windows_values[][4] =
+    {
+        {10, 20},
+        {5, 10, 15, 20},
+        {5, 10, 15, 20},
+        {50, 100},
+    };
+    static const ULONG windows_value_count[] = {2, 4, 4, 2};
+    ULONG policy, i, value;
+    NTSTATUS status;
+    BOOL found;
+
+    if (!pRtlQueryResourcePolicy)
+    {
+        win_skip("RtlQueryResourcePolicy is not available.\n");
+        return;
+    }
+
+    for (policy = 0; policy < ARRAY_SIZE(windows_values); ++policy)
+    {
+        value = 0xcccccccc;
+        status = pRtlQueryResourcePolicy(policy, 0, &value, sizeof(value));
+        ok(status == STATUS_SUCCESS, "policy %lu returned status %#lx.\n", policy, status);
+        found = FALSE;
+        for (i = 0; i < windows_value_count[policy]; ++i)
+            if (value == windows_values[policy][i]) found = TRUE;
+        ok(found, "policy %lu returned unexpected value %lu.\n", policy, value);
+    }
+
+    value = 0xcccccccc;
+    status = pRtlQueryResourcePolicy(4, 0, &value, sizeof(value));
+    ok(status == STATUS_INVALID_INFO_CLASS, "invalid policy returned status %#lx.\n", status);
+    ok(value == 0xcccccccc, "invalid policy changed value to %#lx.\n", value);
+
+    status = pRtlQueryResourcePolicy(0, 1, &value, sizeof(value));
+    ok(status == STATUS_INVALID_PARAMETER, "nonzero flags returned status %#lx.\n", status);
+    status = pRtlQueryResourcePolicy(0, 0, &value, sizeof(value) - 1);
+    ok(status == STATUS_INVALID_PARAMETER, "short size returned status %#lx.\n", status);
+    status = pRtlQueryResourcePolicy(0, 0, &value, sizeof(value) + 1);
+    ok(status == STATUS_INVALID_PARAMETER, "long size returned status %#lx.\n", status);
+    status = pRtlQueryResourcePolicy(0, 0, NULL, sizeof(value));
+    ok(status == STATUS_INVALID_PARAMETER, "null output returned status %#lx.\n", status);
+}
+
 static ULONG_PTR rotate_bits_right( ULONG_PTR v, ULONG count )
 {
     static const unsigned int bits = sizeof(v) * 8;
@@ -5566,6 +5705,8 @@ START_TEST(rtl)
 {
     InitFunctionPtrs();
 
+    test_RtlAllocateWnfSerializationGroup();
+    test_feature_toggle_configuration();
     test_RtlQueryProcessDebugInformation();
     test_RtlCompareMemory();
     test_RtlCompareMemoryUlong();
@@ -5631,7 +5772,9 @@ START_TEST(rtl)
     test_RtlEnumerateGenericTableWithoutSplaying();
     test_RtlEnumerateGenericTable();
     test_RtlGetElementGenericTable();
+    test_RtlCapabilityCheck();
     test_RtlCreateServiceSid();
     test_RtlDeriveCapabilitySidsFromName();
+    test_RtlQueryResourcePolicy();
     test_pointer_encoding();
 }

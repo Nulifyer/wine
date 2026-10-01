@@ -1,8 +1,10 @@
 TESTDLL   = combase.dll
-IMPORTS   = combase uuid user32
+IMPORTS   = advapi32 combase uuid user32
 
 SOURCES = \
+	activation_wait.c \
 	combase.rc \
+	implicit_local_server.c \
 	roapi.c \
 	string.c \
 	wine.combase.test.c \

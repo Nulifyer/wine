@@ -45,6 +45,8 @@ static LPVOID (WINAPI *pMapViewOfFileFromApp)(HANDLE, ULONG, ULONG64, SIZE_T);
 static BOOL (WINAPI *pUnmapViewOfFile2)(HANDLE, void *, ULONG);
 static HRESULT (WINAPI *pGetMachineTypeAttributes)(USHORT, MACHINE_ATTRIBUTES *);
 static BOOL (WINAPI *pIsWow64Process2)(HANDLE, USHORT *, USHORT *);
+static DWORD (WINAPI *pWTSGetServiceSessionId)(void);
+static BOOL (WINAPI *pWTSIsServerContainer)(void);
 
 static void test_CompareObjectHandles(void)
 {
@@ -669,6 +671,28 @@ static void test_GetMachineTypeAttributes(void)
     }
 }
 
+static void test_service_session(void)
+{
+    DWORD session_id;
+    BOOL server_container;
+
+    if (!pWTSGetServiceSessionId || !pWTSIsServerContainer)
+    {
+        win_skip("Service-session helpers are not available.\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    session_id = pWTSGetServiceSessionId();
+    ok(!session_id, "Expected service session 0, got %lu.\n", session_id);
+    ok(GetLastError() == 0xdeadbeef, "Last error changed to %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    server_container = pWTSIsServerContainer();
+    ok(!server_container, "Expected a non-container system.\n");
+    ok(GetLastError() == 0xdeadbeef, "Last error changed to %lu.\n", GetLastError());
+}
+
 static void init_funcs(void)
 {
     HMODULE hmod = GetModuleHandleA("kernelbase.dll");
@@ -686,6 +710,8 @@ static void init_funcs(void)
     X(VirtualAllocFromApp);
     X(VirtualProtectFromApp);
     X(UnmapViewOfFile2);
+    X(WTSGetServiceSessionId);
+    X(WTSIsServerContainer);
 
     hmod = GetModuleHandleA("ntdll.dll");
 
@@ -708,4 +734,5 @@ START_TEST(process)
     test_MapViewOfFileFromApp();
     test_QueryProcessCycleTime();
     test_GetMachineTypeAttributes();
+    test_service_session();
 }

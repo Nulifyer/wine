@@ -203,6 +203,9 @@ static RPC_STATUS epm_register( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bindin
   handle_t handle;
 
   TRACE("(%p,%p,%p,%s) replace=%d\n", IfSpec, BindingVector, UuidVector, debugstr_a((char*)Annotation), replace);
+  ERR("linuxnt RPC probe: epm_register interface %s %u.%u bindings %lu\n",
+      debugstr_guid(&If->InterfaceId.SyntaxGUID), If->InterfaceId.SyntaxVersion.MajorVersion,
+      If->InterfaceId.SyntaxVersion.MinorVersion, BindingVector ? BindingVector->Count : 0);
   TRACE(" ifid=%s\n", debugstr_guid(&If->InterfaceId.SyntaxGUID));
   for (i=0; i<BindingVector->Count; i++) {
     RpcBinding* bind = BindingVector->BindingH[i];
@@ -285,6 +288,9 @@ static RPC_STATUS epm_register( RPC_IF_HANDLE IfSpec, RPC_BINDING_VECTOR *Bindin
   }
 
   free(entries);
+
+  ERR("linuxnt RPC probe: epm_register interface %s status %lu\n",
+      debugstr_guid(&If->InterfaceId.SyntaxGUID), status);
 
   return status;
 }

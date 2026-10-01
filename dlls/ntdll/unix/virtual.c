@@ -3416,6 +3416,8 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
                                    struct pe_mapping_info *pe_mapping, USHORT machine,
                                    BOOL is_builtin, off_t offset)
 {
+    static const char target_name[] = "windowmanagementapi.dll";
+    const char *debug_pause;
     int unix_fd = -1, needs_close;
     int shared_fd = -1, shared_needs_close = 0;
     SIZE_T size = pe_mapping->image.map_size;
@@ -3488,6 +3490,26 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
 
 done:
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
+    if (NT_SUCCESS(status) &&
+        (debug_pause = getenv( "LINUXNT_DEBUG_PAUSE_WINDOWMANAGEMENT" )) && debug_pause[0] == '1')
+    {
+        const WCHAR *name = pe_mapping->nt_name.Buffer;
+        unsigned int i, name_len = pe_mapping->nt_name.Length / sizeof(*name);
+        BOOL matches = name_len >= sizeof(target_name) - 1;
+
+        for (i = 0; matches && i < sizeof(target_name) - 1; ++i)
+        {
+            WCHAR ch = name[name_len - (sizeof(target_name) - 1) + i];
+            if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+            if (ch != target_name[i]) matches = FALSE;
+        }
+        if (matches)
+        {
+            TRACE( "pausing after mapping WindowManagementAPI.dll for debugger attachment\n" );
+            while (!faccessat( AT_FDCWD, "/tmp/linuxnt-windowmanagement-debug.pause", F_OK, 0 ))
+                usleep( 10000 );
+        }
+    }
     if (needs_close) close( unix_fd );
     if (shared_needs_close) close( shared_fd );
     return status;
@@ -4502,6 +4524,7 @@ void virtual_map_user_shared_data(void)
  */
 void virtual_init_user_shared_data(void)
 {
+    static const WCHAR nt_system_rootW[] = {'C',':','\\','w','i','n','d','o','w','s',0};
     UNICODE_STRING name_str = RTL_CONSTANT_STRING( shared_data_nameW );
     OBJECT_ATTRIBUTES attr = { sizeof(attr), 0, &name_str };
     SYSTEM_BASIC_INFORMATION info;
@@ -4527,6 +4550,7 @@ void virtual_init_user_shared_data(void)
     virtual_get_system_info( &info, FALSE );
 
     data->TickCountMultiplier   = 1 << 24;
+    memcpy( data->NtSystemRoot, nt_system_rootW, sizeof(nt_system_rootW) );
     data->LargePageMinimum      = 2 * 1024 * 1024;
     data->SystemCall            = 1;
     data->NumberOfPhysicalPages = info.MmNumberOfPhysicalPages;

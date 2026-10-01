@@ -1689,6 +1689,75 @@ static void test_query_battery(void)
        "expected %lu minutes remaining got %lu minutes\n", time_left, bs.EstimatedTime);
 }
 
+static void test_query_platform_information(void)
+{
+    POWER_PLATFORM_INFORMATION info;
+    NTSTATUS status;
+    BYTE input = 0x5a;
+
+    memset(&info, 0xcc, sizeof(info));
+    status = pNtPowerInformation(PlatformInformation, NULL, 0, &info, sizeof(info));
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+    ok(info.AoAc == FALSE || info.AoAc == TRUE, "Unexpected AoAc value %u\n", info.AoAc);
+
+    status = pNtPowerInformation(PlatformInformation, NULL, 0, NULL, 0);
+    ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got %08lx\n", status);
+
+    status = pNtPowerInformation(PlatformInformation, NULL, 0, &info, 0);
+    ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got %08lx\n", status);
+
+    status = pNtPowerInformation(PlatformInformation, &input, sizeof(input), &info, sizeof(info));
+    ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got %08lx\n", status);
+
+    status = pNtPowerInformation(PlatformInformation, &input, 0, &info, sizeof(info));
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+
+    status = pNtPowerInformation(PlatformInformation, NULL, sizeof(input), &info, sizeof(info));
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+}
+
+static void test_query_platform_role(void)
+{
+    BYTE buffer[16];
+    NTSTATUS status;
+    unsigned int i;
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    status = pNtPowerInformation(PlatformRole, NULL, 0, buffer, 0);
+    ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got %08lx\n", status);
+    ok(buffer[0] == 0xcc, "Expected untouched buffer, got %#x\n", buffer[0]);
+
+    status = pNtPowerInformation(PlatformRole, NULL, 0, buffer, sizeof(POWER_PLATFORM_ROLE) - 1);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Expected STATUS_BUFFER_TOO_SMALL, got %08lx\n", status);
+    ok(buffer[0] == 0xcc, "Expected untouched buffer, got %#x\n", buffer[0]);
+
+    status = pNtPowerInformation(PlatformRole, NULL, 0, buffer, sizeof(buffer));
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+    ok(*(POWER_PLATFORM_ROLE *)buffer == PlatformRoleDesktop, "Expected desktop role, got %u\n",
+       (unsigned int)*(POWER_PLATFORM_ROLE *)buffer);
+    for (i = sizeof(POWER_PLATFORM_ROLE); i < sizeof(buffer); ++i)
+        ok(buffer[i] == 0xcc, "Expected byte %u to be untouched, got %#x\n", i, buffer[i]);
+}
+
+static void test_query_power_information_internal(void)
+{
+    ULONG request[2] = {4, 0};
+    BYTE buffer[16];
+    NTSTATUS status;
+    unsigned int i;
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    status = pNtPowerInformation(PowerInformationInternal, request, sizeof(request), buffer, 0);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Expected STATUS_BUFFER_TOO_SMALL, got %08lx\n", status);
+    ok(buffer[0] == 0xcc, "Expected untouched buffer, got %#x\n", buffer[0]);
+
+    status = pNtPowerInformation(PowerInformationInternal, request, sizeof(request), buffer, 1);
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
+    ok(buffer[0] == FALSE, "Expected false property, got %#x\n", buffer[0]);
+    for (i = 1; i < sizeof(buffer); ++i)
+        ok(buffer[i] == 0xcc, "Expected byte %u to be untouched, got %#x\n", i, buffer[i]);
+}
+
 static void test_query_processor_power_info(void)
 {
     NTSTATUS status;
@@ -4767,6 +4836,9 @@ START_TEST(info)
 
     /* NtPowerInformation */
     test_query_battery();
+    test_query_platform_information();
+    test_query_platform_role();
+    test_query_power_information_internal();
     test_query_processor_power_info();
 
     /* NtQueryInformationProcess */

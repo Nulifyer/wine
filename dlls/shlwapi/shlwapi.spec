@@ -275,7 +275,7 @@
 275 stub -noname RegisterGlobalHotkeyA
 276 stdcall -ordinal WhichPlatform()
 277 stub -noname SHDialogBox
-278 stdcall -noname SHCreateWorkerWindowW(ptr ptr long long ptr long)
+278 stdcall SHCreateWorkerWindowW(ptr ptr long long ptr long)
 279 stdcall -noname SHInvokeDefaultCommand(ptr ptr ptr)
 280 stdcall -ordinal SHRegGetIntW(ptr wstr long) shcore.SHRegGetIntW
 281 stdcall -noname SHPackDispParamsV(ptr ptr long ptr)

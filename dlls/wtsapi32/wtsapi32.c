@@ -554,6 +554,18 @@ BOOL WINAPI WTSQuerySessionInformationW(HANDLE server, DWORD session_id, WTS_INF
         return FALSE;
     }
 
+    if (class == WTSInitialProgram)
+    {
+        WCHAR *program;
+
+        if (!(program = malloc(sizeof(*program)))) return FALSE;
+        *program = 0;
+        *buffer = program;
+        *count = sizeof(*program);
+        SetLastError(ERROR_SUCCESS);
+        return TRUE;
+    }
+
     if (class == WTSConnectState)
     {
         WTS_CONNECTSTATE_CLASS *state;

@@ -1,0 +1,4 @@
+TESTDLL = appxdeploymentclient.dll
+
+SOURCES = \
+	deployment.c

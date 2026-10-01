@@ -20,10 +20,34 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dataexchange);
 
+/* Windows.UI.Xaml uses this private factory interface to bind drag/drop to a
+ * XAML island's core object instead of to a CoreWindow or HWND. */
+DEFINE_GUID(IID_ICoreDragDropManagerInternalStatics, 0xacbedab7, 0xe1fa, 0x4fd6,
+            0xa9, 0x9e, 0x88, 0xbf, 0x0b, 0x0b, 0xe7, 0xfa);
+
+typedef struct ICoreDragDropManagerInternalStatics ICoreDragDropManagerInternalStatics;
+typedef struct ICoreDragDropManagerInternalStaticsVtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(ICoreDragDropManagerInternalStatics *, REFIID, void **);
+    ULONG (STDMETHODCALLTYPE *AddRef)(ICoreDragDropManagerInternalStatics *);
+    ULONG (STDMETHODCALLTYPE *Release)(ICoreDragDropManagerInternalStatics *);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(ICoreDragDropManagerInternalStatics *, ULONG *, IID **);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(ICoreDragDropManagerInternalStatics *, HSTRING *);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(ICoreDragDropManagerInternalStatics *, TrustLevel *);
+    HRESULT (STDMETHODCALLTYPE *GetForCoreObject)(ICoreDragDropManagerInternalStatics *,
+                                                  IInspectable *, IInspectable **);
+} ICoreDragDropManagerInternalStaticsVtbl;
+
+struct ICoreDragDropManagerInternalStatics
+{
+    const ICoreDragDropManagerInternalStaticsVtbl *lpVtbl;
+};
+
 struct dataexchange
 {
     IActivationFactory IActivationFactory_iface;
     ICoreDragDropManagerStatics ICoreDragDropManagerStatics_iface;
+    ICoreDragDropManagerInternalStatics ICoreDragDropManagerInternalStatics_iface;
     IDragDropManagerInterop IDragDropManagerInterop_iface;
     LONG ref;
 };
@@ -53,6 +77,12 @@ static HRESULT STDMETHODCALLTYPE dataexchange_QueryInterface(IActivationFactory 
     {
         ICoreDragDropManagerStatics_AddRef(&impl->ICoreDragDropManagerStatics_iface);
         *out = &impl->ICoreDragDropManagerStatics_iface;
+        return S_OK;
+    }
+    else if (IsEqualGUID(iid, &IID_ICoreDragDropManagerInternalStatics))
+    {
+        IUnknown_AddRef(iface);
+        *out = &impl->ICoreDragDropManagerInternalStatics_iface;
         return S_OK;
     }
     else if (IsEqualGUID(iid, &IID_IDragDropManagerInterop))
@@ -128,8 +158,13 @@ struct core_dragdrop_manager
 {
     ICoreDragDropManager ICoreDragDropManager_iface;
     HWND hwnd;
+    ITypedEventHandler_CoreDragDropManager_CoreDropOperationTargetRequestedEventArgs *target_requested;
+    EventRegistrationToken target_requested_token;
+    boolean concurrent_operations_enabled;
     LONG ref;
 };
+
+static LONG next_target_requested_token;
 
 static inline struct core_dragdrop_manager *impl_from_ICoreDragDropManager(ICoreDragDropManager *iface)
 {
@@ -171,7 +206,12 @@ static ULONG STDMETHODCALLTYPE core_dragdrop_manager_Release(ICoreDragDropManage
     TRACE("iface %p, ref %lu.\n", iface, ref);
 
     if (!ref)
+    {
+        if (impl->target_requested)
+            ITypedEventHandler_CoreDragDropManager_CoreDropOperationTargetRequestedEventArgs_Release(
+                impl->target_requested );
         free(impl);
+    }
 
     return ref;
 }
@@ -201,30 +241,58 @@ static HRESULT STDMETHODCALLTYPE core_dragdrop_manager_add_TargetRequested(ICore
                                                                            ITypedEventHandler_CoreDragDropManager_CoreDropOperationTargetRequestedEventArgs *value,
                                                                            EventRegistrationToken *return_value)
 {
-    FIXME("iface %p, value %p, return_value %p stub!\n", iface, value, return_value);
-    return_value->value = 0xdeadbeef;
+    struct core_dragdrop_manager *impl = impl_from_ICoreDragDropManager(iface);
+
+    TRACE("iface %p, value %p, return_value %p.\n", iface, value, return_value);
+
+    if (!value || !return_value) return E_POINTER;
+    if (impl->target_requested)
+        ITypedEventHandler_CoreDragDropManager_CoreDropOperationTargetRequestedEventArgs_Release(
+            impl->target_requested );
+
+    ITypedEventHandler_CoreDragDropManager_CoreDropOperationTargetRequestedEventArgs_AddRef(value);
+    impl->target_requested = value;
+    impl->target_requested_token.value = InterlockedIncrement(&next_target_requested_token);
+    return_value->value = impl->target_requested_token.value;
     return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE core_dragdrop_manager_remove_TargetRequested(ICoreDragDropManager *iface,
                                                                               EventRegistrationToken value)
 {
-    FIXME("iface %p, value %#I64x stub!\n", iface, value.value);
-    return E_NOTIMPL;
+    struct core_dragdrop_manager *impl = impl_from_ICoreDragDropManager(iface);
+
+    TRACE("iface %p, value %#I64x.\n", iface, value.value);
+
+    if (impl->target_requested && value.value == impl->target_requested_token.value)
+    {
+        ITypedEventHandler_CoreDragDropManager_CoreDropOperationTargetRequestedEventArgs_Release(
+            impl->target_requested );
+        impl->target_requested = NULL;
+        impl->target_requested_token.value = 0;
+    }
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE core_dragdrop_manager_get_AreConcurrentOperationsEnabled(ICoreDragDropManager *iface,
                                                                                           boolean *value)
 {
-    FIXME("iface %p, value %p stub!\n", iface, value);
-    return E_NOTIMPL;
+    struct core_dragdrop_manager *impl = impl_from_ICoreDragDropManager(iface);
+
+    TRACE("iface %p, value %p.\n", iface, value);
+    if (!value) return E_POINTER;
+    *value = impl->concurrent_operations_enabled;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE core_dragdrop_manager_put_AreConcurrentOperationsEnabled(ICoreDragDropManager *iface,
                                                                                           boolean value)
 {
-    FIXME("iface %p, value %d stub!\n", iface, value);
-    return E_NOTIMPL;
+    struct core_dragdrop_manager *impl = impl_from_ICoreDragDropManager(iface);
+
+    TRACE("iface %p, value %d.\n", iface, value);
+    impl->concurrent_operations_enabled = value;
+    return S_OK;
 }
 
 static const struct ICoreDragDropManagerVtbl core_dragdrop_manager_vtbl =
@@ -265,14 +333,50 @@ static HRESULT create_core_dragdrop_manager(HWND hwnd, REFIID iid, void **out)
     return hr;
 }
 
+static HRESULT create_core_dragdrop_manager_for_core_object(IInspectable *core_object,
+                                                             IInspectable **out)
+{
+    struct core_dragdrop_manager *manager;
+    HRESULT hr;
+
+    if (!core_object || !out) return E_POINTER;
+    *out = NULL;
+
+    if (!(manager = calloc(1, sizeof(*manager))))
+        return E_OUTOFMEMORY;
+
+    manager->ICoreDragDropManager_iface.lpVtbl = &core_dragdrop_manager_vtbl;
+    manager->ref = 1;
+    hr = ICoreDragDropManager_QueryInterface(&manager->ICoreDragDropManager_iface,
+                                              &IID_IInspectable, (void **)out);
+    ICoreDragDropManager_Release(&manager->ICoreDragDropManager_iface);
+    return hr;
+}
+
 DEFINE_IINSPECTABLE(core_dragdrop_manager_statics, ICoreDragDropManagerStatics, struct dataexchange,
                     IActivationFactory_iface)
+
+static BOOL CALLBACK find_thread_window(HWND hwnd, LPARAM param)
+{
+    HWND *result = (HWND *)param;
+
+    *result = hwnd;
+    return FALSE;
+}
 
 static HRESULT STDMETHODCALLTYPE core_dragdrop_manager_statics_GetForCurrentView(ICoreDragDropManagerStatics *iface,
                                                                                  ICoreDragDropManager **value)
 {
-    FIXME("iface %p, value %p stub!\n", iface, value);
-    return E_NOTIMPL;
+    HWND hwnd = NULL;
+
+    TRACE("iface %p, value %p.\n", iface, value);
+    if (!value) return E_POINTER;
+    *value = NULL;
+
+    EnumThreadWindows(GetCurrentThreadId(), find_thread_window, (LPARAM)&hwnd);
+    if (!hwnd) return E_FAIL;
+
+    return create_core_dragdrop_manager(hwnd, &IID_ICoreDragDropManager, (void **)value);
 }
 
 static const struct ICoreDragDropManagerStaticsVtbl core_dragdrop_manager_statics_vtbl =
@@ -286,6 +390,27 @@ static const struct ICoreDragDropManagerStaticsVtbl core_dragdrop_manager_static
     core_dragdrop_manager_statics_GetTrustLevel,
     /* ICoreDragDropManagerStatics methods */
     core_dragdrop_manager_statics_GetForCurrentView,
+};
+
+DEFINE_IINSPECTABLE(core_dragdrop_manager_internal_statics, ICoreDragDropManagerInternalStatics,
+                    struct dataexchange, IActivationFactory_iface)
+
+static HRESULT STDMETHODCALLTYPE core_dragdrop_manager_internal_statics_GetForCoreObject(
+    ICoreDragDropManagerInternalStatics *iface, IInspectable *core_object, IInspectable **value)
+{
+    TRACE("iface %p, core_object %p, value %p.\n", iface, core_object, value);
+    return create_core_dragdrop_manager_for_core_object(core_object, value);
+}
+
+static const ICoreDragDropManagerInternalStaticsVtbl core_dragdrop_manager_internal_statics_vtbl =
+{
+    core_dragdrop_manager_internal_statics_QueryInterface,
+    core_dragdrop_manager_internal_statics_AddRef,
+    core_dragdrop_manager_internal_statics_Release,
+    core_dragdrop_manager_internal_statics_GetIids,
+    core_dragdrop_manager_internal_statics_GetRuntimeClassName,
+    core_dragdrop_manager_internal_statics_GetTrustLevel,
+    core_dragdrop_manager_internal_statics_GetForCoreObject,
 };
 
 DEFINE_IINSPECTABLE(dragdrop_manager_interop, IDragDropManagerInterop, struct dataexchange,
@@ -316,6 +441,7 @@ static struct dataexchange dataexchange =
 {
     {&activation_factory_vtbl},
     {&core_dragdrop_manager_statics_vtbl},
+    {&core_dragdrop_manager_internal_statics_vtbl},
     {&dragdrop_manager_interop_vtbl},
     1
 };

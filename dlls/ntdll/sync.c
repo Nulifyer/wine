@@ -39,6 +39,34 @@
 WINE_DEFAULT_DEBUG_CHANNEL(sync);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
+static const char *debugstr_timeout( const LARGE_INTEGER *timeout );
+
+/******************************************************************
+ *              NtCreateIRTimer (NTDLL.@)
+ *
+ * IR timers use a restricted Timer2 object on Windows.  Wine's timer
+ * server provides the same one-shot notification behavior needed by the
+ * user-mode contract; the extra parameter identifies the internal client.
+ */
+NTSTATUS WINAPI NtCreateIRTimer( HANDLE *handle, const void *extra, ACCESS_MASK access )
+{
+    TRACE( "handle %p, extra %p, access %#x\n", handle, extra, access );
+
+    if (!extra) return STATUS_INVALID_PARAMETER_2;
+    return NtCreateTimer( handle, access, NULL, NotificationTimer );
+}
+
+/******************************************************************
+ *              NtSetIRTimer (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSetIRTimer( HANDLE handle, const LARGE_INTEGER *when )
+{
+    TRACE( "handle %p, timeout %s\n", handle, debugstr_timeout( when ) );
+
+    if (!when) return NtCancelTimer( handle, NULL );
+    return NtSetTimer( handle, when, NULL, NULL, FALSE, 0, NULL );
+}
+
 static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
 {
     if (!timeout) return "(infinite)";
@@ -515,6 +543,12 @@ void WINAPI RtlAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
 {
     union { RTL_SRWLOCK *rtl; struct srw_lock *s; LONG *l; } u = { lock };
 
+    TRACE("lock %p value %#lx caller %p\n", lock, *u.l, __builtin_return_address( 0 ));
+    if (((ULONG_PTR)lock & 0xfff) == 0x368)
+        TRACE("xaml mutex lock %p owner %#lx count %#lx thread %#lx\n", lock,
+              *(DWORD *)((char *)lock + 0x38), *(DWORD *)((char *)lock + 0x3c),
+              HandleToULong( NtCurrentTeb()->ClientId.UniqueThread ));
+
     InterlockedExchangeAdd16( &u.s->exclusive_waiters, 2 );
 
     for (;;)
@@ -541,7 +575,12 @@ void WINAPI RtlAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
             }
         } while (InterlockedCompareExchange( u.l, new.l, old.l ) != old.l);
 
-        if (!wait) return;
+        if (!wait)
+        {
+            TRACE("acquired lock %p value %#lx\n", lock, *u.l);
+            return;
+        }
+        TRACE("waiting for lock %p value %#lx\n", lock, *u.l);
         RtlWaitOnAddress( &u.s->owners, &new.s.owners, sizeof(short), NULL );
     }
 }
@@ -592,6 +631,8 @@ void WINAPI RtlReleaseSRWLockExclusive( RTL_SRWLOCK *lock )
 {
     union { RTL_SRWLOCK *rtl; struct srw_lock *s; LONG *l; } u = { lock };
     union { struct srw_lock s; LONG l; } old, new;
+
+    TRACE("lock %p value %#lx caller %p\n", lock, *u.l, __builtin_return_address( 0 ));
 
     do
     {
@@ -882,7 +923,8 @@ NTSTATUS WINAPI RtlWaitOnAddress( const void *addr, const void *cmp, SIZE_T size
     struct futex_entry entry;
     NTSTATUS ret;
 
-    TRACE("addr %p cmp %p size %#Ix timeout %s\n", addr, cmp, size, debugstr_timeout( timeout ));
+    TRACE("addr %p cmp %p size %#Ix timeout %s caller %p\n", addr, cmp, size,
+          debugstr_timeout( timeout ), __builtin_return_address( 0 ));
 
     if (size != 1 && size != 2 && size != 4 && size != 8)
         return STATUS_INVALID_PARAMETER;

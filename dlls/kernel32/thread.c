@@ -155,5 +155,8 @@ DWORD WINAPI KERNEL32_GetCurrentProcessId(void)
  */
 DWORD WINAPI KERNEL32_GetCurrentThreadId(void)
 {
-    return HandleToULong(NtCurrentTeb()->ClientId.UniqueThread);
+    DWORD id = HandleToULong(NtCurrentTeb()->ClientId.UniqueThread);
+
+    TRACE("returning %#lx caller %p\n", id, __builtin_return_address( 0 ));
+    return id;
 }

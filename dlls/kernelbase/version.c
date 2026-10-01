@@ -34,11 +34,13 @@
 #include "winver.h"
 #include "winuser.h"
 #include "winnls.h"
+#include "winreg.h"
 #include "winternl.h"
 #include "winerror.h"
 #include "appmodel.h"
 
 #include "kernelbase.h"
+#include "package_graph.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ver);
@@ -1546,24 +1548,285 @@ BOOL WINAPI GetVersionExW( OSVERSIONINFOW *info )
     return TRUE;
 }
 
+static LONG get_current_application_user_model_id( UINT32 *length, WCHAR *id );
+
 /***********************************************************************
  *         GetCurrentApplicationUserModelId   (kernelbase.@)
  */
 LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentApplicationUserModelId( UINT32 *length, WCHAR *id )
 {
-    FIXME( "(%p %p): stub\n", length, id );
-    return APPMODEL_ERROR_NO_APPLICATION;
+    TRACE( "(%p %p)\n", length, id );
+    return get_current_application_user_model_id( length, id );
 }
 
 /***********************************************************************
- *         AddDependencyToProcessPackageGraph   (kernelbase.@)
+ *         GetApplicationUserModelIdFromToken   (kernelbase.@)
  */
-HRESULT WINAPI AddDependencyToProcessPackageGraph( const WCHAR *package_full_name, UINT64 context,
-                                                   UINT32 rank, UINT32 options )
+LONG WINAPI GetApplicationUserModelIdFromToken( HANDLE token, UINT32 *length, WCHAR *id )
 {
-    TRACE( "(%s, %s, %u, %#x)\n", debugstr_w(package_full_name),
-           wine_dbgstr_longlong(context), rank, options );
+    TRACE( "(%p %p %p)\n", token, length, id );
+    if (!token) return ERROR_INVALID_HANDLE;
+    return get_current_application_user_model_id( length, id );
+}
+
+/***********************************************************************
+ *         GetApplicationUserModelId   (kernelbase.@)
+ */
+LONG WINAPI GetApplicationUserModelId( HANDLE process, UINT32 *length, WCHAR *id )
+{
+    TRACE( "(%p %p %p)\n", process, length, id );
+    if (!process || !length || (!id && *length)) return ERROR_INVALID_PARAMETER;
+    return get_current_application_user_model_id( length, id );
+}
+
+static LONG get_current_package_strings( WCHAR *full_name, UINT32 full_name_count,
+                                         WCHAR *path, UINT32 path_count )
+{
+    static const WCHAR windows_apps[] = L"\\WindowsApps\\";
+    WCHAR image[MAX_PATH], *component = NULL, *end, *p;
+    DWORD image_len;
+    UINT32 name_len, package_path_len;
+
+    image_len = GetModuleFileNameW( NULL, image, ARRAY_SIZE(image) );
+    if (!image_len || image_len >= ARRAY_SIZE(image)) return APPMODEL_ERROR_NO_PACKAGE;
+
+    for (p = image; *p; ++p)
+    {
+        if (!wcsnicmp( p, windows_apps, ARRAY_SIZE(windows_apps) - 1 ))
+        {
+            component = p + ARRAY_SIZE(windows_apps) - 1;
+            break;
+        }
+    }
+    if (!component || !(end = wcschr( component, L'\\' ))) return APPMODEL_ERROR_NO_PACKAGE;
+
+    name_len = end - component;
+    package_path_len = end - image;
+    if (!name_len || name_len >= full_name_count || package_path_len >= path_count)
+        return ERROR_INSUFFICIENT_BUFFER;
+
+    memcpy( full_name, component, name_len * sizeof(*full_name) );
+    full_name[name_len] = 0;
+    memcpy( path, image, package_path_len * sizeof(*path) );
+    path[package_path_len] = 0;
+    return ERROR_SUCCESS;
+}
+
+static LONG copy_package_string( const WCHAR *value, UINT32 *length, WCHAR *buffer )
+{
+    UINT32 required;
+
+    if (!length) return ERROR_INVALID_PARAMETER;
+    required = lstrlenW( value ) + 1;
+    if (!buffer || *length < required)
+    {
+        *length = required;
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
+    memcpy( buffer, value, required * sizeof(*buffer) );
+    *length = required;
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *         ParseApplicationUserModelId   (kernelbase.@)
+ */
+LONG WINAPI ParseApplicationUserModelId( const WCHAR *application_user_model_id,
+                                         UINT32 *package_family_name_length,
+                                         WCHAR *package_family_name,
+                                         UINT32 *package_relative_application_id_length,
+                                         WCHAR *package_relative_application_id )
+{
+    const WCHAR *separator;
+    UINT32 family_supplied, relative_supplied, family_required, relative_required;
+
+    TRACE( "(%s %p %p %p %p)\n", debugstr_w(application_user_model_id),
+           package_family_name_length, package_family_name,
+           package_relative_application_id_length, package_relative_application_id );
+
+    if (!application_user_model_id || !package_family_name_length ||
+        !package_relative_application_id_length ||
+        !(separator = wcschr( application_user_model_id, L'!' )) ||
+        separator == application_user_model_id || !separator[1] ||
+        wcschr( separator + 1, L'!' ))
+        return ERROR_INVALID_PARAMETER;
+
+    family_required = separator - application_user_model_id + 1;
+    relative_required = lstrlenW( separator + 1 ) + 1;
+    if (family_required - 1 < PACKAGE_FAMILY_NAME_MIN_LENGTH ||
+        family_required - 1 > PACKAGE_FAMILY_NAME_MAX_LENGTH ||
+        relative_required < PACKAGE_RELATIVE_APPLICATION_ID_MIN_LENGTH ||
+        relative_required > PACKAGE_RELATIVE_APPLICATION_ID_MAX_LENGTH ||
+        family_required + relative_required > APPLICATION_USER_MODEL_ID_MAX_LENGTH)
+        return ERROR_INVALID_PARAMETER;
+
+    family_supplied = *package_family_name_length;
+    relative_supplied = *package_relative_application_id_length;
+    *package_family_name_length = family_required;
+    *package_relative_application_id_length = relative_required;
+
+    if (!package_family_name || family_supplied < family_required ||
+        !package_relative_application_id || relative_supplied < relative_required)
+        return ERROR_INSUFFICIENT_BUFFER;
+
+    memcpy( package_family_name, application_user_model_id,
+            (family_required - 1) * sizeof(*package_family_name) );
+    package_family_name[family_required - 1] = 0;
+    memcpy( package_relative_application_id, separator + 1,
+            relative_required * sizeof(*package_relative_application_id) );
+    return ERROR_SUCCESS;
+}
+
+static LONG get_package_family_name( const WCHAR *full_name, WCHAR *family_name )
+{
+    const WCHAR *name_end, *publisher_id;
+    UINT32 name_len;
+
+    if (!(name_end = wcschr( full_name, L'_' )) ||
+        !(publisher_id = wcsrchr( full_name, L'_' )) || publisher_id == name_end)
+        return APPMODEL_ERROR_PACKAGE_IDENTITY_CORRUPT;
+
+    name_len = name_end - full_name;
+    if (name_len + 1 + lstrlenW( publisher_id + 1 ) > PACKAGE_FAMILY_NAME_MAX_LENGTH)
+        return APPMODEL_ERROR_PACKAGE_IDENTITY_CORRUPT;
+
+    memcpy( family_name, full_name, name_len * sizeof(*family_name) );
+    family_name[name_len] = L'_';
+    lstrcpyW( family_name + name_len + 1, publisher_id + 1 );
+    return ERROR_SUCCESS;
+}
+
+static LONG get_current_package_identity( WCHAR *full_name, WCHAR *family_name, WCHAR *path )
+{
+    LONG ret;
+
+    if ((ret = get_current_package_strings( full_name, PACKAGE_FULL_NAME_MAX_LENGTH + 1,
+                                            path, MAX_PATH )))
+        return ret;
+
+    return get_package_family_name( full_name, family_name );
+}
+
+static LONG get_current_application_user_model_id( UINT32 *length, WCHAR *id )
+{
+    static const WCHAR application_id_env[] = L"LINUXNT_APPLICATION_ID";
+    static const WCHAR default_application_id[] = L"App";
+    WCHAR full_name[PACKAGE_FULL_NAME_MAX_LENGTH + 1];
+    WCHAR family_name[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1];
+    WCHAR path[MAX_PATH], application_id[APPLICATION_USER_MODEL_ID_MAX_LENGTH];
+    WCHAR aumid[APPLICATION_USER_MODEL_ID_MAX_LENGTH];
+    const WCHAR *relative_id = application_id;
+    DWORD env_length;
+    LONG ret;
+
+    if ((ret = get_current_package_identity( full_name, family_name, path )))
+        return ret == APPMODEL_ERROR_NO_PACKAGE ? APPMODEL_ERROR_NO_APPLICATION : ret;
+
+    env_length = GetEnvironmentVariableW( application_id_env, application_id,
+                                          ARRAY_SIZE(application_id) );
+    if (!env_length || env_length >= ARRAY_SIZE(application_id)) relative_id = default_application_id;
+    if (lstrlenW(family_name) + 1 + lstrlenW(relative_id) >= ARRAY_SIZE(aumid))
+        return APPMODEL_ERROR_PACKAGE_IDENTITY_CORRUPT;
+
+    lstrcpyW( aumid, family_name );
+    lstrcatW( aumid, L"!" );
+    lstrcatW( aumid, relative_id );
+    return copy_package_string( aumid, length, id );
+}
+
+
+
+/***********************************************************************
+ *         AppXGetOSMaxVersionTested   (kernelbase.@)
+ */
+HRESULT WINAPI AppXGetOSMaxVersionTested( const WCHAR *full_name, UINT64 *max_version )
+{
+    PACKAGE_VERSION version = {0};
+
+    TRACE( "(%s %p)\n", debugstr_w(full_name), max_version );
+    if (!full_name || !max_version) return E_INVALIDARG;
+
+    /* The Windows 11 inbox packages used by LinuxNT target this baseline. */
+    version.Major = 10;
+    version.Build = 22621;
+    *max_version = version.Version;
     return S_OK;
+}
+
+/***********************************************************************
+ *         CoCreateObjectInContext   (kernelbase.@)
+ *
+ * The private COM API-set contracts resolve this name through KernelBase
+ * on current Windows builds.  That API-set entry is an unavailable-API
+ * thunk there (it reports the unavailable API and returns E_FAIL), not the
+ * public four-argument COMBASE export with the same name.
+ */
+HRESULT WINAPI CoCreateObjectInContext( void *arg1, void *arg2, void *arg3, void *arg4 )
+{
+    TRACE( "(%p %p %p %p)\n", arg1, arg2, arg3, arg4 );
+    return E_FAIL;
+}
+
+/***********************************************************************
+ *         CoRegisterInitializeSpy   (kernelbase.@)
+ */
+HRESULT WINAPI CoRegisterInitializeSpy(void *spy, ULARGE_INTEGER *cookie)
+{
+    typedef HRESULT (WINAPI *register_spy_fn)(void *, ULARGE_INTEGER *);
+    HMODULE module = GetModuleHandleW(L"combase.dll");
+    register_spy_fn func;
+
+    TRACE("%p, %p\n", spy, cookie);
+    if (!module || !(func = (register_spy_fn)GetProcAddress(module, "CoRegisterInitializeSpy")))
+        return E_NOTIMPL;
+    return func(spy, cookie);
+}
+
+/***********************************************************************
+ *         CoRevokeInitializeSpy   (kernelbase.@)
+ */
+HRESULT WINAPI CoRevokeInitializeSpy(ULARGE_INTEGER cookie)
+{
+    typedef HRESULT (WINAPI *revoke_spy_fn)(ULARGE_INTEGER);
+    HMODULE module = GetModuleHandleW(L"combase.dll");
+    revoke_spy_fn func;
+
+    TRACE("%s\n", wine_dbgstr_longlong(cookie.QuadPart));
+    if (!module || !(func = (revoke_spy_fn)GetProcAddress(module, "CoRevokeInitializeSpy")))
+        return E_NOTIMPL;
+    return func(cookie);
+}
+
+/***********************************************************************
+ *         PsmQueryBackgroundActivationType   (kernelbase.@)
+ */
+NTSTATUS WINAPI PsmQueryBackgroundActivationType(void)
+{
+    TRACE( "()\n" );
+    return STATUS_ENTRYPOINT_NOT_FOUND;
+}
+
+/***********************************************************************
+ *         GetCurrentPackageApplicationResourcesContext   (kernelbase.@)
+ */
+LONG WINAPI GetCurrentPackageApplicationResourcesContext( UINT32 index, UINT32 reserved,
+                                                           void **context )
+{
+    TRACE( "(%u %#x %p)\n", index, reserved, context );
+    if (!context) return ERROR_INVALID_PARAMETER;
+    *context = NULL;
+    return ERROR_NOT_FOUND;
+}
+
+/***********************************************************************
+ *         GetCurrentPackageGlobalizationContext   (kernelbase.@)
+ */
+LONG WINAPI GetCurrentPackageGlobalizationContext( UINT32 index, UINT32 reserved, void **context )
+{
+    TRACE( "(%u %#x %p)\n", index, reserved, context );
+    if (!context) return ERROR_INVALID_PARAMETER;
+    *context = NULL;
+    return ERROR_NOT_FOUND;
 }
 
 /***********************************************************************
@@ -1571,8 +1834,14 @@ HRESULT WINAPI AddDependencyToProcessPackageGraph( const WCHAR *package_full_nam
  */
 LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackageFamilyName( UINT32 *length, WCHAR *name )
 {
-    FIXME( "(%p %p): stub\n", length, name );
-    return APPMODEL_ERROR_NO_PACKAGE;
+    WCHAR full_name[PACKAGE_FULL_NAME_MAX_LENGTH + 1];
+    WCHAR family_name[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1];
+    WCHAR path[MAX_PATH];
+    LONG ret;
+
+    TRACE( "(%p %p)\n", length, name );
+    if ((ret = get_current_package_identity( full_name, family_name, path ))) return ret;
+    return copy_package_string( family_name, length, name );
 }
 
 
@@ -1581,8 +1850,14 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackageFamilyName( UINT32 *length,
  */
 LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackageFullName( UINT32 *length, WCHAR *name )
 {
-    FIXME( "(%p %p): stub\n", length, name );
-    return APPMODEL_ERROR_NO_PACKAGE;
+    WCHAR full_name[PACKAGE_FULL_NAME_MAX_LENGTH + 1];
+    WCHAR family_name[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1];
+    WCHAR path[MAX_PATH];
+    LONG ret;
+
+    TRACE( "(%p %p)\n", length, name );
+    if ((ret = get_current_package_identity( full_name, family_name, path ))) return ret;
+    return copy_package_string( full_name, length, name );
 }
 
 
@@ -1591,8 +1866,15 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackageFullName( UINT32 *length, W
  */
 LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackageId( UINT32 *len, BYTE *buffer )
 {
-    FIXME( "(%p %p): stub\n", len, buffer );
-    return APPMODEL_ERROR_NO_PACKAGE;
+    WCHAR full_name[PACKAGE_FULL_NAME_MAX_LENGTH + 1];
+    WCHAR family_name[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1];
+    WCHAR path[MAX_PATH];
+    LONG ret;
+
+    TRACE( "(%p %p)\n", len, buffer );
+    if (!len) return ERROR_INVALID_PARAMETER;
+    if ((ret = get_current_package_identity( full_name, family_name, path ))) return ret;
+    return PackageIdFromFullName( full_name, 0, len, buffer );
 }
 
 /***********************************************************************
@@ -1600,8 +1882,27 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackageId( UINT32 *len, BYTE *buff
  */
 LONG WINAPI GetCurrentPackageInfo( const UINT32 flags, UINT32 *buffer_size, BYTE *buffer, UINT32 *count )
 {
-    FIXME( "(%#x %p %p %p): stub\n", flags, buffer_size, buffer, count );
-    return APPMODEL_ERROR_NO_PACKAGE;
+    TRACE( "(%#x %p %p %p)\n", flags, buffer_size, buffer, count );
+    return package_graph_info( flags, PackagePathType_Install, buffer_size, buffer, count );
+}
+
+/***********************************************************************
+ *         GetCurrentPackageInfo2   (kernelbase.@)
+ */
+LONG WINAPI GetCurrentPackageInfo2( UINT32 flags, UINT32 path_type, UINT32 *buffer_size,
+                                    BYTE *buffer, UINT32 *count )
+{
+    TRACE( "(%#x %#x %p %p %p)\n", flags, path_type, buffer_size, buffer, count );
+    return package_graph_info( flags, path_type, buffer_size, buffer, count );
+}
+
+/***********************************************************************
+ *         GetCurrentPackageInfo3   (kernelbase.@)
+ */
+HRESULT WINAPI GetCurrentPackageInfo3( UINT32 flags, UINT32 info_type, UINT32 *buffer_size,
+                                       void *buffer, UINT32 *count )
+{
+    return package_graph_info3(flags, info_type, buffer_size, buffer, count);
 }
 
 /***********************************************************************
@@ -1609,8 +1910,14 @@ LONG WINAPI GetCurrentPackageInfo( const UINT32 flags, UINT32 *buffer_size, BYTE
  */
 LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackagePath( UINT32 *length, WCHAR *path )
 {
-    FIXME( "(%p %p): stub\n", length, path );
-    return APPMODEL_ERROR_NO_PACKAGE;
+    WCHAR full_name[PACKAGE_FULL_NAME_MAX_LENGTH + 1];
+    WCHAR family_name[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1];
+    WCHAR package_path[MAX_PATH];
+    LONG ret;
+
+    TRACE( "(%p %p)\n", length, path );
+    if ((ret = get_current_package_identity( full_name, family_name, package_path ))) return ret;
+    return copy_package_string( package_path, length, path );
 }
 
 
@@ -1654,12 +1961,113 @@ LONG WINAPI DECLSPEC_HOTPATCH GetPackagesByPackageFamily(const WCHAR *family_nam
  */
 LONG WINAPI GetPackagePathByFullName(const WCHAR *name, UINT32 *len, WCHAR *path)
 {
-    if (!len || !name)
+    WCHAR package_path[MAX_PATH] = L"C:\\Program Files\\WindowsApps\\";
+
+    TRACE( "(%s %p %p)\n", debugstr_w(name), len, path );
+    if (!len || !name) return ERROR_INVALID_PARAMETER;
+    if (lstrlenW(package_path) + lstrlenW(name) >= ARRAY_SIZE(package_path))
+        return ERROR_INSUFFICIENT_BUFFER;
+    lstrcatW( package_path, name );
+    if (GetFileAttributesW(package_path) == INVALID_FILE_ATTRIBUTES)
+        return APPMODEL_ERROR_NO_PACKAGE;
+    return copy_package_string( package_path, len, path );
+}
+
+/***********************************************************************
+ *         GetPackagePathByFullName2   (kernelbase.@)
+ */
+LONG WINAPI GetPackagePathByFullName2( const WCHAR *name, UINT32 path_type,
+                                       UINT32 *len, WCHAR *path )
+{
+    TRACE( "(%s %#x %p %p)\n", debugstr_w(name), path_type, len, path );
+    if (path_type > PackagePathType_EffectiveExternal) return ERROR_INVALID_PARAMETER;
+    return GetPackagePathByFullName( name, len, path );
+}
+
+/***********************************************************************
+ *         GetStagedPackagePathByFullName   (kernelbase.@)
+ */
+LONG WINAPI GetStagedPackagePathByFullName( const WCHAR *name, UINT32 *len, WCHAR *path )
+{
+    return GetPackagePathByFullName( name, len, path );
+}
+
+/***********************************************************************
+ *         GetStagedPackagePathByFullName2   (kernelbase.@)
+ */
+LONG WINAPI GetStagedPackagePathByFullName2( const WCHAR *name, UINT32 path_type,
+                                             UINT32 *len, WCHAR *path )
+{
+    return GetPackagePathByFullName2( name, path_type, len, path );
+}
+
+/***********************************************************************
+ *         GetPackageStatus   (kernelbase.@)
+ */
+LONG WINAPI GetPackageStatus( const WCHAR *package_full_name, UINT32 *status )
+{
+    static const WCHAR root[] =
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\StateChange\\PackageList\\";
+    WCHAR key_name[ARRAY_SIZE(root) + PACKAGE_FULL_NAME_MAX_LENGTH];
+    BYTE identity[sizeof(PACKAGE_ID) + (PACKAGE_FULL_NAME_MAX_LENGTH + 3) * sizeof(WCHAR)];
+    UINT32 identity_size = sizeof(identity);
+    DWORD value = 0, type, size = sizeof(value), saved_error = GetLastError();
+    HKEY key;
+    LONG ret;
+
+    TRACE( "(%s %p)\n", debugstr_w(package_full_name), status );
+    if (!package_full_name || !package_full_name[0] || !status)
         return ERROR_INVALID_PARAMETER;
 
-    FIXME( "(%s %p %p): stub\n", debugstr_w(name), len, path );
+    if (lstrlenW(package_full_name) > PACKAGE_FULL_NAME_MAX_LENGTH)
+        return ERROR_INVALID_PARAMETER;
+    lstrcpyW( key_name, root );
+    lstrcatW( key_name, package_full_name );
+    ret = RegOpenKeyExW( HKEY_LOCAL_MACHINE, key_name, 0, KEY_READ, &key );
+    if (!ret)
+    {
+        ret = RegQueryValueExW( key, L"PackageStatus", NULL, &type, (BYTE *)&value, &size );
+        RegCloseKey( key );
+        if (ret == ERROR_FILE_NOT_FOUND) ret = ERROR_SUCCESS;
+        else if (!ret && (type != REG_DWORD || size != sizeof(value)))
+            ret = APPMODEL_ERROR_PACKAGE_RUNTIME_CORRUPT;
+    }
+    else if (ret == ERROR_FILE_NOT_FOUND)
+    {
+        /* A valid name with no recorded status is healthy, even when the
+         * package is not installed. Location and status are separate queries. */
+        ret = PackageIdFromFullName( package_full_name, 0, &identity_size, identity );
+    }
+    if (!ret) *status = value;
+    SetLastError( saved_error );
+    return ret;
+}
 
-    return APPMODEL_ERROR_NO_PACKAGE;
+/***********************************************************************
+ *         GetEffectivePackageStatusForUser   (kernelbase.@)
+ */
+LONG WINAPI GetEffectivePackageStatusForUser( void *user_context,
+                                              const WCHAR *package_full_name,
+                                              UINT32 *status )
+{
+    TRACE( "(%p %s %p)\n", user_context, debugstr_w(package_full_name), status );
+    return GetPackageStatus( package_full_name, status );
+}
+
+/***********************************************************************
+ *         GetStagedPackageOrigin   (kernelbase.@)
+ */
+LONG WINAPI GetStagedPackageOrigin( const WCHAR *package_full_name, PackageOrigin *origin )
+{
+    UINT32 status;
+    LONG ret;
+
+    TRACE( "(%s %p)\n", debugstr_w(package_full_name), origin );
+    if (!origin) return ERROR_INVALID_PARAMETER;
+    if ((ret = GetPackageStatus( package_full_name, &status ))) return ret;
+
+    *origin = PackageOrigin_Store;
+    return ERROR_SUCCESS;
 }
 
 static const struct
@@ -1774,4 +2182,69 @@ LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *
     id->publisherId[len] = 0;
 
     return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *         PackageFamilyNameFromId   (kernelbase.@)
+ */
+LONG WINAPI PackageFamilyNameFromId( const PACKAGE_ID *id, UINT32 *length, WCHAR *family_name )
+{
+    WCHAR value[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1];
+
+    TRACE( "(%p %p %p)\n", id, length, family_name );
+    if (!id || !id->name || !id->publisherId || !length) return ERROR_INVALID_PARAMETER;
+    if (lstrlenW(id->name) + 1 + lstrlenW(id->publisherId) >= ARRAY_SIZE(value))
+        return ERROR_INVALID_PARAMETER;
+    lstrcpyW( value, id->name );
+    lstrcatW( value, L"_" );
+    lstrcatW( value, id->publisherId );
+    return copy_package_string( value, length, family_name );
+}
+
+/***********************************************************************
+ *         PackageFamilyNameFromFullName   (kernelbase.@)
+ */
+LONG WINAPI PackageFamilyNameFromFullName( const WCHAR *full_name, UINT32 *length,
+                                           WCHAR *family_name )
+{
+    BYTE id_buffer[sizeof(PACKAGE_ID) +
+                   (PACKAGE_NAME_MAX_LENGTH + PACKAGE_RESOURCEID_MAX_LENGTH +
+                    PACKAGE_PUBLISHERID_MAX_LENGTH + 3) * sizeof(WCHAR)];
+    PACKAGE_ID *id = (PACKAGE_ID *)id_buffer;
+    UINT32 id_size = sizeof(id_buffer);
+    LONG ret;
+
+    TRACE( "(%s %p %p)\n", debugstr_w(full_name), length, family_name );
+    if ((ret = PackageIdFromFullName( full_name, 0, &id_size, id_buffer ))) return ret;
+    return PackageFamilyNameFromId( id, length, family_name );
+}
+
+/***********************************************************************
+ *         PackageNameAndPublisherIdFromFamilyName   (kernelbase.@)
+ */
+LONG WINAPI PackageNameAndPublisherIdFromFamilyName( const WCHAR *family_name,
+                                                      UINT32 *name_length, WCHAR *name,
+                                                      UINT32 *publisher_length, WCHAR *publisher_id )
+{
+    const WCHAR *separator;
+    WCHAR package_name[PACKAGE_NAME_MAX_LENGTH + 1];
+    UINT32 package_name_length;
+    LONG name_ret, publisher_ret;
+
+    TRACE( "(%s %p %p %p %p)\n", debugstr_w(family_name), name_length, name,
+           publisher_length, publisher_id );
+    if (!family_name || !name_length || !publisher_length ||
+        !(separator = wcsrchr(family_name, L'_'))) return ERROR_INVALID_PARAMETER;
+    package_name_length = separator - family_name;
+    if (!package_name_length || package_name_length >= ARRAY_SIZE(package_name))
+        return ERROR_INVALID_PARAMETER;
+    memcpy( package_name, family_name, package_name_length * sizeof(WCHAR) );
+    package_name[package_name_length] = 0;
+
+    name_ret = copy_package_string( package_name, name_length, name );
+    publisher_ret = copy_package_string( separator + 1, publisher_length, publisher_id );
+    if (name_ret == ERROR_INSUFFICIENT_BUFFER || publisher_ret == ERROR_INSUFFICIENT_BUFFER)
+        return ERROR_INSUFFICIENT_BUFFER;
+    if (name_ret) return name_ret;
+    return publisher_ret;
 }

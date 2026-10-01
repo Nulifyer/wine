@@ -1,0 +1,13 @@
+/* Proxy for the standard Windows Runtime inspectable interface. */
+
+#pragma makedep proxy
+#pragma makedep register
+#pragma makedep ident
+
+#include "inspectable.idl"
+
+[
+    threading(both),
+    uuid(b8da6310-e19b-11d0-933c-00a0c90dcaa9)
+]
+coclass PSFactoryBuffer { interface IPSFactoryBuffer; }

@@ -20,15 +20,485 @@
  */
 
 #include <time.h>
+#include <string.h>
 
 #include "ntstatus.h"
 #include "wine/debug.h"
+#include "wine/server.h"
 #include "ntdll_misc.h"
 #include "wmistr.h"
 #include "evntrace.h"
 #include "evntprov.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
+
+#define WNF_SUBSCRIPTION_MAGIC 0x4c4e54574e465355ULL
+#define FEATURE_CONFIGURATION_REGISTRATION_MAGIC 0x4c4e544643524547ULL
+
+static LONG wnf_serialization_group;
+
+struct feature_configuration
+{
+    ULONG feature_id;
+    ULONG flags;
+    ULONG variant_payload;
+};
+
+typedef void (WINAPI *FEATURE_CONFIGURATION_CHANGE_CALLBACK)( void *context );
+
+struct feature_configuration_registration
+{
+    ULONGLONG magic;
+    FEATURE_CONFIGURATION_CHANGE_CALLBACK callback;
+    void *context;
+};
+
+/***********************************************************************
+ *      RtlGetFeatureToggleConfiguration   (NTDLL.@)
+ *
+ * The second argument is the caller's packed default configuration. Wine's
+ * feature configuration is immutable, so there is no process-local override
+ * to apply to that default.
+ */
+ULONGLONG WINAPI RtlGetFeatureToggleConfiguration( ULONG feature_id, ULONGLONG default_configuration )
+{
+    TRACE( "(%#lx %#I64x)\n", feature_id, default_configuration );
+    return default_configuration;
+}
+
+/***********************************************************************
+ *      RtlGetFeatureTogglesChangeToken   (NTDLL.@)
+ */
+ULONG WINAPI RtlGetFeatureTogglesChangeToken(void)
+{
+    return 1;
+}
+
+/***********************************************************************
+ *      RtlNotifyFeatureToggleUsage   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlNotifyFeatureToggleUsage( ULONG feature_id, ULONGLONG configuration,
+                                              ULONG reporting_kind )
+{
+    TRACE( "(%#lx %#I64x %lu)\n", feature_id, configuration, reporting_kind );
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *      RtlQueryFeatureConfiguration   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlQueryFeatureConfiguration( ULONG feature_id, ULONG configuration_type,
+                                               ULONGLONG *change_stamp,
+                                               struct feature_configuration *configuration )
+{
+    ULONG flags = 0;
+
+    TRACE( "(%#lx %lu %p %p)\n", feature_id, configuration_type,
+           change_stamp, configuration );
+
+    if (!change_stamp || !configuration || configuration_type > 1)
+        return STATUS_INVALID_PARAMETER;
+
+    if (feature_id == 0x038419ca && configuration_type <= 1)
+        flags = 0x2f;
+    else if (feature_id == 0x037e2887 && configuration_type == 0)
+        flags = 0x2f;
+    else if (feature_id == 0x032cf8c5 && configuration_type == 0)
+        flags = 0x19;
+    else if ((feature_id == 0x032204ec || feature_id == 0x03334051 ||
+              feature_id == 0x036099b1) && configuration_type == 0)
+        flags = 0x29;
+    else if (feature_id == 0x036933e4 && configuration_type == 0)
+        flags = 0x20;
+
+    *change_stamp = 1;
+    if (!flags) return STATUS_NOT_FOUND;
+
+    configuration->feature_id = feature_id;
+    configuration->flags = flags;
+    configuration->variant_payload = 0;
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *      RtlRegisterFeatureConfigurationChangeNotification   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlRegisterFeatureConfigurationChangeNotification(
+    FEATURE_CONFIGURATION_CHANGE_CALLBACK callback, void *context,
+    const ULONGLONG *observed_change_stamp, void **registration )
+{
+    struct feature_configuration_registration *entry;
+
+    TRACE( "(%p %p %p %p)\n", callback, context, observed_change_stamp, registration );
+
+    if (!callback || !registration) return STATUS_INVALID_PARAMETER;
+    *registration = NULL;
+
+    if (!(entry = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*entry) )))
+        return STATUS_NO_MEMORY;
+    entry->magic = FEATURE_CONFIGURATION_REGISTRATION_MAGIC;
+    entry->callback = callback;
+    entry->context = context;
+    *registration = entry;
+
+    /* Wine's feature configuration is immutable.  There is consequently no
+     * newer change stamp to deliver after a successful registration. */
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *      RtlUnregisterFeatureConfigurationChangeNotification   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlUnregisterFeatureConfigurationChangeNotification( void *registration )
+{
+    struct feature_configuration_registration *entry = registration;
+
+    TRACE( "(%p)\n", registration );
+
+    if (!entry || !RtlValidateHeap( GetProcessHeap(), 0, entry ) ||
+        entry->magic != FEATURE_CONFIGURATION_REGISTRATION_MAGIC)
+        return STATUS_INVALID_HANDLE;
+    entry->magic = 0;
+
+    /* Windows exposes this entry as NTSTATUS but returns the BOOLEAN result
+     * of freeing a valid registration object. */
+    return RtlFreeHeap( GetProcessHeap(), 0, entry );
+}
+
+/***********************************************************************
+ *      RtlAllocateWnfSerializationGroup   (NTDLL.@)
+ */
+ULONG WINAPI RtlAllocateWnfSerializationGroup(void)
+{
+    ULONG group;
+
+    do group = InterlockedIncrement( &wnf_serialization_group );
+    while (!group);
+    return group;
+}
+
+/***********************************************************************
+ *      NtSerializeBoot   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSerializeBoot(void)
+{
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *      NtCreateWnfStateName   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtCreateWnfStateName( ULONGLONG *state_name, ULONG name_lifetime,
+                                      ULONG data_scope, BOOLEAN persist_data,
+                                      const GUID *type_id, ULONG maximum_size,
+                                      const void *security_descriptor )
+{
+    NTSTATUS status;
+
+    TRACE( "(%p %lu %lu %u %s %lu %p)\n", state_name, name_lifetime, data_scope,
+           persist_data, debugstr_guid(type_id), maximum_size, security_descriptor );
+
+    if (!state_name || persist_data > 1 || name_lifetime > 3 || data_scope > 5 || !maximum_size)
+        return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( create_wnf_state_name )
+    {
+        req->name_lifetime = name_lifetime;
+        req->data_scope = data_scope;
+        req->maximum_size = maximum_size;
+        req->persist_data = persist_data;
+        req->type_id = !!type_id;
+        req->security_descriptor = !!security_descriptor;
+        status = wine_server_call( req );
+        if (!status) *state_name = reply->state_name;
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+/***********************************************************************
+ *      NtDeleteWnfStateName   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtDeleteWnfStateName( const ULONGLONG *state_name )
+{
+    NTSTATUS status;
+
+    TRACE( "(%p %#I64x)\n", state_name, state_name ? *state_name : 0 );
+    if (!state_name || !*state_name) return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( delete_wnf_state_name )
+    {
+        req->state_name = *state_name;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+/***********************************************************************
+ *      NtQuerySecurityAttributesToken   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQuerySecurityAttributesToken( HANDLE token, const UNICODE_STRING *attributes,
+                                                 ULONG count, void *buffer, ULONG length,
+                                                 ULONG *return_length )
+{
+    ULONG i;
+
+    TRACE( "(%p %p %lu %p %lu %p)\n", token, attributes, count, buffer, length,
+           return_length );
+    for (i = 0; i < count; ++i)
+        TRACE( "attribute[%lu] %s\n", i, debugstr_us(attributes + i) );
+
+    /* Wine currently synthesizes the package-token attribute set as a
+     * single block.  Returning that complete set also satisfies callers
+     * querying named members; selective packing can be added when a caller
+     * depends on the response containing only the requested names. */
+    return NtQueryInformationToken( token, TokenSecurityAttributes, buffer, length,
+                                    return_length );
+}
+
+typedef NTSTATUS (WINAPI *WNF_USER_CALLBACK)( ULONGLONG state_name, ULONG change_stamp,
+                                              const GUID *type_id, void *context,
+                                              const void *buffer, ULONG buffer_size );
+
+struct wnf_subscription
+{
+    ULONGLONG magic;
+    ULONGLONG state_name;
+    ULONG change_stamp;
+    ULONG serialization_group;
+    ULONG flags;
+    WNF_USER_CALLBACK callback;
+    void *callback_context;
+    GUID type_id;
+    BOOL has_type_id;
+};
+
+/***********************************************************************
+ *      NtUpdateWnfStateData   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtUpdateWnfStateData( const ULONGLONG *state_name, const void *buffer,
+                                      ULONG length, const GUID *type_id,
+                                      const void *explicit_scope, ULONG matching_change_stamp,
+                                      ULONG check_stamp )
+{
+    NTSTATUS status;
+
+    TRACE( "(%p %#I64x %p %lu %s %p %lu %lu)\n", state_name,
+           state_name ? *state_name : 0, buffer, length, debugstr_guid(type_id),
+           explicit_scope, matching_change_stamp, check_stamp );
+
+    if (!state_name || !*state_name || (!buffer && length) || check_stamp > 1)
+        return STATUS_INVALID_PARAMETER;
+    if (explicit_scope && (((*state_name ^ 0x41c64e6da3bc0074ULL) >> 6) & 0xf) != 1)
+        return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( update_wnf_state_data )
+    {
+        req->state_name = *state_name;
+        req->matching_stamp = matching_change_stamp;
+        req->check_stamp = check_stamp;
+        req->explicit_scope = !!explicit_scope;
+        req->session_id = explicit_scope ? *(const ULONG *)explicit_scope : 0;
+        wine_server_add_data( req, buffer, length );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+/***********************************************************************
+ *      RtlPublishWnfStateData   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlPublishWnfStateData( ULONGLONG state_name, const GUID *type_id,
+                                        const void *buffer, ULONG length,
+                                        const void *explicit_scope )
+{
+    return NtUpdateWnfStateData( &state_name, buffer, length, type_id,
+                                 explicit_scope, 0, FALSE );
+}
+
+/***********************************************************************
+ *      NtQueryWnfStateData   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQueryWnfStateData( const ULONGLONG *state_name, const GUID *type_id,
+                                     const void *explicit_scope, ULONG *change_stamp,
+                                     void *buffer, ULONG *buffer_size )
+{
+    unsigned char state_data[4096];
+    ULONG capacity, size = 0, stamp = 0;
+    NTSTATUS status;
+
+    TRACE( "(%p %s %p %p %p %p)\n", state_name, debugstr_guid(type_id), explicit_scope,
+           change_stamp, buffer, buffer_size );
+
+    if (!state_name || !buffer_size) return STATUS_INVALID_PARAMETER;
+    if (explicit_scope && (((*state_name ^ 0x41c64e6da3bc0074ULL) >> 6) & 0xf) != 1)
+        return STATUS_INVALID_PARAMETER;
+    capacity = *buffer_size;
+
+    SERVER_START_REQ( query_wnf_state_data )
+    {
+        req->state_name = *state_name;
+        req->explicit_scope = !!explicit_scope;
+        req->session_id = explicit_scope ? *(const ULONG *)explicit_scope : 0;
+        wine_server_set_reply( req, state_data, sizeof(state_data) );
+        status = wine_server_call( req );
+        if (!status)
+        {
+            stamp = reply->change_stamp;
+            size = reply->total;
+        }
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
+    if (change_stamp) *change_stamp = stamp;
+    *buffer_size = size;
+    if (capacity < size) return STATUS_BUFFER_TOO_SMALL;
+    if (size && !buffer) return STATUS_ACCESS_VIOLATION;
+    if (size) memcpy( buffer, state_data, size );
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *      RtlQueryWnfStateData   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlQueryWnfStateData( ULONG *change_stamp, ULONGLONG state_name,
+                                      WNF_USER_CALLBACK callback, void *callback_context,
+                                      const GUID *type_id )
+{
+    ULONGLONG empty_data[2] = {0};
+    ULONG stamp, size = sizeof(empty_data);
+    NTSTATUS status;
+
+    TRACE( "(%p %#I64x %p %p %s)\n", change_stamp, state_name, callback,
+           callback_context, debugstr_guid(type_id) );
+
+    /* An encoded WNF name has version one in the low nibble after XOR with
+     * the WNF state-name key, hence an encoded low nibble of five. */
+    if (!change_stamp || !callback || (state_name & 0xf) != 5)
+        return STATUS_INVALID_PARAMETER;
+
+    stamp = *change_stamp;
+    status = NtQueryWnfStateData( &state_name, type_id, NULL, &stamp,
+                                  empty_data, &size );
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND)
+    {
+        /* Windows invokes the callback with a non-NULL, zero-filled buffer
+         * even when a permanent state currently has no payload. */
+        stamp = 0;
+        size = 0;
+        status = STATUS_SUCCESS;
+    }
+    if (status) return status;
+
+    *change_stamp = stamp;
+    return callback( state_name, stamp, type_id, callback_context,
+                     empty_data, size );
+}
+
+/***********************************************************************
+ *      RtlQueryWnfMetaNotification   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlQueryWnfMetaNotification( ULONG *value, ULONG info_class,
+                                              ULONGLONG state_name,
+                                              const void *explicit_scope )
+{
+    ULONG size = 0;
+    NTSTATUS status;
+
+    TRACE( "(%p %lu %#I64x %p)\n", value, info_class, state_name, explicit_scope );
+
+    if (!value) return STATUS_ACCESS_VIOLATION;
+    if ((state_name & 0xf) != 5 || info_class > 2 || explicit_scope)
+        return STATUS_INVALID_PARAMETER;
+
+    status = NtQueryWnfStateData( &state_name, NULL, NULL, NULL, NULL, &size );
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND && !info_class)
+    {
+        *value = FALSE;
+        return STATUS_SUCCESS;
+    }
+    if (status != STATUS_SUCCESS && status != STATUS_BUFFER_TOO_SMALL) return status;
+
+    switch (info_class)
+    {
+    case 0: /* WnfInfoStateNameExist */
+        *value = TRUE;
+        break;
+    case 1: /* WnfInfoSubscribersPresent */
+        /* The current WNF partition does not deliver subscriptions. */
+        *value = FALSE;
+        break;
+    case 2: /* WnfInfoIsQuiescent */
+        /* With no delivery engine there can be no outstanding delivery. */
+        *value = TRUE;
+        break;
+    }
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *      RtlSubscribeWnfStateChangeNotification   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSubscribeWnfStateChangeNotification( void **subscription, ULONGLONG state_name,
+                                                         ULONG change_stamp, WNF_USER_CALLBACK callback,
+                                                         void *callback_context, const GUID *type_id,
+                                                         ULONG serialization_group, ULONG flags )
+{
+    struct wnf_subscription *entry;
+
+    TRACE( "(%p %#I64x %lu %p %p %s %lu %#lx)\n", subscription, state_name, change_stamp,
+           callback, callback_context, debugstr_guid(type_id), serialization_group, flags );
+
+    if (!subscription || !callback) return STATUS_INVALID_PARAMETER;
+    *subscription = NULL;
+
+    if (!(entry = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*entry) ))) return STATUS_NO_MEMORY;
+    entry->magic = WNF_SUBSCRIPTION_MAGIC;
+    entry->state_name = state_name;
+    entry->change_stamp = change_stamp;
+    entry->serialization_group = serialization_group;
+    entry->flags = flags;
+    entry->callback = callback;
+    entry->callback_context = callback_context;
+    entry->has_type_id = !!type_id;
+    if (type_id) entry->type_id = *type_id;
+    *subscription = entry;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS unsubscribe_wnf_state_change( void *subscription )
+{
+    struct wnf_subscription *entry = subscription;
+
+    TRACE( "(%p)\n", subscription );
+
+    if (!entry || !RtlValidateHeap( GetProcessHeap(), 0, entry ) ||
+        entry->magic != WNF_SUBSCRIPTION_MAGIC)
+        return STATUS_INVALID_HANDLE;
+
+    entry->magic = 0;
+    if (!RtlFreeHeap( GetProcessHeap(), 0, entry )) return STATUS_UNSUCCESSFUL;
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *      RtlUnsubscribeWnfStateChangeNotification   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlUnsubscribeWnfStateChangeNotification( void *subscription )
+{
+    return unsubscribe_wnf_state_change( subscription );
+}
+
+/***********************************************************************
+ *      RtlUnsubscribeWnfNotificationWaitForCompletion   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlUnsubscribeWnfNotificationWaitForCompletion( void *subscription )
+{
+    return unsubscribe_wnf_state_change( subscription );
+}
 
 LPCSTR debugstr_us( const UNICODE_STRING *us )
 {
@@ -278,6 +748,14 @@ void WINAPI WinSqmSetDWORD(HANDLE session, DWORD datapoint_id, DWORD datapoint_v
 void WINAPI WinSqmSetIfMaxDWORD(DWORD unk1, DWORD unk2, DWORD unk3)
 {
     FIXME("(0x%lx, 0x%lx, 0x%lx): stub\n", unk1, unk2, unk3);
+}
+
+/***********************************************************************
+ *          WinSqmSetString (NTDLL.@)
+ */
+void WINAPI WinSqmSetString(HANDLE session, DWORD datapoint_id, const WCHAR *value, DWORD length)
+{
+    FIXME("(%p, %lu, %s, %lu): stub\n", session, datapoint_id, debugstr_w(value), length);
 }
 
 /******************************************************************************

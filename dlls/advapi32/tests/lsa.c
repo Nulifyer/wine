@@ -40,6 +40,11 @@ DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 
 static BOOL (WINAPI *pGetSystemPreferredUILanguages)(DWORD, ULONG*, WCHAR*, ULONG*);
 static NTSTATUS (WINAPI *pLsaGetUserName)(PUNICODE_STRING *user, PUNICODE_STRING *domain);
+static NTSTATUS (WINAPI *pLsaLookupClose)(LSA_HANDLE handle);
+static NTSTATUS (WINAPI *pLsaLookupFreeMemory)(void *buffer);
+static NTSTATUS (WINAPI *pLsaLookupGetDomainInfo)(LSA_HANDLE handle, POLICY_INFORMATION_CLASS class, void **buffer);
+static NTSTATUS (WINAPI *pLsaLookupOpenLocalPolicy)(PLSA_OBJECT_ATTRIBUTES attributes, ACCESS_MASK access,
+                                                    PLSA_HANDLE handle);
 
 static void test_lsa(void)
 {
@@ -525,17 +530,62 @@ static void test_LsaGetUserName(void)
     LsaFreeMemory(lsa_domain);
 }
 
+static void test_lsa_lookup(void)
+{
+    LSA_OBJECT_ATTRIBUTES attributes = {sizeof(attributes)};
+    LSA_HANDLE handle = (void *)0xdeadbeef;
+    NTSTATUS status;
+    void *info;
+
+    if (!pLsaLookupOpenLocalPolicy || !pLsaLookupGetDomainInfo ||
+        !pLsaLookupClose || !pLsaLookupFreeMemory)
+    {
+        win_skip("LSA lookup API is not available\n");
+        return;
+    }
+
+    status = pLsaLookupOpenLocalPolicy(&attributes, POLICY_VIEW_LOCAL_INFORMATION, &handle);
+    ok(!status, "LsaLookupOpenLocalPolicy returned %#lx\n", status);
+    if (status) return;
+
+    info = (void *)0xdeadbeef;
+    status = pLsaLookupGetDomainInfo(handle, PolicyAccountDomainInformation, &info);
+    ok(!status, "account domain query returned %#lx\n", status);
+    ok(info != (void *)0xdeadbeef, "account domain buffer was not updated\n");
+    if (!status) ok(!pLsaLookupFreeMemory(info), "failed to free account domain buffer\n");
+
+    info = (void *)0xdeadbeef;
+    status = pLsaLookupGetDomainInfo(handle, PolicyDnsDomainInformation, &info);
+    ok(!status, "DNS domain query returned %#lx\n", status);
+    ok(info != (void *)0xdeadbeef, "DNS domain buffer was not updated\n");
+    if (!status) ok(!pLsaLookupFreeMemory(info), "failed to free DNS domain buffer\n");
+
+    info = (void *)0xdeadbeef;
+    status = pLsaLookupGetDomainInfo(handle, 0, &info);
+    ok(status == STATUS_INVALID_INFO_CLASS, "invalid class returned %#lx\n", status);
+    ok(info == (void *)0xdeadbeef, "invalid class changed buffer to %p\n", info);
+
+    status = pLsaLookupClose(handle);
+    ok(!status, "LsaLookupClose returned %#lx\n", status);
+}
+
 START_TEST(lsa)
 {
     HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
     HMODULE hadvapi32 = GetModuleHandleA("advapi32.dll");
+    HMODULE hsechost = GetModuleHandleA("sechost.dll");
 
     pGetSystemPreferredUILanguages = (void*)GetProcAddress(hkernel32, "GetSystemPreferredUILanguages");
     pLsaGetUserName = (void *)GetProcAddress(hadvapi32, "LsaGetUserName");
+    pLsaLookupClose = (void *)GetProcAddress(hsechost, "LsaLookupClose");
+    pLsaLookupFreeMemory = (void *)GetProcAddress(hsechost, "LsaLookupFreeMemory");
+    pLsaLookupGetDomainInfo = (void *)GetProcAddress(hsechost, "LsaLookupGetDomainInfo");
+    pLsaLookupOpenLocalPolicy = (void *)GetProcAddress(hsechost, "LsaLookupOpenLocalPolicy");
 
     test_lsa();
     test_LsaLookupNames2();
     test_LsaLookupSids();
     test_LsaLookupPrivilegeName();
     test_LsaGetUserName();
+    test_lsa_lookup();
 }

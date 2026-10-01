@@ -17,7 +17,7 @@
 @ stub AuditSetSystemPolicy
 @ stub BuildSecurityDescriptorForSharingAccess
 @ stub BuildSecurityDescriptorForSharingAccessEx
-@ stub CapabilityCheck
+@ stdcall CapabilityCheck(long wstr ptr)
 @ stub CapabilityCheckForSingleSessionSku
 @ stdcall ChangeServiceConfig2A(long long ptr)
 @ stdcall ChangeServiceConfig2W(long long ptr)
@@ -94,7 +94,7 @@
 @ stub EventAccessControl
 @ stub EventAccessQuery
 @ stub EventAccessRemove
-@ stub FreeTransientObjectSecurityDescriptor
+@ stdcall FreeTransientObjectSecurityDescriptor(ptr)
 @ stub GetDefaultIdentityProvider
 @ stub GetIdentityProviderInfoByGUID
 @ stub GetIdentityProviderInfoByName
@@ -104,7 +104,7 @@
 @ stub GetServiceRegistryStateKey
 @ stub I_QueryTagInformation
 @ stub I_RegisterSvchostNotificationCallback
-@ stub I_ScBroadcastServiceControlMessage
+@ stdcall I_ScBroadcastServiceControlMessage(long long long ptr)
 @ stub I_ScIsSecurityProcess
 @ stub I_ScPnPGetServiceName
 @ stub I_ScQueryServiceConfig
@@ -137,17 +137,17 @@
 @ stub LsaICLookupNamesWithCreds
 @ stub LsaICLookupSids
 @ stub LsaICLookupSidsWithCreds
-@ stub LsaLookupClose
-@ stub LsaLookupFreeMemory
-@ stub LsaLookupGetDomainInfo
+@ stdcall LsaLookupClose(ptr) advapi32.LsaClose
+@ stdcall LsaLookupFreeMemory(ptr) advapi32.LsaFreeMemory
+@ stdcall LsaLookupGetDomainInfo(ptr long ptr) advapi32.LsaLookupGetDomainInfo
 @ stub LsaLookupManageSidNameMapping
 @ stdcall LsaLookupNames2(ptr long long ptr ptr ptr) advapi32.LsaLookupNames2
-@ stub LsaLookupOpenLocalPolicy
+@ stdcall LsaLookupOpenLocalPolicy(ptr long ptr) advapi32.LsaLookupOpenLocalPolicy
 @ stdcall LsaLookupSids(ptr long ptr ptr ptr) advapi32.LsaLookupSids
 @ stub LsaLookupSids2
 @ stub LsaLookupTranslateNames
 @ stub LsaLookupTranslateSids
-@ stub LsaLookupUserAccountType
+@ stdcall LsaLookupUserAccountType(ptr ptr)
 @ stdcall LsaOpenPolicy(long ptr long long) advapi32.LsaOpenPolicy
 @ stub LsaOpenSecret
 @ stdcall LsaQueryInformationPolicy(ptr long ptr) advapi32.LsaQueryInformationPolicy
@@ -178,7 +178,7 @@
 @ stdcall QueryServiceStatus(long ptr)
 @ stdcall QueryServiceStatusEx(long long ptr long ptr)
 @ stub QueryTraceProcessingHandle
-@ stub QueryTransientObjectSecurityDescriptor
+@ stdcall QueryTransientObjectSecurityDescriptor(long wstr ptr)
 @ stub QueryUserServiceName
 @ stub QueryUserServiceNameForContext
 @ stdcall RegisterServiceCtrlHandlerA(str ptr)
@@ -201,8 +201,8 @@
 @ stdcall StartTraceA(ptr str ptr)
 @ stdcall StartTraceW(ptr wstr ptr)
 @ stdcall StopTraceW(int64 wstr ptr)
-@ stub SubscribeServiceChangeNotifications
+@ stdcall SubscribeServiceChangeNotifications(long long ptr ptr ptr)
 @ stub TraceQueryInformation
 @ stdcall TraceSetInformation(int64 long ptr long)
-@ stub UnsubscribeServiceChangeNotifications
-@ stub WaitServiceState
+@ stdcall UnsubscribeServiceChangeNotifications(ptr)
+@ stdcall WaitServiceState(long long long long)

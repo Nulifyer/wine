@@ -202,9 +202,35 @@ DLL_DIRECTORY_COOKIE WINAPI DECLSPEC_HOTPATCH AddDllDirectory( const WCHAR *dir 
 /***********************************************************************
  *	DelayLoadFailureHook   (kernelbase.@)
  */
+static HRESULT WINAPI minuser_SetClassScope( void *class_id, void *scope_id, UINT scope )
+{
+    TRACE( "class_id %p, scope_id %p, scope %u\n", class_id, scope_id, scope );
+    return S_OK;
+}
+
+static FARPROC lookup_delay_load_fallback( LPCSTR name, LPCSTR function )
+{
+    static const char *minuser_contracts[] =
+    {
+        "ext-ms-win-rtcore-minuser-private-ext-l1-1-0.dll",
+        "ext-ms-win-rtcore-minuser-private-ext-l1-1-1.dll",
+        "ext-ms-win-rtcore-minuser-private-ext-l1-1-2.dll",
+        "ext-ms-win-rtcore-minuser-private-ext-l1-1-3.dll",
+    };
+    unsigned int i;
+
+    if ((ULONG_PTR)function <= 0xffff || lstrcmpiA( function, "SetClassScope" )) return NULL;
+    for (i = 0; i < ARRAY_SIZE(minuser_contracts); ++i)
+        if (!lstrcmpiA( name, minuser_contracts[i] )) return (FARPROC)minuser_SetClassScope;
+    return NULL;
+}
+
 FARPROC WINAPI DECLSPEC_HOTPATCH DelayLoadFailureHook( LPCSTR name, LPCSTR function )
 {
     ULONG_PTR args[2];
+    FARPROC fallback;
+
+    if ((fallback = lookup_delay_load_fallback( name, function ))) return fallback;
 
     if ((ULONG_PTR)function >> 16)
         ERR( "failed to delay load %s.%s\n", name, function );

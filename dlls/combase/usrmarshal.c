@@ -138,6 +138,7 @@ IMPL_WIREM_HANDLE(HBRUSH)
 IMPL_WIREM_HANDLE(HDC)
 IMPL_WIREM_HANDLE(HICON)
 IMPL_WIREM_HANDLE(HMENU)
+IMPL_WIREM_HANDLE(HMONITOR)
 IMPL_WIREM_HANDLE(HWND)
 
 /******************************************************************************

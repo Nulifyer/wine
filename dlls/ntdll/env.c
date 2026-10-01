@@ -289,23 +289,12 @@ void WINAPI RtlSetCurrentEnvironment(PWSTR new_env, PWSTR* old_env)
 /******************************************************************************
  *  RtlSetEnvironmentVariable		[NTDLL.@]
  */
-NTSTATUS WINAPI RtlSetEnvironmentVariable(PWSTR* penv, PUNICODE_STRING name, 
-                                          PUNICODE_STRING value)
+static NTSTATUS set_environment_var( WCHAR **penv, const WCHAR *name, SIZE_T namelen,
+                                     const WCHAR *value, SIZE_T valuelen )
 {
-    INT varlen, len, old_size;
+    SIZE_T varlen, old_size, removed = 0, added, new_size, offset;
     LPWSTR      p, env;
     NTSTATUS    nts = STATUS_SUCCESS;
-
-    TRACE("(%p, %s, %s)\n", penv, debugstr_us(name), debugstr_us(value));
-
-    if (!name || !name->Buffer || !name->Length)
-        return STATUS_INVALID_PARAMETER_1;
-
-    len = name->Length / sizeof(WCHAR);
-
-    /* variable names can't contain a '=' except as a first character */
-    for (p = name->Buffer + 1; p < name->Buffer + len; p++)
-        if (*p == '=') return STATUS_INVALID_PARAMETER;
 
     if (!penv)
     {
@@ -313,68 +302,105 @@ NTSTATUS WINAPI RtlSetEnvironmentVariable(PWSTR* penv, PUNICODE_STRING name,
         env = NtCurrentTeb()->Peb->ProcessParameters->Environment;
     } else env = *penv;
 
+    if (!env) env = empty;
     old_size = get_env_length( env );
 
     /* Find a place to insert the string */
     for (p = env; *p; p += varlen + 1)
     {
         varlen = wcslen(p);
-        if (varlen > len && p[len] == '=' &&
-            !RtlCompareUnicodeStrings( name->Buffer, len, p, len, TRUE )) break;
+        if (varlen > namelen && p[namelen] == '=' &&
+            !RtlCompareUnicodeStrings( name, namelen, p, namelen, TRUE )) break;
     }
     if (!value && !*p) goto done;  /* Value to remove doesn't exist */
 
     /* Realloc the buffer */
-    len = value ? len + value->Length / sizeof(WCHAR) + 2 : 0;
-    if (*p) len -= wcslen(p) + 1;  /* The name already exists */
-
-    if (len < 0)
+    added = value ? namelen + valuelen + 2 : 0;
+    if (*p) removed = wcslen(p) + 1;
+    if (added > ~(SIZE_T)0 / sizeof(WCHAR) - (old_size - removed))
     {
-        LPWSTR next = p + wcslen(p) + 1;  /* We know there is a next one */
-        memmove(next + len, next, (old_size - (next - env)) * sizeof(WCHAR));
+        nts = STATUS_NO_MEMORY;
+        goto done;
     }
+    new_size = old_size - removed + added;
+    offset = p - env;
 
-    if ((old_size + len) * sizeof(WCHAR) > RtlSizeHeap( GetProcessHeap(), 0, env ))
+    if (env == empty || new_size * sizeof(WCHAR) > RtlSizeHeap( GetProcessHeap(), 0, env ))
     {
-        SIZE_T new_size = (old_size + len) * sizeof(WCHAR);
-        LPWSTR new_env = RtlAllocateHeap( GetProcessHeap(), 0, new_size );
+        LPWSTR new_env = RtlAllocateHeap( GetProcessHeap(), 0, new_size * sizeof(WCHAR) );
 
         if (!new_env)
         {
             nts = STATUS_NO_MEMORY;
             goto done;
         }
-        memcpy(new_env, env, (p - env) * sizeof(WCHAR));
-        memcpy(new_env + (p - env) + len, p, (old_size - (p - env)) * sizeof(WCHAR));
-        p = new_env + (p - env);
+        memcpy(new_env, env, offset * sizeof(WCHAR));
+        memcpy(new_env + offset + added, p + removed, (old_size - offset - removed) * sizeof(WCHAR));
+        p = new_env + offset;
 
-        RtlDestroyEnvironment(env);
+        if (env != empty) RtlDestroyEnvironment(env);
         if (!penv)
         {
             NtCurrentTeb()->Peb->ProcessParameters->Environment = new_env;
-            NtCurrentTeb()->Peb->ProcessParameters->EnvironmentSize = new_size;
+            NtCurrentTeb()->Peb->ProcessParameters->EnvironmentSize = new_size * sizeof(WCHAR);
         }
         else *penv = new_env;
     }
     else
     {
-        if (len > 0) memmove(p + len, p, (old_size - (p - env)) * sizeof(WCHAR));
+        memmove(p + added, p + removed, (old_size - offset - removed) * sizeof(WCHAR));
     }
 
     /* Set the new string */
     if (value)
     {
-        memcpy( p, name->Buffer, name->Length );
-        p += name->Length / sizeof(WCHAR);
+        memcpy( p, name, namelen * sizeof(WCHAR) );
+        p += namelen;
         *p++ = '=';
-        memcpy( p, value->Buffer, value->Length );
-        p[value->Length / sizeof(WCHAR)] = 0;
+        memcpy( p, value, valuelen * sizeof(WCHAR) );
+        p[valuelen] = 0;
     }
 
 done:
     if (!penv) RtlReleasePebLock();
 
     return nts;
+}
+
+/******************************************************************************
+ *  RtlSetEnvironmentVariable (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSetEnvironmentVariable( WCHAR **env, UNICODE_STRING *name, UNICODE_STRING *value )
+{
+    SIZE_T i, len;
+
+    TRACE("(%p, %s, %s)\n", env, debugstr_us(name), debugstr_us(value));
+    if (!name || !name->Buffer || !name->Length) return STATUS_INVALID_PARAMETER_1;
+    len = name->Length / sizeof(WCHAR);
+    for (i = 1; i < len; ++i) if (name->Buffer[i] == '=') return STATUS_INVALID_PARAMETER;
+    return set_environment_var( env, name->Buffer, len, value ? (value->Length ? value->Buffer : empty) : NULL,
+                                value ? value->Length / sizeof(WCHAR) : 0 );
+}
+
+/******************************************************************************
+ *  RtlSetEnvironmentVar (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSetEnvironmentVar( WCHAR **env, const WCHAR *name, SIZE_T namelen,
+                                     const WCHAR *value, SIZE_T valuelen )
+{
+    SIZE_T i;
+
+    TRACE("(%p, %p, %Iu, %p, %Iu)\n", env, name, namelen, value, valuelen);
+    if (!namelen) return STATUS_INVALID_PARAMETER;
+    for (i = 0; i < namelen; ++i)
+        if (!name[i] || (i && name[i] == '=')) return STATUS_INVALID_PARAMETER;
+    if (value)
+    {
+        for (i = 0; i < valuelen; ++i) if (!value[i]) return STATUS_INVALID_PARAMETER;
+        if (namelen > ~(SIZE_T)0 / sizeof(WCHAR) - 2 ||
+            valuelen > ~(SIZE_T)0 / sizeof(WCHAR) - 2 - namelen) return STATUS_NO_MEMORY;
+    }
+    return set_environment_var( env, name, namelen, value, valuelen );
 }
 
 /******************************************************************************

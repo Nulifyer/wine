@@ -56,7 +56,7 @@
 @ stub UpdateDataSourceRun
 @ stub UpdateDataSourceCancelRun
 @ stub GetPackageRegistrationStatusForUser
-@ stub IsSharedAppsEnabled
+@ stdcall IsSharedAppsEnabled(ptr)
 @ stub AppInstallerUpdateAllTask
 @ stub CheckAppInstallerUpdateAvailability
 @ stub UpdateAgentFreeDownloadRanges
@@ -65,7 +65,7 @@
 @ stub GetMetadataRootForPackage
 @ stub ClientGetAllPackagesToBeInstalledForUser
 @ stub ClientDeleteAllPackagesFromMainPackageArray
-@ stub GetPackageRegistrationStatusForUserAndDefaultAccount
+@ stdcall GetPackageRegistrationStatusForUserAndDefaultAccount(wstr int64 long ptr ptr ptr ptr ptr)
 @ stub UpdateAgentGetDownloadingPackageCount
 @ stub PreRegisterPackagesInContainer
 @ stub EnsurePackageFamiliesAreRegisteredInContainer

@@ -643,6 +643,22 @@ BOOL WINAPI GetClassInfoExW( HINSTANCE hInstance, LPCWSTR name, WNDCLASSEXW *wc 
     return atom;
 }
 
+/***********************************************************************
+ *           SetClassScope   (USER32.@)
+ *
+ * Private CoreWindow helper used by Windows.UI.  Windows uses it to
+ * associate a class with a private class-registration scope.  Wine has no
+ * equivalent namespace: classes are already isolated by the process and
+ * instance rules implemented by the server, so accepting the scope is the
+ * least surprising behaviour here.
+ */
+HRESULT WINAPI SetClassScope( void *class_id, void *scope_id, UINT scope )
+{
+    FIXME( "class_id %p, scope_id %p, scope %u: class scopes are not supported\n",
+           class_id, scope_id, scope );
+    return S_OK;
+}
+
 
 #ifdef _WIN64
 

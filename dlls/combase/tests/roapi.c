@@ -23,6 +23,7 @@
 #include "winerror.h"
 #include "winstring.h"
 #include "winternl.h"
+#include "ctxtcall.h"
 
 #include "initguid.h"
 #include "roapi.h"
@@ -31,6 +32,252 @@
 #include "wine/test.h"
 
 #define EXPECT_REF(obj,ref) _expect_ref((IUnknown*)obj, ref, __LINE__)
+
+typedef HRESULT (WINAPI *ro_initialize_strict_fn)(INT type);
+typedef HRESULT (WINAPI *get_shared_service_id_fn)(DWORD *id);
+typedef LONG (WINAPI *shared_service_reference_fn)(DWORD id);
+typedef HRESULT (WINAPI *dll_get_activation_factory_fn)(HSTRING classid, IActivationFactory **factory);
+
+struct extension_catalog;
+struct extension_iterator;
+
+struct extension_catalog_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct extension_catalog *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct extension_catalog *);
+    ULONG (WINAPI *Release)(struct extension_catalog *);
+    HRESULT (WINAPI *GetIids)(struct extension_catalog *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(struct extension_catalog *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(struct extension_catalog *, TrustLevel *);
+    HRESULT (WINAPI *QueryCatalog)(struct extension_catalog *, HSTRING, struct extension_iterator **);
+    HRESULT (WINAPI *QueryCatalogByPackageFamilyName)(struct extension_catalog *, HSTRING, HSTRING,
+                                                       struct extension_iterator **);
+};
+
+struct extension_catalog
+{
+    const struct extension_catalog_vtbl *lpVtbl;
+};
+
+struct extension_iterator_vtbl
+{
+    HRESULT (WINAPI *QueryInterface)(struct extension_iterator *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(struct extension_iterator *);
+    ULONG (WINAPI *Release)(struct extension_iterator *);
+    HRESULT (WINAPI *GetIids)(struct extension_iterator *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(struct extension_iterator *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(struct extension_iterator *, TrustLevel *);
+    HRESULT (WINAPI *get_Current)(struct extension_iterator *, IInspectable **);
+    HRESULT (WINAPI *get_HasCurrent)(struct extension_iterator *, boolean *);
+    HRESULT (WINAPI *MoveNext)(struct extension_iterator *, boolean *);
+    HRESULT (WINAPI *GetMany)(struct extension_iterator *, UINT32, IInspectable **, UINT32 *);
+};
+
+struct extension_iterator
+{
+    const struct extension_iterator_vtbl *lpVtbl;
+};
+
+static const IID IID_IExtensionCatalog =
+    {0x07cee0d8, 0xd555, 0x4d61, {0x9c, 0x37, 0x01, 0xc1, 0x94, 0xb0, 0xf2, 0x08}};
+
+static const CLSID context_switcher_clsid =
+    {0x0000034e, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+
+struct context_switcher_callback_state
+{
+    ULONG_PTR token;
+    HRESULT token_hr;
+    unsigned int calls;
+};
+
+static HRESULT WINAPI context_switcher_callback(ComCallData *data)
+{
+    struct context_switcher_callback_state *state = data->pUserDefined;
+
+    ++state->calls;
+    state->token_hr = CoGetContextToken(&state->token);
+    return S_FALSE;
+}
+
+static void test_context_switcher(void)
+{
+    struct context_switcher_callback_state first_state = {0}, second_state = {0};
+    ComCallData first_data = {0, 0, &first_state}, second_data = {0, 0, &second_state};
+    IContextCallback *first = NULL, *second = NULL;
+    IComThreadingInfo *threading_info = (void *)0xdeadbeef;
+    ULONG_PTR original_token, after_token;
+    HRESULT hr;
+
+    hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    ok(hr == S_OK, "CoInitializeEx returned %#lx.\n", hr);
+
+    hr = CoGetContextToken(&original_token);
+    ok(hr == S_OK, "CoGetContextToken returned %#lx.\n", hr);
+
+    hr = CoCreateInstance(&context_switcher_clsid, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IContextCallback, (void **)&first);
+    ok(hr == S_OK, "first CoCreateInstance returned %#lx.\n", hr);
+    ok(!!first, "first context switcher is NULL.\n");
+
+    hr = CoCreateInstance(&context_switcher_clsid, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IContextCallback, (void **)&second);
+    ok(hr == S_OK, "second CoCreateInstance returned %#lx.\n", hr);
+    ok(!!second, "second context switcher is NULL.\n");
+    ok(first != second, "separate activations returned the same object.\n");
+
+    hr = IContextCallback_QueryInterface(first, &IID_IComThreadingInfo, (void **)&threading_info);
+    ok(hr == E_NOINTERFACE, "IComThreadingInfo query returned %#lx.\n", hr);
+    ok(!threading_info, "IComThreadingInfo query returned %p.\n", threading_info);
+
+    hr = IContextCallback_ContextCallback(first, context_switcher_callback, &first_data,
+            &IID_IContextCallback, 5, NULL);
+    ok(hr == S_FALSE, "first ContextCallback returned %#lx.\n", hr);
+    ok(first_state.calls == 1, "callback ran %u times.\n", first_state.calls);
+    ok(first_state.token_hr == S_OK, "callback CoGetContextToken returned %#lx.\n", first_state.token_hr);
+    ok(first_state.token != original_token, "callback did not enter a distinct context.\n");
+
+    hr = CoGetContextToken(&after_token);
+    ok(hr == S_OK, "post-callback CoGetContextToken returned %#lx.\n", hr);
+    ok(after_token == original_token, "callback did not restore the original context.\n");
+
+    first_state.calls = 0;
+    after_token = first_state.token;
+    hr = IContextCallback_ContextCallback(first, context_switcher_callback, &first_data,
+            &IID_IContextCallback, 5, NULL);
+    ok(hr == S_FALSE, "repeat ContextCallback returned %#lx.\n", hr);
+    ok(first_state.token == after_token, "repeat callback entered a different context.\n");
+
+    hr = IContextCallback_ContextCallback(second, context_switcher_callback, &second_data,
+            &IID_IContextCallback, 5, NULL);
+    ok(hr == S_FALSE, "second ContextCallback returned %#lx.\n", hr);
+    ok(second_state.token != original_token, "second callback did not enter a distinct context.\n");
+    ok(second_state.token != first_state.token, "separate context switchers shared a context.\n");
+
+    hr = IContextCallback_ContextCallback(first, NULL, &first_data, &IID_IContextCallback, 5, NULL);
+    ok(hr == E_INVALIDARG, "NULL callback returned %#lx.\n", hr);
+
+    if (second) IContextCallback_Release(second);
+    if (first) IContextCallback_Release(first);
+    CoUninitialize();
+}
+
+static void test_shared_service_ordinals(void)
+{
+    shared_service_reference_fn add_ref, release;
+    get_shared_service_id_fn get_id;
+    HMODULE module;
+    DWORD first = 0xcccccccc, second = 0xdddddddd;
+    HRESULT hr;
+
+    module = GetModuleHandleW(L"combase.dll");
+    get_id = (void *)GetProcAddress(module, MAKEINTRESOURCEA(66));
+    add_ref = (void *)GetProcAddress(module, MAKEINTRESOURCEA(67));
+    release = (void *)GetProcAddress(module, MAKEINTRESOURCEA(68));
+    if (!get_id || !add_ref || !release)
+    {
+        win_skip("shared-service ordinals are unavailable.\n");
+        return;
+    }
+
+    hr = get_id(NULL);
+    ok(hr == E_INVALIDARG, "null output returned %#lx.\n", hr);
+    hr = get_id(&first);
+    ok(hr == S_OK, "first call returned %#lx.\n", hr);
+    ok(first == (DWORD)(ULONG_PTR)NtCurrentTeb()->SubProcessTag,
+            "got id %#lx, expected current service tag %p.\n", first, NtCurrentTeb()->SubProcessTag);
+    hr = get_id(&second);
+    ok(hr == S_OK, "second call returned %#lx.\n", hr);
+    ok(second == first, "second id %#lx differs from first %#lx.\n", second, first);
+
+    ok(add_ref(first) == 1, "first add-ref returned an unexpected count.\n");
+    ok(add_ref(first) == 2, "second add-ref returned an unexpected count.\n");
+    ok(release(first) == 1, "first release returned an unexpected count.\n");
+    ok(release(first) == 0, "second release returned an unexpected count.\n");
+    ok(add_ref(0x12345678) == -1, "missing-id add-ref did not return -1.\n");
+    ok(release(0x12345678) == -1, "missing-id release did not return -1.\n");
+}
+
+struct ro_initialize_strict_result
+{
+    ro_initialize_strict_fn initialize;
+    INT input;
+    HRESULT first_hr;
+    HRESULT query_hr;
+    HRESULT second_hr;
+    APTTYPE type;
+    APTTYPEQUALIFIER qualifier;
+};
+
+static DWORD WINAPI ro_initialize_strict_thread(void *arg)
+{
+    struct ro_initialize_strict_result *result = arg;
+
+    result->first_hr = result->initialize(result->input);
+    result->type = APTTYPE_CURRENT;
+    result->qualifier = APTTYPEQUALIFIER_NONE;
+    result->query_hr = CoGetApartmentType(&result->type, &result->qualifier);
+    result->second_hr = result->initialize(result->input);
+    if (SUCCEEDED(result->first_hr)) CoUninitialize();
+    return 0;
+}
+
+static void test_RoInitializeStrict(void)
+{
+    static const struct
+    {
+        INT input;
+        HRESULT first_hr;
+        HRESULT query_hr;
+        APTTYPE type;
+        INT qualifier;
+    }
+    tests[] =
+    {
+        {-1, E_INVALIDARG, CO_E_NOTINITIALIZED, APTTYPE_CURRENT, APTTYPEQUALIFIER_NONE},
+        { 0, S_OK, S_OK, APTTYPE_MAINSTA, APTTYPEQUALIFIER_NONE},
+        { 1, S_OK, S_OK, APTTYPE_STA, APTTYPEQUALIFIER_APPLICATION_STA},
+        { 2, S_OK, S_OK, APTTYPE_MTA, APTTYPEQUALIFIER_NONE},
+        { 3, CO_E_NOT_SUPPORTED, CO_E_NOTINITIALIZED, APTTYPE_CURRENT, APTTYPEQUALIFIER_NONE},
+        { 4, S_OK, S_OK, APTTYPE_STA, 7},
+        { 5, E_INVALIDARG, CO_E_NOTINITIALIZED, APTTYPE_CURRENT, APTTYPEQUALIFIER_NONE},
+    };
+    ro_initialize_strict_fn initialize;
+    unsigned int i;
+
+    initialize = (void *)GetProcAddress(GetModuleHandleW(L"combase.dll"), MAKEINTRESOURCEA(179));
+    if (!initialize)
+    {
+        win_skip("RoInitializeStrict is unavailable.\n");
+        return;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        struct ro_initialize_strict_result result = {initialize, tests[i].input};
+        HANDLE thread;
+
+        winetest_push_context("input %d", tests[i].input);
+        thread = CreateThread(NULL, 0, ro_initialize_strict_thread, &result, 0, NULL);
+        ok(!!thread, "CreateThread failed, error %lu.\n", GetLastError());
+        if (thread)
+        {
+            WaitForSingleObject(thread, INFINITE);
+            CloseHandle(thread);
+            ok(result.first_hr == tests[i].first_hr, "first call returned %#lx.\n", result.first_hr);
+            ok(result.query_hr == tests[i].query_hr, "CoGetApartmentType returned %#lx.\n", result.query_hr);
+            if (SUCCEEDED(result.query_hr))
+            {
+                ok(result.type == tests[i].type, "got apartment type %d.\n", result.type);
+                ok(result.qualifier == tests[i].qualifier, "got apartment qualifier %d.\n", result.qualifier);
+            }
+            ok(result.second_hr == (SUCCEEDED(tests[i].first_hr) ? CO_E_INIT_ONLY_SINGLE_THREADED : tests[i].first_hr),
+                    "second call returned %#lx.\n", result.second_hr);
+        }
+        winetest_pop_context();
+    }
+}
+
 static void _expect_ref(IUnknown* obj, ULONG ref, int line)
 {
     ULONG rc;
@@ -72,6 +319,314 @@ static void load_resource(const WCHAR *filename)
     WriteFile(file, ptr, SizeofResource(GetModuleHandleW(NULL), res), &written, NULL);
     ok(written == SizeofResource(GetModuleHandleW(NULL), res), "couldn't write resource\n");
     CloseHandle(file);
+}
+
+static HRESULT WINAPI outproc_factory_QueryInterface(IActivationFactory *iface, REFIID iid, void **out)
+{
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (IsEqualGUID(iid, &IID_IUnknown) || IsEqualGUID(iid, &IID_IInspectable) ||
+            IsEqualGUID(iid, &IID_IAgileObject) || IsEqualGUID(iid, &IID_IActivationFactory))
+    {
+        *out = iface;
+        IActivationFactory_AddRef(iface);
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI outproc_factory_AddRef(IActivationFactory *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI outproc_factory_Release(IActivationFactory *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI outproc_factory_GetIids(IActivationFactory *iface, ULONG *count, IID **iids)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI outproc_factory_GetRuntimeClassName(IActivationFactory *iface, HSTRING *name)
+{
+    return WindowsCreateString(L"Wine.Test.OutOfProcess", ARRAY_SIZE(L"Wine.Test.OutOfProcess") - 1, name);
+}
+
+static HRESULT WINAPI outproc_factory_GetTrustLevel(IActivationFactory *iface, TrustLevel *level)
+{
+    if (!level) return E_POINTER;
+    *level = BaseTrust;
+    return S_OK;
+}
+
+static HRESULT WINAPI outproc_factory_ActivateInstance(IActivationFactory *iface, IInspectable **instance)
+{
+    return E_NOTIMPL;
+}
+
+static const IActivationFactoryVtbl outproc_factory_vtbl =
+{
+    outproc_factory_QueryInterface,
+    outproc_factory_AddRef,
+    outproc_factory_Release,
+    outproc_factory_GetIids,
+    outproc_factory_GetRuntimeClassName,
+    outproc_factory_GetTrustLevel,
+    outproc_factory_ActivateInstance,
+};
+
+static IActivationFactory outproc_factory = {&outproc_factory_vtbl};
+
+static HRESULT WINAPI get_outproc_factory(HSTRING classid, IActivationFactory **factory)
+{
+    if (wcscmp(WindowsGetStringRawBuffer(classid, NULL), L"Wine.Test.OutOfProcess"))
+        return REGDB_E_CLASSNOTREG;
+    *factory = &outproc_factory;
+    IActivationFactory_AddRef(*factory);
+    return S_OK;
+}
+
+static void outproc_activation_server(const char *ready_name, const char *quit_name)
+{
+    RO_REGISTRATION_COOKIE cookie = NULL;
+    PFNGETACTIVATIONFACTORY callback = get_outproc_factory;
+    HANDLE ready, quit;
+    HSTRING classid;
+    HRESULT hr;
+
+    ready = OpenEventA(EVENT_MODIFY_STATE, FALSE, ready_name);
+    ok(!!ready, "OpenEventA(%s) failed, error %lu.\n", ready_name, GetLastError());
+    quit = OpenEventA(SYNCHRONIZE, FALSE, quit_name);
+    ok(!!quit, "OpenEventA(%s) failed, error %lu.\n", quit_name, GetLastError());
+
+    hr = RoInitialize(RO_INIT_MULTITHREADED);
+    ok(hr == S_OK, "RoInitialize returned %#lx.\n", hr);
+    hr = WindowsCreateString(L"Wine.Test.OutOfProcess", ARRAY_SIZE(L"Wine.Test.OutOfProcess") - 1, &classid);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    hr = RoRegisterActivationFactories(&classid, &callback, 1, &cookie);
+    ok(hr == S_OK, "RoRegisterActivationFactories returned %#lx.\n", hr);
+    SetEvent(ready);
+
+    if (SUCCEEDED(hr))
+    {
+        ok(WaitForSingleObject(quit, 10000) == WAIT_OBJECT_0, "quit event wait timed out.\n");
+        RoRevokeActivationFactories(cookie);
+    }
+    WindowsDeleteString(classid);
+    RoUninitialize();
+    CloseHandle(quit);
+    CloseHandle(ready);
+}
+
+static void test_outproc_activation(void)
+{
+    static const WCHAR class_key_name[] =
+            L"Software\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Wine.Test.OutOfProcess";
+    static const WCHAR server_key_name[] =
+            L"Software\\Microsoft\\WindowsRuntime\\Server\\Wine.Test.Server";
+    static const WCHAR server_name[] = L"Wine.Test.Server";
+    PROCESS_INFORMATION process = {0};
+    STARTUPINFOA startup = {sizeof(startup)};
+    char **argv, command[3 * MAX_PATH], ready_name[64], quit_name[64];
+    IActivationFactory *factory = NULL;
+    HANDLE ready, quit;
+    HSTRING classid;
+    TrustLevel level;
+    HRESULT hr;
+    HKEY key;
+    LONG ret;
+
+    ret = RegCreateKeyExW(HKEY_LOCAL_MACHINE, class_key_name, 0, NULL, 0, KEY_ALL_ACCESS,
+            NULL, &key, NULL);
+    ok(!ret, "RegCreateKeyExW(class) returned %ld.\n", ret);
+    if (ret) return;
+    ret = RegSetValueExW(key, L"Server", 0, REG_SZ, (const BYTE *)server_name, sizeof(server_name));
+    ok(!ret, "RegSetValueExW returned %ld.\n", ret);
+    RegCloseKey(key);
+    ret = RegCreateKeyExW(HKEY_LOCAL_MACHINE, server_key_name, 0, NULL, 0, KEY_ALL_ACCESS,
+            NULL, &key, NULL);
+    ok(!ret, "RegCreateKeyExW(server) returned %ld.\n", ret);
+    if (!ret) RegCloseKey(key);
+
+    sprintf(ready_name, "Wine Combase WinRT Ready %lu", GetCurrentProcessId());
+    sprintf(quit_name, "Wine Combase WinRT Quit %lu", GetCurrentProcessId());
+    ready = CreateEventA(NULL, TRUE, FALSE, ready_name);
+    quit = CreateEventA(NULL, TRUE, FALSE, quit_name);
+    ok(!!ready && !!quit, "failed to create server events, error %lu.\n", GetLastError());
+
+    winetest_get_mainargs(&argv);
+    sprintf(command, "\"%s\" %s outproc_activation_server \"%s\" \"%s\"",
+            argv[0], argv[1], ready_name, quit_name);
+    ret = CreateProcessA(argv[0], command, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &process);
+    ok(ret, "CreateProcessA failed, error %lu.\n", GetLastError());
+    if (ret)
+    {
+        ok(WaitForSingleObject(ready, 10000) == WAIT_OBJECT_0, "server ready event wait timed out.\n");
+        hr = RoInitialize(RO_INIT_MULTITHREADED);
+        ok(hr == S_OK, "RoInitialize returned %#lx.\n", hr);
+        hr = WindowsCreateString(L"Wine.Test.OutOfProcess", ARRAY_SIZE(L"Wine.Test.OutOfProcess") - 1,
+                &classid);
+        ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+        hr = RoGetActivationFactory(classid, &IID_IActivationFactory, (void **)&factory);
+        ok(hr == S_OK, "RoGetActivationFactory returned %#lx.\n", hr);
+        if (factory)
+        {
+            level = -1;
+            hr = IActivationFactory_GetTrustLevel(factory, &level);
+            ok(hr == S_OK, "GetTrustLevel returned %#lx.\n", hr);
+            ok(level == BaseTrust, "GetTrustLevel returned %d.\n", level);
+            IActivationFactory_Release(factory);
+        }
+        WindowsDeleteString(classid);
+        RoUninitialize();
+        SetEvent(quit);
+        winetest_wait_child_process(&process);
+    }
+
+    CloseHandle(quit);
+    CloseHandle(ready);
+    RegDeleteKeyW(HKEY_LOCAL_MACHINE, server_key_name);
+    RegDeleteKeyW(HKEY_LOCAL_MACHINE, class_key_name);
+}
+
+static void test_extension_catalog(void)
+{
+    static const WCHAR class_name[] = L"Windows.Foundation.ExtensionCatalog";
+    static const WCHAR extension_name[] = L"linuxnt.nonexistent";
+    static const IID expected_catalog_iids[] =
+    {
+        {0x07cee0d8, 0xd555, 0x4d61, {0x9c, 0x37, 0x01, 0xc1, 0x94, 0xb0, 0xf2, 0x08}},
+        {0x00000038, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}},
+    };
+    static const IID expected_iterator_iids[] =
+    {
+        {0xb4d4a79e, 0xfe15, 0x5272, {0x99, 0x88, 0x61, 0x7a, 0x34, 0xd8, 0x30, 0x0b}},
+        {0x00000038, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}},
+    };
+    dll_get_activation_factory_fn get_factory;
+    struct extension_catalog *catalog = NULL, *catalog_iface = NULL;
+    struct extension_iterator *iterator = NULL;
+    IActivationFactory *factory = NULL;
+    IInspectable *current = (void *)0xdeadbeef;
+    HSTRING classid = NULL, name = NULL, query = NULL;
+    IID *iids = NULL;
+    TrustLevel level;
+    const WCHAR *buffer;
+    boolean value;
+    UINT32 length;
+    ULONG count;
+    HRESULT hr;
+
+    get_factory = (void *)GetProcAddress(GetModuleHandleW(L"combase.dll"), "DllGetActivationFactory");
+    ok(!!get_factory, "DllGetActivationFactory is missing.\n");
+    if (!get_factory) return;
+
+    hr = WindowsCreateString(class_name, ARRAY_SIZE(class_name) - 1, &classid);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    hr = get_factory(classid, &factory);
+    ok(hr == S_OK, "DllGetActivationFactory returned %#lx.\n", hr);
+    ok(!!factory, "factory is NULL.\n");
+    if (!factory) goto done;
+
+    count = 0xdeadbeef;
+    hr = IActivationFactory_GetIids(factory, &count, &iids);
+    ok(hr == S_OK, "factory GetIids returned %#lx.\n", hr);
+    ok(count == 1, "factory GetIids returned %lu interfaces.\n", count);
+    if (count == 1) ok(IsEqualGUID(&iids[0], &IID_IActivationFactory), "unexpected factory IID %s.\n",
+                       wine_dbgstr_guid(&iids[0]));
+    CoTaskMemFree(iids);
+    iids = NULL;
+
+    hr = IActivationFactory_GetRuntimeClassName(factory, &name);
+    ok(hr == E_ILLEGAL_METHOD_CALL, "factory GetRuntimeClassName returned %#lx.\n", hr);
+    ok(!name, "factory returned class name %p.\n", name);
+    level = BaseTrust;
+    hr = IActivationFactory_GetTrustLevel(factory, &level);
+    ok(hr == S_OK, "factory GetTrustLevel returned %#lx.\n", hr);
+    ok(level == FullTrust, "factory trust level is %u.\n", level);
+
+    hr = IActivationFactory_ActivateInstance(factory, (IInspectable **)&catalog);
+    ok(hr == S_OK, "ActivateInstance returned %#lx.\n", hr);
+    ok(!!catalog, "catalog is NULL.\n");
+    if (!catalog) goto done;
+
+    hr = catalog->lpVtbl->QueryInterface(catalog, &IID_IExtensionCatalog, (void **)&catalog_iface);
+    ok(hr == S_OK, "catalog QueryInterface returned %#lx.\n", hr);
+    ok(catalog_iface == catalog, "catalog QueryInterface returned %p, expected %p.\n", catalog_iface, catalog);
+    if (catalog_iface) catalog_iface->lpVtbl->Release(catalog_iface);
+
+    count = 0xdeadbeef;
+    hr = catalog->lpVtbl->GetIids(catalog, &count, &iids);
+    ok(hr == S_OK, "catalog GetIids returned %#lx.\n", hr);
+    ok(count == ARRAY_SIZE(expected_catalog_iids), "catalog GetIids returned %lu interfaces.\n", count);
+    if (count == ARRAY_SIZE(expected_catalog_iids))
+    {
+        ok(IsEqualGUID(&iids[0], &expected_catalog_iids[0]), "unexpected catalog IID[0] %s.\n",
+           wine_dbgstr_guid(&iids[0]));
+        ok(IsEqualGUID(&iids[1], &expected_catalog_iids[1]), "unexpected catalog IID[1] %s.\n",
+           wine_dbgstr_guid(&iids[1]));
+    }
+    CoTaskMemFree(iids);
+    iids = NULL;
+
+    hr = catalog->lpVtbl->GetRuntimeClassName(catalog, &name);
+    ok(hr == S_OK, "catalog GetRuntimeClassName returned %#lx.\n", hr);
+    buffer = WindowsGetStringRawBuffer(name, &length);
+    ok(length == ARRAY_SIZE(class_name) - 1 && !wcscmp(buffer, class_name), "unexpected class name %s.\n",
+       wine_dbgstr_w(buffer));
+    WindowsDeleteString(name);
+    name = NULL;
+    level = BaseTrust;
+    hr = catalog->lpVtbl->GetTrustLevel(catalog, &level);
+    ok(hr == S_OK, "catalog GetTrustLevel returned %#lx.\n", hr);
+    ok(level == FullTrust, "catalog trust level is %u.\n", level);
+
+    hr = WindowsCreateString(extension_name, ARRAY_SIZE(extension_name) - 1, &query);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    hr = catalog->lpVtbl->QueryCatalog(catalog, query, &iterator);
+    ok(hr == S_OK, "QueryCatalog returned %#lx.\n", hr);
+    ok(!!iterator, "iterator is NULL.\n");
+    if (iterator)
+    {
+        count = 0xdeadbeef;
+        hr = iterator->lpVtbl->GetIids(iterator, &count, &iids);
+        ok(hr == S_OK, "iterator GetIids returned %#lx.\n", hr);
+        ok(count == ARRAY_SIZE(expected_iterator_iids), "iterator GetIids returned %lu interfaces.\n", count);
+        if (count == ARRAY_SIZE(expected_iterator_iids))
+        {
+            ok(IsEqualGUID(&iids[0], &expected_iterator_iids[0]), "unexpected iterator IID[0] %s.\n",
+               wine_dbgstr_guid(&iids[0]));
+            ok(IsEqualGUID(&iids[1], &expected_iterator_iids[1]), "unexpected iterator IID[1] %s.\n",
+               wine_dbgstr_guid(&iids[1]));
+        }
+        CoTaskMemFree(iids);
+        iids = NULL;
+
+        hr = iterator->lpVtbl->GetRuntimeClassName(iterator, &name);
+        ok(hr == E_NOTIMPL, "iterator GetRuntimeClassName returned %#lx.\n", hr);
+        ok(!name, "iterator returned class name %p.\n", name);
+        value = 0xff;
+        hr = iterator->lpVtbl->get_HasCurrent(iterator, &value);
+        ok(hr == S_OK, "iterator get_HasCurrent returned %#lx.\n", hr);
+        ok(!value, "iterator has current value %u.\n", value);
+        hr = iterator->lpVtbl->get_Current(iterator, &current);
+        ok(hr == E_BOUNDS, "iterator get_Current returned %#lx.\n", hr);
+        ok(!current, "iterator current is %p.\n", current);
+        value = 0xff;
+        hr = iterator->lpVtbl->MoveNext(iterator, &value);
+        ok(hr == E_BOUNDS, "iterator MoveNext returned %#lx.\n", hr);
+        ok(!value, "iterator MoveNext value is %u.\n", value);
+        iterator->lpVtbl->Release(iterator);
+    }
+
+done:
+    if (catalog) catalog->lpVtbl->Release(catalog);
+    if (factory) IActivationFactory_Release(factory);
+    WindowsDeleteString(query);
+    WindowsDeleteString(classid);
 }
 
 static void test_ActivationFactories(void)
@@ -868,8 +1423,37 @@ static void test_RoGetErrorReportingFlags(void)
 
 START_TEST(roapi)
 {
+    char **argv;
+    int argc;
     BOOL ret;
 
+    argc = winetest_get_mainargs(&argv);
+    if (argc >= 5 && !strcmp(argv[2], "outproc_activation_server"))
+    {
+        outproc_activation_server(argv[3], argv[4]);
+        return;
+    }
+    if (argc >= 3 && !strcmp(argv[2], "outproc_activation"))
+    {
+        test_outproc_activation();
+        return;
+    }
+    if (argc >= 3 && !strcmp(argv[2], "shared_service"))
+    {
+        test_shared_service_ordinals();
+        return;
+    }
+    if (argc >= 3 && !strcmp(argv[2], "context_switcher"))
+    {
+        test_context_switcher();
+        return;
+    }
+
+    test_shared_service_ordinals();
+    test_context_switcher();
+    test_outproc_activation();
+    test_extension_catalog();
+    test_RoInitializeStrict();
     load_resource(L"wine.combase.test.dll");
 
     test_implicit_mta();

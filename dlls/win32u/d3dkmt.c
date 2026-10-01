@@ -1769,6 +1769,15 @@ NTSTATUS WINAPI NtGdiDdDDIDestroySynchronizationObject( const D3DKMT_DESTROYSYNC
 }
 
 /******************************************************************************
+ *           NtGdiDdDDIGetYieldPercentage    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDIGetYieldPercentage( void *params )
+{
+    FIXME( "params %p, Linux graphics scheduler policy is not implemented.\n", params );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
  *           NtGdiDdDDISignalSynchronizationObjectFromCpu    (win32u.@)
  */
 NTSTATUS WINAPI NtGdiDdDDISignalSynchronizationObjectFromCpu( const D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU *params )

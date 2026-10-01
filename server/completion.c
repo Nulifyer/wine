@@ -34,6 +34,7 @@
 #include "file.h"
 #include "handle.h"
 #include "request.h"
+#include "user.h"
 
 static const WCHAR completion_name[] = {'I','o','C','o','m','p','l','e','t','i','o','n'};
 
@@ -75,8 +76,15 @@ struct completion
     struct object      *sync;
     struct list         queue;
     struct list         wait_queue;
+    struct list         core_messaging_windows;
     unsigned int        depth;
     unsigned int        concurrent;
+};
+
+struct core_messaging_window
+{
+    struct list entry;
+    user_handle_t handle;
 };
 
 struct completion_packet
@@ -185,10 +193,18 @@ static void completion_destroy( struct object *obj)
 {
     struct completion *completion = (struct completion *) obj;
     struct comp_msg *tmp, *next;
+    struct core_messaging_window *window, *window_next;
 
     LIST_FOR_EACH_ENTRY_SAFE( tmp, next, &completion->queue, struct comp_msg, queue_entry )
     {
         free( tmp );
+    }
+
+    LIST_FOR_EACH_ENTRY_SAFE( window, window_next, &completion->core_messaging_windows,
+                              struct core_messaging_window, entry )
+    {
+        list_remove( &window->entry );
+        free( window );
     }
 
     if (completion->sync) release_object( completion->sync );
@@ -211,6 +227,7 @@ static bool completion_init( struct object *obj, const void *init_data )
     completion->concurrent = data->concurrent;
     list_init( &completion->queue );
     list_init( &completion->wait_queue );
+    list_init( &completion->core_messaging_windows );
     return !!(completion->sync = create_internal_sync( 1, 0 ));
 }
 
@@ -281,11 +298,10 @@ struct completion *get_completion_obj( struct process *process, obj_handle_t han
 void add_completion( struct completion *completion, apc_param_t ckey, apc_param_t cvalue,
                      unsigned int status, apc_param_t information, struct completion_packet *packet )
 {
-    struct comp_msg *msg = mem_alloc( sizeof( *msg ) );
+    struct comp_msg *msg;
     struct completion_wait *wait;
 
-    if (!msg)
-        return;
+    if (!(msg = mem_alloc( sizeof( *msg ) ))) return;
 
     msg->packet = packet;
     msg->ckey = ckey;
@@ -318,31 +334,16 @@ struct type_descr completion_packet_type =
 };
 
 static void completion_packet_dump( struct object *, int );
+static bool completion_packet_init( struct object *, const void * );
 static void completion_packet_destroy( struct object * );
 
 static const struct object_ops completion_packet_ops =
 {
-    sizeof(struct completion_packet), /* size */
-    &completion_packet_type,          /* type */
-    completion_packet_dump,           /* dump */
-    no_add_queue,                     /* add_queue */
-    NULL,                             /* remove_queue */
-    NULL,                             /* signaled */
-    NULL,                             /* satisfied */
-    no_signal,                        /* signal */
-    no_get_fd,                        /* get_fd */
-    default_get_sync,                 /* get_sync */
-    default_map_access,               /* map_access */
-    default_get_sd,                   /* get_sd */
-    default_set_sd,                   /* set_sd */
-    default_get_full_name,            /* get_full_name */
-    no_lookup_name,                   /* lookup_name */
-    directory_link_name,              /* link_name */
-    default_unlink_name,              /* unlink_name */
-    no_open_file,                     /* open_file */
-    no_kernel_obj_list,               /* get_kernel_obj_list */
-    no_close_handle,                  /* close_handle */
-    completion_packet_destroy         /* destroy */
+    .size    = sizeof(struct completion_packet),
+    .type    = &completion_packet_type,
+    .dump    = completion_packet_dump,
+    .init    = completion_packet_init,
+    .destroy = completion_packet_destroy,
 };
 
 static void completion_packet_dump( struct object *obj, int verbose )
@@ -364,26 +365,19 @@ static struct completion_packet *get_completion_packet_obj( struct process *proc
     return (struct completion_packet *)get_handle_obj( process, handle, access, &completion_packet_ops );
 }
 
-static struct completion_packet *create_completion_packet( struct object *root,
-                                                           const struct unicode_str *name,
-                                                           unsigned int attr,
-                                                           const struct security_descriptor *sd )
+static bool completion_packet_init( struct object *obj, const void *init_data )
 {
-    struct completion_packet *packet;
+    struct completion_packet *packet = (struct completion_packet *)obj;
 
-    if ((packet = create_named_object( root, &completion_packet_ops, name, attr, sd ))
-        && get_error() != STATUS_OBJECT_NAME_EXISTS)
-    {
-        packet->target = NULL;
-        packet->completion = NULL;
-        packet->ckey = 0;
-        packet->cvalue = 0;
-        packet->information = 0;
-        packet->status = 0;
-        packet->in_target_packet_queue = 0;
-        packet->in_completion_queue = 0;
-    }
-    return packet;
+    packet->target = NULL;
+    packet->completion = NULL;
+    packet->ckey = 0;
+    packet->cvalue = 0;
+    packet->information = 0;
+    packet->status = 0;
+    packet->in_target_packet_queue = 0;
+    packet->in_completion_queue = 0;
+    return true;
 }
 
 /* try to wake up completion packets in the object when it's signaled */
@@ -394,11 +388,11 @@ void wake_up_completion_packets( struct object *obj )
     if (list_empty( &obj->completion_packet_queue ))
         return;
 
-    if (!is_obj_signaled( obj ))
-        return;
-
     LIST_FOR_EACH_ENTRY( packet, &obj->completion_packet_queue, struct completion_packet, entry )
     {
+        if (!is_obj_signaled( obj ))
+            break;
+
         assert( packet->in_target_packet_queue );
         assert( packet->target );
         assert( !packet->in_completion_queue );
@@ -491,6 +485,54 @@ DECL_HANDLER(open_completion)
 {
     reply->handle = open_object( current->process, req->rootdir, req->access,
                                  &completion_ops, get_req_unicode_str(), req->attributes );
+}
+
+/* register a window for USER CoreMessaging completion dispatch */
+DECL_HANDLER(register_coremessaging_completion)
+{
+    struct core_messaging_window *window;
+    struct completion *completion;
+    struct thread *thread;
+    user_handle_t handle;
+
+    if (!(completion = get_completion_obj( current->process, req->handle,
+                                            IO_COMPLETION_MODIFY_STATE ))) return;
+    if (!(handle = get_valid_window_handle( req->window )))
+    {
+        release_object( completion );
+        return;
+    }
+    if (!(thread = get_window_thread( handle )))
+    {
+        release_object( completion );
+        set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
+        return;
+    }
+    if (thread != current)
+    {
+        release_object( thread );
+        release_object( completion );
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    release_object( thread );
+
+    LIST_FOR_EACH_ENTRY( window, &completion->core_messaging_windows,
+                         struct core_messaging_window, entry )
+    {
+        if (window->handle == handle)
+        {
+            release_object( completion );
+            return;
+        }
+    }
+
+    if ((window = mem_alloc( sizeof(*window) )))
+    {
+        window->handle = get_user_full_handle( handle );
+        list_add_tail( &completion->core_messaging_windows, &window->entry );
+    }
+    release_object( completion );
 }
 
 
@@ -600,24 +642,11 @@ DECL_HANDLER(query_completion)
 /* create a wait completion packet */
 DECL_HANDLER(create_completion_packet)
 {
-    struct completion_packet *packet;
-    struct unicode_str name;
-    struct object *root;
-    const struct security_descriptor *sd;
-    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
+    struct object_params params = { .ops = &completion_packet_ops, .access = req->access };
 
-    if (!objattr) return;
-    if ((packet = create_completion_packet( root, &name, objattr->attributes, sd )))
-    {
-        if (get_error() == STATUS_OBJECT_NAME_EXISTS)
-            reply->handle = alloc_handle( current->process, packet, req->access, objattr->attributes );
-        else
-            reply->handle = alloc_handle_no_access_check( current->process, packet,
-                                                          req->access, objattr->attributes );
-        release_object( packet );
-    }
-
-    if (root) release_object( root );
+    if (!get_req_object_attributes( &params )) return;
+    reply->handle = create_named_obj_handle( current->process, &params );
+    if (params.root) release_object( params.root );
 }
 
 /* associate a wait completion packet */

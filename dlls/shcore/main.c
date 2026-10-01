@@ -45,6 +45,99 @@ HWND WINAPI SHCreateWorkerWindowW(WNDPROC, HWND, DWORD, DWORD, HMENU, LONG_PTR);
 
 static DWORD shcore_tls;
 static IUnknown *process_ref;
+static LONG task_pool_context;
+
+struct task_pool_work
+{
+    IRunnableTask *task;
+    HANDLE completed;
+    HRESULT result;
+};
+
+static void CALLBACK task_pool_callback(PTP_CALLBACK_INSTANCE instance, void *context)
+{
+    struct task_pool_work *work = context;
+
+    TRACE("instance %p, task %p.\n", instance, work->task);
+    work->result = IRunnableTask_Run(work->task);
+    TRACE("task %p returned %#lx.\n", work->task, work->result);
+    SetEvent(work->completed);
+}
+
+DWORD WINAPI SHTaskPoolGetUniqueContext(void)
+{
+    return InterlockedIncrement(&task_pool_context);
+}
+
+HRESULT WINAPI SHTaskPoolQueueTask(DWORD type, DWORD priority, DWORD context, DWORD flags,
+        IRunnableTask *task, void **operation)
+{
+    struct task_pool_work *work;
+    HRESULT hr;
+
+    TRACE("type %lu, priority %#lx, context %lu, flags %#lx, task %p, operation %p.\n",
+          type, priority, context, flags, task, operation);
+
+    if (operation) *operation = NULL;
+    if (!task) return E_OUTOFMEMORY;
+
+    /* Native executes type 4 on the caller. */
+    if (type == 4) return IRunnableTask_Run(task);
+
+    /* The operation-returning mode has a separate cancellation contract. */
+    if (flags)
+    {
+        FIXME("Unsupported operation flags %#lx.\n", flags);
+        return E_NOTIMPL;
+    }
+
+    if (!(work = HeapAlloc(GetProcessHeap(), 0, sizeof(*work)))) return E_OUTOFMEMORY;
+    if (!(work->completed = CreateEventW(NULL, FALSE, FALSE, NULL)))
+    {
+        HeapFree(GetProcessHeap(), 0, work);
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+    work->task = task;
+    work->result = E_UNEXPECTED;
+    IRunnableTask_AddRef(task);
+    if (!TrySubmitThreadpoolCallback(task_pool_callback, work, NULL))
+    {
+        hr = HRESULT_FROM_WIN32(GetLastError());
+        IRunnableTask_Release(task);
+        CloseHandle(work->completed);
+        HeapFree(GetProcessHeap(), 0, work);
+        return hr;
+    }
+
+    /* Native runs ordinary tasks on a pool thread, but does not return until
+     * IRunnableTask::Run completes.  Callers rely on writes made by Run being
+     * visible immediately after this function succeeds. */
+    WaitForSingleObject(work->completed, INFINITE);
+    hr = work->result;
+    TRACE("task %p completed with %#lx.\n", task, hr);
+    IRunnableTask_Release(task);
+    CloseHandle(work->completed);
+    HeapFree(GetProcessHeap(), 0, work);
+    return hr;
+}
+
+/*
+ * Windows 11 MrmCoreR calls this private export with a NULL context and a
+ * 100-byte output structure.  The observed implementation writes only the
+ * structure size in that case and succeeds.
+ */
+HRESULT WINAPI SHCoreGetEnvironmentInfo(void *context, DWORD *info)
+{
+    TRACE("%p, %p.\n", context, info);
+
+    if (!info) return E_INVALIDARG;
+
+    *info = 100;
+    if (!context) return S_OK;
+
+    FIXME("Unsupported non-NULL context %p.\n", context);
+    return E_NOTIMPL;
+}
 
 BOOL WINAPI GUIDFromStringW(LPCWSTR string, GUID *guid)
 {
@@ -155,6 +248,18 @@ DEVICE_SCALE_FACTOR WINAPI GetScaleFactorForDevice(DISPLAY_DEVICE_TYPE device_ty
     FIXME("%d\n", device_type);
 
     return SCALE_100_PERCENT;
+}
+
+DEVICE_SCALE_FACTOR WINAPI GetScaleFactorForWindow(HWND hwnd)
+{
+    DEVICE_SCALE_FACTOR scale = SCALE_100_PERCENT;
+    HMONITOR monitor;
+
+    TRACE("%p.\n", hwnd);
+
+    monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    if (monitor) GetScaleFactorForMonitor(monitor, &scale);
+    return scale;
 }
 
 HRESULT WINAPI _IStream_Read(IStream *stream, void *dest, ULONG size)
@@ -663,9 +768,28 @@ WCHAR** WINAPI CommandLineToArgvW(const WCHAR *cmdline, int *numargs)
     return argv;
 }
 
+typedef struct IStreamPrivateBufferAccess IStreamPrivateBufferAccess;
+
+typedef struct IStreamPrivateBufferAccessVtbl
+{
+    HRESULT (WINAPI *QueryInterface)(IStreamPrivateBufferAccess *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(IStreamPrivateBufferAccess *);
+    ULONG (WINAPI *Release)(IStreamPrivateBufferAccess *);
+    HRESULT (WINAPI *GetBuffer)(IStreamPrivateBufferAccess *, UINT *, const BYTE **);
+} IStreamPrivateBufferAccessVtbl;
+
+struct IStreamPrivateBufferAccess
+{
+    const IStreamPrivateBufferAccessVtbl *lpVtbl;
+};
+
+static const GUID IID_IStreamPrivateBufferAccess =
+    {0xed3071e9, 0xf556, 0x4c46, {0x92, 0x94, 0x66, 0x40, 0xc8, 0xc7, 0x52, 0x81}};
+
 struct shstream
 {
     IStream IStream_iface;
+    IStreamPrivateBufferAccess IStreamPrivateBufferAccess_iface;
     LONG refcount;
 
     union
@@ -693,6 +817,11 @@ static inline struct shstream *impl_from_IStream(IStream *iface)
     return CONTAINING_RECORD(iface, struct shstream, IStream_iface);
 }
 
+static inline struct shstream *impl_from_IStreamPrivateBufferAccess(IStreamPrivateBufferAccess *iface)
+{
+    return CONTAINING_RECORD(iface, struct shstream, IStreamPrivateBufferAccess_iface);
+}
+
 static HRESULT WINAPI shstream_QueryInterface(IStream *iface, REFIID riid, void **out)
 {
     struct shstream *stream = impl_from_IStream(iface);
@@ -707,11 +836,58 @@ static HRESULT WINAPI shstream_QueryInterface(IStream *iface, REFIID riid, void 
         IStream_AddRef(iface);
         return S_OK;
     }
+    if (IsEqualIID(riid, &IID_IStreamPrivateBufferAccess) &&
+        stream->IStreamPrivateBufferAccess_iface.lpVtbl)
+    {
+        *out = &stream->IStreamPrivateBufferAccess_iface;
+        IStream_AddRef(iface);
+        return S_OK;
+    }
 
     *out = NULL;
     WARN("Unsupported interface %s.\n", debugstr_guid(riid));
     return E_NOINTERFACE;
 }
+
+static HRESULT WINAPI private_buffer_QueryInterface(IStreamPrivateBufferAccess *iface,
+        REFIID riid, void **out)
+{
+    struct shstream *stream = impl_from_IStreamPrivateBufferAccess(iface);
+    return IStream_QueryInterface(&stream->IStream_iface, riid, out);
+}
+
+static ULONG WINAPI private_buffer_AddRef(IStreamPrivateBufferAccess *iface)
+{
+    struct shstream *stream = impl_from_IStreamPrivateBufferAccess(iface);
+    return IStream_AddRef(&stream->IStream_iface);
+}
+
+static ULONG WINAPI private_buffer_Release(IStreamPrivateBufferAccess *iface)
+{
+    struct shstream *stream = impl_from_IStreamPrivateBufferAccess(iface);
+    return IStream_Release(&stream->IStream_iface);
+}
+
+static HRESULT WINAPI private_buffer_GetBuffer(IStreamPrivateBufferAccess *iface,
+        UINT *size, const BYTE **buffer)
+{
+    struct shstream *stream = impl_from_IStreamPrivateBufferAccess(iface);
+
+    TRACE("%p, %p, %p.\n", iface, size, buffer);
+
+    if (!size || !buffer) return E_POINTER;
+    *size = stream->u.mem.length;
+    *buffer = stream->u.mem.buffer;
+    return S_OK;
+}
+
+static const IStreamPrivateBufferAccessVtbl private_buffer_vtbl =
+{
+    private_buffer_QueryInterface,
+    private_buffer_AddRef,
+    private_buffer_Release,
+    private_buffer_GetBuffer,
+};
 
 static ULONG WINAPI shstream_AddRef(IStream *iface)
 {
@@ -982,6 +1158,7 @@ static struct shstream *shstream_create(const IStreamVtbl *vtbl, const BYTE *dat
 
     stream = malloc(sizeof(*stream));
     stream->IStream_iface.lpVtbl = vtbl;
+    stream->IStreamPrivateBufferAccess_iface.lpVtbl = &private_buffer_vtbl;
     stream->refcount = 1;
     stream->u.mem.buffer = malloc(data_len);
     if (!stream->u.mem.buffer)
@@ -1020,6 +1197,38 @@ IStream * WINAPI SHCreateMemStream(const BYTE *data, UINT data_len)
 
     stream = shstream_create(&memstreamvtbl, data, data_len);
     return stream ? &stream->IStream_iface : NULL;
+}
+
+/*
+ * SHCreateMemoryStreamOnSharedBuffer   [SHCORE.270]
+ *
+ * The first argument implements the private shared-buffer interface used by
+ * the Windows resource manager.  Its first method after IUnknown returns the
+ * address of the buffer.  Keep a private copy in the returned stream; this is
+ * sufficient for in-process consumers and avoids tying the stream lifetime to
+ * the caller's shared-buffer implementation.
+ */
+HRESULT WINAPI SHCreateMemoryStreamOnSharedBuffer(IUnknown *shared_buffer, UINT size,
+        IStream **stream)
+{
+    typedef HRESULT (WINAPI *get_buffer_func)(IUnknown *, const BYTE **);
+    get_buffer_func get_buffer;
+    const BYTE *data;
+    HRESULT hr;
+
+    TRACE("%p, %u, %p.\n", shared_buffer, size, stream);
+
+    if (!stream) return E_POINTER;
+    *stream = NULL;
+    if (!shared_buffer) return E_INVALIDARG;
+
+    get_buffer = (get_buffer_func)((const void *const *)shared_buffer->lpVtbl)[3];
+    if (!get_buffer) return E_NOINTERFACE;
+    if (FAILED(hr = get_buffer(shared_buffer, &data))) return hr;
+    if (!data && size) return E_INVALIDARG;
+
+    if (!(*stream = SHCreateMemStream(data, size))) return E_OUTOFMEMORY;
+    return S_OK;
 }
 
 static ULONG WINAPI filestream_Release(IStream *iface)
@@ -1299,6 +1508,7 @@ HRESULT WINAPI SHCreateStreamOnFileEx(const WCHAR *path, DWORD mode, DWORD attri
 
     stream = malloc(sizeof(*stream));
     stream->IStream_iface.lpVtbl = &filestreamvtbl;
+    stream->IStreamPrivateBufferAccess_iface.lpVtbl = NULL;
     stream->refcount = 1;
     stream->u.file.handle = hFile;
     stream->u.file.mode = mode;
@@ -2679,6 +2889,57 @@ HRESULT WINAPI RegisterScaleChangeNotifications(DISPLAY_DEVICE_TYPE display_devi
     if (cookie) *cookie = 0;
 
     return E_NOTIMPL;
+}
+
+/*************************************************************************
+ * RegisterScaleChangeSinkForWindow        [SHCORE.240]
+ */
+HRESULT WINAPI RegisterScaleChangeSinkForWindow(HWND hwnd, IUnknown *sink, DWORD *cookie)
+{
+    static LONG next_cookie;
+
+    TRACE("(%p, %p, %p)\n", hwnd, sink, cookie);
+    if (!IsWindow(hwnd) || !sink || !cookie) return E_INVALIDARG;
+
+    /* Wine's window driver delivers WM_DPICHANGED directly.  Keep a stable
+     * registration token for callers using the private SHCore sink path; a
+     * fixed-DPI desktop has no additional scale-change callback to dispatch. */
+    *cookie = InterlockedIncrement(&next_cookie);
+    return S_OK;
+}
+
+/*************************************************************************
+ * RegisterScaleChangeNotificationsForWindow        [SHCORE.245]
+ */
+HRESULT WINAPI RegisterScaleChangeNotificationsForWindow(HWND scale_window, HWND notify_window,
+        UINT msg, DWORD *cookie)
+{
+    static LONG next_cookie;
+
+    TRACE("(%p, %p, %u, %p)\n", scale_window, notify_window, msg, cookie);
+
+    if (!cookie) return E_INVALIDARG;
+    *cookie = 0;
+    if (!IsWindow(notify_window)) return E_INVALIDARG;
+
+    /* Windows uses scale_window to select a scaling-info provider, then
+     * registers notify_window and msg with it. Wine already delivers DPI
+     * changes through the window driver, so retain only a revocable token. */
+    *cookie = InterlockedIncrement(&next_cookie);
+    return S_OK;
+}
+
+/*************************************************************************
+ * RevokeScaleChangeNotificationsForWindow        [SHCORE.246]
+ */
+HRESULT WINAPI RevokeScaleChangeNotificationsForWindow(HWND scale_window, DWORD cookie)
+{
+    TRACE("(%p, %lu)\n", scale_window, cookie);
+
+    /* The corresponding registration has no Wine-side callback object: DPI
+     * notifications are delivered by the window driver.  Windows also treats
+     * an absent registration as a successful revoke. */
+    return S_OK;
 }
 
 /*************************************************************************

@@ -1573,13 +1573,168 @@ void WINAPI RtlRbRemoveNode( RTL_RB_TREE *tree, RTL_BALANCED_NODE *node )
     if (tree->root) tree->root->Red = 0;
 }
 
+struct rtl_avl_table_entry
+{
+    RTL_BALANCED_LINKS links;
+    LONGLONG data;
+};
+
+static inline void *get_data_from_avl_links( RTL_BALANCED_LINKS *links )
+{
+    return (unsigned char *)links + FIELD_OFFSET( struct rtl_avl_table_entry, data );
+}
+
+static RTL_BALANCED_LINKS *rtl_avl_find( RTL_AVL_TABLE *table, void *value,
+                                         RTL_GENERIC_COMPARE_RESULTS *result )
+{
+    RTL_BALANCED_LINKS *node = table->BalancedRoot.RightChild;
+
+    if (!node)
+    {
+        *result = GenericEqual;
+        return &table->BalancedRoot;
+    }
+
+    for (;;)
+    {
+        *result = table->CompareRoutine( table, value, get_data_from_avl_links( node ) );
+        if (*result == GenericEqual) return node;
+        if (*result == GenericLessThan)
+        {
+            if (!node->LeftChild) return node;
+            node = node->LeftChild;
+        }
+        else
+        {
+            if (!node->RightChild) return node;
+            node = node->RightChild;
+        }
+    }
+}
+
+static RTL_BALANCED_LINKS *rtl_avl_rotate_left( RTL_AVL_TABLE *table, RTL_BALANCED_LINKS *node )
+{
+    RTL_BALANCED_LINKS *parent = node->Parent;
+    RTL_BALANCED_LINKS *child = node->RightChild;
+
+    node->RightChild = child->LeftChild;
+    if (node->RightChild) node->RightChild->Parent = node;
+    child->LeftChild = node;
+    node->Parent = child;
+    child->Parent = parent;
+    if (parent == &table->BalancedRoot) parent->RightChild = child;
+    else if (parent->LeftChild == node) parent->LeftChild = child;
+    else parent->RightChild = child;
+    return child;
+}
+
+static RTL_BALANCED_LINKS *rtl_avl_rotate_right( RTL_AVL_TABLE *table, RTL_BALANCED_LINKS *node )
+{
+    RTL_BALANCED_LINKS *parent = node->Parent;
+    RTL_BALANCED_LINKS *child = node->LeftChild;
+
+    node->LeftChild = child->RightChild;
+    if (node->LeftChild) node->LeftChild->Parent = node;
+    child->RightChild = node;
+    node->Parent = child;
+    child->Parent = parent;
+    if (parent == &table->BalancedRoot) parent->RightChild = child;
+    else if (parent->LeftChild == node) parent->LeftChild = child;
+    else parent->RightChild = child;
+    return child;
+}
+
+static void rtl_avl_rebalance_after_insert( RTL_AVL_TABLE *table, RTL_BALANCED_LINKS *node )
+{
+    RTL_BALANCED_LINKS *parent = node->Parent, *child, *pivot;
+    CHAR balance;
+
+    while (parent != &table->BalancedRoot)
+    {
+        if (node == parent->LeftChild)
+        {
+            if (parent->Balance > 0)
+            {
+                parent->Balance = 0;
+                return;
+            }
+            if (!parent->Balance)
+            {
+                parent->Balance = -1;
+                node = parent;
+                parent = parent->Parent;
+                continue;
+            }
+
+            child = parent->LeftChild;
+            if (child->Balance <= 0)
+            {
+                rtl_avl_rotate_right( table, parent );
+                parent->Balance = 0;
+                child->Balance = 0;
+            }
+            else
+            {
+                pivot = child->RightChild;
+                balance = pivot->Balance;
+                rtl_avl_rotate_left( table, child );
+                rtl_avl_rotate_right( table, parent );
+                parent->Balance = balance < 0 ? 1 : 0;
+                child->Balance = balance > 0 ? -1 : 0;
+                pivot->Balance = 0;
+            }
+            return;
+        }
+
+        if (parent->Balance < 0)
+        {
+            parent->Balance = 0;
+            return;
+        }
+        if (!parent->Balance)
+        {
+            parent->Balance = 1;
+            node = parent;
+            parent = parent->Parent;
+            continue;
+        }
+
+        child = parent->RightChild;
+        if (child->Balance >= 0)
+        {
+            rtl_avl_rotate_left( table, parent );
+            parent->Balance = 0;
+            child->Balance = 0;
+        }
+        else
+        {
+            pivot = child->LeftChild;
+            balance = pivot->Balance;
+            rtl_avl_rotate_right( table, child );
+            rtl_avl_rotate_left( table, parent );
+            parent->Balance = balance > 0 ? -1 : 0;
+            child->Balance = balance < 0 ? 1 : 0;
+            pivot->Balance = 0;
+        }
+        return;
+    }
+    table->DepthOfTree++;
+}
+
 /***********************************************************************
  *           RtlInitializeGenericTableAvl  (NTDLL.@)
  */
 void WINAPI RtlInitializeGenericTableAvl(PRTL_AVL_TABLE table, PRTL_AVL_COMPARE_ROUTINE compare,
                                          PRTL_AVL_ALLOCATE_ROUTINE allocate, PRTL_AVL_FREE_ROUTINE free, void *context)
 {
-    FIXME("%p %p %p %p %p: stub\n", table, compare, allocate, free, context);
+    TRACE("%p %p %p %p %p\n", table, compare, allocate, free, context);
+
+    memset( table, 0, sizeof(*table) );
+    table->BalancedRoot.Parent = &table->BalancedRoot;
+    table->CompareRoutine = compare;
+    table->AllocateRoutine = allocate;
+    table->FreeRoutine = free;
+    table->TableContext = context;
 }
 
 /******************************************************************************
@@ -1587,11 +1742,35 @@ void WINAPI RtlInitializeGenericTableAvl(PRTL_AVL_TABLE table, PRTL_AVL_COMPARE_
  */
 void * WINAPI RtlEnumerateGenericTableWithoutSplayingAvl(RTL_AVL_TABLE *table, PVOID *previous)
 {
-    static int warn_once;
+    RTL_BALANCED_LINKS *node;
 
-    if (!warn_once++)
-        FIXME("(%p, %p) stub!\n", table, previous);
-    return NULL;
+    TRACE("(%p, %p)\n", table, previous);
+
+    if (!table->NumberGenericTableElements) return NULL;
+    if (!*previous)
+    {
+        node = table->BalancedRoot.RightChild;
+        while (node->LeftChild) node = node->LeftChild;
+    }
+    else
+    {
+        node = (RTL_BALANCED_LINKS *)RtlRealSuccessor( (RTL_SPLAY_LINKS *)*previous );
+        if (!node) return NULL;
+    }
+
+    *previous = node;
+    return get_data_from_avl_links( node );
+}
+
+/******************************************************************************
+ *           RtlEnumerateGenericTableAvl  (NTDLL.@)
+ */
+void * WINAPI RtlEnumerateGenericTableAvl(RTL_AVL_TABLE *table, BOOLEAN restart)
+{
+    TRACE("(%p, %u)\n", table, restart);
+
+    if (restart) table->RestartKey = NULL;
+    return RtlEnumerateGenericTableWithoutSplayingAvl( table, (void **)&table->RestartKey );
 }
 
 /******************************************************************************
@@ -1599,16 +1778,51 @@ void * WINAPI RtlEnumerateGenericTableWithoutSplayingAvl(RTL_AVL_TABLE *table, P
  */
 ULONG WINAPI RtlNumberGenericTableElementsAvl(RTL_AVL_TABLE *table)
 {
-    FIXME("(%p) stub!\n", table);
-    return 0;
+    TRACE("(%p)\n", table);
+    return table->NumberGenericTableElements;
 }
 
 /***********************************************************************
  *           RtlInsertElementGenericTableAvl  (NTDLL.@)
  */
-void WINAPI RtlInsertElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer, ULONG size, BOOL *element)
+void * WINAPI RtlInsertElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer, ULONG size, BOOL *element)
 {
-    FIXME("%p %p %lu %p: stub\n", table, buffer, size, element);
+    RTL_GENERIC_COMPARE_RESULTS result;
+    RTL_BALANCED_LINKS *parent, *node;
+
+    TRACE("%p %p %lu %p\n", table, buffer, size, element);
+
+    parent = rtl_avl_find( table, buffer, &result );
+    if (parent != &table->BalancedRoot && result == GenericEqual)
+    {
+        if (element) *element = FALSE;
+        return get_data_from_avl_links( parent );
+    }
+
+    node = table->AllocateRoutine( table, size + FIELD_OFFSET( struct rtl_avl_table_entry, data ) );
+    if (!node)
+    {
+        if (element) *element = FALSE;
+        return NULL;
+    }
+
+    memset( node, 0, sizeof(*node) );
+    memcpy( get_data_from_avl_links( node ), buffer, size );
+    node->Parent = parent;
+    if (parent == &table->BalancedRoot)
+    {
+        parent->RightChild = node;
+        table->DepthOfTree = 1;
+    }
+    else if (result == GenericLessThan) parent->LeftChild = node;
+    else parent->RightChild = node;
+
+    table->NumberGenericTableElements++;
+    table->OrderedPointer = NULL;
+    table->WhichOrderedElement = 0;
+    if (parent != &table->BalancedRoot) rtl_avl_rebalance_after_insert( table, node );
+    if (element) *element = TRUE;
+    return get_data_from_avl_links( node );
 }
 
 /******************************************************************************
@@ -1616,25 +1830,92 @@ void WINAPI RtlInsertElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer, 
  */
 void * WINAPI RtlLookupElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer)
 {
-    FIXME("(%p, %p) stub!\n", table, buffer);
-    return NULL;
+    RTL_GENERIC_COMPARE_RESULTS result;
+    RTL_BALANCED_LINKS *node;
+
+    TRACE("(%p, %p)\n", table, buffer);
+
+    node = rtl_avl_find( table, buffer, &result );
+    if (node == &table->BalancedRoot || result != GenericEqual) return NULL;
+    return get_data_from_avl_links( node );
 }
 
 /*********************************************************************
  *           RtlQueryPackageIdentity [NTDLL.@]
  */
+static NTSTATUS get_current_package_claim( const WCHAR **fullname, SIZE_T *fullname_chars )
+{
+    static const WCHAR windows_apps[] = L"\\Program Files\\WindowsApps\\";
+    const UNICODE_STRING *image = &NtCurrentTeb()->Peb->ProcessParameters->ImagePathName;
+    const WCHAR *component = NULL;
+    SIZE_T image_chars = image->Length / sizeof(WCHAR), prefix_chars = ARRAY_SIZE(windows_apps) - 1;
+    SIZE_T i, end;
+
+    for (i = 0; i + prefix_chars < image_chars; ++i)
+    {
+        if (!wcsnicmp( image->Buffer + i, windows_apps, prefix_chars ))
+        {
+            component = image->Buffer + i + prefix_chars;
+            break;
+        }
+    }
+    if (!component) return STATUS_NOT_FOUND;
+
+    end = component - image->Buffer;
+    while (end < image_chars && image->Buffer[end] != L'\\' && image->Buffer[end] != L'/') ++end;
+    if (end == component - image->Buffer) return STATUS_NOT_FOUND;
+
+    *fullname = component;
+    *fullname_chars = end - (component - image->Buffer);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS copy_package_claim_string( const WCHAR *value, SIZE_T chars, WCHAR *buffer,
+                                           SIZE_T *size )
+{
+    SIZE_T supplied, required = (chars + 1) * sizeof(WCHAR);
+
+    if (!size) return buffer ? STATUS_INVALID_PARAMETER : STATUS_SUCCESS;
+    supplied = *size;
+    *size = required;
+    if (!buffer) return STATUS_BUFFER_TOO_SMALL;
+    if (supplied < required) return STATUS_BUFFER_TOO_SMALL;
+    memcpy( buffer, value, chars * sizeof(WCHAR) );
+    buffer[chars] = 0;
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS WINAPI RtlQueryPackageIdentity(HANDLE token, WCHAR *fullname, SIZE_T *fullname_size,
                                         WCHAR *appid, SIZE_T *appid_size, BOOLEAN *packaged)
 {
-    FIXME("(%p, %p, %p, %p, %p, %p): stub\n", token, fullname, fullname_size, appid, appid_size, packaged);
-    return STATUS_NOT_FOUND;
+    static const WCHAR app[] = L"App";
+    const WCHAR *current_fullname;
+    SIZE_T current_fullname_chars;
+    NTSTATUS status, appid_status;
+
+    TRACE("(%p, %p, %p, %p, %p, %p)\n", token, fullname, fullname_size, appid, appid_size, packaged);
+    if ((status = get_current_package_claim( &current_fullname, &current_fullname_chars )))
+    {
+        if (fullname_size) *fullname_size = 0;
+        if (appid_size) *appid_size = 0;
+        if (packaged) *packaged = FALSE;
+        return status;
+    }
+
+    if (packaged) *packaged = TRUE;
+    status = copy_package_claim_string( current_fullname, current_fullname_chars,
+                                        fullname, fullname_size );
+    appid_status = copy_package_claim_string( app, ARRAY_SIZE(app) - 1, appid, appid_size );
+    return status ? status : appid_status;
 }
 
 /*********************************************************************
  *           RtlQueryPackageClaims [NTDLL.@]
  *
- * An ordinary desktop process has no package identity.  Keep every
- * optional result deterministic while reporting that state to callers.
+ * Package identity is carried by the process token on Windows.  LinuxNT's
+ * initial package server launches deployed applications directly from their
+ * WindowsApps directory, so derive the immutable package full name from the
+ * image path and expose the token claim shape consumed by native XAML.
  */
 NTSTATUS WINAPI RtlQueryPackageClaims(HANDLE token, WCHAR *fullname, SIZE_T *fullname_size,
                                       WCHAR *appid, SIZE_T *appid_size, GUID *dynamic_id,
@@ -1646,15 +1927,74 @@ NTSTATUS WINAPI RtlQueryPackageClaims(HANDLE token, WCHAR *fullname, SIZE_T *ful
         ULONG origin;
     };
 
-    FIXME("(%p, %p, %p, %p, %p, %p, %p, %p): no package identity\n", token, fullname,
-          fullname_size, appid, appid_size, dynamic_id, package_claim, attributes_present);
+    static const WCHAR app[] = L"App";
+    const WCHAR *current_fullname;
+    SIZE_T current_fullname_chars;
+    NTSTATUS status, appid_status;
 
-    if (fullname_size) *fullname_size = 0;
-    if (appid_size) *appid_size = 0;
+    TRACE("(%p, %p, %p, %p, %p, %p, %p, %p)\n", token, fullname, fullname_size,
+          appid, appid_size, dynamic_id, package_claim, attributes_present);
+
+    if ((status = get_current_package_claim( &current_fullname, &current_fullname_chars )))
+    {
+        if (fullname_size) *fullname_size = 0;
+        if (appid_size) *appid_size = 0;
+        if (dynamic_id) memset(dynamic_id, 0, sizeof(*dynamic_id));
+        if (package_claim) memset(package_claim, 0, sizeof(struct package_claim));
+        if (attributes_present) *attributes_present = 0;
+        return status;
+    }
+
     if (dynamic_id) memset(dynamic_id, 0, sizeof(*dynamic_id));
-    if (package_claim) memset(package_claim, 0, sizeof(struct package_claim));
-    if (attributes_present) *attributes_present = 0;
-    return STATUS_NOT_FOUND;
+    if (package_claim)
+    {
+        struct package_claim *claim = package_claim;
+        claim->flags = 0x11;
+        claim->origin = 3;
+    }
+    if (attributes_present) *attributes_present = 3;
+
+    status = copy_package_claim_string( current_fullname, current_fullname_chars,
+                                        fullname, fullname_size );
+    appid_status = copy_package_claim_string( app, ARRAY_SIZE(app) - 1, appid, appid_size );
+    return status ? status : appid_status;
+}
+
+/*********************************************************************
+ *           RtlQueryResourcePolicy [NTDLL.@]
+ *
+ * These are the desktop-class defaults returned by Windows when its memory,
+ * system-volume and platform probes do not classify the machine as resource
+ * constrained. LinuxNT does not yet expose those host probes to PE ntdll.
+ */
+NTSTATUS WINAPI RtlQueryResourcePolicy(ULONG policy, ULONG flags, ULONG *value, SIZE_T size)
+{
+    static const ULONG desktop_policy[] = {20, 15, 10, 100};
+
+    TRACE("(%lu, %#lx, %p, %Iu)\n", policy, flags, value, size);
+
+    if (!value || flags || size != sizeof(*value)) return STATUS_INVALID_PARAMETER;
+    if (policy >= ARRAY_SIZE(desktop_policy)) return STATUS_INVALID_INFO_CLASS;
+
+    *value = desktop_policy[policy];
+    return STATUS_SUCCESS;
+}
+
+/*********************************************************************
+ *           RtlIsCloudFilesPlaceholder [NTDLL.@]
+ */
+BOOLEAN WINAPI RtlIsCloudFilesPlaceholder(ULONG attributes, ULONG tag)
+{
+    return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+           (tag & ~IO_REPARSE_TAG_CLOUD_MASK) == IO_REPARSE_TAG_CLOUD;
+}
+
+/*********************************************************************
+ *           RtlIsPartialPlaceholder [NTDLL.@]
+ */
+BOOLEAN WINAPI RtlIsPartialPlaceholder(ULONG attributes, ULONG tag)
+{
+    return !!(attributes & (FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS));
 }
 
 /*********************************************************************
@@ -1662,8 +2002,49 @@ NTSTATUS WINAPI RtlQueryPackageClaims(HANDLE token, WCHAR *fullname, SIZE_T *ful
  */
 char WINAPI RtlQueryProcessPlaceholderCompatibilityMode(void)
 {
-    FIXME("stub\n");
-    return PHCM_APPLICATION_DEFAULT;
+    PEB *peb = NtCurrentTeb()->Peb;
+
+    return peb ? peb->PlaceholderCompatibilityMode : PHCM_ERROR_NO_PEB;
+}
+
+/*********************************************************************
+ *           RtlQueryThreadPlaceholderCompatibilityMode [NTDLL.@]
+ */
+char WINAPI RtlQueryThreadPlaceholderCompatibilityMode(void)
+{
+    TEB *teb = NtCurrentTeb();
+
+    return teb ? teb->PlaceholderCompatibilityMode : PHCM_ERROR_NO_TEB;
+}
+
+/*********************************************************************
+ *           RtlSetProcessPlaceholderCompatibilityMode [NTDLL.@]
+ */
+char WINAPI RtlSetProcessPlaceholderCompatibilityMode(char mode)
+{
+    PEB *peb;
+    char previous;
+
+    if ((unsigned char)mode > PHCM_MAX) return PHCM_ERROR_INVALID_PARAMETER;
+    if (!(peb = NtCurrentTeb()->Peb)) return PHCM_ERROR_NO_PEB;
+    previous = peb->PlaceholderCompatibilityMode;
+    peb->PlaceholderCompatibilityMode = mode;
+    return previous;
+}
+
+/*********************************************************************
+ *           RtlSetThreadPlaceholderCompatibilityMode [NTDLL.@]
+ */
+char WINAPI RtlSetThreadPlaceholderCompatibilityMode(char mode)
+{
+    TEB *teb;
+    char previous;
+
+    if ((unsigned char)mode > PHCM_MAX) return PHCM_ERROR_INVALID_PARAMETER;
+    if (!(teb = NtCurrentTeb())) return PHCM_ERROR_NO_TEB;
+    previous = teb->PlaceholderCompatibilityMode;
+    teb->PlaceholderCompatibilityMode = mode;
+    return previous;
 }
 
 /*********************************************************************

@@ -225,6 +225,9 @@ RPCRTAPI RPC_STATUS RPC_ENTRY
   I_RpcBindingInqLocalClientPID (RPC_BINDING_HANDLE Binding, ULONG *Pid );
 
 RPCRTAPI RPC_STATUS RPC_ENTRY
+  I_RpcOpenClientProcess (RPC_BINDING_HANDLE Binding, DWORD DesiredAccess, HANDLE *ClientProcess );
+
+RPCRTAPI RPC_STATUS RPC_ENTRY
   I_RpcBindingInqTransportType( RPC_BINDING_HANDLE Binding, unsigned int* Type );
 
 RPCRTAPI LONG RPC_ENTRY I_RpcMapWin32Status(RPC_STATUS);

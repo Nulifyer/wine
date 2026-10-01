@@ -48,6 +48,8 @@
 98 stdcall GetImmersiveUserColorSetPreference(long long)
 100 stdcall -noname GetImmersiveColorNamedTypeByIndex(long)
 104 stdcall -noname RefreshImmersiveColorPolicyState()
+120 stdcall GetUserColorPreference(ptr long)
+121 stdcall GetColorFromPreference(ptr long long long)
 132 stdcall -noname ShouldAppsUseDarkMode()
 133 stdcall -noname AllowDarkModeForWindow(ptr long)
 135 stdcall -noname SetPreferredAppMode(long)

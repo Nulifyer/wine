@@ -1912,7 +1912,11 @@ struct open_file_object_request
     obj_handle_t rootdir;
     unsigned int sharing;
     unsigned int options;
+    int impersonation_level;
+    int context_tracking;
+    int effective_only;
     /* VARARG(filename,unicode_str); */
+    char __pad_44[4];
 };
 struct open_file_object_reply
 {
@@ -4879,6 +4883,32 @@ struct set_desktop_shell_windows_reply
 #define SET_DESKTOP_TASKMAN_WINDOW  0x04
 
 
+struct acquire_desktop_iam_key_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct acquire_desktop_iam_key_reply
+{
+    struct reply_header __header;
+    client_ptr_t    key;
+};
+
+
+struct enable_thread_iam_access_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    client_ptr_t    key;
+    int             enable;
+    char __pad_28[4];
+};
+struct enable_thread_iam_access_reply
+{
+    struct reply_header __header;
+};
+
+
 struct adjust_token_privileges_request
 {
     struct request_header __header;
@@ -5566,6 +5596,20 @@ struct open_completion_reply
 
 
 
+struct register_coremessaging_completion_request
+{
+    struct request_header __header;
+    obj_handle_t  handle;
+    user_handle_t window;
+    char __pad_20[4];
+};
+struct register_coremessaging_completion_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct add_completion_request
 {
     struct request_header __header;
@@ -5642,6 +5686,56 @@ struct set_completion_info_request
     char __pad_28[4];
 };
 struct set_completion_info_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct create_completion_packet_request
+{
+    struct request_header __header;
+    unsigned int access;
+    /* VARARG(objattr,object_attributes); */
+};
+struct create_completion_packet_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+
+struct associate_completion_packet_request
+{
+    struct request_header __header;
+    obj_handle_t  packet;
+    obj_handle_t  completion;
+    obj_handle_t  target;
+    apc_param_t   ckey;
+    apc_param_t   cvalue;
+    apc_param_t   information;
+    unsigned int  status;
+    char __pad_52[4];
+};
+struct associate_completion_packet_reply
+{
+    struct reply_header __header;
+    int           already_signaled;
+    char __pad_12[4];
+};
+
+
+
+struct cancel_completion_packet_request
+{
+    struct request_header __header;
+    obj_handle_t  packet;
+    int           remove_signaled;
+    char __pad_20[4];
+};
+struct cancel_completion_packet_reply
 {
     struct reply_header __header;
 };
@@ -5886,6 +5980,105 @@ struct open_job_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+
+struct open_memory_partition_request
+{
+    struct request_header __header;
+    unsigned int access;
+    unsigned int attributes;
+    obj_handle_t rootdir;
+    /* VARARG(name,unicode_str); */
+};
+struct open_memory_partition_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+
+struct query_memory_partition_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct query_memory_partition_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct create_wnf_state_name_request
+{
+    struct request_header __header;
+    unsigned int name_lifetime;
+    unsigned int data_scope;
+    unsigned int maximum_size;
+    int          persist_data;
+    int          type_id;
+    int          security_descriptor;
+    char __pad_36[4];
+};
+struct create_wnf_state_name_reply
+{
+    struct reply_header __header;
+    unsigned __int64 state_name;
+};
+
+
+
+struct delete_wnf_state_name_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+};
+struct delete_wnf_state_name_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct query_wnf_state_data_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+    unsigned int session_id;
+    int          explicit_scope;
+};
+struct query_wnf_state_data_reply
+{
+    struct reply_header __header;
+    unsigned int change_stamp;
+    data_size_t  total;
+    /* VARARG(data,bytes); */
+};
+
+
+
+struct update_wnf_state_data_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    unsigned __int64 state_name;
+    unsigned int matching_stamp;
+    int          check_stamp;
+    unsigned int session_id;
+    int          explicit_scope;
+    /* VARARG(data,bytes); */
+};
+struct update_wnf_state_data_reply
+{
+    struct reply_header __header;
+    unsigned int change_stamp;
     char __pad_12[4];
 };
 
@@ -6246,6 +6439,140 @@ struct alpc_create_port_reply
 };
 
 
+
+struct alpc_connect_port_request
+{
+    struct request_header __header;
+    unsigned int        flags;
+    unsigned int        attributes;
+    obj_handle_t        rootdir;
+    mem_size_t          max_msg_len;
+    data_size_t         name_size;
+    /* VARARG(name,unicode_str,name_size); */
+    /* VARARG(message,bytes); */
+    char __pad_36[4];
+};
+struct alpc_connect_port_reply
+{
+    struct reply_header __header;
+    obj_handle_t        handle;
+    unsigned int        message_id;
+};
+
+
+
+struct alpc_get_connect_result_request
+{
+    struct request_header __header;
+    obj_handle_t        handle;
+};
+struct alpc_get_connect_result_reply
+{
+    struct reply_header __header;
+    unsigned int        status;
+    unsigned int        message_id;
+    data_size_t         message_size;
+    /* VARARG(message,bytes); */
+    char __pad_20[4];
+};
+
+
+
+struct alpc_accept_connect_port_request
+{
+    struct request_header __header;
+    obj_handle_t        connection;
+    unsigned int        flags;
+    unsigned int        attributes;
+    unsigned int        accept;
+    unsigned int        message_id;
+    mem_size_t          max_msg_len;
+    client_ptr_t        port_context;
+    client_ptr_t        message_context;
+    /* VARARG(message,bytes); */
+};
+struct alpc_accept_connect_port_reply
+{
+    struct reply_header __header;
+    obj_handle_t        handle;
+    char __pad_12[4];
+};
+
+
+
+struct alpc_send_receive_request
+{
+    struct request_header __header;
+    obj_handle_t        handle;
+    unsigned int        flags;
+    data_size_t         send_size;
+    unsigned int        message_id;
+    unsigned int        valid_attributes;
+    client_ptr_t        message_context;
+    unsigned __int64    work_on_behalf;
+    /* VARARG(message,bytes); */
+};
+struct alpc_send_receive_reply
+{
+    struct reply_header __header;
+    unsigned int        pending;
+    unsigned int        message_id;
+    process_id_t        sender_pid;
+    thread_id_t         sender_tid;
+    unsigned int        message_type;
+    data_size_t         message_size;
+    client_ptr_t        port_context;
+    client_ptr_t        message_context;
+    unsigned int        valid_attributes;
+    char __pad_52[4];
+    unsigned __int64    work_on_behalf;
+    /* VARARG(message,bytes); */
+};
+
+
+
+struct alpc_disconnect_port_request
+{
+    struct request_header __header;
+    obj_handle_t        handle;
+    unsigned int        flags;
+    char __pad_20[4];
+};
+struct alpc_disconnect_port_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct alpc_query_information_request
+{
+    struct request_header __header;
+    obj_handle_t        handle;
+};
+struct alpc_query_information_reply
+{
+    struct reply_header __header;
+    unsigned int        flags;
+    unsigned int        sequence;
+    client_ptr_t        context;
+};
+
+
+
+struct alpc_impersonate_client_request
+{
+    struct request_header __header;
+    obj_handle_t        handle;
+    unsigned int        message_id;
+    char __pad_20[4];
+};
+struct alpc_impersonate_client_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -6471,6 +6798,8 @@ enum request
     REQ_create_token,
     REQ_open_token,
     REQ_set_desktop_shell_windows,
+    REQ_acquire_desktop_iam_key,
+    REQ_enable_thread_iam_access,
     REQ_adjust_token_privileges,
     REQ_get_token_privileges,
     REQ_check_token_privileges,
@@ -6514,11 +6843,15 @@ enum request
     REQ_create_linked_token,
     REQ_create_completion,
     REQ_open_completion,
+    REQ_register_coremessaging_completion,
     REQ_add_completion,
     REQ_remove_completion,
     REQ_get_thread_completion,
     REQ_query_completion,
     REQ_set_completion_info,
+    REQ_create_completion_packet,
+    REQ_associate_completion_packet,
+    REQ_cancel_completion_packet,
     REQ_add_fd_completion,
     REQ_set_fd_completion_mode,
     REQ_set_fd_disp_info,
@@ -6534,6 +6867,12 @@ enum request
     REQ_update_rawinput_devices,
     REQ_create_job,
     REQ_open_job,
+    REQ_open_memory_partition,
+    REQ_query_memory_partition,
+    REQ_create_wnf_state_name,
+    REQ_delete_wnf_state_name,
+    REQ_query_wnf_state_data,
+    REQ_update_wnf_state_data,
     REQ_assign_job,
     REQ_process_in_job,
     REQ_set_job_limits,
@@ -6556,6 +6895,13 @@ enum request
     REQ_d3dkmt_mutex_acquire,
     REQ_d3dkmt_mutex_release,
     REQ_alpc_create_port,
+    REQ_alpc_connect_port,
+    REQ_alpc_get_connect_result,
+    REQ_alpc_accept_connect_port,
+    REQ_alpc_send_receive,
+    REQ_alpc_disconnect_port,
+    REQ_alpc_query_information,
+    REQ_alpc_impersonate_client,
     REQ_NB_REQUESTS
 };
 
@@ -6786,6 +7132,8 @@ union generic_request
     struct create_token_request create_token_request;
     struct open_token_request open_token_request;
     struct set_desktop_shell_windows_request set_desktop_shell_windows_request;
+    struct acquire_desktop_iam_key_request acquire_desktop_iam_key_request;
+    struct enable_thread_iam_access_request enable_thread_iam_access_request;
     struct adjust_token_privileges_request adjust_token_privileges_request;
     struct get_token_privileges_request get_token_privileges_request;
     struct check_token_privileges_request check_token_privileges_request;
@@ -6829,11 +7177,15 @@ union generic_request
     struct create_linked_token_request create_linked_token_request;
     struct create_completion_request create_completion_request;
     struct open_completion_request open_completion_request;
+    struct register_coremessaging_completion_request register_coremessaging_completion_request;
     struct add_completion_request add_completion_request;
     struct remove_completion_request remove_completion_request;
     struct get_thread_completion_request get_thread_completion_request;
     struct query_completion_request query_completion_request;
     struct set_completion_info_request set_completion_info_request;
+    struct create_completion_packet_request create_completion_packet_request;
+    struct associate_completion_packet_request associate_completion_packet_request;
+    struct cancel_completion_packet_request cancel_completion_packet_request;
     struct add_fd_completion_request add_fd_completion_request;
     struct set_fd_completion_mode_request set_fd_completion_mode_request;
     struct set_fd_disp_info_request set_fd_disp_info_request;
@@ -6849,6 +7201,12 @@ union generic_request
     struct update_rawinput_devices_request update_rawinput_devices_request;
     struct create_job_request create_job_request;
     struct open_job_request open_job_request;
+    struct open_memory_partition_request open_memory_partition_request;
+    struct query_memory_partition_request query_memory_partition_request;
+    struct create_wnf_state_name_request create_wnf_state_name_request;
+    struct delete_wnf_state_name_request delete_wnf_state_name_request;
+    struct query_wnf_state_data_request query_wnf_state_data_request;
+    struct update_wnf_state_data_request update_wnf_state_data_request;
     struct assign_job_request assign_job_request;
     struct process_in_job_request process_in_job_request;
     struct set_job_limits_request set_job_limits_request;
@@ -6871,6 +7229,13 @@ union generic_request
     struct d3dkmt_mutex_acquire_request d3dkmt_mutex_acquire_request;
     struct d3dkmt_mutex_release_request d3dkmt_mutex_release_request;
     struct alpc_create_port_request alpc_create_port_request;
+    struct alpc_connect_port_request alpc_connect_port_request;
+    struct alpc_get_connect_result_request alpc_get_connect_result_request;
+    struct alpc_accept_connect_port_request alpc_accept_connect_port_request;
+    struct alpc_send_receive_request alpc_send_receive_request;
+    struct alpc_disconnect_port_request alpc_disconnect_port_request;
+    struct alpc_query_information_request alpc_query_information_request;
+    struct alpc_impersonate_client_request alpc_impersonate_client_request;
 };
 union generic_reply
 {
@@ -7099,6 +7464,8 @@ union generic_reply
     struct create_token_reply create_token_reply;
     struct open_token_reply open_token_reply;
     struct set_desktop_shell_windows_reply set_desktop_shell_windows_reply;
+    struct acquire_desktop_iam_key_reply acquire_desktop_iam_key_reply;
+    struct enable_thread_iam_access_reply enable_thread_iam_access_reply;
     struct adjust_token_privileges_reply adjust_token_privileges_reply;
     struct get_token_privileges_reply get_token_privileges_reply;
     struct check_token_privileges_reply check_token_privileges_reply;
@@ -7142,11 +7509,15 @@ union generic_reply
     struct create_linked_token_reply create_linked_token_reply;
     struct create_completion_reply create_completion_reply;
     struct open_completion_reply open_completion_reply;
+    struct register_coremessaging_completion_reply register_coremessaging_completion_reply;
     struct add_completion_reply add_completion_reply;
     struct remove_completion_reply remove_completion_reply;
     struct get_thread_completion_reply get_thread_completion_reply;
     struct query_completion_reply query_completion_reply;
     struct set_completion_info_reply set_completion_info_reply;
+    struct create_completion_packet_reply create_completion_packet_reply;
+    struct associate_completion_packet_reply associate_completion_packet_reply;
+    struct cancel_completion_packet_reply cancel_completion_packet_reply;
     struct add_fd_completion_reply add_fd_completion_reply;
     struct set_fd_completion_mode_reply set_fd_completion_mode_reply;
     struct set_fd_disp_info_reply set_fd_disp_info_reply;
@@ -7162,6 +7533,12 @@ union generic_reply
     struct update_rawinput_devices_reply update_rawinput_devices_reply;
     struct create_job_reply create_job_reply;
     struct open_job_reply open_job_reply;
+    struct open_memory_partition_reply open_memory_partition_reply;
+    struct query_memory_partition_reply query_memory_partition_reply;
+    struct create_wnf_state_name_reply create_wnf_state_name_reply;
+    struct delete_wnf_state_name_reply delete_wnf_state_name_reply;
+    struct query_wnf_state_data_reply query_wnf_state_data_reply;
+    struct update_wnf_state_data_reply update_wnf_state_data_reply;
     struct assign_job_reply assign_job_reply;
     struct process_in_job_reply process_in_job_reply;
     struct set_job_limits_reply set_job_limits_reply;
@@ -7184,8 +7561,15 @@ union generic_reply
     struct d3dkmt_mutex_acquire_reply d3dkmt_mutex_acquire_reply;
     struct d3dkmt_mutex_release_reply d3dkmt_mutex_release_reply;
     struct alpc_create_port_reply alpc_create_port_reply;
+    struct alpc_connect_port_reply alpc_connect_port_reply;
+    struct alpc_get_connect_result_reply alpc_get_connect_result_reply;
+    struct alpc_accept_connect_port_reply alpc_accept_connect_port_reply;
+    struct alpc_send_receive_reply alpc_send_receive_reply;
+    struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
+    struct alpc_query_information_reply alpc_query_information_reply;
+    struct alpc_impersonate_client_reply alpc_impersonate_client_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 961
+#define SERVER_PROTOCOL_VERSION 975
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

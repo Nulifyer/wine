@@ -406,6 +406,7 @@ struct language_factory
 {
     IActivationFactory IActivationFactory_iface;
     ILanguageFactory ILanguageFactory_iface;
+    ILanguageStatics ILanguageStatics_iface;
     LONG ref;
 };
 
@@ -440,6 +441,11 @@ static inline struct windows_globalization *impl_from_IGlobalizationPreferencesS
 static inline struct language_factory *impl_from_ILanguageFactory(ILanguageFactory *iface)
 {
     return CONTAINING_RECORD(iface, struct language_factory, ILanguageFactory_iface);
+}
+
+static inline struct language_factory *impl_from_ILanguageStatics(ILanguageStatics *iface)
+{
+    return CONTAINING_RECORD(iface, struct language_factory, ILanguageStatics_iface);
 }
 
 static inline struct language *impl_from_ILanguage(ILanguage *iface)
@@ -837,6 +843,13 @@ static HRESULT STDMETHODCALLTYPE windows_globalization_language_factory_QueryInt
         return S_OK;
     }
 
+    if (IsEqualGUID(iid, &IID_ILanguageStatics))
+    {
+        IUnknown_AddRef(iface);
+        *out = &factory->ILanguageStatics_iface;
+        return S_OK;
+    }
+
     FIXME("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
     *out = NULL;
     return E_NOINTERFACE;
@@ -947,10 +960,91 @@ static const struct ILanguageFactoryVtbl language_factory_vtbl =
     language_factory_CreateLanguage,
 };
 
+static HRESULT STDMETHODCALLTYPE language_statics_QueryInterface(
+        ILanguageStatics *iface, REFIID iid, void **object)
+{
+    struct language_factory *factory = impl_from_ILanguageStatics(iface);
+    return IActivationFactory_QueryInterface(&factory->IActivationFactory_iface, iid, object);
+}
+
+static ULONG STDMETHODCALLTYPE language_statics_AddRef(ILanguageStatics *iface)
+{
+    struct language_factory *factory = impl_from_ILanguageStatics(iface);
+    return IActivationFactory_AddRef(&factory->IActivationFactory_iface);
+}
+
+static ULONG STDMETHODCALLTYPE language_statics_Release(ILanguageStatics *iface)
+{
+    struct language_factory *factory = impl_from_ILanguageStatics(iface);
+    return IActivationFactory_Release(&factory->IActivationFactory_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE language_statics_GetIids(
+        ILanguageStatics *iface, ULONG *iid_count, IID **iids)
+{
+    FIXME("iface %p, iid_count %p, iids %p stub!\n", iface, iid_count, iids);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE language_statics_GetRuntimeClassName(
+        ILanguageStatics *iface, HSTRING *class_name)
+{
+    FIXME("iface %p, class_name %p stub!\n", iface, class_name);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE language_statics_GetTrustLevel(
+        ILanguageStatics *iface, TrustLevel *trust_level)
+{
+    FIXME("iface %p, trust_level %p stub!\n", iface, trust_level);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE language_statics_IsWellFormed(
+        ILanguageStatics *iface, HSTRING tag, BOOLEAN *result)
+{
+    const WCHAR *name;
+    WCHAR buffer[LOCALE_NAME_MAX_LENGTH];
+
+    TRACE("iface %p, tag %p, result %p.\n", iface, tag, result);
+    if (!result) return E_POINTER;
+
+    name = WindowsGetStringRawBuffer(tag, NULL);
+    *result = name && GetLocaleInfoEx(name, LOCALE_SNAME, buffer, ARRAY_SIZE(buffer));
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE language_statics_get_CurrentInputMethodLanguageTag(
+        ILanguageStatics *iface, HSTRING *value)
+{
+    WCHAR name[LOCALE_NAME_MAX_LENGTH];
+
+    TRACE("iface %p, value %p.\n", iface, value);
+    if (!value) return E_POINTER;
+    *value = NULL;
+    if (!GetUserDefaultLocaleName(name, ARRAY_SIZE(name))) return HRESULT_FROM_WIN32(GetLastError());
+    return WindowsCreateString(name, wcslen(name), value);
+}
+
+static const struct ILanguageStaticsVtbl language_statics_vtbl =
+{
+    language_statics_QueryInterface,
+    language_statics_AddRef,
+    language_statics_Release,
+    /* IInspectable methods */
+    language_statics_GetIids,
+    language_statics_GetRuntimeClassName,
+    language_statics_GetTrustLevel,
+    /* ILanguageStatics methods */
+    language_statics_IsWellFormed,
+    language_statics_get_CurrentInputMethodLanguageTag,
+};
+
 static struct language_factory language_factory =
 {
     {&activation_factory_language_vtbl},
     {&language_factory_vtbl},
+    {&language_statics_vtbl},
     0
 };
 

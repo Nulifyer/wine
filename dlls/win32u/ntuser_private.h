@@ -40,6 +40,16 @@ enum system_timer_id
 
 #define OBJ_OTHER_PROCESS ((void *)1)  /* returned by get_user_handle_ptr on unknown handles */
 
+extern NTSTATUS WINAPI NtDCompositionGetFrameStatistics(void *statistics, void *private_statistics);
+extern NTSTATUS WINAPI NtDCompositionCreateChannel(UINT *channel_id, UINT *section_size, void **mapping);
+extern NTSTATUS WINAPI NtDCompositionSetChannelConnectionId(UINT channel_id);
+extern NTSTATUS WINAPI NtDCompositionGetBatchId(UINT channel_id, UINT type, UINT *batch_id);
+extern NTSTATUS WINAPI NtDCompositionProcessChannelBatchBuffer(UINT channel_id, UINT size,
+                                                               UINT *processed, BYTE *pending);
+extern NTSTATUS WINAPI NtCreateCompositionInputSink(const void *descriptor, HANDLE *sink);
+extern NTSTATUS WINAPI NtQueryCompositionInputSinkLuid(HANDLE sink, LUID *luid);
+extern NTSTATUS WINAPI NtCloseCompositionInputSink(HANDLE sink);
+
 typedef struct tagWND
 {
     HWND               handle;        /* window full handle */

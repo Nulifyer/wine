@@ -1,20 +1,24 @@
 EXTRADEFS = -DWINOLE32API=
 MODULE    = combase.dll
 IMPORTLIB = combase
-IMPORTS   = advapi32 ole32 user32 gdi32 uuid rpcrt4
-DELAYIMPORTS = oleaut32
+IMPORTS   = advapi32 bcrypt ole32 user32 gdi32 uuid rpcrt4
+DELAYIMPORTS = oleaut32 shlwapi xmllite
 
 SOURCES = \
 	apartment.c \
 	combase.c \
 	dcom.idl \
 	errorinfo.c \
+	extension_catalog.c \
 	hglobalstream.c \
 	irpcss.idl \
 	malloc.c \
 	marshal.c \
+	package_activation.c \
+	proxy_thunks.c \
 	roapi.c \
 	rpc.c \
 	string.c \
 	stubmanager.c \
-	usrmarshal.c
+	usrmarshal.c \
+	xaml_provider.c

@@ -33,3 +33,7 @@ namespace Windows.Storage.Streams {
     runtimeclass RandomAccessStreamReference;
     runtimeclass InMemoryRandomAccessStream;
 }
+
+namespace Windows.Storage {
+    runtimeclass AppDataPaths;
+}

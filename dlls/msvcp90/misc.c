@@ -773,6 +773,10 @@ int __cdecl _Mtx_current_owns(_Mtx_arg_t mtx)
 
 int __cdecl _Mtx_lock(_Mtx_arg_t mtx)
 {
+    TRACE("mtx %p flags %#lx owner %#lx count %#lx thread %#lx\n", MTX_T_FROM_ARG(mtx),
+          MTX_T_FROM_ARG(mtx)->flags, MTX_T_FROM_ARG(mtx)->thread_id,
+          MTX_T_FROM_ARG(mtx)->count, GetCurrentThreadId());
+
     if(MTX_T_FROM_ARG(mtx)->thread_id != GetCurrentThreadId()) {
         cs_lock(&MTX_T_FROM_ARG(mtx)->cs);
         MTX_T_FROM_ARG(mtx)->thread_id = GetCurrentThreadId();
@@ -782,16 +786,27 @@ int __cdecl _Mtx_lock(_Mtx_arg_t mtx)
     }
 
     MTX_T_FROM_ARG(mtx)->count++;
+    TRACE("locked mtx %p owner %#lx count %#lx\n", MTX_T_FROM_ARG(mtx),
+          MTX_T_FROM_ARG(mtx)->thread_id, MTX_T_FROM_ARG(mtx)->count);
     return 0;
 }
 
 int __cdecl _Mtx_unlock(_Mtx_arg_t mtx)
 {
+    TRACE("mtx %p owner %#lx count %#lx thread %#lx\n", MTX_T_FROM_ARG(mtx),
+          MTX_T_FROM_ARG(mtx)->thread_id, MTX_T_FROM_ARG(mtx)->count,
+          GetCurrentThreadId());
+
     if(--MTX_T_FROM_ARG(mtx)->count)
+    {
+        TRACE("still locked mtx %p owner %#lx count %#lx\n", MTX_T_FROM_ARG(mtx),
+              MTX_T_FROM_ARG(mtx)->thread_id, MTX_T_FROM_ARG(mtx)->count);
         return 0;
+    }
 
     MTX_T_FROM_ARG(mtx)->thread_id = -1;
     cs_unlock(&MTX_T_FROM_ARG(mtx)->cs);
+    TRACE("unlocked mtx %p\n", MTX_T_FROM_ARG(mtx));
     return 0;
 }
 

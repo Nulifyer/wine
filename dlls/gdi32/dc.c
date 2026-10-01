@@ -626,6 +626,26 @@ INT WINAPI GetDeviceCaps( HDC hdc, INT cap )
 }
 
 /***********************************************************************
+ *           GetCurrentDpiInfo    (GDI32.@)
+ *
+ * The native virtual display path reports that current DPI information is
+ * unavailable. Callers use this result to select their per-monitor DPI path.
+ */
+BOOL WINAPI GetCurrentDpiInfo( HMONITOR monitor, void *info )
+{
+    (void)info;
+
+    if (!monitor)
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        return FALSE;
+    }
+
+    SetLastError( ERROR_INVALID_PARAMETER );
+    return FALSE;
+}
+
+/***********************************************************************
  *             Escape  (GDI32.@)
  */
 INT WINAPI Escape( HDC hdc, INT escape, INT in_count, const char *in_data, void *out_data )

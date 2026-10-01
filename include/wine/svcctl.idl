@@ -38,7 +38,7 @@ cpp_quote("#define SVCCTL_ENDPOINTA \"\\\\pipe\\\\svcctl\"")
 cpp_quote("#define SVCCTL_STARTED_EVENT {'_','_','w','i','n','e','_','S','v','c','c','t','l','S','t','a','r','t','e','d',0}")
 
 /* Service startup protocol over control pipe - not compatible with Windows */
-cpp_quote("#define SERVICE_PROTOCOL_MAGIC 0x57494e45")
+cpp_quote("#define SERVICE_PROTOCOL_MAGIC 0x57494e46")
 cpp_quote("#define SERVICE_CONTROL_START 0")
 cpp_quote("#define SERVICE_CONTROL_FORWARD_FLAG 0x80000000")
 
@@ -48,6 +48,7 @@ typedef struct service_start_info_t
     DWORD                     total_size; /* total request size */
     DWORD                     name_size;  /* size of name in data buffer */
     DWORD                     control;    /* control code */
+    DWORD                     event_type; /* extended handler event */
     BYTE                      data[1];
 } service_start_info;
 
@@ -705,8 +706,14 @@ typedef [switch_type(DWORD)] union _SC_RPC_SERVICE_CONTROL_OUT_PARAMSW {
         [in, string, unique] LPCWSTR groupname
     );
 
-    /* Not compatible with Windows function 43 */
-    DWORD svcctl_unknown43(/*FIXME*/);
+    /* Function 43 */
+    DWORD svcctl_BroadcastServiceControlMessage(
+        [in] SC_RPC_HANDLE manager,
+        [in] DWORD control,
+        [in] DWORD event_type,
+        [in] DWORD data_size,
+        [in, unique, size_is(data_size)] const BYTE *data
+    );
 
     /* Function 44 */
     DWORD svcctl_CreateServiceWOW64A(

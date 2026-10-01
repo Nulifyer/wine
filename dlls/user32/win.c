@@ -461,6 +461,154 @@ HWND WINAPI DECLSPEC_HOTPATCH CreateWindowExW( DWORD exStyle, LPCWSTR className,
     return wow_handlers.create_window( &cs, className, instance, TRUE );
 }
 
+/***********************************************************************
+ *              CreateWindowInBand   (USER32.@)
+ *
+ * Wine has a single desktop z-order instead of Windows' private z-order
+ * bands.  Create the requested window in that desktop while preserving all
+ * public CreateWindowExW parameters.
+ */
+HWND WINAPI CreateWindowInBand( DWORD ex_style, LPCWSTR class_name, LPCWSTR window_name,
+                                DWORD style, INT x, INT y, INT width, INT height,
+                                HWND parent, HMENU menu, HINSTANCE instance, void *data,
+                                DWORD band )
+{
+    FIXME( "band %#lx is not supported; creating an ordinary window\n", band );
+    return CreateWindowExW( ex_style, class_name, window_name, style, x, y, width, height,
+                            parent, menu, instance, data );
+}
+
+/***********************************************************************
+ *              CreateWindowInBandEx   (USER32.@)
+ */
+HWND WINAPI CreateWindowInBandEx( DWORD ex_style, LPCWSTR class_name, LPCWSTR window_name,
+                                  DWORD style, INT x, INT y, INT width, INT height,
+                                  HWND parent, HMENU menu, HINSTANCE instance, void *data,
+                                  DWORD band, DWORD type_flags )
+{
+    FIXME( "band %#lx, type_flags %#lx are not supported; creating an ordinary window\n",
+           band, type_flags );
+    return CreateWindowExW( ex_style, class_name, window_name, style, x, y, width, height,
+                            parent, menu, instance, data );
+}
+
+/***********************************************************************
+ *              SetCoreWindow   (USER32.@)
+ *
+ * Windows records this flag in win32k for its immersive-window policy.
+ * Wine does not distinguish CoreWindow HWNDs from other top-level windows.
+ */
+BOOL WINAPI SetCoreWindow( HWND hwnd, BOOL core_window )
+{
+    FIXME( "hwnd %p, core_window %u: CoreWindow policy is not supported\n", hwnd, core_window );
+    return TRUE;
+}
+
+/*************************************************************************
+ *              InternalClipCursor   (USER32.2534)
+ *
+ * InputHost uses this private helper to confine the pointer to its window
+ * while it owns input.  The native implementation resolves the window rect
+ * before forwarding to the ordinary cursor clipping path.
+ */
+BOOL WINAPI InternalClipCursor( HWND hwnd, BOOL enable )
+{
+    RECT rect;
+
+    TRACE( "hwnd %p, enable %u\n", hwnd, enable );
+
+    if (!enable) return NtUserClipCursor( NULL );
+    if (!hwnd || !GetWindowRect( hwnd, &rect )) return FALSE;
+    return NtUserClipCursor( &rect );
+}
+
+/*************************************************************************
+ *              SetWindowServicesDestroyCallback   (USER32.2536)
+ *
+ * Windows keeps one process callback used while its private window-services
+ * integration is torn down.  Wine owns no corresponding win32k object, so
+ * there is nothing to destroy; accepting the registration is sufficient to
+ * preserve that lifetime contract.
+ */
+BOOL WINAPI SetWindowServicesDestroyCallback( void *window_services, void *callback )
+{
+    TRACE( "window_services %p, callback %p\n", window_services, callback );
+    return TRUE;
+}
+
+/*************************************************************************
+ *              EnableResizeLayoutSynchronization   (USER32.2615)
+ *
+ * CoreWindow uses this private policy switch to coordinate a resize with
+ * the Windows compositor.  Wine's window driver already serializes its
+ * layout updates and has no corresponding DComposition synchronization
+ * object, so retaining the requested state is sufficient here.
+ */
+static BOOL resize_layout_synchronization;
+
+BOOL WINAPI EnableResizeLayoutSynchronization( BOOL enable )
+{
+    TRACE( "enable %u\n", enable );
+    resize_layout_synchronization = enable;
+    return TRUE;
+}
+
+/*************************************************************************
+ *              IsResizeLayoutSynchronizationEnabled   (USER32.2617)
+ */
+BOOL WINAPI IsResizeLayoutSynchronizationEnabled(void)
+{
+    TRACE( "returning %u\n", resize_layout_synchronization );
+    return resize_layout_synchronization;
+}
+
+/*************************************************************************
+ *              SetWindowFeedbackSetting   (USER32.@)
+ */
+BOOL WINAPI SetWindowFeedbackSetting( HWND hwnd, FEEDBACK_TYPE feedback, DWORD flags,
+                                      UINT32 size, const void *configuration )
+{
+    TRACE( "hwnd %p, feedback %u, flags %#lx, size %u, configuration %p\n",
+           hwnd, feedback, flags, size, configuration );
+
+    /* Windows.UI uses this to suppress native touch/pen visual feedback on
+     * its CoreWindow.  Wine does not generate that feedback, so the requested
+     * policy is already in effect. */
+    return TRUE;
+}
+
+/*************************************************************************
+ *              CreateActivationObject   (USER32.2633)
+ *
+ * The native syscall creates a win32k-side identity used to associate an
+ * InputHost instance with its CoreMessaging activation.  Wine has no
+ * separate win32k object for that association, so preserve the caller's
+ * stable 64-bit identity as the activation token.
+ */
+BOOL WINAPI CreateActivationObject( UINT type, const ULONGLONG *identity,
+                                    ULONGLONG *activation_object )
+{
+    TRACE( "type %u, identity %p, activation_object %p\n", type, identity, activation_object );
+
+    if (!identity || !activation_object)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    *activation_object = *identity;
+    return TRUE;
+}
+
+/***********************************************************************
+ *              EnableMouseInPointerForWindow   (USER32.@)
+ */
+BOOL WINAPI EnableMouseInPointerForWindow( HWND hwnd, BOOL enable )
+{
+    FIXME( "hwnd %p: applying per-window mouse-in-pointer state process-wide\n", hwnd );
+    return NtUserEnableMouseInPointer( enable );
+}
+
 
 /***********************************************************************
  *		CloseWindow (USER32.@)
@@ -1596,12 +1744,96 @@ BOOL WINAPI SetWindowDisplayAffinity(HWND hwnd, DWORD affinity)
     return FALSE;
 }
 
+struct window_composition_attrib_data
+{
+    DWORD attribute;
+    void *value;
+    SIZE_T size;
+};
+
+/**********************************************************************
+ *              CreateDCompositionHwndTarget (USER32.@)
+ *
+ * The native function creates a shared kernel object for DirectComposition
+ * and returns a handle which dcomp.dll closes after opening its proxy.  Wine
+ * has no win32k compositor object to expose, so use an event as the opaque,
+ * closeable process handle while the user-mode composition graph is built.
+ */
+BOOL WINAPI CreateDCompositionHwndTarget(HWND hwnd, DWORD type, HANDLE *target)
+{
+    HANDLE handle;
+
+    TRACE("(%p, %lu, %p)\n", hwnd, type, target);
+
+    if (!target || !IsWindow(hwnd) || type > 2) return FALSE;
+    if (!(handle = CreateEventW(NULL, FALSE, FALSE, NULL))) return FALSE;
+
+    *target = handle;
+    return TRUE;
+}
+
+/**********************************************************************
+ *              DestroyDCompositionHwndTarget (USER32.@)
+ */
+BOOL WINAPI DestroyDCompositionHwndTarget(HWND hwnd, DWORD type)
+{
+    TRACE("(%p, %lu)\n", hwnd, type);
+
+    if (!IsWindow(hwnd) || type > 2) return FALSE;
+    return TRUE;
+}
+
+/**********************************************************************
+ *              GetWindowCompositionAttribute (USER32.@)
+ */
+BOOL WINAPI GetWindowCompositionAttribute(HWND hwnd, void *data)
+{
+    struct window_composition_attrib_data *attribute = data;
+
+    if (!attribute)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    TRACE("(%p, attribute %lu, value %p, size %Iu)\n", hwnd,
+          attribute->attribute, attribute->value, attribute->size);
+
+    /* Attribute 34 is a four-byte window policy queried by the XAML desktop
+     * bridge.  Native returns a cleared value for an ordinary top-level
+     * desktop window. */
+    if (attribute->attribute == 34 && attribute->value && attribute->size == sizeof(DWORD))
+    {
+        *(DWORD *)attribute->value = 0;
+        return TRUE;
+    }
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
 /**********************************************************************
  *              SetWindowCompositionAttribute (USER32.@)
  */
 BOOL WINAPI SetWindowCompositionAttribute(HWND hwnd, void *data)
 {
-    FIXME("(%p, %p): stub\n", hwnd, data);
+    struct window_composition_attrib_data *attribute = data;
+
+    if (attribute)
+        TRACE("(%p, attribute %lu, value %p, size %Iu)\n", hwnd,
+              attribute->attribute, attribute->value, attribute->size);
+    else
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    /* Attribute 19 is WCA_ACCENT_POLICY.  Wine does not expose Windows'
+     * compositor effects, so retain the ordinary window Wine presents while
+     * accepting the native-sized policy structure. */
+    if (attribute->attribute == 19 && attribute->value && attribute->size == 4 * sizeof(DWORD))
+        return TRUE;
+
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }

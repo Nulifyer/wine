@@ -230,6 +230,8 @@ DECL_HANDLER(remove_clipboard_listener);
 DECL_HANDLER(create_token);
 DECL_HANDLER(open_token);
 DECL_HANDLER(set_desktop_shell_windows);
+DECL_HANDLER(acquire_desktop_iam_key);
+DECL_HANDLER(enable_thread_iam_access);
 DECL_HANDLER(adjust_token_privileges);
 DECL_HANDLER(get_token_privileges);
 DECL_HANDLER(check_token_privileges);
@@ -273,11 +275,15 @@ DECL_HANDLER(get_token_info);
 DECL_HANDLER(create_linked_token);
 DECL_HANDLER(create_completion);
 DECL_HANDLER(open_completion);
+DECL_HANDLER(register_coremessaging_completion);
 DECL_HANDLER(add_completion);
 DECL_HANDLER(remove_completion);
 DECL_HANDLER(get_thread_completion);
 DECL_HANDLER(query_completion);
 DECL_HANDLER(set_completion_info);
+DECL_HANDLER(create_completion_packet);
+DECL_HANDLER(associate_completion_packet);
+DECL_HANDLER(cancel_completion_packet);
 DECL_HANDLER(add_fd_completion);
 DECL_HANDLER(set_fd_completion_mode);
 DECL_HANDLER(set_fd_disp_info);
@@ -293,6 +299,12 @@ DECL_HANDLER(get_rawinput_buffer);
 DECL_HANDLER(update_rawinput_devices);
 DECL_HANDLER(create_job);
 DECL_HANDLER(open_job);
+DECL_HANDLER(open_memory_partition);
+DECL_HANDLER(query_memory_partition);
+DECL_HANDLER(create_wnf_state_name);
+DECL_HANDLER(delete_wnf_state_name);
+DECL_HANDLER(query_wnf_state_data);
+DECL_HANDLER(update_wnf_state_data);
 DECL_HANDLER(assign_job);
 DECL_HANDLER(process_in_job);
 DECL_HANDLER(set_job_limits);
@@ -315,6 +327,13 @@ DECL_HANDLER(d3dkmt_object_open_name);
 DECL_HANDLER(d3dkmt_mutex_acquire);
 DECL_HANDLER(d3dkmt_mutex_release);
 DECL_HANDLER(alpc_create_port);
+DECL_HANDLER(alpc_connect_port);
+DECL_HANDLER(alpc_get_connect_result);
+DECL_HANDLER(alpc_accept_connect_port);
+DECL_HANDLER(alpc_send_receive);
+DECL_HANDLER(alpc_disconnect_port);
+DECL_HANDLER(alpc_query_information);
+DECL_HANDLER(alpc_impersonate_client);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -542,6 +561,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_create_token,
     (req_handler)req_open_token,
     (req_handler)req_set_desktop_shell_windows,
+    (req_handler)req_acquire_desktop_iam_key,
+    (req_handler)req_enable_thread_iam_access,
     (req_handler)req_adjust_token_privileges,
     (req_handler)req_get_token_privileges,
     (req_handler)req_check_token_privileges,
@@ -585,11 +606,15 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_create_linked_token,
     (req_handler)req_create_completion,
     (req_handler)req_open_completion,
+    (req_handler)req_register_coremessaging_completion,
     (req_handler)req_add_completion,
     (req_handler)req_remove_completion,
     (req_handler)req_get_thread_completion,
     (req_handler)req_query_completion,
     (req_handler)req_set_completion_info,
+    (req_handler)req_create_completion_packet,
+    (req_handler)req_associate_completion_packet,
+    (req_handler)req_cancel_completion_packet,
     (req_handler)req_add_fd_completion,
     (req_handler)req_set_fd_completion_mode,
     (req_handler)req_set_fd_disp_info,
@@ -605,6 +630,12 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_update_rawinput_devices,
     (req_handler)req_create_job,
     (req_handler)req_open_job,
+    (req_handler)req_open_memory_partition,
+    (req_handler)req_query_memory_partition,
+    (req_handler)req_create_wnf_state_name,
+    (req_handler)req_delete_wnf_state_name,
+    (req_handler)req_query_wnf_state_data,
+    (req_handler)req_update_wnf_state_data,
     (req_handler)req_assign_job,
     (req_handler)req_process_in_job,
     (req_handler)req_set_job_limits,
@@ -627,6 +658,13 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_d3dkmt_mutex_acquire,
     (req_handler)req_d3dkmt_mutex_release,
     (req_handler)req_alpc_create_port,
+    (req_handler)req_alpc_connect_port,
+    (req_handler)req_alpc_get_connect_result,
+    (req_handler)req_alpc_accept_connect_port,
+    (req_handler)req_alpc_send_receive,
+    (req_handler)req_alpc_disconnect_port,
+    (req_handler)req_alpc_query_information,
+    (req_handler)req_alpc_impersonate_client,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -985,7 +1023,10 @@ C_ASSERT( offsetof(struct open_file_object_request, attributes) == 16 );
 C_ASSERT( offsetof(struct open_file_object_request, rootdir) == 20 );
 C_ASSERT( offsetof(struct open_file_object_request, sharing) == 24 );
 C_ASSERT( offsetof(struct open_file_object_request, options) == 28 );
-C_ASSERT( sizeof(struct open_file_object_request) == 32 );
+C_ASSERT( offsetof(struct open_file_object_request, impersonation_level) == 32 );
+C_ASSERT( offsetof(struct open_file_object_request, context_tracking) == 36 );
+C_ASSERT( offsetof(struct open_file_object_request, effective_only) == 40 );
+C_ASSERT( sizeof(struct open_file_object_request) == 48 );
 C_ASSERT( offsetof(struct open_file_object_reply, handle) == 8 );
 C_ASSERT( sizeof(struct open_file_object_reply) == 16 );
 C_ASSERT( offsetof(struct alloc_file_handle_request, access) == 12 );
@@ -1962,6 +2003,12 @@ C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_shell_listview) =
 C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_progman_window) == 16 );
 C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_taskman_window) == 20 );
 C_ASSERT( sizeof(struct set_desktop_shell_windows_reply) == 24 );
+C_ASSERT( sizeof(struct acquire_desktop_iam_key_request) == 16 );
+C_ASSERT( offsetof(struct acquire_desktop_iam_key_reply, key) == 8 );
+C_ASSERT( sizeof(struct acquire_desktop_iam_key_reply) == 16 );
+C_ASSERT( offsetof(struct enable_thread_iam_access_request, key) == 16 );
+C_ASSERT( offsetof(struct enable_thread_iam_access_request, enable) == 24 );
+C_ASSERT( sizeof(struct enable_thread_iam_access_request) == 32 );
 C_ASSERT( offsetof(struct adjust_token_privileges_request, handle) == 12 );
 C_ASSERT( offsetof(struct adjust_token_privileges_request, disable_all) == 16 );
 C_ASSERT( offsetof(struct adjust_token_privileges_request, get_modified_state) == 20 );
@@ -2177,6 +2224,9 @@ C_ASSERT( offsetof(struct open_completion_request, rootdir) == 20 );
 C_ASSERT( sizeof(struct open_completion_request) == 24 );
 C_ASSERT( offsetof(struct open_completion_reply, handle) == 8 );
 C_ASSERT( sizeof(struct open_completion_reply) == 16 );
+C_ASSERT( offsetof(struct register_coremessaging_completion_request, handle) == 12 );
+C_ASSERT( offsetof(struct register_coremessaging_completion_request, window) == 16 );
+C_ASSERT( sizeof(struct register_coremessaging_completion_request) == 24 );
 C_ASSERT( offsetof(struct add_completion_request, handle) == 12 );
 C_ASSERT( offsetof(struct add_completion_request, ckey) == 16 );
 C_ASSERT( offsetof(struct add_completion_request, cvalue) == 24 );
@@ -2207,6 +2257,23 @@ C_ASSERT( offsetof(struct set_completion_info_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_completion_info_request, ckey) == 16 );
 C_ASSERT( offsetof(struct set_completion_info_request, chandle) == 24 );
 C_ASSERT( sizeof(struct set_completion_info_request) == 32 );
+C_ASSERT( offsetof(struct create_completion_packet_request, access) == 12 );
+C_ASSERT( sizeof(struct create_completion_packet_request) == 16 );
+C_ASSERT( offsetof(struct create_completion_packet_reply, handle) == 8 );
+C_ASSERT( sizeof(struct create_completion_packet_reply) == 16 );
+C_ASSERT( offsetof(struct associate_completion_packet_request, packet) == 12 );
+C_ASSERT( offsetof(struct associate_completion_packet_request, completion) == 16 );
+C_ASSERT( offsetof(struct associate_completion_packet_request, target) == 20 );
+C_ASSERT( offsetof(struct associate_completion_packet_request, ckey) == 24 );
+C_ASSERT( offsetof(struct associate_completion_packet_request, cvalue) == 32 );
+C_ASSERT( offsetof(struct associate_completion_packet_request, information) == 40 );
+C_ASSERT( offsetof(struct associate_completion_packet_request, status) == 48 );
+C_ASSERT( sizeof(struct associate_completion_packet_request) == 56 );
+C_ASSERT( offsetof(struct associate_completion_packet_reply, already_signaled) == 8 );
+C_ASSERT( sizeof(struct associate_completion_packet_reply) == 16 );
+C_ASSERT( offsetof(struct cancel_completion_packet_request, packet) == 12 );
+C_ASSERT( offsetof(struct cancel_completion_packet_request, remove_signaled) == 16 );
+C_ASSERT( sizeof(struct cancel_completion_packet_request) == 24 );
 C_ASSERT( offsetof(struct add_fd_completion_request, handle) == 12 );
 C_ASSERT( offsetof(struct add_fd_completion_request, cvalue) == 16 );
 C_ASSERT( offsetof(struct add_fd_completion_request, information) == 24 );
@@ -2282,6 +2349,40 @@ C_ASSERT( offsetof(struct open_job_request, rootdir) == 20 );
 C_ASSERT( sizeof(struct open_job_request) == 24 );
 C_ASSERT( offsetof(struct open_job_reply, handle) == 8 );
 C_ASSERT( sizeof(struct open_job_reply) == 16 );
+C_ASSERT( offsetof(struct open_memory_partition_request, access) == 12 );
+C_ASSERT( offsetof(struct open_memory_partition_request, attributes) == 16 );
+C_ASSERT( offsetof(struct open_memory_partition_request, rootdir) == 20 );
+C_ASSERT( sizeof(struct open_memory_partition_request) == 24 );
+C_ASSERT( offsetof(struct open_memory_partition_reply, handle) == 8 );
+C_ASSERT( sizeof(struct open_memory_partition_reply) == 16 );
+C_ASSERT( offsetof(struct query_memory_partition_request, handle) == 12 );
+C_ASSERT( sizeof(struct query_memory_partition_request) == 16 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, name_lifetime) == 12 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, data_scope) == 16 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, maximum_size) == 20 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, persist_data) == 24 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, type_id) == 28 );
+C_ASSERT( offsetof(struct create_wnf_state_name_request, security_descriptor) == 32 );
+C_ASSERT( sizeof(struct create_wnf_state_name_request) == 40 );
+C_ASSERT( offsetof(struct create_wnf_state_name_reply, state_name) == 8 );
+C_ASSERT( sizeof(struct create_wnf_state_name_reply) == 16 );
+C_ASSERT( offsetof(struct delete_wnf_state_name_request, state_name) == 16 );
+C_ASSERT( sizeof(struct delete_wnf_state_name_request) == 24 );
+C_ASSERT( offsetof(struct query_wnf_state_data_request, state_name) == 16 );
+C_ASSERT( offsetof(struct query_wnf_state_data_request, session_id) == 24 );
+C_ASSERT( offsetof(struct query_wnf_state_data_request, explicit_scope) == 28 );
+C_ASSERT( sizeof(struct query_wnf_state_data_request) == 32 );
+C_ASSERT( offsetof(struct query_wnf_state_data_reply, change_stamp) == 8 );
+C_ASSERT( offsetof(struct query_wnf_state_data_reply, total) == 12 );
+C_ASSERT( sizeof(struct query_wnf_state_data_reply) == 16 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, state_name) == 16 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, matching_stamp) == 24 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, check_stamp) == 28 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, session_id) == 32 );
+C_ASSERT( offsetof(struct update_wnf_state_data_request, explicit_scope) == 36 );
+C_ASSERT( sizeof(struct update_wnf_state_data_request) == 40 );
+C_ASSERT( offsetof(struct update_wnf_state_data_reply, change_stamp) == 8 );
+C_ASSERT( sizeof(struct update_wnf_state_data_reply) == 16 );
 C_ASSERT( offsetof(struct assign_job_request, job) == 12 );
 C_ASSERT( offsetof(struct assign_job_request, process) == 16 );
 C_ASSERT( sizeof(struct assign_job_request) == 24 );
@@ -2394,3 +2495,60 @@ C_ASSERT( offsetof(struct alpc_create_port_request, max_msg_len) == 16 );
 C_ASSERT( sizeof(struct alpc_create_port_request) == 24 );
 C_ASSERT( offsetof(struct alpc_create_port_reply, handle) == 8 );
 C_ASSERT( sizeof(struct alpc_create_port_reply) == 16 );
+C_ASSERT( offsetof(struct alpc_connect_port_request, flags) == 12 );
+C_ASSERT( offsetof(struct alpc_connect_port_request, attributes) == 16 );
+C_ASSERT( offsetof(struct alpc_connect_port_request, rootdir) == 20 );
+C_ASSERT( offsetof(struct alpc_connect_port_request, max_msg_len) == 24 );
+C_ASSERT( offsetof(struct alpc_connect_port_request, name_size) == 32 );
+C_ASSERT( sizeof(struct alpc_connect_port_request) == 40 );
+C_ASSERT( offsetof(struct alpc_connect_port_reply, handle) == 8 );
+C_ASSERT( offsetof(struct alpc_connect_port_reply, message_id) == 12 );
+C_ASSERT( sizeof(struct alpc_connect_port_reply) == 16 );
+C_ASSERT( offsetof(struct alpc_get_connect_result_request, handle) == 12 );
+C_ASSERT( sizeof(struct alpc_get_connect_result_request) == 16 );
+C_ASSERT( offsetof(struct alpc_get_connect_result_reply, status) == 8 );
+C_ASSERT( offsetof(struct alpc_get_connect_result_reply, message_id) == 12 );
+C_ASSERT( offsetof(struct alpc_get_connect_result_reply, message_size) == 16 );
+C_ASSERT( sizeof(struct alpc_get_connect_result_reply) == 24 );
+C_ASSERT( offsetof(struct alpc_accept_connect_port_request, connection) == 12 );
+C_ASSERT( offsetof(struct alpc_accept_connect_port_request, flags) == 16 );
+C_ASSERT( offsetof(struct alpc_accept_connect_port_request, attributes) == 20 );
+C_ASSERT( offsetof(struct alpc_accept_connect_port_request, accept) == 24 );
+C_ASSERT( offsetof(struct alpc_accept_connect_port_request, message_id) == 28 );
+C_ASSERT( offsetof(struct alpc_accept_connect_port_request, max_msg_len) == 32 );
+C_ASSERT( offsetof(struct alpc_accept_connect_port_request, port_context) == 40 );
+C_ASSERT( offsetof(struct alpc_accept_connect_port_request, message_context) == 48 );
+C_ASSERT( sizeof(struct alpc_accept_connect_port_request) == 56 );
+C_ASSERT( offsetof(struct alpc_accept_connect_port_reply, handle) == 8 );
+C_ASSERT( sizeof(struct alpc_accept_connect_port_reply) == 16 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, handle) == 12 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, flags) == 16 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, send_size) == 20 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, message_id) == 24 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, valid_attributes) == 28 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, message_context) == 32 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, work_on_behalf) == 40 );
+C_ASSERT( sizeof(struct alpc_send_receive_request) == 48 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, pending) == 8 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, message_id) == 12 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, sender_pid) == 16 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, sender_tid) == 20 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, message_type) == 24 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, message_size) == 28 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, port_context) == 32 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, message_context) == 40 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, valid_attributes) == 48 );
+C_ASSERT( offsetof(struct alpc_send_receive_reply, work_on_behalf) == 56 );
+C_ASSERT( sizeof(struct alpc_send_receive_reply) == 64 );
+C_ASSERT( offsetof(struct alpc_disconnect_port_request, handle) == 12 );
+C_ASSERT( offsetof(struct alpc_disconnect_port_request, flags) == 16 );
+C_ASSERT( sizeof(struct alpc_disconnect_port_request) == 24 );
+C_ASSERT( offsetof(struct alpc_query_information_request, handle) == 12 );
+C_ASSERT( sizeof(struct alpc_query_information_request) == 16 );
+C_ASSERT( offsetof(struct alpc_query_information_reply, flags) == 8 );
+C_ASSERT( offsetof(struct alpc_query_information_reply, sequence) == 12 );
+C_ASSERT( offsetof(struct alpc_query_information_reply, context) == 16 );
+C_ASSERT( sizeof(struct alpc_query_information_reply) == 24 );
+C_ASSERT( offsetof(struct alpc_impersonate_client_request, handle) == 12 );
+C_ASSERT( offsetof(struct alpc_impersonate_client_request, message_id) == 16 );
+C_ASSERT( sizeof(struct alpc_impersonate_client_request) == 24 );

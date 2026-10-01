@@ -49,6 +49,13 @@ struct notify_data
     struct list entry;
 };
 
+struct service_change_subscription
+{
+    DWORD event_type;
+    void (CALLBACK *callback)(DWORD, void *);
+    void *context;
+};
+
 static struct list notify_list = LIST_INIT(notify_list);
 
 static CRITICAL_SECTION service_cs;
@@ -1079,6 +1086,28 @@ BOOL WINAPI DECLSPEC_HOTPATCH ControlService( SC_HANDLE service, DWORD control, 
     return set_error( err );
 }
 
+DWORD WINAPI I_ScBroadcastServiceControlMessage( DWORD control, DWORD event_type,
+                                                DWORD data_size, const BYTE *data )
+{
+    SC_HANDLE manager;
+    DWORD err;
+
+    TRACE( "%lu %lu %lu %p\n", control, event_type, data_size, data );
+    if (!(manager = OpenSCManagerW( NULL, NULL, SC_MANAGER_ALL_ACCESS ))) return GetLastError();
+    __TRY
+    {
+        err = svcctl_BroadcastServiceControlMessage( manager, control, event_type, data_size, data );
+    }
+    __EXCEPT(rpc_filter)
+    {
+        err = map_exception_code( GetExceptionCode() );
+    }
+    __ENDTRY
+    CloseServiceHandle( manager );
+    SetLastError( ERROR_SUCCESS );
+    return err;
+}
+
 /******************************************************************************
  *     QueryServiceStatus   (sechost.@)
  */
@@ -1097,6 +1126,61 @@ BOOL WINAPI DECLSPEC_HOTPATCH QueryServiceStatus( SC_HANDLE service, SERVICE_STA
                                 sizeof(SERVICE_STATUS_PROCESS), &size );
     if (ret) memcpy(status, &process_status, sizeof(SERVICE_STATUS) );
     return ret;
+}
+
+static DWORD service_state_notification( DWORD state )
+{
+    switch (state)
+    {
+    case SERVICE_STOPPED:          return SERVICE_NOTIFY_STOPPED;
+    case SERVICE_START_PENDING:    return SERVICE_NOTIFY_START_PENDING;
+    case SERVICE_STOP_PENDING:     return SERVICE_NOTIFY_STOP_PENDING;
+    case SERVICE_RUNNING:          return SERVICE_NOTIFY_RUNNING;
+    case SERVICE_CONTINUE_PENDING: return SERVICE_NOTIFY_CONTINUE_PENDING;
+    case SERVICE_PAUSE_PENDING:    return SERVICE_NOTIFY_PAUSE_PENDING;
+    case SERVICE_PAUSED:           return SERVICE_NOTIFY_PAUSED;
+    default:                       return 0;
+    }
+}
+
+/*************************************************************************
+ *     WaitServiceState   (sechost.@)
+ */
+BOOL WINAPI WaitServiceState( SC_HANDLE service, DWORD notify_mask, DWORD timeout,
+                              HANDLE cancel_event )
+{
+    ULONGLONG start = GetTickCount64();
+    SERVICE_STATUS status;
+
+    TRACE("(%p, %#lx, %lu, %p)\n", service, notify_mask, timeout, cancel_event);
+
+    for (;;)
+    {
+        DWORD elapsed, wait;
+
+        if (!QueryServiceStatus( service, &status )) return FALSE;
+        if (service_state_notification( status.dwCurrentState ) & notify_mask) return TRUE;
+
+        elapsed = GetTickCount64() - start;
+        if (elapsed >= timeout)
+        {
+            SetLastError( ERROR_TIMEOUT );
+            return FALSE;
+        }
+
+        wait = min( timeout - elapsed, 50 );
+        if (cancel_event)
+        {
+            DWORD result = WaitForSingleObject( cancel_event, wait );
+            if (result == WAIT_OBJECT_0)
+            {
+                SetLastError( ERROR_CANCELLED );
+                return FALSE;
+            }
+            if (result == WAIT_FAILED) return FALSE;
+        }
+        else Sleep( wait );
+    }
 }
 
 /******************************************************************************
@@ -1409,6 +1493,36 @@ DWORD WINAPI DECLSPEC_HOTPATCH NotifyServiceStatusChangeW( SC_HANDLE service, DW
     return ERROR_SUCCESS;
 }
 
+/******************************************************************************
+ *     SubscribeServiceChangeNotifications   (sechost.@)
+ */
+DWORD WINAPI SubscribeServiceChangeNotifications( SC_HANDLE service, DWORD event_type,
+        void (CALLBACK *callback)(DWORD, void *), void *context, void **subscription )
+{
+    struct service_change_subscription *entry;
+
+    TRACE( "%p %lu %p %p %p\n", service, event_type, callback, context, subscription );
+
+    if (!service || !callback || !subscription || event_type > 2) return ERROR_INVALID_PARAMETER;
+    *subscription = NULL;
+    if (!(entry = malloc( sizeof(*entry) ))) return ERROR_NOT_ENOUGH_MEMORY;
+    entry->event_type = event_type;
+    entry->callback = callback;
+    entry->context = context;
+    *subscription = entry;
+    FIXME( "temporary observation-only subscription for event type %lu\n", event_type );
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ *     UnsubscribeServiceChangeNotifications   (sechost.@)
+ */
+void WINAPI UnsubscribeServiceChangeNotifications( void *subscription )
+{
+    TRACE( "%p\n", subscription );
+    free( subscription );
+}
+
 /* thunk for calling the RegisterServiceCtrlHandler handler function */
 static DWORD WINAPI ctrl_handler_thunk( DWORD control, DWORD type, void *data, void *context )
 {
@@ -1652,7 +1766,8 @@ static DWORD service_handle_start( struct service_data *service, const void *dat
     return 0;
 }
 
-static DWORD service_handle_control( struct service_data *service, DWORD control, const void *data, DWORD data_size )
+static DWORD service_handle_control( struct service_data *service, DWORD control, DWORD event_type,
+                                     const void *data, DWORD data_size )
 {
     DWORD ret = ERROR_INVALID_SERVICE_CONTROL;
 
@@ -1661,7 +1776,7 @@ static DWORD service_handle_control( struct service_data *service, DWORD control
     if (control == SERVICE_CONTROL_START)
         ret = service_handle_start( service, data, data_size );
     else if (service->handler)
-        ret = service->handler( control, 0, (void *)data, service->context );
+        ret = service->handler( control, event_type, (void *)data, service->context );
     return ret;
 }
 
@@ -1746,7 +1861,7 @@ static DWORD WINAPI service_control_dispatcher( void *arg )
         }
 
         data_size -= info.name_size * sizeof(WCHAR);
-        result = service_handle_control(service, info.control, data_size ?
+        result = service_handle_control(service, info.control, info.event_type, data_size ?
                                         &data[info.name_size * sizeof(WCHAR)] : NULL, data_size);
 
     done:
@@ -1791,7 +1906,7 @@ static void handle_shutdown_msg(DWORD msg, DWORD accept)
             }
         }
 
-        service_handle_control( services[i], msg, NULL, 0 );
+        service_handle_control( services[i], msg, 0, NULL, 0 );
         wait_handles[n++] = services[i]->full_access_handle;
     }
     LeaveCriticalSection( &service_cs );

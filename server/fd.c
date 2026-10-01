@@ -2999,7 +2999,9 @@ DECL_HANDLER(open_file_object)
     if (!obj->ops->open_file) set_error( STATUS_OBJECT_TYPE_MISMATCH );
     else if ((result = obj->ops->open_file( obj, req->access, req->sharing, req->options )))
     {
-        reply->handle = alloc_handle( current->process, result, req->access, req->attributes );
+        if (set_named_pipe_client_security( result, req->impersonation_level,
+                                            req->context_tracking, req->effective_only ))
+            reply->handle = alloc_handle( current->process, result, req->access, req->attributes );
         release_object( result );
     }
     release_object( obj );

@@ -675,3 +675,12 @@ HRESULT WINAPI TF_InitMlngInfo(void)
     FIXME("stub\n");
     return S_OK;
 }
+
+/***********************************************************************
+ *              HasDeferredInputForCoreDispatcher(MSCTF.@)
+ */
+BOOL WINAPI HasDeferredInputForCoreDispatcher(void)
+{
+    TRACE("\n");
+    return FALSE;
+}

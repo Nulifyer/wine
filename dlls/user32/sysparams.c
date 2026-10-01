@@ -733,6 +733,14 @@ BOOL WINAPI AreDpiAwarenessContextsEqual( DPI_AWARENESS_CONTEXT ctx1, DPI_AWAREN
 }
 
 /***********************************************************************
+ *              IsOneCoreTransformMode   (USER32.@)
+ */
+BOOL WINAPI IsOneCoreTransformMode(void)
+{
+    return FALSE;
+}
+
+/***********************************************************************
  *              GetAwarenessFromDpiAwarenessContext   (USER32.@)
  *              copied into win32u, make sure to keep that in sync
  */

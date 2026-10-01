@@ -983,6 +983,27 @@ DWORD WINAPI NtUserGetQueueStatus( UINT flags )
 }
 
 /***********************************************************************
+ *           NtUserGetQueueStatusReadonly (win32u.@)
+ */
+DWORD WINAPI NtUserGetQueueStatusReadonly(void)
+{
+    UINT ret, wake_bits, changed_bits;
+
+    check_for_events( QS_ALLINPUT );
+
+    if (get_shared_queue_bits( &wake_bits, &changed_bits ))
+        ret = MAKELONG( changed_bits, wake_bits );
+    else SERVER_START_REQ( get_queue_status )
+    {
+        req->clear_bits = 0;
+        wine_server_call( req );
+        ret = MAKELONG( reply->changed_bits, reply->wake_bits );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/***********************************************************************
  *           NtUserInitThreadCoreMessagingIocp2 (win32u.@)
  */
 HANDLE WINAPI NtUserInitThreadCoreMessagingIocp2( HWND hwnd, DWORD *mode )
@@ -1062,6 +1083,7 @@ ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions(void)
         RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
         return FALSE;
     }
+    dispatch_thread_core_messaging_completions();
     return TRUE;
 }
 
@@ -1073,14 +1095,94 @@ ULONG_PTR WINAPI NtUserDrainThreadCoreMessagingCompletions2( HWND hwnd )
     struct user_thread_info *thread_info = get_user_thread_info();
     struct core_messaging_window *window;
 
+    if (!hwnd || !is_window( hwnd ))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+    if (!thread_info->core_messaging_iocp)
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+
     LIST_FOR_EACH_ENTRY( window, &thread_info->core_messaging_windows,
                          struct core_messaging_window, entry )
     {
-        if (window->hwnd == hwnd) return TRUE;
+        if (window->hwnd == hwnd)
+        {
+            dispatch_thread_core_messaging_completions();
+            return TRUE;
+        }
     }
 
-    RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+    RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
     return FALSE;
+}
+
+static BOOL queue_thread_core_messaging_completion( ULONG_PTR key, ULONG_PTR value )
+{
+#ifdef _WIN64
+    if (NtCurrentTeb()->WowTebOffset)
+    {
+        TEB32 *teb32 = (TEB32 *)((char *)NtCurrentTeb() + NtCurrentTeb()->WowTebOffset);
+        ULONG *client_data = (ULONG *)(ULONG_PTR)teb32->Win32ClientInfo[61];
+        ULONG *node = (ULONG *)key;
+
+        if (!client_data || !node || value > 1) return FALSE;
+        node[0] = client_data[value + 1];
+        client_data[value + 1] = key;
+        return TRUE;
+    }
+#endif
+
+    if (NtCurrentTeb()->Win32ClientInfo[61] && key && value <= 1)
+    {
+        ULONG_PTR *client_data = (ULONG_PTR *)(ULONG_PTR)NtCurrentTeb()->Win32ClientInfo[61];
+        ULONG_PTR *node = (ULONG_PTR *)key;
+
+        node[0] = client_data[value + 1];
+        client_data[value + 1] = key;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+BOOL dispatch_thread_core_messaging_completions(void)
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct core_messaging_window *window;
+    LARGE_INTEGER zero = {0};
+    IO_STATUS_BLOCK io;
+    ULONG_PTR key, value;
+    NTSTATUS status;
+    BOOL dispatched = FALSE;
+
+    if (!thread_info->core_messaging_iocp) return FALSE;
+
+    while (!(status = NtRemoveIoCompletion( thread_info->core_messaging_iocp, &key, &value,
+                                             &io, &zero )))
+    {
+        if (queue_thread_core_messaging_completion( key, value )) continue;
+        else if (!value)
+        {
+            if (!list_empty( &thread_info->core_messaging_windows ))
+            {
+                window = LIST_ENTRY( list_head( &thread_info->core_messaging_windows ),
+                                     struct core_messaging_window, entry );
+                NtUserPostMessage( window->hwnd, 0x0060, 3, 0 );
+            }
+        }
+        else
+        {
+            LIST_FOR_EACH_ENTRY( window, &thread_info->core_messaging_windows,
+                                 struct core_messaging_window, entry )
+                NtUserPostMessage( window->hwnd, 0x0060, 8, value );
+        }
+        dispatched = TRUE;
+    }
+
+    return dispatched;
 }
 
 void destroy_thread_core_messaging(void)
@@ -2451,6 +2553,19 @@ HWND WINAPI NtUserSetFocus( HWND hwnd )
 }
 
 /*****************************************************************
+ *           NtUserSetBrokeredForeground  (win32u.@)
+ */
+BOOL WINAPI NtUserSetBrokeredForeground( HWND hwnd )
+{
+    /* All Wine windows use ordinary bands. Windows rejects these here;
+     * brokered foreground requires privileged bands and broker authority.
+     * Do not substitute an unrestricted SetForegroundWindow call. */
+    FIXME( "unsupported brokered foreground %p\n", hwnd );
+    RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+    return FALSE;
+}
+
+/*****************************************************************
  *           NtUserSetForegroundWindow  (win32u.@)
  */
 BOOL WINAPI NtUserSetForegroundWindow( HWND hwnd )
@@ -3077,12 +3192,8 @@ BOOL WINAPI NtUserRegisterTouchPadCapable( BOOL capable )
  */
 INT WINAPI NtUserScheduleDispatchNotification( HWND hwnd )
 {
-    FIXME("hwnd %p stub!\n", hwnd);
-
-    if (is_window(hwnd))
-        return 2;
-
-    return 0;
+    if (!is_window( hwnd )) return 0;
+    return NtUserPostMessage( hwnd, 0x0060, 0, 0 ) ? 2 : 0;
 }
 
 void destroy_thread_pointers(void)

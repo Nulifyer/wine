@@ -737,6 +737,39 @@ ULONG WINAPI LsaNtStatusToWinError(NTSTATUS Status)
 }
 
 /******************************************************************************
+ * LsaLookupGetDomainInfo [ADVAPI32.@]
+ *
+ * Private provider entry point used by sechost's LSA lookup API.
+ */
+NTSTATUS WINAPI LsaLookupGetDomainInfo(
+    LSA_HANDLE PolicyHandle,
+    POLICY_INFORMATION_CLASS InformationClass,
+    PVOID *Buffer)
+{
+    if (InformationClass != PolicyAccountDomainInformation &&
+        InformationClass != PolicyDnsDomainInformation)
+        return STATUS_INVALID_INFO_CLASS;
+
+    return LsaQueryInformationPolicy(PolicyHandle, InformationClass, Buffer);
+}
+
+/******************************************************************************
+ * LsaLookupOpenLocalPolicy [ADVAPI32.@]
+ *
+ * Private provider entry point used by sechost's LSA lookup API.  Lookup
+ * policy handles use the same local policy implementation as the public LSA
+ * policy API; sechost supplies the local-system restriction in its contract.
+ */
+NTSTATUS WINAPI LsaLookupOpenLocalPolicy(
+    PLSA_OBJECT_ATTRIBUTES ObjectAttributes,
+    ACCESS_MASK DesiredAccess,
+    PLSA_HANDLE PolicyHandle)
+{
+    *PolicyHandle = NULL;
+    return LsaOpenPolicy(NULL, ObjectAttributes, DesiredAccess, PolicyHandle);
+}
+
+/******************************************************************************
  * LsaOpenPolicy [ADVAPI32.@]
  *
  * Opens a handle to the Policy object on a local or remote system.

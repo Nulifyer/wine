@@ -37,7 +37,9 @@ static HMODULE hntdll = 0;
 static VOID (WINAPI *pRtlInitializeBitMap)(PRTL_BITMAP,LPBYTE,ULONG);
 static VOID (WINAPI *pRtlSetAllBits)(PRTL_BITMAP);
 static VOID (WINAPI *pRtlClearAllBits)(PRTL_BITMAP);
+static VOID (WINAPI *pRtlSetBit)(PRTL_BITMAP,ULONG);
 static VOID (WINAPI *pRtlSetBits)(PRTL_BITMAP,ULONG,ULONG);
+static VOID (WINAPI *pRtlClearBit)(PRTL_BITMAP,ULONG);
 static VOID (WINAPI *pRtlClearBits)(PRTL_BITMAP,ULONG,ULONG);
 static BOOLEAN (WINAPI *pRtlAreBitsSet)(PRTL_BITMAP,ULONG,ULONG);
 static BOOLEAN (WINAPI *pRtlAreBitsClear)(PRTL_BITMAP,ULONG,ULONG);
@@ -66,7 +68,9 @@ static void InitFunctionPtrs(void)
     pRtlInitializeBitMap = (void *)GetProcAddress(hntdll, "RtlInitializeBitMap");
     pRtlSetAllBits = (void *)GetProcAddress(hntdll, "RtlSetAllBits");
     pRtlClearAllBits = (void *)GetProcAddress(hntdll, "RtlClearAllBits");
+    pRtlSetBit = (void *)GetProcAddress(hntdll, "RtlSetBit");
     pRtlSetBits = (void *)GetProcAddress(hntdll, "RtlSetBits");
+    pRtlClearBit = (void *)GetProcAddress(hntdll, "RtlClearBit");
     pRtlClearBits = (void *)GetProcAddress(hntdll, "RtlClearBits");
     pRtlAreBitsSet = (void *)GetProcAddress(hntdll, "RtlAreBitsSet");
     pRtlAreBitsClear = (void *)GetProcAddress(hntdll, "RtlAreBitsClear");
@@ -181,6 +185,35 @@ static void test_RtlClearBits(void)
 
   pRtlClearBits(&bm, sizeof(buff)*8-1, 1);
   ok(buff[sizeof(buff)-1] == 0x7f, "didn't set last bit\n");
+}
+
+static void test_RtlSetBitClearBit(void)
+{
+  static const ULONG bits[] = {0, 7, 8, 31, 32, sizeof(buff) * 8 - 1};
+  unsigned int i;
+
+  if (!pRtlSetBit || !pRtlClearBit)
+  {
+    win_skip("RtlSetBit or RtlClearBit is unavailable\n");
+    return;
+  }
+
+  memset(buff, 0, sizeof(buff));
+  pRtlInitializeBitMap(&bm, buff, sizeof(buff) * 8);
+
+  for (i = 0; i < ARRAY_SIZE(bits); i++)
+  {
+    pRtlSetBit(&bm, bits[i]);
+    ok(buff[bits[i] / 8] & (1u << (bits[i] & 7)),
+       "bit %lu was not set\n", bits[i]);
+  }
+
+  for (i = 0; i < ARRAY_SIZE(bits); i++)
+  {
+    pRtlClearBit(&bm, bits[i]);
+    ok(!(buff[bits[i] / 8] & (1u << (bits[i] & 7))),
+       "bit %lu was not cleared\n", bits[i]);
+  }
 }
 
 static void test_RtlCheckBit(void)
@@ -674,6 +707,7 @@ START_TEST(rtlbitmap)
     test_RtlClearAllBits();
     test_RtlSetBits();
     test_RtlClearBits();
+    test_RtlSetBitClearBit();
     test_RtlCheckBit();
     test_RtlAreBitsSet();
     test_RtlAreBitsClear();

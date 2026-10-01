@@ -251,6 +251,15 @@ static struct dispatcher_queue_controller_statics dispatcher_queue_controller_st
 
 static IActivationFactory *dispatcher_queue_controller_factory = &dispatcher_queue_controller_statics.IActivationFactory_iface;
 
+HRESULT WINAPI CoreUICreate( void **session )
+{
+    FIXME( "session %p: CoreUI sessions are not implemented.\n", session );
+
+    if (!session) return E_POINTER;
+    *session = NULL;
+    return E_NOTIMPL;
+}
+
 HRESULT WINAPI DllGetActivationFactory( HSTRING classid, IActivationFactory **factory )
 {
     const WCHAR *name = WindowsGetStringRawBuffer( classid, NULL );

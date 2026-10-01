@@ -8260,6 +8260,41 @@ static void test_associate_wait_completion_packet(void)
     status = pNtClose(packet);
     ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
 
+    /* Closing the last packet handle is also part of the packet/queue lifetime
+     * contract.  CoreMessaging closes adapters while their target waits may be
+     * transitioning to the completion queue. */
+    status = pNtCreateWaitCompletionPacket(&packet, GENERIC_ALL, NULL);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtCreateEvent(&event, GENERIC_ALL, NULL, NotificationEvent, FALSE);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtAssociateWaitCompletionPacket(packet, completion, event, (void *)57, (void *)58,
+                                              STATUS_SUCCESS, (ULONG_PTR)59, &signaled);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtClose(packet);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtSetEvent(event, NULL);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtRemoveIoCompletion(completion, &key_context, &apc_context, &iosb, &timeout);
+    ok(status == STATUS_TIMEOUT, "Got unexpected status %#lx.\n", status);
+    status = pNtClose(event);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+
+    status = pNtCreateWaitCompletionPacket(&packet, GENERIC_ALL, NULL);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtCreateEvent(&event, GENERIC_ALL, NULL, NotificationEvent, FALSE);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtAssociateWaitCompletionPacket(packet, completion, event, (void *)60, (void *)61,
+                                              STATUS_SUCCESS, (ULONG_PTR)62, &signaled);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtSetEvent(event, NULL);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtClose(packet);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+    status = pNtRemoveIoCompletion(completion, &key_context, &apc_context, &iosb, &timeout);
+    ok(status == STATUS_TIMEOUT, "Got unexpected status %#lx.\n", status);
+    status = pNtClose(event);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+
     /* Parameter checks */
     InitializeObjectAttributes(&attr, &packet_name, 0, NULL, NULL);
     status = pNtCreateWaitCompletionPacket(&packet, GENERIC_ALL, &attr);

@@ -30,6 +30,38 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wow);
 
+typedef struct
+{
+    ULONG Flags;
+    ULONG NumaNode;
+    ULONG Channel;
+    ULONG NumberOfNumaNodes;
+    ULONG ResidentAvailablePages;
+    ULONG CommittedPages;
+    ULONG CommitLimit;
+    ULONG PeakCommitment;
+    ULONG TotalNumberOfPages;
+    ULONG AvailablePages;
+    ULONG ZeroPages;
+    ULONG FreePages;
+    ULONG StandbyPages;
+    ULONG StandbyPageCountByPriority[8];
+    ULONG RepurposedPagesByPriority[8];
+    ULONG MaximumCommitLimit;
+    ULONG Reserved;
+    ULONG PartitionId;
+} MEMORY_PARTITION_CONFIGURATION_INFORMATION32;
+
+typedef struct
+{
+    ULONG Flags;
+    ULONG HandleAttributes;
+    ACCESS_MASK DesiredAccess;
+    ULONG LowCommitCondition;
+    ULONG HighCommitCondition;
+    ULONG MaximumCommitCondition;
+} MEMORY_PARTITION_MEMORY_EVENTS_INFORMATION32;
+
 static void put_system_basic_information( SYSTEM_BASIC_INFORMATION32 *info32,
                                           const SYSTEM_BASIC_INFORMATION *info )
 {
@@ -51,6 +83,88 @@ static void put_group_affinity( GROUP_AFFINITY32 *info32, const GROUP_AFFINITY *
 {
     info32->Mask = info->Mask;
     info32->Group = info->Group;
+}
+
+
+/**********************************************************************
+ *           wow64_NtManagePartition
+ */
+NTSTATUS WINAPI wow64_NtManagePartition( UINT *args )
+{
+    HANDLE target = get_handle( &args );
+    HANDLE source = get_handle( &args );
+    PARTITION_INFORMATION_CLASS class = get_ulong( &args );
+    void *buffer = get_ptr( &args );
+    ULONG length = get_ulong( &args );
+    NTSTATUS status;
+
+    switch (class)
+    {
+    case SystemMemoryPartitionInformation:
+    {
+        MEMORY_PARTITION_CONFIGURATION_INFORMATION32 *info32 = buffer;
+        MEMORY_PARTITION_CONFIGURATION_INFORMATION info;
+        unsigned int i;
+
+        if (length != sizeof(*info32)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info32) return STATUS_ACCESS_VIOLATION;
+
+        memset( &info, 0, sizeof(info) );
+        info.Flags = info32->Flags;
+        info.NumaNode = info32->NumaNode;
+        info.Channel = info32->Channel;
+        status = NtManagePartition( target, source, class, &info, sizeof(info) );
+        if (status) return status;
+
+        info32->Flags = info.Flags;
+        info32->NumaNode = info.NumaNode;
+        info32->Channel = info.Channel;
+        info32->NumberOfNumaNodes = info.NumberOfNumaNodes;
+        info32->ResidentAvailablePages = info.ResidentAvailablePages;
+        info32->CommittedPages = info.CommittedPages;
+        info32->CommitLimit = info.CommitLimit;
+        info32->PeakCommitment = info.PeakCommitment;
+        info32->TotalNumberOfPages = info.TotalNumberOfPages;
+        info32->AvailablePages = info.AvailablePages;
+        info32->ZeroPages = info.ZeroPages;
+        info32->FreePages = info.FreePages;
+        info32->StandbyPages = info.StandbyPages;
+        for (i = 0; i < ARRAY_SIZE(info32->StandbyPageCountByPriority); i++)
+            info32->StandbyPageCountByPriority[i] = info.StandbyPageCountByPriority[i];
+        for (i = 0; i < ARRAY_SIZE(info32->RepurposedPagesByPriority); i++)
+            info32->RepurposedPagesByPriority[i] = info.RepurposedPagesByPriority[i];
+        info32->MaximumCommitLimit = info.MaximumCommitLimit;
+        info32->Reserved = info.Reserved;
+        info32->PartitionId = info.PartitionId;
+        return STATUS_SUCCESS;
+    }
+
+    case SystemMemoryPartitionGetMemoryEvents:
+    {
+        MEMORY_PARTITION_MEMORY_EVENTS_INFORMATION32 *info32 = buffer;
+        MEMORY_PARTITION_MEMORY_EVENTS_INFORMATION info;
+
+        if (length != sizeof(*info32)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!info32) return STATUS_ACCESS_VIOLATION;
+
+        info.Flags = info32->Flags;
+        info.HandleAttributes = info32->HandleAttributes;
+        info.DesiredAccess = info32->DesiredAccess;
+        info.LowCommitCondition = 0;
+        info.HighCommitCondition = 0;
+        info.MaximumCommitCondition = 0;
+        status = NtManagePartition( target, source, class, &info, sizeof(info) );
+        if (status) return status;
+
+        info32->LowCommitCondition = HandleToUlong( info.LowCommitCondition );
+        info32->HighCommitCondition = HandleToUlong( info.HighCommitCondition );
+        info32->MaximumCommitCondition = HandleToUlong( info.MaximumCommitCondition );
+        return STATUS_SUCCESS;
+    }
+
+    default:
+        return NtManagePartition( target, source, class, buffer, length );
+    }
 }
 
 

@@ -107,6 +107,7 @@ static const WELLKNOWNSID WellKnownSids[] =
     { WinBuiltinAuthorizationAccessSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_AUTHORIZATIONACCESS } } },
     { WinBuiltinTerminalServerLicenseServersSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_TS_LICENSE_SERVERS } } },
     { WinBuiltinDCOMUsersSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_DCOM_USERS } } },
+    { WinBuiltinDefaultSystemManagedGroupSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_DEFAULT_ACCOUNT } } },
     { WinLowLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_LOW_RID} } },
     { WinMediumLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_MEDIUM_RID } } },
     { WinHighLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_HIGH_RID } } },
@@ -136,6 +137,7 @@ static const WELLKNOWNRID WellKnownRids[] =
     { WinAccountEnterpriseAdminsSid, DOMAIN_GROUP_RID_ENTERPRISE_ADMINS },
     { WinAccountPolicyAdminsSid,     DOMAIN_GROUP_RID_POLICY_ADMINS },
     { WinAccountRasAndIasServersSid, DOMAIN_ALIAS_RID_RAS_SERVERS },
+    { WinAccountDefaultSystemManagedSid, DOMAIN_USER_RID_DEFAULT_ACCOUNT },
 };
 
 static NTSTATUS open_file( LPCWSTR name, DWORD access, HANDLE *file )
@@ -615,6 +617,57 @@ exit:
     HeapFree(GetProcessHeap(), 0, token_groups);
     if (thread_token != NULL) CloseHandle(thread_token);
     return ret;
+}
+
+/******************************************************************************
+ * CheckTokenCapability    (kernelbase.@)
+ */
+BOOL WINAPI CheckTokenCapability( HANDLE token, PSID sid_to_check, PBOOL has_capability )
+{
+    const SID_IDENTIFIER_AUTHORITY app_package_authority = { SECURITY_APP_PACKAGE_AUTHORITY };
+
+    TRACE("(%p %s %p)\n", token, debugstr_sid(sid_to_check), has_capability);
+
+    if (!has_capability)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    *has_capability = FALSE;
+
+    if (!sid_to_check || !IsValidSid(sid_to_check) ||
+        memcmp(GetSidIdentifierAuthority(sid_to_check), &app_package_authority,
+               sizeof(app_package_authority)) ||
+        !*GetSidSubAuthorityCount(sid_to_check) ||
+        *GetSidSubAuthority(sid_to_check, 0) != SECURITY_CAPABILITY_BASE_RID)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    /* Wine has no separate app-container capability set yet.  Capability SIDs
+     * present in an impersonation token are represented by its enabled groups. */
+    return CheckTokenMembership(token, sid_to_check, has_capability);
+}
+
+/******************************************************************************
+ * CheckTokenMembershipEx    (kernelbase.@)
+ */
+BOOL WINAPI CheckTokenMembershipEx( HANDLE token, PSID sid_to_check, DWORD flags, PBOOL is_member )
+{
+    static const DWORD CTMF_INCLUDE_APPCONTAINER = 0x00000001;
+
+    TRACE("(%p %s %#lx %p)\n", token, debugstr_sid(sid_to_check), flags, is_member);
+
+    if (flags & ~CTMF_INCLUDE_APPCONTAINER)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    /* Wine currently exposes no app-container tokens, so the additional flag
+     * does not alter the membership query. */
+    return CheckTokenMembership( token, sid_to_check, is_member );
 }
 
 /*************************************************************************
@@ -1272,13 +1325,138 @@ BOOL WINAPI AccessCheckAndAuditAlarmW( LPCWSTR subsystem, LPVOID id, LPWSTR type
 /******************************************************************************
  * AccessCheckByType    (kernelbase.@)
  */
+static PSID get_simple_ace_sid( PACE_HEADER header )
+{
+    switch (header->AceType)
+    {
+    case ACCESS_ALLOWED_ACE_TYPE:
+    case ACCESS_DENIED_ACE_TYPE:
+    case SYSTEM_AUDIT_ACE_TYPE:
+    case SYSTEM_ALARM_ACE_TYPE:
+        return (PSID)&((ACCESS_ALLOWED_ACE *)header)->SidStart;
+    default:
+        return NULL;
+    }
+}
+
+static PACL replace_principal_self_aces( PACL acl, PSID principal )
+{
+    SIZE_T principal_len = GetLengthSid( principal ), size = sizeof(ACL);
+    PACE_HEADER header;
+    PACL replacement;
+    DWORD i;
+
+    for (i = 0; i < acl->AceCount; ++i)
+    {
+        PSID ace_sid;
+
+        if (!GetAce( acl, i, (void **)&header )) return NULL;
+        ace_sid = get_simple_ace_sid( header );
+        if (ace_sid && IsValidSid( ace_sid ) && IsWellKnownSid( ace_sid, WinSelfSid ))
+            size += header->AceSize - GetLengthSid( ace_sid ) + principal_len;
+        else
+            size += header->AceSize;
+    }
+
+    if (size > 0xffff)
+    {
+        SetLastError( ERROR_INVALID_ACL );
+        return NULL;
+    }
+    if (!(replacement = HeapAlloc( GetProcessHeap(), 0, size )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return NULL;
+    }
+    if (!InitializeAcl( replacement, size, acl->AclRevision )) goto failed;
+
+    for (i = 0; i < acl->AceCount; ++i)
+    {
+        PSID ace_sid;
+
+        if (!GetAce( acl, i, (void **)&header )) goto failed;
+        ace_sid = get_simple_ace_sid( header );
+        if (ace_sid && IsValidSid( ace_sid ) && IsWellKnownSid( ace_sid, WinSelfSid ))
+        {
+            SIZE_T sid_offset = (BYTE *)ace_sid - (BYTE *)header;
+            SIZE_T old_sid_len = GetLengthSid( ace_sid );
+            SIZE_T tail_len = header->AceSize - sid_offset - old_sid_len;
+            SIZE_T ace_size = sid_offset + principal_len + tail_len;
+            PACE_HEADER ace;
+
+            if (!(ace = HeapAlloc( GetProcessHeap(), 0, ace_size )))
+            {
+                SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+                goto failed;
+            }
+            memcpy( ace, header, sid_offset );
+            memcpy( (BYTE *)ace + sid_offset, principal, principal_len );
+            memcpy( (BYTE *)ace + sid_offset + principal_len,
+                    (BYTE *)header + sid_offset + old_sid_len, tail_len );
+            ace->AceSize = ace_size;
+            if (!AddAce( replacement, acl->AclRevision, MAXDWORD, ace, ace_size ))
+            {
+                HeapFree( GetProcessHeap(), 0, ace );
+                goto failed;
+            }
+            HeapFree( GetProcessHeap(), 0, ace );
+        }
+        else if (!AddAce( replacement, acl->AclRevision, MAXDWORD, header, header->AceSize ))
+            goto failed;
+    }
+    return replacement;
+
+failed:
+    HeapFree( GetProcessHeap(), 0, replacement );
+    return NULL;
+}
+
 BOOL WINAPI AccessCheckByType( PSECURITY_DESCRIPTOR descr, PSID sid, HANDLE token, DWORD access,
                                POBJECT_TYPE_LIST types, DWORD types_len, PGENERIC_MAPPING mapping,
                                PPRIVILEGE_SET priv, LPDWORD priv_len, LPDWORD granted, LPBOOL status )
 {
-    FIXME("stub\n");
-    *status = TRUE;
-    return !*status;
+    SECURITY_DESCRIPTOR replacement_descr;
+    BOOL dacl_present, dacl_defaulted, owner_defaulted, group_defaulted;
+    BOOL sacl_present, sacl_defaulted, ret;
+    PACL dacl, replacement_dacl, sacl;
+    PSID owner, group;
+
+    TRACE("(%p, %s, %p, %#lx, %p, %lu, %p, %p, %p, %p, %p)\n", descr,
+          debugstr_sid(sid), token, access, types, types_len, mapping, priv, priv_len, granted, status);
+
+    if (types || types_len)
+    {
+        FIXME("object type lists are not supported\n");
+        SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+        return FALSE;
+    }
+    if (!sid) return AccessCheck( descr, token, access, mapping, priv, priv_len, granted, status );
+    if (!IsValidSid( sid ))
+    {
+        SetLastError( ERROR_INVALID_SID );
+        return FALSE;
+    }
+    if (!GetSecurityDescriptorDacl( descr, &dacl_present, &dacl, &dacl_defaulted )) return FALSE;
+    if (!dacl_present || !dacl)
+        return AccessCheck( descr, token, access, mapping, priv, priv_len, granted, status );
+    if (!(replacement_dacl = replace_principal_self_aces( dacl, sid ))) return FALSE;
+
+    if (!GetSecurityDescriptorOwner( descr, &owner, &owner_defaulted ) ||
+        !GetSecurityDescriptorGroup( descr, &group, &group_defaulted ) ||
+        !GetSecurityDescriptorSacl( descr, &sacl_present, &sacl, &sacl_defaulted ) ||
+        !InitializeSecurityDescriptor( &replacement_descr, SECURITY_DESCRIPTOR_REVISION ) ||
+        !SetSecurityDescriptorOwner( &replacement_descr, owner, owner_defaulted ) ||
+        !SetSecurityDescriptorGroup( &replacement_descr, group, group_defaulted ) ||
+        !SetSecurityDescriptorDacl( &replacement_descr, TRUE, replacement_dacl, dacl_defaulted ) ||
+        !SetSecurityDescriptorSacl( &replacement_descr, sacl_present, sacl, sacl_defaulted ))
+    {
+        HeapFree( GetProcessHeap(), 0, replacement_dacl );
+        return FALSE;
+    }
+
+    ret = AccessCheck( &replacement_descr, token, access, mapping, priv, priv_len, granted, status );
+    HeapFree( GetProcessHeap(), 0, replacement_dacl );
+    return ret;
 }
 
 /******************************************************************************

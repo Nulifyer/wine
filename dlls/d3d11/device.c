@@ -21,6 +21,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d11);
 
+static const GUID IID_IDXGIDeviceXAML =
+    {0xf898b024, 0xb5c8, 0x42cd, {0xa1, 0x4f, 0xac, 0x5a, 0xdb, 0xf4, 0xbe, 0x22}};
+
 static BOOL d3d_array_reserve(void **elements, SIZE_T *capacity, SIZE_T count, SIZE_T size)
 {
     SIZE_T max_capacity, new_capacity;
@@ -5537,6 +5540,10 @@ static HRESULT STDMETHODCALLTYPE d3d_device_inner_QueryInterface(IUnknown *iface
     {
         *out = &device->ID3D10Multithread_iface;
     }
+    else if (IsEqualGUID(riid, &IID_IDXGIDeviceXAML))
+    {
+        *out = &device->IDXGIDeviceXAML_iface;
+    }
     else if (IsEqualGUID(riid, &IID_IWineDXGIDeviceParent))
     {
         *out = &device->IWineDXGIDeviceParent_iface;
@@ -7645,6 +7652,72 @@ static const struct IUnknownVtbl d3d_device_inner_unknown_vtbl =
     d3d_device_inner_Release,
 };
 
+/* IDXGIDeviceXAML methods */
+
+static inline struct d3d_device *impl_from_IDXGIDeviceXAML(IDXGIDeviceXAML *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d_device, IDXGIDeviceXAML_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_device_xaml_QueryInterface(IDXGIDeviceXAML *iface,
+        REFIID iid, void **out)
+{
+    struct d3d_device *device = impl_from_IDXGIDeviceXAML(iface);
+
+    return IUnknown_QueryInterface(device->outer_unk, iid, out);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_device_xaml_AddRef(IDXGIDeviceXAML *iface)
+{
+    struct d3d_device *device = impl_from_IDXGIDeviceXAML(iface);
+
+    return IUnknown_AddRef(device->outer_unk);
+}
+
+static ULONG STDMETHODCALLTYPE dxgi_device_xaml_Release(IDXGIDeviceXAML *iface)
+{
+    struct d3d_device *device = impl_from_IDXGIDeviceXAML(iface);
+
+    return IUnknown_Release(device->outer_unk);
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_device_xaml_SetInProcessGPUPriority(IDXGIDeviceXAML *iface,
+        int priority)
+{
+    struct d3d_device *device = impl_from_IDXGIDeviceXAML(iface);
+
+    TRACE("iface %p, priority %d.\n", iface, priority);
+
+    if (priority != 0 && priority != 1)
+        return E_INVALIDARG;
+
+    InterlockedExchange(&device->xaml_gpu_priority, priority);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_device_xaml_GetInProcessGPUPriority(IDXGIDeviceXAML *iface,
+        int *priority)
+{
+    struct d3d_device *device = impl_from_IDXGIDeviceXAML(iface);
+
+    TRACE("iface %p, priority %p.\n", iface, priority);
+
+    if (!priority)
+        return E_INVALIDARG;
+
+    *priority = InterlockedCompareExchange(&device->xaml_gpu_priority, 0, 0);
+    return S_OK;
+}
+
+static const IDXGIDeviceXAMLVtbl dxgi_device_xaml_vtbl =
+{
+    dxgi_device_xaml_QueryInterface,
+    dxgi_device_xaml_AddRef,
+    dxgi_device_xaml_Release,
+    dxgi_device_xaml_SetInProcessGPUPriority,
+    dxgi_device_xaml_GetInProcessGPUPriority,
+};
+
 /* ID3D10Multithread methods */
 
 static inline struct d3d_device *impl_from_ID3D10Multithread(ID3D10Multithread *iface)
@@ -8160,6 +8233,7 @@ void d3d_device_init(struct d3d_device *device, void *outer_unknown)
     device->ID3D11Device5_iface.lpVtbl = &d3d11_device_vtbl;
     device->ID3D10Device1_iface.lpVtbl = &d3d10_device1_vtbl;
     device->ID3D10Multithread_iface.lpVtbl = &d3d10_multithread_vtbl;
+    device->IDXGIDeviceXAML_iface.lpVtbl = &dxgi_device_xaml_vtbl;
     device->ID3D11VideoDevice1_iface.lpVtbl = &d3d11_video_device1_vtbl;
     device->IWineDXGIDeviceParent_iface.lpVtbl = &d3d_dxgi_device_parent_vtbl;
     device->device_parent.ops = &d3d_wined3d_device_parent_ops;
@@ -8167,6 +8241,7 @@ void d3d_device_init(struct d3d_device *device, void *outer_unknown)
     /* COM aggregation always takes place */
     device->outer_unk = outer_unknown;
     device->d3d11_only = FALSE;
+    device->xaml_gpu_priority = 0;
     device->state = NULL;
 
     d3d11_device_context_init(&device->immediate_context, device, D3D11_DEVICE_CONTEXT_IMMEDIATE);

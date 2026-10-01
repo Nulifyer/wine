@@ -125,9 +125,11 @@ DEFINE_IINSPECTABLE(design_mode_statics, IDesignModeStatics, struct design_mode_
 
 static HRESULT WINAPI design_mode_statics_DesignModeEnabled(IDesignModeStatics *iface, boolean *value)
 {
-    FIXME("iface %p, value %p.\n", iface, value);
+    TRACE("iface %p, value %p.\n", iface, value);
 
-    return E_NOTIMPL;
+    if (!value) return E_INVALIDARG;
+    *value = FALSE;
+    return S_OK;
 }
 
 static const struct IDesignModeStaticsVtbl design_mode_statics_vtbl =
@@ -147,9 +149,11 @@ DEFINE_IINSPECTABLE(design_mode_statics2, IDesignModeStatics2, struct design_mod
 
 static HRESULT WINAPI design_mode_statics2_DesignMode2Enabled(IDesignModeStatics2 *iface, boolean *value)
 {
-    FIXME("iface %p, value %p.\n", iface, value);
+    TRACE("iface %p, value %p.\n", iface, value);
 
-    return E_NOTIMPL;
+    if (!value) return E_INVALIDARG;
+    *value = FALSE;
+    return S_OK;
 }
 
 static const struct IDesignModeStatics2Vtbl design_mode_statics2_vtbl =

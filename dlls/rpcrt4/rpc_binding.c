@@ -762,6 +762,142 @@ fail:
 /***********************************************************************
  *             RpcBindingFree (RPCRT4.@)
  */
+static const WCHAR *fast_binding_protseq(ULONG protocol_sequence)
+{
+  switch (protocol_sequence)
+  {
+  case RPC_PROTSEQ_TCP:  return L"ncacn_ip_tcp";
+  case RPC_PROTSEQ_NMP:  return L"ncacn_np";
+  case RPC_PROTSEQ_LRPC: return L"ncalrpc";
+  case RPC_PROTSEQ_HTTP: return L"ncacn_http";
+  default: return NULL;
+  }
+}
+
+static RPC_STATUS create_fast_bindingW(const RPC_BINDING_HANDLE_TEMPLATE_V1_W *template,
+                                       RPC_BINDING_HANDLE *binding)
+{
+  static WCHAR emptyW[] = {0};
+  const WCHAR *protseq;
+  RpcBinding *bind;
+  RPC_STATUS status;
+
+  if (!template || !binding || template->Version != 1) return RPC_S_INVALID_ARG;
+  if (!(protseq = fast_binding_protseq(template->ProtocolSequence))) return RPC_S_CANNOT_SUPPORT;
+  if (template->Flags & ~RPC_BHT_OBJECT_UUID_VALID) return RPC_S_CANNOT_SUPPORT;
+
+  *binding = NULL;
+  if ((status = RPCRT4_CreateBindingW(&bind, FALSE, protseq)) != RPC_S_OK) return status;
+  if (template->Flags & RPC_BHT_OBJECT_UUID_VALID)
+    RPCRT4_SetBindingObject(bind, &template->ObjectUuid);
+  status = RPCRT4_CompleteBindingW(bind,
+                                  template->NetworkAddress ? template->NetworkAddress : emptyW,
+                                  template->StringEndpoint ? template->StringEndpoint : emptyW,
+                                  emptyW);
+  if (status != RPC_S_OK)
+  {
+    RPCRT4_ReleaseBinding(bind);
+    return status;
+  }
+  *binding = bind;
+  return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             RpcBindingCreateW (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcBindingCreateW(RPC_BINDING_HANDLE_TEMPLATE_V1_W *template,
+                                    RPC_BINDING_HANDLE_SECURITY_V1_W *security,
+                                    RPC_BINDING_HANDLE_OPTIONS_V1 *options,
+                                    RPC_BINDING_HANDLE *binding)
+{
+  RPC_STATUS status;
+
+  TRACE("(%p,%p,%p,%p) version %lu flags %#lx protseq %lu endpoint %s\n", template,
+        security, options, binding, template ? template->Version : 0,
+        template ? template->Flags : 0, template ? template->ProtocolSequence : 0,
+        template ? debugstr_w(template->StringEndpoint) : "(null)");
+
+  if (security && security->Version != 1) return RPC_S_INVALID_ARG;
+  if (options && options->Version != 1) return RPC_S_INVALID_ARG;
+  if ((status = create_fast_bindingW(template, binding)) != RPC_S_OK) return status;
+
+  if (security && security->AuthnSvc != RPC_C_AUTHN_NONE)
+  {
+    status = RpcBindingSetAuthInfoExW(*binding, security->ServerPrincName,
+                                     security->AuthnLevel, security->AuthnSvc,
+                                     security->AuthIdentity, RPC_C_AUTHZ_NONE,
+                                     security->SecurityQos);
+    if (status != RPC_S_OK) RpcBindingFree(binding);
+  }
+  return status;
+}
+
+/***********************************************************************
+ *             RpcBindingCreateA (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcBindingCreateA(RPC_BINDING_HANDLE_TEMPLATE_V1_A *template,
+                                    RPC_BINDING_HANDLE_SECURITY_V1_A *security,
+                                    RPC_BINDING_HANDLE_OPTIONS_V1 *options,
+                                    RPC_BINDING_HANDLE *binding)
+{
+  RPC_BINDING_HANDLE_TEMPLATE_V1_W templateW;
+  RPC_BINDING_HANDLE_SECURITY_V1_W securityW, *securityW_ptr = NULL;
+  WCHAR *networkW = NULL, *endpointW = NULL, *principalW = NULL;
+  RPC_STATUS status;
+
+  if (!template || !binding) return RPC_S_INVALID_ARG;
+  templateW.Version = template->Version;
+  templateW.Flags = template->Flags;
+  templateW.ProtocolSequence = template->ProtocolSequence;
+  templateW.NetworkAddress = networkW = RPCRT4_strdupAtoW((const char *)template->NetworkAddress);
+  templateW.StringEndpoint = endpointW = RPCRT4_strdupAtoW((const char *)template->StringEndpoint);
+  templateW.u1.Reserved = NULL;
+  templateW.ObjectUuid = template->ObjectUuid;
+  if (security)
+  {
+    securityW.Version = security->Version;
+    securityW.ServerPrincName = principalW = RPCRT4_strdupAtoW((const char *)security->ServerPrincName);
+    securityW.AuthnLevel = security->AuthnLevel;
+    securityW.AuthnSvc = security->AuthnSvc;
+    securityW.AuthIdentity = (SEC_WINNT_AUTH_IDENTITY_W *)security->AuthIdentity;
+    securityW.SecurityQos = security->SecurityQos;
+    securityW_ptr = &securityW;
+  }
+  status = RpcBindingCreateW(&templateW, securityW_ptr, options, binding);
+  free(principalW);
+  free(endpointW);
+  free(networkW);
+  return status;
+}
+
+/***********************************************************************
+ *             RpcBindingBind (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcBindingBind(struct _RPC_ASYNC_STATE *async, RPC_BINDING_HANDLE binding,
+                                 RPC_IF_HANDLE ifspec)
+{
+  RpcBinding *bind = binding;
+
+  TRACE("(%p,%p,%p)\n", async, binding, ifspec);
+  if (!bind || bind->server || !ifspec) return RPC_S_INVALID_BINDING;
+  if (async) return RPC_S_CANNOT_SUPPORT;
+  if (!bind->Endpoint || !bind->Endpoint[0]) return RpcEpResolveBinding(binding, ifspec);
+  return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             RpcBindingUnbind (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcBindingUnbind(RPC_BINDING_HANDLE binding)
+{
+  RpcBinding *bind = binding;
+
+  TRACE("(%p)\n", binding);
+  if (!bind || bind->server) return RPC_S_INVALID_BINDING;
+  return RPC_S_OK;
+}
+
 RPC_STATUS WINAPI RpcBindingFree( RPC_BINDING_HANDLE* Binding )
 {
   RPC_STATUS status;
@@ -1090,6 +1226,27 @@ static inline BOOL has_nt_auth_identity(ULONG AuthnLevel)
     default:
         return FALSE;
     }
+}
+
+static RPC_STATUS normalize_kernel_authn(RpcBinding *binding, ULONG *authn_level, ULONG *authn_svc)
+{
+    if (*authn_svc != RPC_C_AUTHN_KERNEL) return RPC_S_OK;
+
+    if (*authn_level > RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
+        return RPC_S_UNKNOWN_AUTHN_LEVEL;
+
+    /* Kernel authentication is a local-RPC optimization. Windows rejects it
+     * for other protocol sequences and exposes an authenticated local binding
+     * as NTLM at packet-privacy level. */
+    if (!binding->Protseq || strcmp(binding->Protseq, "ncalrpc"))
+        return RPC_S_UNKNOWN_AUTHN_SERVICE;
+
+    if (*authn_level != RPC_C_AUTHN_LEVEL_NONE)
+    {
+        *authn_level = RPC_C_AUTHN_LEVEL_PKT_PRIVACY;
+        *authn_svc = RPC_C_AUTHN_WINNT;
+    }
+    return RPC_S_OK;
 }
 
 RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc,
@@ -1658,6 +1815,7 @@ RpcBindingSetAuthInfoExA( RPC_BINDING_HANDLE Binding, RPC_CSTR ServerPrincName,
   ULONG i;
   PSecPkgInfoA packages;
   ULONG cbMaxToken;
+  RPC_STATUS status;
 
   TRACE("%p %s %lu %lu %p %lu %p\n", Binding, debugstr_a((const char*)ServerPrincName),
         AuthnLevel, AuthnSvc, AuthIdentity, AuthzSvr, SecurityQos);
@@ -1695,6 +1853,9 @@ RpcBindingSetAuthInfoExA( RPC_BINDING_HANDLE Binding, RPC_CSTR ServerPrincName,
 
   if (AuthnSvc == RPC_C_AUTHN_DEFAULT)
     AuthnSvc = RPC_C_AUTHN_WINNT;
+
+  status = normalize_kernel_authn(bind, &AuthnLevel, &AuthnSvc);
+  if (status != RPC_S_OK) return status;
 
   /* FIXME: the mapping should probably be retrieved using SSPI somehow */
   if (AuthnLevel == RPC_C_AUTHN_LEVEL_DEFAULT)
@@ -1789,6 +1950,7 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
   ULONG i;
   PSecPkgInfoW packages;
   ULONG cbMaxToken;
+  RPC_STATUS status;
 
   TRACE("%p %s %lu %lu %p %lu %p\n", Binding, debugstr_w(ServerPrincName),
         AuthnLevel, AuthnSvc, AuthIdentity, AuthzSvr, SecurityQos);
@@ -1826,6 +1988,9 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
 
   if (AuthnSvc == RPC_C_AUTHN_DEFAULT)
     AuthnSvc = RPC_C_AUTHN_WINNT;
+
+  status = normalize_kernel_authn(bind, &AuthnLevel, &AuthnSvc);
+  if (status != RPC_S_OK) return status;
 
   /* FIXME: the mapping should probably be retrieved using SSPI somehow */
   if (AuthnLevel == RPC_C_AUTHN_LEVEL_DEFAULT)
@@ -1978,4 +2143,26 @@ RPC_STATUS WINAPI I_RpcBindingInqLocalClientPID(RPC_BINDING_HANDLE ClientBinding
         return RPC_S_INVALID_BINDING;
 
     return connection->ops->inquire_client_pid(connection, ClientPID);
+}
+
+/***********************************************************************
+ *             I_RpcOpenClientProcess (RPCRT4.@)
+ */
+RPC_STATUS WINAPI I_RpcOpenClientProcess(RPC_BINDING_HANDLE ClientBinding,
+                                         DWORD DesiredAccess, HANDLE *ClientProcess)
+{
+    RPC_STATUS status;
+    ULONG client_pid;
+    HANDLE process;
+
+    TRACE("%p %#lx %p\n", ClientBinding, DesiredAccess, ClientProcess);
+
+    status = I_RpcBindingInqLocalClientPID(ClientBinding, &client_pid);
+    if (status != RPC_S_OK) return status;
+
+    process = OpenProcess(DesiredAccess, FALSE, client_pid);
+    if (!process) return GetLastError();
+
+    *ClientProcess = process;
+    return RPC_S_OK;
 }

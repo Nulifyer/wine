@@ -40,6 +40,7 @@
 #include "request.h"
 #include "security.h"
 #include "process.h"
+#include "unicode.h"
 
 struct named_pipe;
 
@@ -49,6 +50,7 @@ struct pipe_message
     data_size_t          read_pos;   /* already read bytes */
     struct iosb         *iosb;       /* message iosb */
     struct async        *async;      /* async of pending write */
+    struct token        *token;      /* security context of the writer */
 };
 
 struct pipe_end
@@ -61,6 +63,11 @@ struct pipe_end
     struct pipe_end     *connection; /* the other end of the pipe */
     process_id_t         client_pid; /* process that created the client */
     process_id_t         server_pid; /* process that created the server */
+    struct token        *client_token; /* security context of the last message read */
+    struct token        *static_token; /* client context captured at open */
+    int                  impersonation_level;
+    int                  context_tracking;
+    int                  effective_only;
     data_size_t          buffer_size;/* size of buffered data that doesn't block caller */
     struct list          message_queue;
     struct async_queue   read_q;     /* read queue */
@@ -368,9 +375,20 @@ static struct fd *pipe_end_get_fd( struct object *obj )
 
 static struct pipe_message *queue_message( struct pipe_end *pipe_end, struct iosb *iosb )
 {
+    struct pipe_end *writer = pipe_end->connection;
     struct pipe_message *message;
 
     if (!(message = mem_alloc( sizeof(*message) ))) return NULL;
+    message->token = NULL;
+    if (writer && writer->obj.ops == &pipe_client_ops &&
+        !(message->token = writer->context_tracking
+              ? token_duplicate_impersonation( thread_get_impersonation_token( current ),
+                                                writer->impersonation_level, writer->effective_only )
+              : (struct token *)grab_object( writer->static_token )))
+    {
+        free( message );
+        return NULL;
+    }
     message->iosb = (struct iosb *)grab_object( iosb );
     message->async = NULL;
     message->read_pos = 0;
@@ -393,7 +411,15 @@ static void free_message( struct pipe_message *message )
 {
     list_remove( &message->entry );
     if (message->iosb) release_object( message->iosb );
+    if (message->token) release_object( message->token );
     free( message );
+}
+
+static void pipe_end_set_client_token( struct pipe_end *pipe_end, struct pipe_message *message )
+{
+    if (!message->token) return;
+    if (pipe_end->client_token) release_object( pipe_end->client_token );
+    pipe_end->client_token = (struct token *)grab_object( message->token );
 }
 
 static void pipe_end_disconnect( struct pipe_end *pipe_end, unsigned int status )
@@ -403,6 +429,11 @@ static void pipe_end_disconnect( struct pipe_end *pipe_end, unsigned int status 
     struct async *async;
 
     pipe_end->connection = NULL;
+    if (status == STATUS_PIPE_DISCONNECTED && pipe_end->client_token)
+    {
+        release_object( pipe_end->client_token );
+        pipe_end->client_token = NULL;
+    }
 
     pipe_end->state = status == STATUS_PIPE_DISCONNECTED
         ? FILE_PIPE_DISCONNECTED_STATE : FILE_PIPE_CLOSING_STATE;
@@ -441,6 +472,8 @@ static void pipe_end_destroy( struct object *obj )
 
     free_async_queue( &pipe_end->read_q );
     free_async_queue( &pipe_end->write_q );
+    if (pipe_end->client_token) release_object( pipe_end->client_token );
+    if (pipe_end->static_token) release_object( pipe_end->static_token );
     if (pipe_end->fd) release_object( pipe_end->fd );
     if (pipe_end->pipe) release_object( pipe_end->pipe );
 }
@@ -921,6 +954,7 @@ static void message_queue_read( struct pipe_end *pipe_end, struct async *async )
     message = LIST_ENTRY( list_head(&pipe_end->message_queue), struct pipe_message, entry );
     if (!message->read_pos && message->iosb->in_size == iosb->out_size) /* fast path */
     {
+        pipe_end_set_client_token( pipe_end, message );
         async_request_complete( async, status, out_size, out_size, message->iosb->in_data );
         message->iosb->in_data = NULL;
         wake_message( message, message->iosb->in_size );
@@ -942,6 +976,7 @@ static void message_queue_read( struct pipe_end *pipe_end, struct async *async )
         {
             message = LIST_ENTRY( list_head(&pipe_end->message_queue), struct pipe_message, entry );
             writing = min( out_size - write_pos, message->iosb->in_size - message->read_pos );
+            if (writing) pipe_end_set_client_token( pipe_end, message );
             if (writing) memcpy( buf + write_pos, (const char *)message->iosb->in_data + message->read_pos, writing );
             write_pos += writing;
             message->read_pos += writing;
@@ -1310,10 +1345,15 @@ static void pipe_server_ioctl( struct fd *fd, ioctl_code_t code, struct async *a
         return;
 
     case FSCTL_PIPE_IMPERSONATE:
-        if (current->process->token) /* FIXME: use the client token */
         {
             struct token *token;
-            if (!(token = token_duplicate( current->process->token, 0, SecurityImpersonation, NULL, NULL, 0, NULL, 0 )))
+            if (!server->pipe_end.client_token)
+            {
+                set_error( STATUS_CANNOT_IMPERSONATE );
+                return;
+            }
+            if (!(token = token_duplicate_impersonation( server->pipe_end.client_token,
+                                                         server->pipe_end.impersonation_level, FALSE )))
                 return;
             if (current->token) release_object( current->token );
             current->token = token;
@@ -1347,6 +1387,11 @@ static void init_pipe_end( struct pipe_end *pipe_end, struct named_pipe *pipe,
     pipe_end->fd = NULL;
     pipe_end->flags = pipe_flags;
     pipe_end->connection = NULL;
+    pipe_end->client_token = NULL;
+    pipe_end->static_token = NULL;
+    pipe_end->impersonation_level = SecurityImpersonation;
+    pipe_end->context_tracking = SECURITY_DYNAMIC_TRACKING;
+    pipe_end->effective_only = TRUE;
     pipe_end->buffer_size = buffer_size;
     init_async_queue( &pipe_end->read_q );
     init_async_queue( &pipe_end->write_q );
@@ -1402,6 +1447,27 @@ static struct pipe_end *create_pipe_client( struct named_pipe *pipe, data_size_t
     set_fd_signaled( client->fd, 1 );
 
     return client;
+}
+
+int set_named_pipe_client_security( struct object *obj, int level, int tracking, int effective_only )
+{
+    struct pipe_end *client = (struct pipe_end *)obj;
+
+    if (obj->ops != &pipe_client_ops) return 1;
+    if (level < SecurityAnonymous || level > SecurityDelegation)
+    {
+        set_error( STATUS_BAD_IMPERSONATION_LEVEL );
+        return 0;
+    }
+    client->impersonation_level = level;
+    client->context_tracking = tracking;
+    client->effective_only = effective_only;
+    if (!tracking && !(client->static_token = token_duplicate_impersonation(
+            thread_get_impersonation_token( current ), level, effective_only ))) return 0;
+    client->connection->impersonation_level = level;
+    if (client->static_token)
+        client->connection->client_token = (struct token *)grab_object( client->static_token );
+    return 1;
 }
 
 static int named_pipe_link_name( struct object *obj, struct object_name *name, struct object *parent )

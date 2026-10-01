@@ -656,6 +656,18 @@ DWORD get_window_thread( HWND hwnd, DWORD *process )
     return entry.tid;
 }
 
+/*****************************************************************
+ *           NtUserSetWindowMessageCapability (win32u.@)
+ */
+BOOL WINAPI NtUserSetWindowMessageCapability( HWND hwnd, UINT message, PSID sid, ULONG action )
+{
+    /* Wine does not enforce SID-based window-message capabilities. Reject
+     * the operation without claiming to register or remove a permission. */
+    FIXME( "unsupported window-message capability %p %x %p %lu\n", hwnd, message, sid, action );
+    RtlSetLastWin32Error( ERROR_NOT_SUPPORTED );
+    return FALSE;
+}
+
 /* see GetParent */
 HWND get_parent( HWND hwnd )
 {
@@ -1107,6 +1119,19 @@ BOOL is_window_unicode( HWND hwnd )
     BOOL ansi = FALSE;
     if (!get_window_wndproc_handle( hwnd, &ansi )) return FALSE;
     return !ansi;
+}
+
+/*****************************************************************
+ *           NtUserEnableWindowResizeOptimization (win32u.@)
+ */
+BOOL WINAPI NtUserEnableWindowResizeOptimization( UINT flags, UINT value, UINT timeout )
+{
+    /* This configures Windows session-wide GDI resize optimization, not an
+     * individual HWND. Wine's normal host-backed resize path remains active.
+     * Reject the unsupported optimization without claiming to enable it. */
+    FIXME( "unsupported resize optimization %#x %u %u\n", flags, value, timeout );
+    RtlSetLastWin32Error( ERROR_NOT_SUPPORTED );
+    return FALSE;
 }
 
 /*****************************************************************
@@ -6590,8 +6615,50 @@ HANDLE WINAPI NtUserQueryWindow( HWND hwnd, WINDOWINFOCLASS cls )
 }
 
 /***********************************************************************
-*            NtUserSetShellWindowEx (win32u.@)
-*/
+ *            NtUserAcquireIAMKey (win32u.@)
+ */
+BOOL WINAPI NtUserAcquireIAMKey( ULONG_PTR *key )
+{
+    BOOL ret = FALSE;
+
+    if (!key)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    SERVER_START_REQ(acquire_desktop_iam_key)
+    {
+        if (!wine_server_call_err(req))
+        {
+            *key = (ULONG_PTR)reply->key;
+            ret = TRUE;
+        }
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/***********************************************************************
+ *            NtUserEnableIAMAccess (win32u.@)
+ */
+BOOL WINAPI NtUserEnableIAMAccess( ULONG_PTR key, BOOL enable )
+{
+    BOOL ret;
+
+    SERVER_START_REQ(enable_thread_iam_access)
+    {
+        req->key = key;
+        req->enable = enable;
+        ret = !wine_server_call_err(req);
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/***********************************************************************
+ *            NtUserSetShellWindowEx (win32u.@)
+ */
 BOOL WINAPI NtUserSetShellWindowEx( HWND shell, HWND list_view )
 {
     BOOL ret;

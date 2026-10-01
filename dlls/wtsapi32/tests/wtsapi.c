@@ -212,6 +212,30 @@ static void test_WTSQuerySessionInformation(void)
     LONGLONG t1, t2;
     BOOL ret;
 
+    SetLastError(0xdeadbeef);
+    count = 0;
+    buf1 = NULL;
+    ret = WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
+                                      WTSInitialProgram, &buf1, &count);
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(!GetLastError(), "got error %lu\n", GetLastError());
+    ok(buf1 != NULL, "buffer not set\n");
+    ok(count == sizeof(WCHAR), "expected %Iu, got %lu\n", sizeof(WCHAR), count);
+    if (buf1) ok(!*buf1, "expected an empty string, got %s\n", wine_dbgstr_w(buf1));
+    WTSFreeMemory(buf1);
+
+    SetLastError(0xdeadbeef);
+    count = 0;
+    buf2 = NULL;
+    ret = WTSQuerySessionInformationA(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
+                                      WTSInitialProgram, &buf2, &count);
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(!GetLastError(), "got error %lu\n", GetLastError());
+    ok(buf2 != NULL, "buffer not set\n");
+    ok(count == sizeof(char), "expected %Iu, got %lu\n", sizeof(char), count);
+    if (buf2) ok(!*buf2, "expected an empty string, got %s\n", wine_dbgstr_a(buf2));
+    WTSFreeMemory(buf2);
+
     count = 0;
     ret = WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSConnectState, (WCHAR **)&state, &count);
     ok(ret, "got error %lu\n", GetLastError());

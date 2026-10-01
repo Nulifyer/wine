@@ -959,6 +959,98 @@ static void test_RpcServerRegisterAuthInfo(void)
     ok(status == RPC_S_UNKNOWN_AUTHN_SERVICE, "status = %lx\n", status);
 }
 
+static void test_kernel_auth(void)
+{
+    static const ULONG levels[] =
+    {
+        RPC_C_AUTHN_LEVEL_DEFAULT,
+        RPC_C_AUTHN_LEVEL_CONNECT,
+        RPC_C_AUTHN_LEVEL_CALL,
+        RPC_C_AUTHN_LEVEL_PKT,
+        RPC_C_AUTHN_LEVEL_PKT_INTEGRITY,
+        RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+    };
+    static RPC_CSTR protseqs[] = {(RPC_CSTR)"ncalrpc", (RPC_CSTR)"ncacn_np", (RPC_CSTR)"ncacn_ip_tcp"};
+    static RPC_CSTR endpoint = (RPC_CSTR)"wine-rpc-kernel-auth-test";
+    RPC_SECURITY_QOS qos = {RPC_C_SECURITY_QOS_VERSION, RPC_C_QOS_CAPABILITIES_DEFAULT,
+                            RPC_C_QOS_IDENTITY_DYNAMIC, RPC_C_IMP_LEVEL_IMPERSONATE};
+    RPC_WSTR principal;
+    RPC_AUTH_IDENTITY_HANDLE identity;
+    RPC_CSTR string_binding;
+    RPC_BINDING_HANDLE binding;
+    ULONG level, service, authz;
+    RPC_STATUS status;
+    unsigned int i, j;
+
+    for (i = 0; i < ARRAY_SIZE(protseqs); ++i)
+    {
+        status = RpcStringBindingComposeA(NULL, protseqs[i], NULL, endpoint, NULL, &string_binding);
+        ok(status == RPC_S_OK, "%s: compose returned %lu\n", protseqs[i], status);
+        status = RpcBindingFromStringBindingA(string_binding, &binding);
+        ok(status == RPC_S_OK, "%s: create binding returned %lu\n", protseqs[i], status);
+
+        if (!strcmp((const char *)protseqs[i], "ncalrpc"))
+        {
+            for (j = 0; j < ARRAY_SIZE(levels); ++j)
+            {
+                if (j & 1)
+                    status = RpcBindingSetAuthInfoExA(binding, NULL, levels[j], RPC_C_AUTHN_KERNEL,
+                                                      NULL, RPC_C_AUTHZ_NONE, &qos);
+                else
+                    status = RpcBindingSetAuthInfoExW(binding, NULL, levels[j], RPC_C_AUTHN_KERNEL,
+                                                      NULL, RPC_C_AUTHZ_NONE, &qos);
+                ok(status == RPC_S_OK, "%s level %lu: kernel auth returned %lu\n",
+                   protseqs[i], levels[j], status);
+
+                principal = (RPC_WSTR)0xdeadbeef;
+                identity = (RPC_AUTH_IDENTITY_HANDLE)0xdeadbeef;
+                level = service = authz = 0xdeadbeef;
+                status = RpcBindingInqAuthInfoExW(binding, &principal, &level, &service,
+                                                  &identity, &authz, RPC_C_SECURITY_QOS_VERSION, NULL);
+                ok(status == RPC_S_OK, "%s level %lu: auth query returned %lu\n",
+                   protseqs[i], levels[j], status);
+                ok(!principal, "%s level %lu: expected no principal, got %p\n",
+                   protseqs[i], levels[j], principal);
+                ok(!identity, "%s level %lu: expected no identity, got %p\n",
+                   protseqs[i], levels[j], identity);
+                ok(level == RPC_C_AUTHN_LEVEL_PKT_PRIVACY, "%s level %lu: normalized level is %lu\n",
+                   protseqs[i], levels[j], level);
+                ok(service == RPC_C_AUTHN_WINNT, "%s level %lu: normalized service is %lu\n",
+                   protseqs[i], levels[j], service);
+                ok(authz == RPC_C_AUTHZ_NONE, "%s level %lu: authz is %lu\n",
+                   protseqs[i], levels[j], authz);
+            }
+
+            status = RpcBindingSetAuthInfoExW(binding, NULL, RPC_C_AUTHN_LEVEL_PKT_PRIVACY + 1,
+                                              RPC_C_AUTHN_KERNEL, NULL, RPC_C_AUTHZ_NONE, &qos);
+            ok(status == RPC_S_UNKNOWN_AUTHN_LEVEL, "%s: invalid level returned %lu\n",
+               protseqs[i], status);
+
+            status = RpcBindingSetAuthInfoExA(binding, NULL, RPC_C_AUTHN_LEVEL_NONE,
+                                              RPC_C_AUTHN_KERNEL, NULL, RPC_C_AUTHZ_NONE, &qos);
+            ok(status == RPC_S_OK, "%s: disabling kernel auth returned %lu\n", protseqs[i], status);
+            status = RpcBindingInqAuthInfoA(binding, NULL, NULL, NULL, NULL, NULL);
+            ok(status == RPC_S_BINDING_HAS_NO_AUTH, "%s: auth query returned %lu\n", protseqs[i], status);
+        }
+        else
+        {
+            status = RpcBindingSetAuthInfoExA(binding, NULL, RPC_C_AUTHN_LEVEL_DEFAULT,
+                                              RPC_C_AUTHN_KERNEL, NULL, RPC_C_AUTHZ_NONE, &qos);
+            ok(status == RPC_S_UNKNOWN_AUTHN_SERVICE, "%s: ANSI kernel auth returned %lu\n",
+               protseqs[i], status);
+            status = RpcBindingSetAuthInfoExW(binding, NULL, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+                                              RPC_C_AUTHN_KERNEL, NULL, RPC_C_AUTHZ_NONE, &qos);
+            ok(status == RPC_S_UNKNOWN_AUTHN_SERVICE, "%s: Unicode kernel auth returned %lu\n",
+               protseqs[i], status);
+        }
+
+        status = RpcBindingFree(&binding);
+        ok(status == RPC_S_OK, "%s: free binding returned %lu\n", protseqs[i], status);
+        status = RpcStringFreeA(&string_binding);
+        ok(status == RPC_S_OK, "%s: free string returned %lu\n", protseqs[i], status);
+    }
+}
+
 static void test_RpcServerUseProtseq(void)
 {
     RPC_STATUS status;
@@ -1258,6 +1350,7 @@ START_TEST( rpc )
     test_RpcIfInqId();
     test_RpcServerInqDefaultPrincName();
     test_RpcServerRegisterAuthInfo();
+    test_kernel_auth();
 
     if (firewall_enabled)
     {

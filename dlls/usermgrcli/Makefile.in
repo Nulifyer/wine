@@ -1,0 +1,5 @@
+MODULE = usermgrcli.dll
+IMPORTS = advapi32
+
+SOURCES = \
+	usermgrcli.c

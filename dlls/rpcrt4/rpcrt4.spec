@@ -58,6 +58,7 @@
 @ stub I_RpcNsBindingSetEntryNameW
 @ stub I_RpcNsInterfaceExported
 @ stub I_RpcNsInterfaceUnexported
+@ stdcall I_RpcOpenClientProcess(ptr long ptr)
 @ stub I_RpcParseSecurity
 @ stub I_RpcPauseExecution
 @ stub I_RpcProxyNewConnection
@@ -295,6 +296,7 @@
 @ stdcall NdrSimpleTypeMarshall(ptr ptr long)
 @ stdcall NdrSimpleTypeUnmarshall(ptr ptr long)
 @ stdcall NdrStubCall2(ptr ptr ptr ptr)
+@ stdcall NdrStubCall3(ptr ptr ptr ptr)
 @ stdcall NdrStubCall(ptr ptr ptr ptr)
 @ stdcall NdrStubForwardingFunction(ptr ptr ptr ptr)
 @ stdcall NdrStubGetBuffer(ptr ptr ptr)
@@ -341,6 +343,9 @@
 @ stdcall RpcAsyncInitializeHandle(ptr long)
 @ stub RpcAsyncRegisterInfo
 @ stdcall RpcBindingCopy(ptr ptr)
+@ stdcall RpcBindingBind(ptr ptr ptr)
+@ stdcall RpcBindingCreateA(ptr ptr ptr ptr)
+@ stdcall RpcBindingCreateW(ptr ptr ptr ptr)
 @ stdcall RpcBindingFree(ptr)
 @ stdcall RpcBindingFromStringBindingA(str  ptr)
 @ stdcall RpcBindingFromStringBindingW(wstr ptr)
@@ -365,6 +370,7 @@
 @ stdcall RpcBindingToStringBindingA(ptr ptr)
 @ stdcall RpcBindingToStringBindingW(ptr ptr)
 @ stdcall RpcBindingVectorFree(ptr)
+@ stdcall RpcBindingUnbind(ptr)
 @ stdcall RpcCancelAsyncCall(ptr long) RpcAsyncCancelCall
 @ stdcall RpcCancelThread(ptr)
 @ stdcall RpcCancelThreadEx(ptr long)
@@ -429,8 +435,9 @@
 @ stdcall RpcRevertToSelf()
 @ stdcall RpcRevertToSelfEx(ptr)
 @ stdcall RpcServerInqBindings(ptr)
-@ stub RpcServerInqCallAttributesA
-@ stub RpcServerInqCallAttributesW
+@ stdcall RpcServerInqBindingsEx(ptr ptr)
+@ stdcall RpcServerInqCallAttributesA(ptr ptr)
+@ stdcall RpcServerInqCallAttributesW(ptr ptr)
 @ stdcall RpcServerInqDefaultPrincNameA(long ptr)
 @ stdcall RpcServerInqDefaultPrincNameW(long ptr)
 @ stub RpcServerInqIf

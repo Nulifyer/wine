@@ -19,8 +19,27 @@
 
 #include "initguid.h"
 #include "private.h"
+#include "shlobj.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(storage);
+
+/* Keep the existing Wine shell implementation for the builtin provider pair.
+ * A native SHELL32 desktop requires its paired native Windows.Storage worker;
+ * it must not combine the native forwarder with this builtin delegate. */
+HRESULT WINAPI SHCoCreateInstanceWorker( const WCHAR *string, const CLSID *clsid, IUnknown *outer,
+                                        REFIID iid, void **out )
+{
+    DWORD error = GetLastError();
+    FARPROC dispatcher = GetProcAddress( GetModuleHandleW( L"kernelbase.dll" ), "SHCoCreateInstance" );
+
+    SetLastError( error );
+    if (dispatcher == (FARPROC)SHCoCreateInstance)
+    {
+        ERR( "SHELL32 forwards back to KernelBase; a paired native storage provider is required.\n" );
+        return HRESULT_FROM_WIN32( ERROR_PROC_NOT_FOUND );
+    }
+    return SHCoCreateInstance( string, clsid, outer, iid, out );
+}
 
 static LONG explorer_server_mode;
 
@@ -54,6 +73,8 @@ HRESULT WINAPI DllGetActivationFactory( HSTRING classid, IActivationFactory **fa
         IActivationFactory_QueryInterface( random_access_stream_reference_factory, &IID_IActivationFactory, (void **)factory );
     if (!wcscmp( buffer, RuntimeClass_Windows_Storage_Streams_InMemoryRandomAccessStream ))
         IActivationFactory_QueryInterface( memory_stream_activation_factory, &IID_IActivationFactory, (void **)factory );
+    if (!wcscmp( buffer, RuntimeClass_Windows_Storage_AppDataPaths ))
+        IActivationFactory_QueryInterface( app_data_paths_factory, &IID_IActivationFactory, (void **)factory );
 
     if (*factory) return S_OK;
     return CLASS_E_CLASSNOTAVAILABLE;

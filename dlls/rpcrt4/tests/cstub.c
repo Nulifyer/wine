@@ -276,6 +276,58 @@ static CInterfaceStubVtbl if2_stub_vtbl =
     { 0, 0, test_CStdStubBuffer2_Release, 0, 0, 0, 0, 0, 0, 0 }
 };
 
+static const CInterfaceStubVtbl if2_compact_stub_vtbl =
+{
+    {
+        &IID_if2,
+        &if2_server_info,
+        13,
+        &if2_table[-3]
+    },
+    { (void *)~(ULONG_PTR)1 }
+};
+
+static const CInterfaceProxyVtbl *compact_ProxyVtblList[] =
+{
+    (const CInterfaceProxyVtbl *)&if2_proxy_vtbl,
+    NULL
+};
+
+static const CInterfaceStubVtbl *compact_StubVtblList[] =
+{
+    &if2_compact_stub_vtbl,
+    NULL
+};
+
+static const IID *compact_base_iid_list[] =
+{
+    &IID_ITypeLib,
+    NULL
+};
+
+static const ExtendedProxyFileInfo compact_proxy_file_info =
+{
+    (const PCInterfaceProxyVtblList *)&compact_ProxyVtblList,
+    (const PCInterfaceStubVtblList *)&compact_StubVtblList,
+    NULL,
+    (const IID **)&compact_base_iid_list,
+    (PIIDLookup)~(ULONG_PTR)0,
+    1,
+    16,
+    NULL,
+    0,
+    0,
+    0
+};
+
+static const ProxyFileInfo *compact_proxy_file_list[] =
+{
+    &compact_proxy_file_info,
+    NULL
+};
+
+static CStdPSFactoryBuffer compact_PSFactoryBuffer;
+
 static CINTERFACE_PROXY_VTABLE(5) if3_proxy_vtbl =
 {
     { &IID_if3 },
@@ -1146,6 +1198,44 @@ static void test_delegating_Invoke(IPSFactoryBuffer *ppsf)
     free(msg.Buffer);
     IRpcStubBuffer_Release(pstub);
 }
+
+static void test_compact_delegating_stub(void)
+{
+    ITypeLibVtbl *obj_vtbl = &delegating_invoke_test_obj_vtbl;
+    IUnknown *obj = (IUnknown *)&obj_vtbl;
+    IRpcChannelBufferVtbl *pchan_vtbl = &delegating_invoke_test_rpc_chan_vtbl;
+    IRpcChannelBuffer *pchan = (IRpcChannelBuffer *)&pchan_vtbl;
+    IRpcStubBuffer *stub;
+    IPSFactoryBuffer *factory;
+    RPCOLEMESSAGE msg = {0};
+    HRESULT hr;
+
+    hr = NdrDllGetClassObject(&CLSID_psfact, &IID_IPSFactoryBuffer, (void **)&factory,
+                              compact_proxy_file_list, &CLSID_psfact, &compact_PSFactoryBuffer);
+    ok(hr == S_OK, "NdrDllGetClassObject returned %#lx\n", hr);
+    if (FAILED(hr)) return;
+
+    hr = IPSFactoryBuffer_CreateStub(factory, &IID_if2, obj, &stub);
+    ok(hr == S_OK, "CreateStub returned %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ok(IRpcStubBuffer_IsIIDSupported(stub, &IID_if2) == stub,
+           "compact stub does not support its IID\n");
+
+        msg.dataRepresentation = NDR_LOCAL_DATA_REPRESENTATION;
+        msg.iMethod = 3;
+        hr = IRpcStubBuffer_Invoke(stub, &msg, pchan);
+        ok(hr == S_OK, "Invoke returned %#lx\n", hr);
+        if (hr == S_OK)
+        {
+            ok(*(DWORD *)msg.Buffer == 0xabcdef, "buf[0] %08lx\n", *(DWORD *)msg.Buffer);
+            ok(*((DWORD *)msg.Buffer + 1) == S_OK, "buf[1] %08lx\n", *((DWORD *)msg.Buffer + 1));
+        }
+        free(msg.Buffer);
+        IRpcStubBuffer_Release(stub);
+    }
+    IPSFactoryBuffer_Release(factory);
+}
 static const CInterfaceProxyVtbl *cstub_ProxyVtblList2[] =
 {
     NULL
@@ -1566,6 +1656,7 @@ START_TEST( cstub )
     test_Disconnect(ppsf);
     test_Release(ppsf);
     test_delegating_Invoke(ppsf);
+    test_compact_delegating_stub();
     test_NdrDllRegisterProxy();
     test_delegated_methods();
     test_ChannelBufferRefCount(ppsf);

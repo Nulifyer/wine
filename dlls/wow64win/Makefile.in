@@ -4,6 +4,7 @@ IMPORTS   = wow64 win32u ntdll
 EXTRADLLFLAGS = -nodefaultlibs
 
 SOURCES = \
+	dcomposition.c \
 	gdi.c \
 	syscall.c \
 	user.c

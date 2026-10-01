@@ -887,6 +887,13 @@ NTSTATUS WINAPI wow64_NtGdiDdDDIDestroySynchronizationObject( UINT *args )
     return NtGdiDdDDIDestroySynchronizationObject( desc );
 }
 
+NTSTATUS WINAPI wow64_NtGdiDdDDIGetYieldPercentage( UINT *args )
+{
+    void *params = get_ptr( &args );
+
+    return NtGdiDdDDIGetYieldPercentage( params );
+}
+
 NTSTATUS WINAPI wow64_NtGdiDdDDIEnumAdapters( UINT *args )
 {
     D3DKMT_ENUMADAPTERS *desc = get_ptr( &args );

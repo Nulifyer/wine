@@ -1385,6 +1385,59 @@ int WINAPI GetImmersiveUserColorSetPreference(BOOL force_check_registry, BOOL sk
     return 0;
 }
 
+struct immersive_color_preference
+{
+    COLORREF start_color;
+    COLORREF accent_color;
+};
+
+/**********************************************************************
+ *      GetUserColorPreference                         (UXTHEME.120)
+ *
+ * Windows 11 returns the current start and accent colors through this
+ * private entry point. Use the standard Windows blue until Wine exposes a
+ * system-wide accent-color provider shared with the Linux desktop.
+ */
+HRESULT WINAPI GetUserColorPreference(struct immersive_color_preference *preference,
+                                      BOOL force_reload)
+{
+    static const COLORREF windows_blue = RGB(0, 120, 212);
+
+    TRACE("%p %d\n", preference, force_reload);
+    if (!preference) return E_INVALIDARG;
+
+    preference->start_color = windows_blue;
+    preference->accent_color = windows_blue;
+    return S_OK;
+}
+
+static DWORD argb_from_colorref(COLORREF color)
+{
+    return 0xff000000 | GetRValue(color) << 16 | GetGValue(color) << 8 | GetBValue(color);
+}
+
+/**********************************************************************
+ *      GetColorFromPreference                        (UXTHEME.121)
+ *
+ * The native function derives a complete immersive palette. The accent
+ * variants are not yet modelled, but returning the selected opaque color
+ * gives XAML a deterministic usable palette instead of its error-magenta
+ * sentinel.
+ */
+DWORD WINAPI GetColorFromPreference(const struct immersive_color_preference *preference,
+                                    UINT color_type, BOOL ignore_high_contrast,
+                                    UINT high_contrast_cache_mode)
+{
+    COLORREF color;
+
+    TRACE("%p %u %d %u\n", preference, color_type, ignore_high_contrast,
+          high_contrast_cache_mode);
+    if (!preference) return 0xffff00ff;
+
+    color = color_type ? preference->accent_color : preference->start_color;
+    return argb_from_colorref(color);
+}
+
 /**********************************************************************
  *      GetImmersiveColorNamedTypeByIndex                 (UXTHEME.100)
  *

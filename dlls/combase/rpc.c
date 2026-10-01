@@ -622,7 +622,7 @@ static HRESULT create_surrogate_server(REFCLSID rclsid, HANDLE *process)
     return S_OK;
 }
 
-HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj)
+static HRESULT rpc_get_local_class_object_internal(REFCLSID rclsid, REFIID riid, void **obj, BOOL launch)
 {
     PMInterfacePointer objref = NULL;
     IServiceProvider *local_server;
@@ -638,32 +638,48 @@ HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj)
 
     while (tries++ < MAXTRIES)
     {
-        DWORD index, start_ticks;
+        DWORD index, start_ticks, elapsed;
+        HANDLE wait_handle;
+        HRESULT wait_hr;
         HANDLE process = 0;
 
         if (SUCCEEDED(hr = rpcss_get_class_object(rclsid, &objref)))
             break;
 
-        if (tries == 1)
+        if (tries == 1 && launch)
         {
             if ((hr = create_local_service(rclsid)) && (hr = create_server(rclsid, &process)) &&
                 (hr = create_surrogate_server(rclsid, &process)) )
                 return hr;
         }
 
+        /* CoWaitForMultipleHandles rejects an empty handle set.  A service
+         * or an already-running server has no process handle here; use an
+         * unsignalled event to retain the timeout and STA message pumping. */
+        wait_handle = process ? process : CreateEventW(NULL, TRUE, FALSE, NULL);
+        if (!wait_handle) return HRESULT_FROM_WIN32(GetLastError());
+
         /* Wait for one second, even if messages arrive. */
         start_ticks = GetTickCount();
+        elapsed = 0;
         do
         {
-            if (SUCCEEDED(CoWaitForMultipleHandles(0, 1000, (process != 0), &process, &index)) && process && !index)
+            wait_hr = CoWaitForMultipleHandles(0, 1000 - elapsed, 1, &wait_handle, &index);
+            if (SUCCEEDED(wait_hr) && process && !index)
             {
                 WARN("Server for %s failed to start.\n", debugstr_guid(rclsid));
-                CloseHandle(process);
+                CloseHandle(wait_handle);
                 return E_NOINTERFACE;
             }
-        } while (GetTickCount() - start_ticks < 1000);
+            if (FAILED(wait_hr) && wait_hr != RPC_S_CALLPENDING)
+            {
+                CloseHandle(wait_handle);
+                return wait_hr;
+            }
+            elapsed = GetTickCount() - start_ticks;
+        } while (elapsed < 1000);
 
-        if (process) CloseHandle(process);
+        CloseHandle(wait_handle);
     }
 
     if (!objref || tries >= MAXTRIES)
@@ -692,6 +708,16 @@ HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj)
         IStream_Release(stream);
 
     return hr;
+}
+
+HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj)
+{
+    return rpc_get_local_class_object_internal(rclsid, riid, obj, TRUE);
+}
+
+HRESULT rpc_get_registered_local_class_object(REFCLSID rclsid, REFIID riid, void **obj)
+{
+    return rpc_get_local_class_object_internal(rclsid, riid, obj, FALSE);
 }
 
 HRESULT rpc_register_local_server(REFCLSID clsid, IStream *stream, DWORD flags, unsigned int *cookie)

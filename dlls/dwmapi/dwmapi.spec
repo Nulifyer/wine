@@ -31,10 +31,10 @@
 135 stub DwmpRenderFlick
 136 stub DwmpAllocateSecurityDescriptor
 137 stub DwmpFreeSecurityDescriptor
-138 stub @
-139 stub @
-140 stub @
-141 stub @
+138 stdcall -noname DwmpBeginTransitionRequest(long)
+139 stdcall -noname DwmpTransitionWindow(long long)
+140 stdcall -noname DwmpEndTransitionRequest(long)
+141 stdcall -noname DwmpTransitionWindowWithRects(long long ptr ptr ptr ptr ptr)
 142 stub @
 143 stub DwmpEnableDDASupport
 144 stub @

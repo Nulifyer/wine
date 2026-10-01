@@ -35,6 +35,116 @@
 
 #include "wine/test.h"
 
+typedef HRESULT (WINAPI *get_thread_flags_fn)(DWORD mask, DWORD *flags);
+typedef HRESULT (WINAPI *set_thread_flags_fn)(DWORD mask, DWORD flags);
+
+struct thread_flags_context
+{
+    get_thread_flags_fn get;
+    set_thread_flags_fn set;
+    HRESULT initial_hr;
+    HRESULT set_hr;
+    HRESULT final_hr;
+    DWORD initial;
+    DWORD final;
+};
+
+static DWORD WINAPI thread_flags_proc(void *param)
+{
+    struct thread_flags_context *context = param;
+
+    context->initial = 0xdeadbeef;
+    context->initial_hr = context->get(~0u, &context->initial);
+    context->set_hr = context->set(0x40000000, 0x40000000);
+    context->final = 0xdeadbeef;
+    context->final_hr = context->get(~0u, &context->final);
+    return 0;
+}
+
+static void test_thread_flags(void)
+{
+    const DWORD bit1 = 0x10000000, bit2 = 0x20000000, mask = bit1 | bit2;
+    struct thread_flags_context context = {0};
+    get_thread_flags_fn get;
+    set_thread_flags_fn set;
+    HMODULE module;
+    HANDLE thread;
+    HRESULT hr;
+    DWORD flags;
+
+    module = LoadLibraryW(L"windows.storage.dll");
+    ok(!!module, "failed to load windows.storage.dll, error %lu.\n", GetLastError());
+    if (!module) return;
+
+    get = (void *)GetProcAddress(module, "GetThreadFlags");
+    set = (void *)GetProcAddress(module, "SetThreadFlags");
+    if (!get || !set)
+    {
+        win_skip("thread flag exports are unavailable.\n");
+        FreeLibrary(module);
+        return;
+    }
+
+    hr = set(mask | 0x40000000, 0);
+    ok(hr == S_OK, "SetThreadFlags returned %#lx.\n", hr);
+    flags = 0xdeadbeef;
+    hr = get(mask, &flags);
+    ok(hr == S_OK, "GetThreadFlags returned %#lx.\n", hr);
+    ok(!flags, "got flags %#lx.\n", flags);
+
+    hr = set(bit1, bit1);
+    ok(hr == S_OK, "SetThreadFlags returned %#lx.\n", hr);
+    flags = 0xdeadbeef;
+    hr = get(mask, &flags);
+    ok(hr == S_OK, "GetThreadFlags returned %#lx.\n", hr);
+    ok(flags == bit1, "got flags %#lx.\n", flags);
+
+    hr = set(bit2, bit2);
+    ok(hr == S_OK, "SetThreadFlags returned %#lx.\n", hr);
+    flags = 0xdeadbeef;
+    hr = get(mask, &flags);
+    ok(hr == S_OK, "GetThreadFlags returned %#lx.\n", hr);
+    ok(flags == mask, "got flags %#lx.\n", flags);
+
+    hr = set(bit1, 0);
+    ok(hr == S_OK, "SetThreadFlags returned %#lx.\n", hr);
+    flags = 0xdeadbeef;
+    hr = get(mask, &flags);
+    ok(hr == S_OK, "GetThreadFlags returned %#lx.\n", hr);
+    ok(flags == bit2, "got flags %#lx.\n", flags);
+
+    hr = set(0, bit1);
+    ok(hr == S_OK, "SetThreadFlags returned %#lx.\n", hr);
+    flags = 0xdeadbeef;
+    hr = get(mask, &flags);
+    ok(hr == S_OK, "GetThreadFlags returned %#lx.\n", hr);
+    ok(flags == mask, "got flags %#lx.\n", flags);
+
+    context.get = get;
+    context.set = set;
+    thread = CreateThread(NULL, 0, thread_flags_proc, &context, 0, NULL);
+    ok(!!thread, "CreateThread failed, error %lu.\n", GetLastError());
+    if (thread)
+    {
+        WaitForSingleObject(thread, INFINITE);
+        CloseHandle(thread);
+        ok(context.initial_hr == S_OK, "thread GetThreadFlags returned %#lx.\n", context.initial_hr);
+        ok(!context.initial, "thread got initial flags %#lx.\n", context.initial);
+        ok(context.set_hr == S_OK, "thread SetThreadFlags returned %#lx.\n", context.set_hr);
+        ok(context.final_hr == S_OK, "thread GetThreadFlags returned %#lx.\n", context.final_hr);
+        ok(context.final == 0x40000000, "thread got final flags %#lx.\n", context.final);
+    }
+
+    flags = 0xdeadbeef;
+    hr = get(mask | 0x40000000, &flags);
+    ok(hr == S_OK, "GetThreadFlags returned %#lx.\n", hr);
+    ok(flags == mask, "main thread got flags %#lx.\n", flags);
+    hr = set(mask, 0);
+    ok(hr == S_OK, "SetThreadFlags returned %#lx.\n", hr);
+
+    FreeLibrary(module);
+}
+
 #define check_interface( obj, iid, is_broken ) check_interface_( __LINE__, obj, iid, is_broken )
 static void check_interface_( unsigned int line, void *obj, const IID *iid, BOOL is_broken )
 {
@@ -529,6 +639,8 @@ static void test_InMemoryRandomAccessStream(void)
 START_TEST(storage)
 {
     HRESULT hr;
+
+    test_thread_flags();
 
     hr = RoInitialize( RO_INIT_MULTITHREADED );
     ok( hr == S_OK, "RoInitialize failed, hr %#lx\n", hr );

@@ -19,6 +19,7 @@ SOURCES = \
 	locale.c \
 	lzexpand.c \
 	module.c \
+	oobe.c \
 	path.c \
 	powermgnt.c \
 	process.c \

@@ -42,6 +42,23 @@
 
 #define SWAPCHAIN_FLAG_SHADER_INPUT             0x1
 
+typedef struct IDXGIDeviceXAML IDXGIDeviceXAML;
+typedef struct IDXGIDeviceXAMLVtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(IDXGIDeviceXAML *iface, REFIID iid, void **out);
+    ULONG (STDMETHODCALLTYPE *AddRef)(IDXGIDeviceXAML *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(IDXGIDeviceXAML *iface);
+    HRESULT (STDMETHODCALLTYPE *SetInProcessGPUPriority)(IDXGIDeviceXAML *iface, int priority);
+    HRESULT (STDMETHODCALLTYPE *GetInProcessGPUPriority)(IDXGIDeviceXAML *iface, int *priority);
+} IDXGIDeviceXAMLVtbl;
+
+struct IDXGIDeviceXAML
+{
+    const IDXGIDeviceXAMLVtbl *lpVtbl;
+};
+
+DEFINE_GUID(IID_IDXGIDeviceXAML, 0xf898b024, 0xb5c8, 0x42cd, 0xa1, 0x4f, 0xac, 0x5a, 0xdb, 0xf4, 0xbe, 0x22);
+
 static bool damavand;
 static unsigned int use_adapter_idx;
 static BOOL enable_debug_layer;
@@ -2346,6 +2363,7 @@ static void test_create_device(void)
 
 static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
 {
+    IDXGIDeviceXAML *xaml_device;
     struct device_desc device_desc;
     IDXGIAdapter *dxgi_adapter;
     IDXGIDevice *dxgi_device;
@@ -2353,6 +2371,7 @@ static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
     IUnknown *iface;
     ULONG refcount;
     HRESULT hr;
+    int priority;
 
     device_desc.feature_level = &feature_level;
     device_desc.flags = 0;
@@ -2375,6 +2394,38 @@ static void test_device_interfaces(const D3D_FEATURE_LEVEL feature_level)
     check_interface(device, &IID_ID3D10Device, FALSE, FALSE);
     check_interface(device, &IID_ID3D10Device1, FALSE, FALSE);
     check_interface(device, &IID_ID3D11InfoQueue, enable_debug_layer, FALSE);
+
+    hr = ID3D11Device_QueryInterface(device, &IID_IDXGIDeviceXAML, (void **)&xaml_device);
+    if (hr == E_NOINTERFACE)
+    {
+        win_skip("IDXGIDeviceXAML is not supported.\n");
+    }
+    else
+    {
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        priority = 0x12345678;
+        hr = xaml_device->lpVtbl->GetInProcessGPUPriority(xaml_device, &priority);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!priority, "Got unexpected priority %d.\n", priority);
+
+        hr = xaml_device->lpVtbl->SetInProcessGPUPriority(xaml_device, -1);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = xaml_device->lpVtbl->SetInProcessGPUPriority(xaml_device, 1);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        priority = 0x12345678;
+        hr = xaml_device->lpVtbl->GetInProcessGPUPriority(xaml_device, &priority);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(priority == 1, "Got unexpected priority %d.\n", priority);
+
+        hr = xaml_device->lpVtbl->SetInProcessGPUPriority(xaml_device, 2);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = xaml_device->lpVtbl->GetInProcessGPUPriority(xaml_device, NULL);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        xaml_device->lpVtbl->Release(xaml_device);
+    }
 
     hr = ID3D11Device_QueryInterface(device, &IID_IDXGIDevice, (void **)&dxgi_device);
     ok(SUCCEEDED(hr), "Device should implement IDXGIDevice.\n");

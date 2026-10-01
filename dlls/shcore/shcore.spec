@@ -84,8 +84,8 @@
 # @ stub SHTaskPoolAllowThreadReuse
 # @ stub SHTaskPoolDoNotWaitForMoreTasks
 # @ stub SHTaskPoolGetCurrentThreadLifetime
-# @ stub SHTaskPoolGetUniqueContext
-# @ stub SHTaskPoolQueueTask
+@ stdcall SHTaskPoolGetUniqueContext()
+@ stdcall SHTaskPoolQueueTask(long long long long ptr ptr)
 # @ stub SHTaskPoolSetThreadReuseAllowed
 @ stdcall SHUnicodeToAnsi(wstr ptr ptr)
 @ stdcall SHUnicodeToUnicode(wstr ptr long)
@@ -170,12 +170,12 @@
 232 stub -noname SHRemoveWindowSubclass
 233 stub -noname SHDefSubclassProc
 234 stub -noname SHRegisterClassW
-240 stub -noname RegisterScaleChangeSinkForWindow
+240 stdcall -noname RegisterScaleChangeSinkForWindow(ptr ptr ptr)
 241 stub -noname ScaleAndMapRelativeRect
 242 stub -noname RelativeRectFromPhysicalRectWithScale
-244 stub -noname GetScaleFactorForWindow
-245 stub -noname RegisterScaleChangeNotificationsForWindow
-246 stub -noname RevokeScaleChangeNotificationsForWindow
+244 stdcall -noname GetScaleFactorForWindow(long)
+245 stdcall -noname RegisterScaleChangeNotificationsForWindow(ptr ptr long ptr)
+246 stdcall -noname RevokeScaleChangeNotificationsForWindow(ptr long)
 247 stub -noname GetOverrideScaleFactorForWindow
 248 stub -noname GetSystemScaleFactorForWindow
 249 stub -noname UpdateScalingInfoCache
@@ -187,7 +187,8 @@
 255 stub -noname GetCurrentWindow
 260 stub -noname PhysicalRectFromRelativeRectWithScales
 261 stub -noname RelativeRectFromPhysicalRectWithScales
-270 stub -noname SHCreateMemoryStreamOnSharedBuffer
+265 stdcall -noname SHCoreGetEnvironmentInfo(ptr ptr)
+270 stdcall -noname SHCreateMemoryStreamOnSharedBuffer(ptr long ptr)
 280 stub -noname _CreateDirectoryHelper
 281 stub -noname Win32CreateDirectory
 282 stub -noname SuspendSHNotify

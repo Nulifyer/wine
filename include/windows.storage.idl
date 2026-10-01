@@ -51,6 +51,8 @@ namespace Windows.Storage {
     typedef enum StorageItemTypes StorageItemTypes;
 
     interface IApplicationData;
+    interface IAppDataPaths;
+    interface IAppDataPathsStatics;
     interface IApplicationData2;
     interface IApplicationData3;
     interface IApplicationDataContainer;
@@ -73,6 +75,7 @@ namespace Windows.Storage {
     interface IStorageItem;
 
     runtimeclass ApplicationData;
+    runtimeclass AppDataPaths;
     runtimeclass ApplicationDataContainer;
     runtimeclass KnownFolders;
     runtimeclass SetVersionDeferral;
@@ -135,6 +138,38 @@ namespace Windows.Storage {
         [contract(Windows.Foundation.UniversalApiContract, 12.0)]
         SharedLocal = 4,
     };
+
+    [
+        contract(Windows.Foundation.UniversalApiContract, 1.0),
+        exclusiveto(Windows.Storage.AppDataPaths),
+        uuid(7301d60a-79a2-48c9-9ec0-3fda092f79e1)
+    ]
+    interface IAppDataPaths : IInspectable
+    {
+        [propget] HRESULT Cookies([out, retval] HSTRING *value);
+        [propget] HRESULT Desktop([out, retval] HSTRING *value);
+        [propget] HRESULT Documents([out, retval] HSTRING *value);
+        [propget] HRESULT Favorites([out, retval] HSTRING *value);
+        [propget] HRESULT History([out, retval] HSTRING *value);
+        [propget] HRESULT InternetCache([out, retval] HSTRING *value);
+        [propget] HRESULT LocalAppData([out, retval] HSTRING *value);
+        [propget] HRESULT ProgramData([out, retval] HSTRING *value);
+        [propget] HRESULT RoamingAppData([out, retval] HSTRING *value);
+    }
+
+    [
+        contract(Windows.Foundation.UniversalApiContract, 1.0),
+        exclusiveto(Windows.Storage.AppDataPaths),
+        uuid(d8eb2afe-a9d9-4b14-b999-e3921379d903)
+    ]
+    interface IAppDataPathsStatics : IInspectable
+    {
+        HRESULT GetForUser(
+            [in] Windows.System.User *user,
+            [out, retval] Windows.Storage.AppDataPaths **value
+        );
+        HRESULT GetDefault([out, retval] Windows.Storage.AppDataPaths **value);
+    }
 
 #ifndef _WINDOWS_APPLICATIONDATA
     [
@@ -620,6 +655,17 @@ namespace Windows.Storage {
         [contract(Windows.Foundation.UniversalApiContract, 1.0)] interface Windows.Storage.IApplicationData2;
         [contract(Windows.Foundation.UniversalApiContract, 1.0)] interface Windows.Storage.IApplicationData3;
         [contract(Windows.Foundation.UniversalApiContract, 12.0)] interface Windows.Foundation.IClosable;
+    }
+
+    [
+        contract(Windows.Foundation.UniversalApiContract, 1.0),
+        marshaling_behavior(agile),
+        static(Windows.Storage.IAppDataPathsStatics, Windows.Foundation.UniversalApiContract, 1.0),
+        threading(both)
+    ]
+    runtimeclass AppDataPaths
+    {
+        [default] interface Windows.Storage.IAppDataPaths;
     }
 
     [

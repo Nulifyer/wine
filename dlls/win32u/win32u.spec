@@ -1,6 +1,6 @@
 @ extern -arch=win32 Wow64Transition __wine_syscall_dispatcher
 @ stub -syscall NtBindCompositionSurface
-@ stub -syscall NtCloseCompositionInputSink
+@ stdcall -syscall NtCloseCompositionInputSink(ptr)
 @ stub -syscall NtCompositionInputThread
 @ stub -syscall NtCompositionSetDropTarget
 @ stub -syscall NtCompositorNotifyExitWindows
@@ -8,7 +8,7 @@
 @ stub -syscall NtCompositorUpdateLastInputTime
 @ stub -syscall NtConfigureInputSpace
 @ stub -syscall NtConfirmCompositionSurfaceIndependentFlipEntry
-@ stub -syscall NtCreateCompositionInputSink
+@ stdcall -syscall NtCreateCompositionInputSink(ptr ptr)
 @ stub -syscall NtCreateCompositionSurfaceHandle
 @ stub -syscall NtCreateImplicitCompositionInputSink
 @ stub -syscall NtDCompositionAddCrossDeviceVisualChild
@@ -19,7 +19,7 @@
 @ stub -syscall NtDCompositionConfirmFrame
 @ stub -syscall NtDCompositionConnectPipe
 @ stub -syscall NtDCompositionCreateAndBindSharedSection
-@ stub -syscall NtDCompositionCreateChannel
+@ stdcall -syscall NtDCompositionCreateChannel(ptr ptr ptr)
 @ stub -syscall NtDCompositionCreateConnection
 @ stub -syscall NtDCompositionCreateDwmChannel
 @ stub -syscall NtDCompositionCreateSharedResourceHandle
@@ -30,20 +30,20 @@
 @ stub -syscall NtDCompositionDuplicateHandleToProcess
 @ stub -syscall NtDCompositionDuplicateSwapchainHandleToDwm
 @ stub -syscall NtDCompositionEnableMMCSS
-@ stub -syscall NtDCompositionGetBatchId
+@ stdcall -syscall NtDCompositionGetBatchId(long long ptr)
 @ stub -syscall NtDCompositionGetChannels
 @ stub -syscall NtDCompositionGetConnectionBatch
 @ stub -syscall NtDCompositionGetDeletedResources
 @ stub -syscall NtDCompositionGetFrameId
 @ stub -syscall NtDCompositionGetFrameIdFromBatchId
 @ stub -syscall NtDCompositionGetFrameLegacyTokens
-@ stub -syscall NtDCompositionGetFrameStatistics
+@ stdcall -syscall NtDCompositionGetFrameStatistics(ptr ptr)
 @ stub -syscall NtDCompositionGetFrameSurfaceUpdates
 @ stub -syscall NtDCompositionGetMaterialProperty
 @ stub -syscall NtDCompositionGetStatistics
 @ stub -syscall NtDCompositionGetTargetStatistics
 @ stub -syscall NtDCompositionNotifySuperWetInkWork
-@ stub -syscall NtDCompositionProcessChannelBatchBuffer
+@ stdcall -syscall NtDCompositionProcessChannelBatchBuffer(long long ptr ptr)
 @ stub -syscall NtDCompositionReferenceSharedResourceOnDwmChannel
 @ stub -syscall NtDCompositionRegisterThumbnailVisual
 @ stub -syscall NtDCompositionRegisterVirtualDesktopVisual
@@ -52,7 +52,7 @@
 @ stub -syscall NtDCompositionRetireFrame
 @ stub -syscall NtDCompositionSetBlurredWallpaperSurface
 @ stub -syscall NtDCompositionSetChannelCommitCompletionEvent
-@ stub -syscall NtDCompositionSetChannelConnectionId
+@ stdcall -syscall NtDCompositionSetChannelConnectionId(long)
 @ stub -syscall NtDCompositionSetChildRootVisual
 @ stub -syscall NtDCompositionSetDebugCounter
 @ stub -syscall NtDCompositionSetMaterialProperty
@@ -284,7 +284,7 @@
 @ stub -syscall NtGdiDdDDIGetSharedResourceAdapterLuid
 @ stub -syscall NtGdiDdDDIGetSharedResourceAdapterLuidFlipManager
 @ stub -syscall NtGdiDdDDIGetSwapChainSurfacePhysicalAddress
-@ stub -syscall NtGdiDdDDIGetYieldPercentage
+@ stdcall -syscall NtGdiDdDDIGetYieldPercentage(ptr)
 @ stub -syscall NtGdiDdDDIInvalidateActiveVidPn
 @ stub -syscall NtGdiDdDDIInvalidateCache
 @ stub -syscall NtGdiDdDDILock
@@ -740,7 +740,7 @@
 @ stub -syscall NtQueryCompositionInputIsImplicit
 @ stub -syscall NtQueryCompositionInputQueueAndTransform
 @ stub -syscall NtQueryCompositionInputSink
-@ stub -syscall NtQueryCompositionInputSinkLuid
+@ stdcall -syscall NtQueryCompositionInputSinkLuid(ptr ptr)
 @ stub -syscall NtQueryCompositionInputSinkViewId
 @ stub -syscall NtQueryCompositionSurfaceBinding
 @ stub -syscall NtQueryCompositionSurfaceFrameRate
@@ -790,7 +790,7 @@
 @ stub -syscall NtTokenManagerThread
 @ stub -syscall NtUnBindCompositionSurface
 @ stub -syscall NtUpdateInputSinkTransforms
-@ stub -syscall NtUserAcquireIAMKey
+@ stdcall -syscall NtUserAcquireIAMKey(ptr)
 @ stub -syscall NtUserAcquireInteractiveControlBackgroundAccess
 @ stdcall -syscall NtUserActivateKeyboardLayout(long long)
 @ stdcall -syscall NtUserAddClipboardFormatListener(long)
@@ -933,7 +933,7 @@
 @ stub -syscall NtUserDwmWindowNotificationsEnabled
 @ stdcall -syscall NtUserEmptyClipboard()
 @ stub -syscall NtUserEnableChildWindowDpiMessage
-@ stub -syscall NtUserEnableIAMAccess
+@ stdcall -syscall NtUserEnableIAMAccess(long long)
 @ stdcall -syscall NtUserEnableMenuItem(long long long)
 @ stub -syscall NtUserEnableModernAppWindowKeyboardIntercept
 @ stdcall -syscall NtUserEnableMouseInPointer(long)
@@ -951,7 +951,7 @@
 @ stdcall -syscall NtUserEnableWindow(long long)
 @ stub -syscall NtUserEnableWindowGDIScaledDpiMessage
 @ stub -syscall NtUserEnableWindowGroupPolicy
-@ stub -syscall NtUserEnableWindowResizeOptimization
+@ stdcall -syscall NtUserEnableWindowResizeOptimization(long long long)
 @ stub -syscall NtUserEnableWindowShellWindowManagementBehavior
 @ stdcall -syscall NtUserEndDeferWindowPosEx(long long)
 @ stdcall -syscall NtUserEndMenu()
@@ -1077,13 +1077,13 @@
 @ stdcall -syscall NtUserGetPriorityClipboardFormat(ptr long)
 @ stdcall -syscall NtUserGetProcessDefaultLayout(ptr)
 @ stdcall -syscall NtUserGetProcessDpiAwarenessContext(long)
-@ stub -syscall NtUserGetProcessUIContextInformation
+@ stdcall -syscall NtUserGetProcessUIContextInformation(ptr ptr)
 @ stdcall -syscall NtUserGetProcessWindowStation()
 @ stdcall -syscall NtUserGetProp(long wstr)
 @ stub -syscall NtUserGetProp2
 @ stub -syscall NtUserGetQueueIocp
 @ stdcall -syscall NtUserGetQueueStatus(long)
-@ stub -syscall NtUserGetQueueStatusReadonly
+@ stdcall -syscall NtUserGetQueueStatusReadonly()
 @ stdcall -syscall NtUserGetRawInputBuffer(ptr ptr long)
 @ stdcall -syscall NtUserGetRawInputData(ptr long ptr ptr long)
 @ stdcall -syscall NtUserGetRawInputDeviceInfo(ptr long ptr ptr)
@@ -1334,7 +1334,7 @@
 @ stub -syscall NtUserSetAppImeLevel
 @ stub -syscall NtUserSetAutoRotation
 @ stub -syscall NtUserSetBridgeWindowChild
-@ stub -syscall NtUserSetBrokeredForeground
+@ stdcall -syscall NtUserSetBrokeredForeground(long)
 @ stub -syscall NtUserSetCalibrationData
 @ stub -syscall NtUserSetCancelRotationDelayHintWindow
 @ stdcall -syscall NtUserSetCapture(long)
@@ -1444,7 +1444,7 @@
 @ stub -syscall NtUserSetWindowGroup
 @ stdcall -syscall NtUserSetWindowLong(long long long long)
 @ stdcall -syscall NtUserSetWindowLongPtr(long long long long)
-@ stub -syscall NtUserSetWindowMessageCapability
+@ stdcall -syscall NtUserSetWindowMessageCapability(long long ptr long)
 @ stdcall -syscall NtUserSetWindowPlacement(long ptr)
 @ stdcall -syscall NtUserSetWindowPos(long long long long long long long)
 @ stdcall -syscall NtUserSetWindowRgn(long long long)

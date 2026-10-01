@@ -3407,11 +3407,23 @@ static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DW
 {
     struct thunk_lock_params params = {.dispatch.callback = thunk_lock_callback};
     WAIT_TYPE type = flags & MWMO_WAITALL ? WaitAll : WaitAny;
+    HANDLE wait_handles[MAXIMUM_WAIT_OBJECTS];
+    HANDLE core_messaging_iocp = get_user_thread_info()->core_messaging_iocp;
+    DWORD queue_index = count - 1, core_messaging_index = ~0u, wait_count = count;
     LARGE_INTEGER time, now, *abs;
     void *ret_ptr;
     ULONG ret_len;
     HANDLE event;
     DWORD ret;
+
+    if (type == WaitAny && core_messaging_iocp && count < MAXIMUM_WAIT_OBJECTS)
+    {
+        memcpy( wait_handles, handles, count * sizeof(*handles) );
+        wait_handles[count] = core_messaging_iocp;
+        handles = wait_handles;
+        core_messaging_index = count;
+        wait_count++;
+    }
 
     if ((abs = get_nt_timeout( &time, timeout )))
     {
@@ -3429,8 +3441,17 @@ static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DW
     process_driver_events( QS_ALLINPUT, wake_mask, changed_mask );
     if (!(changed_mask & QS_SMRESULT) && (event = get_user_thread_info()->idle_event)) NtSetEvent( event, NULL );
 
-    do ret = NtWaitForMultipleObjects( count, handles, type, !!(flags & MWMO_ALERTABLE), abs );
-    while (ret == count - 1 && !process_driver_events( QS_ALLINPUT, wake_mask, changed_mask ));
+    for (;;)
+    {
+        ret = NtWaitForMultipleObjects( wait_count, handles, type, !!(flags & MWMO_ALERTABLE), abs );
+        if (ret == core_messaging_index)
+        {
+            if (!dispatch_thread_core_messaging_completions()) continue;
+            ret = queue_index;
+            break;
+        }
+        if (ret != queue_index || process_driver_events( QS_ALLINPUT, wake_mask, changed_mask )) break;
+    }
 
     if (HIWORD(ret)) /* is it an error code? */
     {
@@ -3439,7 +3460,7 @@ static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DW
     }
 
     if (ret == WAIT_TIMEOUT && !count && !timeout) NtYieldExecution();
-    if (ret == count - 1) get_user_thread_info()->last_driver_time = get_driver_check_time();
+    if (ret == queue_index) get_user_thread_info()->last_driver_time = get_driver_check_time();
 
     KeUserDispatchCallback( &params.dispatch, sizeof(params), &ret_ptr, &ret_len );
 

@@ -49,6 +49,7 @@ static VOID     (WINAPI *pTpReleaseWait)(TP_WAIT *);
 static VOID     (WINAPI *pTpReleaseWork)(TP_WORK *);
 static VOID     (WINAPI *pTpSetPoolMaxThreads)(TP_POOL *,DWORD);
 static NTSTATUS (WINAPI *pTpSetPoolStackInformation)(TP_POOL *,TP_POOL_STACK_INFORMATION *);
+static NTSTATUS (WINAPI *pTpSetPoolThreadBasePriority)(TP_POOL *,ULONG);
 static VOID     (WINAPI *pTpSetTimer)(TP_TIMER *,LARGE_INTEGER *,LONG,LONG);
 static BOOL     (WINAPI *pTpSetTimerEx)(TP_TIMER *,LARGE_INTEGER *,LONG,LONG);
 static VOID     (WINAPI *pTpSetWait)(TP_WAIT *,HANDLE,LARGE_INTEGER *);
@@ -98,6 +99,7 @@ static BOOL init_threadpool(void)
     GET_PROC(TpReleaseWork);
     GET_PROC(TpSetPoolMaxThreads);
     GET_PROC(TpSetPoolStackInformation);
+    GET_PROC(TpSetPoolThreadBasePriority);
     GET_PROC(TpSetTimer);
     GET_PROC(TpSetTimerEx);
     GET_PROC(TpSetWait);

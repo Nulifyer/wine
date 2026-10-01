@@ -1204,7 +1204,8 @@ void manage_desktop( WCHAR *arg )
     WCHAR *cmdline = NULL, *driver = NULL;
     WCHAR *p = arg;
     const WCHAR *name = NULL;
-    BOOL enable_shell, enable_launchers, show_systray, no_tray_items;
+    BOOL enable_shell, enable_launchers, show_systray, no_tray_items, presentation_only;
+    WCHAR native_shell[2];
     void (WINAPI *pShellDDEInit)( BOOL ) = NULL;
     HMODULE shell32;
     HANDLE thread;
@@ -1243,6 +1244,9 @@ void manage_desktop( WCHAR *arg )
     enable_launchers = get_default_enable_launchers();
     show_systray = get_default_show_systray( name );
     no_tray_items = get_no_tray_items_display();
+    presentation_only = (GetEnvironmentVariableW( L"LINUXNT_NATIVE_SHELL", native_shell,
+                                                   ARRAY_SIZE(native_shell) ) == 1 &&
+                         native_shell[0] == '1');
 
     UuidCreate( &guid );
     TRACE( "display guid %s\n", debugstr_guid(&guid) );
@@ -1288,12 +1292,15 @@ void manage_desktop( WCHAR *arg )
         SystemParametersInfoW( SPI_SETDESKWALLPAPER, 0, NULL, FALSE );
         ClipCursor( NULL );
         initialize_display_settings( width, height );
-        initialize_appbar();
+        if (!presentation_only) initialize_appbar();
 
-        initialize_systray( using_root, enable_shell, show_systray, no_tray_items );
-        if (!using_root && enable_launchers) initialize_launchers( hwnd );
+        if (!presentation_only)
+        {
+            initialize_systray( using_root, enable_shell, show_systray, no_tray_items );
+            if (!using_root && enable_launchers) initialize_launchers( hwnd );
+        }
 
-        if ((shell32 = LoadLibraryW( L"shell32.dll" )) &&
+        if (!presentation_only && (shell32 = LoadLibraryW( L"shell32.dll" )) &&
             (pShellDDEInit = (void *)GetProcAddress( shell32, (LPCSTR)188)))
         {
             pShellDDEInit( TRUE );
@@ -1318,12 +1325,15 @@ void manage_desktop( WCHAR *arg )
         }
     }
 
-    desktopshellbrowserwindow_init();
-    shellwindows_init();
+    if (!presentation_only)
+    {
+        desktopshellbrowserwindow_init();
+        shellwindows_init();
 
-    /* Ideally we would set the window of an IShellView here, but we never
-       actually create one, so the desktop window itself will have to do. */
-    set_shell_window( hwnd );
+        /* Ideally we would set the window of an IShellView here, but we never
+           actually create one, so the desktop window itself will have to do. */
+        set_shell_window( hwnd );
+    }
 
     /* run the desktop message loop */
     if (hwnd)

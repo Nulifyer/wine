@@ -317,6 +317,178 @@ static const char *debugstr_TokenInformationClass( TOKEN_INFORMATION_CLASS class
     return wine_dbg_sprintf( "%u", class );
 }
 
+struct token_security_attribute
+{
+    UNICODE_STRING name;
+    USHORT value_type;
+    USHORT reserved;
+    ULONG flags;
+    ULONG value_count;
+    union
+    {
+        ULONGLONG *uint64_values;
+        UNICODE_STRING *string_values;
+    } values;
+};
+
+struct token_security_attributes
+{
+    USHORT version;
+    USHORT reserved;
+    ULONG count;
+    struct token_security_attribute *attributes;
+};
+
+#define ALIGN_TOKEN_ATTRIBUTE(size) (((size) + sizeof(void *) - 1) & ~(sizeof(void *) - 1))
+
+static NTSTATUS get_current_package_token_strings( const WCHAR **fullname, SIZE_T *fullname_chars,
+                                                   WCHAR *family, SIZE_T family_capacity,
+                                                   SIZE_T *family_chars )
+{
+    static const WCHAR windows_apps[] =
+        {'\\','P','r','o','g','r','a','m',' ','F','i','l','e','s','\\',
+         'W','i','n','d','o','w','s','A','p','p','s','\\',0};
+    const UNICODE_STRING *image = &NtCurrentTeb()->Peb->ProcessParameters->ImagePathName;
+    SIZE_T image_chars = image->Length / sizeof(WCHAR), prefix_chars = ARRAY_SIZE(windows_apps) - 1;
+    SIZE_T component_offset = 0, name_end, first_separator = 0, last_separator = 0, i;
+
+    for (i = 0; i + prefix_chars < image_chars; ++i)
+    {
+        if (!wcsnicmp( image->Buffer + i, windows_apps, prefix_chars ))
+        {
+            component_offset = i + prefix_chars;
+            break;
+        }
+    }
+    if (!component_offset) return STATUS_NOT_FOUND;
+
+    name_end = component_offset;
+    while (name_end < image_chars && image->Buffer[name_end] != L'\\' &&
+           image->Buffer[name_end] != L'/')
+    {
+        if (image->Buffer[name_end] == L'_')
+        {
+            if (!first_separator) first_separator = name_end;
+            last_separator = name_end;
+        }
+        ++name_end;
+    }
+    if (!first_separator || first_separator == last_separator) return STATUS_NOT_FOUND;
+
+    *fullname = image->Buffer + component_offset;
+    *fullname_chars = name_end - component_offset;
+    *family_chars = first_separator - component_offset + name_end - last_separator;
+    if (*family_chars + 1 > family_capacity) return STATUS_BUFFER_TOO_SMALL;
+
+    memcpy( family, image->Buffer + component_offset,
+            (first_separator - component_offset) * sizeof(WCHAR) );
+    family[first_separator - component_offset] = L'_';
+    memcpy( family + first_separator - component_offset + 1, image->Buffer + last_separator + 1,
+            (name_end - last_separator - 1) * sizeof(WCHAR) );
+    family[*family_chars] = 0;
+    return STATUS_SUCCESS;
+}
+
+static BYTE *allocate_token_attribute_data( BYTE **cursor, SIZE_T size )
+{
+    BYTE *ret = *cursor;
+    *cursor += ALIGN_TOKEN_ATTRIBUTE( size );
+    return ret;
+}
+
+static void set_token_attribute_string( UNICODE_STRING *string, BYTE **cursor,
+                                        const WCHAR *value, SIZE_T chars )
+{
+    string->Length = chars * sizeof(WCHAR);
+    string->MaximumLength = string->Length;
+    string->Buffer = (WCHAR *)allocate_token_attribute_data( cursor, (chars + 1) * sizeof(WCHAR) );
+    memcpy( string->Buffer, value, chars * sizeof(WCHAR) );
+    string->Buffer[chars] = 0;
+}
+
+static NTSTATUS query_current_package_token_attributes( void *info, ULONG length, ULONG *retlen )
+{
+    static const WCHAR app[] = {'A','p','p',0};
+    static const WCHAR dynamic_id[] =
+        {'{','0','0','0','0','0','0','0','0','-','0','0','0','0','-','0','0','0','0','-',
+         '0','0','0','0','-','0','0','0','0','0','0','0','0','0','0','0','0','0','}',0};
+    static const WCHAR attribute_names[][18] =
+    {
+        {'W','I','N',':','/','/','S','Y','S','A','P','P','I','D',0},
+        {'W','I','N',':','/','/','P','K','G',0},
+        {'W','I','N',':','/','/','P','K','G','H','O','S','T','I','D',0},
+        {'T','S','A',':','/','/','P','r','o','c','U','n','i','q','u','e',0}
+    };
+    struct token_security_attributes *claims = info;
+    struct token_security_attribute *attributes;
+    UNICODE_STRING *app_values;
+    const WCHAR *fullname;
+    WCHAR family[256];
+    SIZE_T fullname_chars, family_chars, required, i;
+    BYTE *cursor;
+    ULONGLONG *values;
+    NTSTATUS status;
+
+    if ((status = get_current_package_token_strings( &fullname, &fullname_chars, family,
+                                                     ARRAY_SIZE(family), &family_chars )))
+        return status;
+
+    required = ALIGN_TOKEN_ATTRIBUTE( sizeof(*claims) + 4 * sizeof(*attributes) );
+    for (i = 0; i < ARRAY_SIZE(attribute_names); ++i)
+        required += ALIGN_TOKEN_ATTRIBUTE( (wcslen(attribute_names[i]) + 1) * sizeof(WCHAR) );
+    required += ALIGN_TOKEN_ATTRIBUTE( 4 * sizeof(*app_values) );
+    required += ALIGN_TOKEN_ATTRIBUTE( (fullname_chars + 1) * sizeof(WCHAR) );
+    required += ALIGN_TOKEN_ATTRIBUTE( sizeof(app) );
+    required += ALIGN_TOKEN_ATTRIBUTE( (family_chars + 1) * sizeof(WCHAR) );
+    required += ALIGN_TOKEN_ATTRIBUTE( sizeof(dynamic_id) );
+    required += 2 * ALIGN_TOKEN_ATTRIBUTE( sizeof(ULONGLONG) );
+    required += ALIGN_TOKEN_ATTRIBUTE( 2 * sizeof(ULONGLONG) );
+
+    if (retlen) *retlen = required;
+    if (length < required) return STATUS_BUFFER_TOO_SMALL;
+    if (!info) return STATUS_ACCESS_VIOLATION;
+
+    memset( info, 0, required );
+    claims->version = 1;
+    claims->count = 4;
+    claims->attributes = attributes = (struct token_security_attribute *)(claims + 1);
+    cursor = (BYTE *)(attributes + 4);
+
+    for (i = 0; i < ARRAY_SIZE(attribute_names); ++i)
+        set_token_attribute_string( &attributes[i].name, &cursor, attribute_names[i],
+                                    wcslen(attribute_names[i]) );
+
+    attributes[0].value_type = 3; /* CLAIM_SECURITY_ATTRIBUTE_TYPE_STRING */
+    attributes[0].value_count = 4;
+    attributes[0].values.string_values = app_values = (UNICODE_STRING *)
+        allocate_token_attribute_data( &cursor, 4 * sizeof(*app_values) );
+    set_token_attribute_string( &app_values[0], &cursor, fullname, fullname_chars );
+    set_token_attribute_string( &app_values[1], &cursor, app, ARRAY_SIZE(app) - 1 );
+    set_token_attribute_string( &app_values[2], &cursor, family, family_chars );
+    set_token_attribute_string( &app_values[3], &cursor, dynamic_id, ARRAY_SIZE(dynamic_id) - 1 );
+
+    attributes[1].value_type = 2; /* CLAIM_SECURITY_ATTRIBUTE_TYPE_UINT64 */
+    attributes[1].value_count = 1;
+    attributes[1].values.uint64_values = values = (ULONGLONG *)
+        allocate_token_attribute_data( &cursor, sizeof(*values) );
+    values[0] = 0x300000011ull; /* origin 3 and package flags 0x11 */
+
+    attributes[2].value_type = 2;
+    attributes[2].value_count = 1;
+    attributes[2].values.uint64_values = values = (ULONGLONG *)
+        allocate_token_attribute_data( &cursor, sizeof(*values) );
+    values[0] = 0x100000000000001full;
+
+    attributes[3].value_type = 2;
+    attributes[3].flags = 0x41;
+    attributes[3].value_count = 2;
+    attributes[3].values.uint64_values = values = (ULONGLONG *)
+        allocate_token_attribute_data( &cursor, 2 * sizeof(*values) );
+    values[0] = HandleToULong( NtCurrentTeb()->ClientId.UniqueProcess );
+    values[1] = HandleToULong( NtCurrentTeb()->ClientId.UniqueThread );
+    return STATUS_SUCCESS;
+}
+
 /***********************************************************************
  *             NtQueryInformationToken  (NTDLL.@)
  */
@@ -468,7 +640,10 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
                 wine_server_set_reply( req, tpriv->Privileges, length - FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ) );
             status = wine_server_call( req );
             if (retlen) *retlen = FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ) + reply->len;
-            if (tpriv) tpriv->PrivilegeCount = reply->len / sizeof(LUID_AND_ATTRIBUTES);
+            if (!status && length < FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ))
+                status = STATUS_BUFFER_TOO_SMALL;
+            if (tpriv && length >= FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ))
+                tpriv->PrivilegeCount = reply->len / sizeof(LUID_AND_ATTRIBUTES);
         }
         SERVER_END_REQ;
         break;
@@ -642,6 +817,10 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
             *(DWORD *)info = 0;
             break;
         }
+
+    case TokenSecurityAttributes:
+        status = query_current_package_token_attributes( info, length, retlen );
+        break;
 
     case TokenLinkedToken:
         SERVER_START_REQ( create_linked_token )

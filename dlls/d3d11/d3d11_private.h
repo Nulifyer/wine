@@ -40,6 +40,22 @@
 
 struct d3d_device;
 
+/* Undocumented interface used by the inbox XAML renderer. */
+typedef struct IDXGIDeviceXAML IDXGIDeviceXAML;
+typedef struct IDXGIDeviceXAMLVtbl
+{
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(IDXGIDeviceXAML *iface, REFIID iid, void **out);
+    ULONG (STDMETHODCALLTYPE *AddRef)(IDXGIDeviceXAML *iface);
+    ULONG (STDMETHODCALLTYPE *Release)(IDXGIDeviceXAML *iface);
+    HRESULT (STDMETHODCALLTYPE *SetInProcessGPUPriority)(IDXGIDeviceXAML *iface, int priority);
+    HRESULT (STDMETHODCALLTYPE *GetInProcessGPUPriority)(IDXGIDeviceXAML *iface, int *priority);
+} IDXGIDeviceXAMLVtbl;
+
+struct IDXGIDeviceXAML
+{
+    const IDXGIDeviceXAMLVtbl *lpVtbl;
+};
+
 extern const struct wined3d_parent_ops d3d_null_wined3d_parent_ops;
 
 /* TRACE helper functions */
@@ -571,12 +587,14 @@ struct d3d_device
     ID3D11Device5 ID3D11Device5_iface;
     ID3D10Device1 ID3D10Device1_iface;
     ID3D10Multithread ID3D10Multithread_iface;
+    IDXGIDeviceXAML IDXGIDeviceXAML_iface;
     IWineDXGIDeviceParent IWineDXGIDeviceParent_iface;
     ID3D11VideoDevice1 ID3D11VideoDevice1_iface;
     IUnknown *outer_unk;
     LONG refcount;
 
     BOOL d3d11_only;
+    LONG xaml_gpu_priority;
 
     struct d3d_device_context_state *state;
     struct d3d11_device_context immediate_context;

@@ -23,6 +23,7 @@ SOURCES = \
 	error.c \
 	exception.c \
 	handletable.c \
+	hashtable.c \
 	heap.c \
 	large_int.c \
 	loader.c \

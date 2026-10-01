@@ -819,6 +819,39 @@ BOOL WINAPI Wow64GetThreadContext( HANDLE handle, WOW64_CONTEXT *context)
 
 
 /***********************************************************************
+ *           Wow64SetThreadDefaultGuestMachine   (kernelbase.@)
+ */
+USHORT WINAPI Wow64SetThreadDefaultGuestMachine( USHORT machine )
+{
+    USHORT native_machine;
+#ifdef __x86_64__
+    USHORT previous;
+#endif
+
+    if (!set_ntstatus( RtlWow64GetProcessMachines( GetCurrentProcess(), NULL, &native_machine )))
+        return IMAGE_FILE_MACHINE_UNKNOWN;
+    if (native_machine != IMAGE_FILE_MACHINE_AMD64)
+    {
+        FIXME( "Guest-machine selection on native machine %#x is unsupported.\n", native_machine );
+        SetLastError( ERROR_NOT_SUPPORTED );
+        return IMAGE_FILE_MACHINE_UNKNOWN;
+    }
+#ifdef __i386__
+    /* The 32-bit slot is a WoW64 transition pointer, not a guest-machine value. */
+    return IMAGE_FILE_MACHINE_I386;
+#elif defined(__x86_64__)
+    if (NtCurrentTeb()->WowTebOffset) return IMAGE_FILE_MACHINE_AMD64;
+    previous = (USHORT)(ULONG_PTR)NtCurrentTeb()->WOW32Reserved;
+    NtCurrentTeb()->WOW32Reserved = (void *)(ULONG_PTR)machine;
+    return previous ? previous : IMAGE_FILE_MACHINE_I386;
+#else
+    SetLastError( ERROR_NOT_SUPPORTED );
+    return IMAGE_FILE_MACHINE_UNKNOWN;
+#endif
+}
+
+
+/***********************************************************************
  *           Wow64SetThreadContext   (kernelbase.@)
  */
 BOOL WINAPI Wow64SetThreadContext( HANDLE handle, const WOW64_CONTEXT *context)

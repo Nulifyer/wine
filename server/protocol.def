@@ -1651,6 +1651,9 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
     obj_handle_t rootdir;       /* root directory */
     unsigned int sharing;       /* sharing flags */
     unsigned int options;       /* file options */
+    int impersonation_level;    /* client security quality of service */
+    int context_tracking;       /* dynamic client token tracking */
+    int effective_only;         /* retain only enabled privileges */
     VARARG(filename,unicode_str); /* file name */
 @REPLY
     obj_handle_t handle;        /* handle to the file */
@@ -3519,6 +3522,18 @@ enum caret_state
 #define SET_DESKTOP_PROGMAN_WINDOW  0x02
 #define SET_DESKTOP_TASKMAN_WINDOW  0x04
 
+/* Acquire the opaque IAM key generated when the shell window was set. */
+@REQ(acquire_desktop_iam_key)
+@REPLY
+    client_ptr_t    key;                  /* desktop IAM key */
+@END
+
+/* Enable or disable IAM access on the calling thread. */
+@REQ(enable_thread_iam_access)
+    client_ptr_t    key;                  /* previously acquired desktop IAM key */
+    int             enable;               /* whether to enable access */
+@END
+
 /* Adjust the privileges held by a token */
 @REQ(adjust_token_privileges)
     obj_handle_t  handle; /* handle to the token */
@@ -3932,6 +3947,13 @@ struct handle_info
 @END
 
 
+/* Register a window to receive USER CoreMessaging dispatches from a completion port */
+@REQ(register_coremessaging_completion)
+    obj_handle_t  handle;          /* completion port handle */
+    user_handle_t window;          /* window owned by the calling thread */
+@END
+
+
 /* add completion to completion port */
 @REQ(add_completion)
     obj_handle_t  handle;         /* port handle */
@@ -4157,6 +4179,67 @@ struct handle_info
 @END
 
 
+/* Open a system memory partition object */
+@REQ(open_memory_partition)
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+    obj_handle_t rootdir;         /* root directory */
+    VARARG(name,unicode_str);     /* object name */
+@REPLY
+    obj_handle_t handle;          /* handle to the memory partition */
+@END
+
+
+/* Validate a system memory partition handle for a query */
+@REQ(query_memory_partition)
+    obj_handle_t handle;          /* memory partition handle */
+@END
+
+
+/* Create a dynamic Windows Notification Facility state. */
+@REQ(create_wnf_state_name)
+    unsigned int name_lifetime; /* WNF state-name lifetime */
+    unsigned int data_scope;    /* WNF state-name scope */
+    unsigned int maximum_size;  /* maximum state-data length */
+    int          persist_data;  /* whether state data persists */
+    int          type_id;       /* whether a type ID was supplied */
+    int          security_descriptor; /* whether a descriptor was supplied */
+@REPLY
+    unsigned __int64 state_name; /* generated encoded WNF state name */
+@END
+
+
+/* Delete a dynamic Windows Notification Facility state. */
+@REQ(delete_wnf_state_name)
+    unsigned __int64 state_name; /* encoded WNF state name */
+@END
+
+
+/* Retrieve data from a Windows Notification Facility state. */
+@REQ(query_wnf_state_data)
+    unsigned __int64 state_name; /* encoded WNF state name */
+    unsigned int session_id;     /* explicit session selector, if supplied */
+    int          explicit_scope; /* whether caller supplied a session scope */
+@REPLY
+    unsigned int change_stamp;   /* current state change stamp */
+    data_size_t  total;          /* total state-data length */
+    VARARG(data,bytes);          /* current state data */
+@END
+
+
+/* Replace data in a Windows Notification Facility state. */
+@REQ(update_wnf_state_data)
+    unsigned __int64 state_name; /* encoded WNF state name */
+    unsigned int matching_stamp; /* required stamp when check_stamp is set */
+    int          check_stamp;    /* atomically require matching_stamp */
+    unsigned int session_id;     /* explicit session selector, if supplied */
+    int          explicit_scope; /* whether caller supplied a session scope */
+    VARARG(data,bytes);          /* replacement state data */
+@REPLY
+    unsigned int change_stamp;   /* resulting state change stamp */
+@END
+
+
 /* Assign a job object to a process */
 @REQ(assign_job)
     obj_handle_t job;             /* handle to the job */
@@ -4370,4 +4453,95 @@ enum inproc_sync_type
     VARARG(obj_attr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t        handle;         /* handle to the ALPC port */
+@END
+
+
+/* Connect to a named ALPC connection port */
+@REQ(alpc_connect_port)
+    unsigned int        flags;          /* connection flags */
+    unsigned int        attributes;     /* object attributes */
+    obj_handle_t        rootdir;        /* root directory */
+    mem_size_t          max_msg_len;    /* requested maximum message length */
+    data_size_t         name_size;      /* port name size */
+    VARARG(name,unicode_str,name_size); /* connection port name */
+    VARARG(message,bytes);              /* optional connection message */
+@REPLY
+    obj_handle_t        handle;         /* client communication port */
+    unsigned int        message_id;     /* connection request message id */
+@END
+
+
+/* Retrieve the result of an ALPC connection request */
+@REQ(alpc_get_connect_result)
+    obj_handle_t        handle;         /* client communication port */
+@REPLY
+    unsigned int        status;         /* connection result */
+    unsigned int        message_id;     /* connection request/reply message id */
+    data_size_t         message_size;   /* connection reply size */
+    VARARG(message,bytes);              /* optional connection reply */
+@END
+
+
+/* Accept or reject an ALPC connection request */
+@REQ(alpc_accept_connect_port)
+    obj_handle_t        connection;     /* server connection port */
+    unsigned int        flags;          /* accept flags */
+    unsigned int        attributes;     /* communication handle attributes */
+    unsigned int        accept;         /* whether to accept the connection */
+    unsigned int        message_id;     /* connection request message id */
+    mem_size_t          max_msg_len;    /* accepted maximum message length */
+    client_ptr_t        port_context;   /* server context for the communication port */
+    client_ptr_t        message_context;/* context associated with the reply */
+    VARARG(message,bytes);              /* connection reply message */
+@REPLY
+    obj_handle_t        handle;         /* server communication port */
+@END
+
+
+/* Send and/or receive an ALPC message */
+@REQ(alpc_send_receive)
+    obj_handle_t        handle;         /* communication or connection port */
+    unsigned int        flags;          /* message flags */
+    data_size_t         send_size;      /* outgoing message size */
+    unsigned int        message_id;     /* outgoing reply/request id */
+    unsigned int        valid_attributes;/* outgoing message attribute mask */
+    client_ptr_t        message_context;/* context associated with the outgoing message */
+    unsigned __int64    work_on_behalf; /* outgoing work-on-behalf ticket */
+    VARARG(message,bytes);              /* optional outgoing message */
+@REPLY
+    unsigned int        pending;        /* receive would block */
+    unsigned int        message_id;     /* received message id */
+    process_id_t        sender_pid;     /* sending process id */
+    thread_id_t         sender_tid;     /* sending thread id */
+    unsigned int        message_type;   /* ALPC message type */
+    data_size_t         message_size;   /* full received message size */
+    client_ptr_t        port_context;   /* receiving port context */
+    client_ptr_t        message_context;/* context associated with the received message */
+    unsigned int        valid_attributes;/* received message attribute mask */
+    unsigned __int64    work_on_behalf; /* received work-on-behalf ticket */
+    VARARG(message,bytes);              /* optional received message */
+@END
+
+
+/* Disconnect an ALPC communication port */
+@REQ(alpc_disconnect_port)
+    obj_handle_t        handle;         /* communication port */
+    unsigned int        flags;          /* disconnect flags */
+@END
+
+
+/* Query basic ALPC port state */
+@REQ(alpc_query_information)
+    obj_handle_t        handle;         /* communication or connection port */
+@REPLY
+    unsigned int        flags;          /* port creation flags */
+    unsigned int        sequence;       /* most recently received message id */
+    client_ptr_t        context;        /* server-defined port context */
+@END
+
+
+/* Impersonate the sender of the last received ALPC message */
+@REQ(alpc_impersonate_client)
+    obj_handle_t        handle;         /* receiving ALPC port */
+    unsigned int        message_id;     /* received message id */
 @END

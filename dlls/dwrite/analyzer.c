@@ -35,6 +35,34 @@ extern const unsigned short bidi_direction_table[];
 /* Number of characters needed for LOCALE_SNATIVEDIGITS */
 #define NATIVE_DIGITS_LEN 11
 
+/* Windows.UI.Xaml uses this private DirectWrite analyzer interface to resolve
+ * the first strong reading direction of a text range.  It is a distinct COM
+ * identity subobject on the native analyzer. */
+static const GUID IID_IDWriteTextAnalyzerInternal =
+    {0xb7e6163e, 0x7f46, 0x43b4, {0x84, 0xb3, 0xe4, 0xe6, 0x24, 0x9c, 0x36, 0x5e}};
+
+typedef struct IDWriteTextAnalyzerInternal IDWriteTextAnalyzerInternal;
+typedef struct IDWriteTextAnalyzerInternalVtbl
+{
+    HRESULT (WINAPI *QueryInterface)(IDWriteTextAnalyzerInternal *iface, REFIID riid, void **obj);
+    ULONG (WINAPI *AddRef)(IDWriteTextAnalyzerInternal *iface);
+    ULONG (WINAPI *Release)(IDWriteTextAnalyzerInternal *iface);
+    HRESULT (WINAPI *GetContentReadingDirection)(IDWriteTextAnalyzerInternal *iface,
+            IDWriteTextAnalysisSource *source, UINT32 position, UINT32 length,
+            DWRITE_READING_DIRECTION *direction, BOOL *is_ambiguous);
+} IDWriteTextAnalyzerInternalVtbl;
+
+struct IDWriteTextAnalyzerInternal
+{
+    const IDWriteTextAnalyzerInternalVtbl *lpVtbl;
+};
+
+struct dwrite_text_analyzer
+{
+    IDWriteTextAnalyzer2 IDWriteTextAnalyzer2_iface;
+    IDWriteTextAnalyzerInternal IDWriteTextAnalyzerInternal_iface;
+};
+
 struct dwritescript_properties
 {
     DWRITE_SCRIPT_PROPERTIES props;
@@ -1302,12 +1330,20 @@ static HRESULT analyze_linebreaks(IDWriteTextAnalysisSource *source, UINT32 posi
 
 static HRESULT WINAPI dwritetextanalyzer_QueryInterface(IDWriteTextAnalyzer2 *iface, REFIID riid, void **obj)
 {
+    struct dwrite_text_analyzer *analyzer = CONTAINING_RECORD(iface, struct dwrite_text_analyzer,
+            IDWriteTextAnalyzer2_iface);
+
     TRACE("%s, %p.\n", debugstr_guid(riid), obj);
+
+    if (IsEqualIID(riid, &IID_IDWriteTextAnalyzerInternal) || IsEqualIID(riid, &IID_IUnknown))
+    {
+        *obj = &analyzer->IDWriteTextAnalyzerInternal_iface;
+        return S_OK;
+    }
 
     if (IsEqualIID(riid, &IID_IDWriteTextAnalyzer2) ||
         IsEqualIID(riid, &IID_IDWriteTextAnalyzer1) ||
-        IsEqualIID(riid, &IID_IDWriteTextAnalyzer) ||
-        IsEqualIID(riid, &IID_IUnknown))
+        IsEqualIID(riid, &IID_IDWriteTextAnalyzer))
     {
         *obj = iface;
         return S_OK;
@@ -2350,11 +2386,89 @@ static const IDWriteTextAnalyzer2Vtbl textanalyzervtbl =
     dwritetextanalyzer2_CheckTypographicFeature
 };
 
-static IDWriteTextAnalyzer2 textanalyzer = { &textanalyzervtbl };
+static HRESULT WINAPI dwritetextanalyzer_internal_QueryInterface(IDWriteTextAnalyzerInternal *iface,
+        REFIID riid, void **obj)
+{
+    struct dwrite_text_analyzer *analyzer = CONTAINING_RECORD(iface, struct dwrite_text_analyzer,
+            IDWriteTextAnalyzerInternal_iface);
+
+    return IDWriteTextAnalyzer2_QueryInterface(&analyzer->IDWriteTextAnalyzer2_iface, riid, obj);
+}
+
+static ULONG WINAPI dwritetextanalyzer_internal_AddRef(IDWriteTextAnalyzerInternal *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI dwritetextanalyzer_internal_Release(IDWriteTextAnalyzerInternal *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI dwritetextanalyzer_internal_GetContentReadingDirection(
+        IDWriteTextAnalyzerInternal *iface, IDWriteTextAnalysisSource *source, UINT32 position, UINT32 length,
+        DWRITE_READING_DIRECTION *direction, BOOL *is_ambiguous)
+{
+    const WCHAR *text;
+    UINT32 text_length, i;
+    WORD type;
+    HRESULT hr;
+
+    TRACE("%p, %p, %u, %u, %p, %p.\n", iface, source, position, length, direction, is_ambiguous);
+
+    if (!source || !direction || !is_ambiguous) return E_INVALIDARG;
+
+    *direction = IDWriteTextAnalysisSource_GetParagraphReadingDirection(source);
+    *is_ambiguous = TRUE;
+
+    while (length)
+    {
+        if (FAILED(hr = IDWriteTextAnalysisSource_GetTextAtPosition(source, position, &text, &text_length)))
+            return hr;
+        if (!text || !text_length) break;
+        text_length = min(text_length, length);
+
+        for (i = 0; i < text_length; ++i)
+        {
+            if (!GetStringTypeW(CT_CTYPE2, text + i, 1, &type)) continue;
+            if (type == C2_LEFTTORIGHT)
+            {
+                *direction = DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
+                *is_ambiguous = FALSE;
+                return S_OK;
+            }
+            if (type == C2_RIGHTTOLEFT)
+            {
+                *direction = DWRITE_READING_DIRECTION_RIGHT_TO_LEFT;
+                *is_ambiguous = FALSE;
+                return S_OK;
+            }
+        }
+
+        position += text_length;
+        length -= text_length;
+    }
+
+    return S_OK;
+}
+
+static const IDWriteTextAnalyzerInternalVtbl textanalyzer_internal_vtbl =
+{
+    dwritetextanalyzer_internal_QueryInterface,
+    dwritetextanalyzer_internal_AddRef,
+    dwritetextanalyzer_internal_Release,
+    dwritetextanalyzer_internal_GetContentReadingDirection,
+};
+
+static struct dwrite_text_analyzer textanalyzer =
+{
+    {&textanalyzervtbl},
+    {&textanalyzer_internal_vtbl},
+};
 
 IDWriteTextAnalyzer2 *get_text_analyzer(void)
 {
-    return &textanalyzer;
+    return &textanalyzer.IDWriteTextAnalyzer2_iface;
 }
 
 static HRESULT WINAPI dwritenumbersubstitution_QueryInterface(IDWriteNumberSubstitution *iface, REFIID riid, void **obj)

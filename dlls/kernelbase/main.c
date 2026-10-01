@@ -466,8 +466,75 @@ ULONG WINAPI PerfStopProvider(HANDLE handle)
  */
 BOOL WINAPI QuirkIsEnabled(void *arg)
 {
-    FIXME("(%p): stub\n", arg);
-    return FALSE;
+    UINT32 package_name_len = 0;
+
+    /* Windows selects quirks against package identity and target-version
+     * metadata, not just the OS build.  LinuxNT's current WindowsApps profile
+     * contains modern packages targeting Windows 11.  A genuine packaged
+     * Notepad process on Windows 11 26200 enabled only 0x2006c from the set
+     * reached by this XAML build; applying the desktop-process set enables
+     * legacy XAML modes and breaks compiled resource lookup. */
+    if (GetCurrentPackageFullName( &package_name_len, NULL ) == ERROR_INSUFFICIENT_BUFFER)
+    {
+        BOOL enabled = (ULONG_PTR)arg == 0x2006c;
+
+        TRACE("packaged quirk %p %s\n", arg, enabled ? "enabled" : "disabled");
+        return enabled;
+    }
+
+    /* These are the quirks enabled by Windows 11 26200 for an ordinary
+     * desktop process.  Modern Windows.UI.Xaml consults this legacy API while
+     * selecting its system resource dictionaries. */
+    switch ((ULONG_PTR)arg)
+    {
+    case 0x20057:
+    case 0x2006c:
+    case 0x2007e:
+    case 0x20086:
+    case 0x2008d:
+    case 0x20092:
+    case 0x20097:
+    case 0x2009e:
+    case 0x200a0:
+    case 0x200a1:
+    case 0x200a8:
+    case 0x200b1:
+    case 0x200b6:
+    case 0x200b7:
+    case 0x200b9:
+    case 0x200cd:
+    case 0x200dc:
+    case 0x200ef:
+    case 0x200f8:
+    case 0x200fb:
+    case 0x200fd:
+    /* 0x20106 enables the legacy-target XAML Islands block.  Packaged apps
+     * are exempted by Windows package-registration metadata that Wine does
+     * not expose yet, so enabling it would incorrectly reject modern inbox
+     * apps launched with LinuxNT's synthetic package identity. */
+    case 0x2010e:
+    case 0x20110:
+    case 0x20116:
+        TRACE("quirk %p enabled\n", arg);
+        return TRUE;
+    default:
+        TRACE("quirk %p disabled\n", arg);
+        return FALSE;
+    }
+}
+
+/***********************************************************************
+ *           QuirkIsEnabledForPackage   (KERNELBASE.@)
+ */
+HRESULT WINAPI QuirkIsEnabledForPackage( void *quirk, const WCHAR *package,
+                                         UINT32 options, BOOL *enabled )
+{
+    TRACE( "quirk %p, package %s, options %#x, enabled %p.\n",
+           quirk, debugstr_w(package), options, enabled );
+
+    if (!enabled) return E_INVALIDARG;
+    *enabled = FALSE;
+    return S_OK;
 }
 
 /***********************************************************************

@@ -37,6 +37,35 @@ WINE_DECLARE_DEBUG_CHANNEL(timestamp);
 
 struct _KUSER_SHARED_DATA *user_shared_data = (void *)0x7ffe0000;
 
+/**************************************************************************
+ * RtlGetThreadWorkOnBehalfTicket [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlGetThreadWorkOnBehalfTicket( ULONGLONG *ticket, ULONG flags )
+{
+    TRACE( "(%p, %#lx)\n", ticket, flags );
+
+    if (!ticket) return STATUS_ACCESS_VIOLATION;
+    if ((flags & ~7) || (flags & 3) == 3) return STATUS_INVALID_PARAMETER_2;
+
+    /* The basic form is the 8-byte ticket cached in the TEB.  The extended
+     * filtering flags query kernel attribution data on Windows; Wine has no
+     * separate attribution record, so the TEB value is also authoritative. */
+    memcpy( ticket, NtCurrentTeb()->WorkingOnBehalfOfTicket, sizeof(*ticket) );
+    return STATUS_SUCCESS;
+}
+
+/**************************************************************************
+ * RtlSetThreadWorkOnBehalfTicket [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlSetThreadWorkOnBehalfTicket( const ULONGLONG *ticket )
+{
+    TRACE( "(%p)\n", ticket );
+
+    if (!ticket) return STATUS_INVALID_PARAMETER;
+    memcpy( NtCurrentTeb()->WorkingOnBehalfOfTicket, ticket, sizeof(*ticket) );
+    return STATUS_SUCCESS;
+}
+
 struct debug_info
 {
     unsigned int str_pos;       /* current position in strings buffer */
@@ -372,6 +401,15 @@ void WINAPI RtlFreeUserStack( void *stack )
 ULONG WINAPI RtlGetNtGlobalFlags(void)
 {
     return NtCurrentTeb()->Peb->NtGlobalFlag;
+}
+
+
+/******************************************************************************
+ *              RtlGetNtSystemRoot   (NTDLL.@)
+ */
+const WCHAR * WINAPI RtlGetNtSystemRoot(void)
+{
+    return user_shared_data->NtSystemRoot;
 }
 
 

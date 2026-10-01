@@ -7506,6 +7506,33 @@ ULONG WINAPI NtUserGetProcessDpiAwarenessContext( HANDLE process )
 }
 
 /***********************************************************************
+ *       NtUserGetProcessUIContextInformation    (win32u.@)
+ *
+ * Windows reports UI_CONTEXT_TYPE_NONE (zero) for a normal desktop
+ * process.  The other values describe private immersive process modes;
+ * Wine processes currently always use the desktop context.
+ */
+BOOL WINAPI NtUserGetProcessUIContextInformation( HANDLE process, ULONG *context )
+{
+    PROCESS_BASIC_INFORMATION info;
+
+    if (!context)
+    {
+        RtlSetLastWin32Error( ERROR_NOACCESS );
+        return FALSE;
+    }
+    if (!process || NtQueryInformationProcess( process, ProcessBasicInformation,
+                                                &info, sizeof(info), NULL ))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    *context = 0;
+    return TRUE;
+}
+
+/***********************************************************************
  *	     NtUserGetProcessDefaultLayout    (win32u.@)
  */
 BOOL WINAPI NtUserGetProcessDefaultLayout( ULONG *layout )
@@ -7642,7 +7669,11 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
     switch(code)
     {
     case NtUserCallOneParam_CreateCursorIcon:
-        return HandleToUlong( alloc_cursoricon_handle( arg ));
+    {
+        HICON icon = alloc_cursoricon_handle( arg );
+        ERR( "CreateCursorIcon(%lu) returned %p\n", arg, icon );
+        return HandleToUlong( icon );
+    }
 
     case NtUserCallOneParam_EnableDC:
         return set_dce_flags( UlongToHandle(arg), DCHF_ENABLEDC );

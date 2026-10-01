@@ -363,6 +363,7 @@ WINOLE32API HRESULT WINAPI CoCreateFreeThreadedMarshaler(LPUNKNOWN punkOuter, LP
 WINOLE32API HRESULT WINAPI CoGetInterfaceAndReleaseStream(LPSTREAM pStm, REFIID iid, LPVOID* ppv);
 WINOLE32API HRESULT WINAPI CoGetMarshalSizeMax(ULONG* pulSize, REFIID riid, LPUNKNOWN pUnk, DWORD dwDestContext, LPVOID pvDestContext, DWORD mshlflags);
 WINOLE32API HRESULT WINAPI CoGetStandardMarshal(REFIID riid, LPUNKNOWN pUnk, DWORD dwDestContext, LPVOID pvDestContext, DWORD mshlflags, LPMARSHAL* ppMarshal);
+WINOLE32API HRESULT WINAPI CoGetStdMarshalEx(LPUNKNOWN outer, DWORD flags, LPUNKNOWN *inner);
 WINOLE32API HRESULT WINAPI CoMarshalHresult(LPSTREAM pstm, HRESULT hresult);
 WINOLE32API HRESULT WINAPI CoMarshalInterface(LPSTREAM pStm, REFIID riid, LPUNKNOWN pUnk, DWORD dwDestContext, LPVOID pvDestContext, DWORD mshlflags);
 WINOLE32API HRESULT WINAPI CoMarshalInterThreadInterfaceInStream(REFIID riid, LPUNKNOWN pUnk, LPSTREAM* ppStm);

@@ -1,0 +1,10 @@
+/* Runtime classes for windows.system.power.dll */
+
+#pragma makedep register
+#pragma winrt ns_prefix
+
+import "windows.system.power.idl";
+
+namespace Windows.System.Power {
+    runtimeclass PowerManager;
+}
