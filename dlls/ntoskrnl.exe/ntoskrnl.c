@@ -4197,7 +4197,8 @@ static WCHAR *get_windir_path( const WCHAR *path )
 }
 
 /* load the .sys module for a device driver */
-static HMODULE load_driver( const WCHAR *driver_name, const UNICODE_STRING *keyname )
+static HMODULE load_driver( const WCHAR *driver_name, const UNICODE_STRING *keyname,
+                            BOOL allow_missing_service )
 {
     static const WCHAR driversW[] = {'\\','d','r','i','v','e','r','s','\\',0};
     static const WCHAR systemrootW[] = {'\\','S','y','s','t','e','m','R','o','o','t','\\',0};
@@ -4208,16 +4209,18 @@ static HMODULE load_driver( const WCHAR *driver_name, const UNICODE_STRING *keyn
     HMODULE module;
     LPWSTR path = NULL, str;
     DWORD type, size;
+    LSTATUS error;
 
-    if (RegOpenKeyW( HKEY_LOCAL_MACHINE, keyname->Buffer + 18 /* skip \registry\machine */, &driver_hkey ))
+    error = RegOpenKeyW( HKEY_LOCAL_MACHINE, keyname->Buffer + 18 /* skip \registry\machine */, &driver_hkey );
+    if (error && !allow_missing_service)
     {
-        ERR( "cannot open key %s, err=%lu\n", wine_dbgstr_w(keyname->Buffer), GetLastError() );
+        ERR( "cannot open key %s, err=%lu\n", wine_dbgstr_w(keyname->Buffer), error );
         return NULL;
     }
 
     /* read the executable path from memory */
     size = 0;
-    if (!RegQueryValueExW( driver_hkey, ImagePathW, NULL, &type, NULL, &size ))
+    if (!error && !RegQueryValueExW( driver_hkey, ImagePathW, NULL, &type, NULL, &size ))
     {
         str = HeapAlloc( GetProcessHeap(), 0, size );
         if (!RegQueryValueExW( driver_hkey, ImagePathW, NULL, &type, (LPBYTE)str, &size ))
@@ -4264,7 +4267,7 @@ static HMODULE load_driver( const WCHAR *driver_name, const UNICODE_STRING *keyn
         lstrcatW(path, postfixW);
         str = path;
     }
-    RegCloseKey( driver_hkey );
+    if (!error) RegCloseKey( driver_hkey );
 
     TRACE( "loading driver %s\n", wine_dbgstr_w(str) );
 
@@ -4298,7 +4301,8 @@ static HMODULE load_driver( const WCHAR *driver_name, const UNICODE_STRING *keyn
 }
 
 /* call the driver init entry point */
-static NTSTATUS WINAPI init_driver( DRIVER_OBJECT *driver_object, UNICODE_STRING *keyname )
+static NTSTATUS init_driver_object( DRIVER_OBJECT *driver_object, UNICODE_STRING *keyname,
+                                    BOOL allow_missing_service )
 {
     unsigned int i;
     NTSTATUS status;
@@ -4310,7 +4314,7 @@ static NTSTATUS WINAPI init_driver( DRIVER_OBJECT *driver_object, UNICODE_STRING
     driver_name = wcsrchr( keyname->Buffer, '\\' );
     driver_name++;
 
-    module = load_driver( driver_name, keyname );
+    module = load_driver( driver_name, keyname, allow_missing_service );
     if (!module)
         return STATUS_DLL_INIT_FAILED;
 
@@ -4338,6 +4342,16 @@ static NTSTATUS WINAPI init_driver( DRIVER_OBJECT *driver_object, UNICODE_STRING
         TRACE( "- MajorFunction[%d] = %p\n", i, driver_object->MajorFunction[i] );
 
     return status;
+}
+
+static NTSTATUS WINAPI init_driver( DRIVER_OBJECT *driver_object, UNICODE_STRING *keyname )
+{
+    return init_driver_object( driver_object, keyname, FALSE );
+}
+
+static NTSTATUS WINAPI init_standalone_driver( DRIVER_OBJECT *driver_object, UNICODE_STRING *keyname )
+{
+    return init_driver_object( driver_object, keyname, TRUE );
 }
 
 static BOOLEAN get_drv_name( UNICODE_STRING *drv_name, const UNICODE_STRING *service_name )
@@ -4385,7 +4399,7 @@ NTSTATUS CDECL __wine_load_driver( const WCHAR *driver_name )
         return STATUS_IMAGE_ALREADY_LOADED;
     }
 
-    status = IoCreateDriver( &drv_name, init_driver );
+    status = IoCreateDriver( &drv_name, init_standalone_driver );
     entry = wine_rb_get( &wine_drivers, &drv_name );
     free( name );
     if (status != STATUS_SUCCESS)
