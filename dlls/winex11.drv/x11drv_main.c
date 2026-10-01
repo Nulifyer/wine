@@ -127,6 +127,7 @@ const char * const X11DRV_atom_names[NB_XATOMS - FIRST_XATOM] =
     "DndProtocol",
     "DndSelection",
     "_ICC_PROFILE",
+    "_WINE_DWM_OUTPUT",
     "_KDE_NET_WM_STATE_SKIP_SWITCHER",
     "_MOTIF_WM_HINTS",
     "_NET_ACTIVE_WINDOW",

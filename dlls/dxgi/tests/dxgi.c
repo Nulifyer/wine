@@ -1588,6 +1588,7 @@ static void test_dwm_swapchain(void)
     IDXGIFactory *factory;
     IDXGIOutput *output;
     IUnknown *identity;
+    HWND cover_window = NULL;
     HWND host_window = NULL;
     RECT host_rect;
     LONG host_ex_style;
@@ -1751,9 +1752,48 @@ static void test_dwm_swapchain(void)
     hr = swapchain_dwm->lpVtbl->PresentDWM(swapchain_dwm, 0, 0, 1, NULL,
             0, NULL, NULL, 0);
     ok(hr == E_INVALIDARG, "Got invalid dirty-rectangle hr %#lx.\n", hr);
+
+    cover_window = CreateWindowExA(WS_EX_TOPMOST, "static", "dxgi_dwm_cover",
+            WS_POPUP | WS_VISIBLE, 0, 0, 64, 64, NULL, NULL, NULL, NULL);
+    ok(!!cover_window, "Failed to create cover window, error %lu.\n", GetLastError());
+    if (cover_window)
+    {
+        HWND window;
+        BOOL cover_is_above = FALSE;
+
+        for (window = GetWindow(host_window, GW_HWNDPREV); window;
+                window = GetWindow(window, GW_HWNDPREV))
+        {
+            if (window == cover_window)
+            {
+                cover_is_above = TRUE;
+                break;
+            }
+        }
+        ok(cover_is_above, "Expected the newly created cover window above the DWM host.\n");
+    }
+
     hr = swapchain_dwm->lpVtbl->PresentDWM(swapchain_dwm, 0, 0, 0, NULL,
             0, NULL, NULL, 0);
     ok(hr == S_OK, "Failed to present DWM swap chain, hr %#lx.\n", hr);
+    if (cover_window)
+    {
+        HWND window;
+        BOOL host_is_above = FALSE;
+
+        for (window = GetWindow(cover_window, GW_HWNDPREV); window;
+                window = GetWindow(window, GW_HWNDPREV))
+        {
+            if (window == host_window)
+            {
+                host_is_above = TRUE;
+                break;
+            }
+        }
+        ok(host_is_above, "Expected DWM present to restore the host window above the cover.\n");
+        DestroyWindow(cover_window);
+        cover_window = NULL;
+    }
     present_count = 0xdeadbeef;
     hr = swapchain_dwm->lpVtbl->GetLastPresentCount(swapchain_dwm, &present_count);
     ok(hr == S_OK && present_count == 1, "Got present count %u, hr %#lx.\n",
@@ -1789,6 +1829,8 @@ static void test_dwm_swapchain(void)
     swapchain_dwm->lpVtbl->Release(swapchain_dwm);
     ok(!IsWindow(host_window), "Host presentation window %p survived its swap chain.\n",
             host_window);
+    if (cover_window)
+        DestroyWindow(cover_window);
 
 done_output:
     IDXGIOutput_Release(output);

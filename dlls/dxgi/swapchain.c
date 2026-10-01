@@ -375,6 +375,15 @@ static HRESULT d3d11_swapchain_present(struct d3d11_swapchain *swapchain,
         return S_OK;
     }
 
+    if (swapchain->is_dwm && swapchain->dwm_host_window
+            && GetWindow(swapchain->dwm_host_window, GW_HWNDPREV))
+    {
+        if (!SetWindowPos(swapchain->dwm_host_window, HWND_TOP, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER))
+            WARN("Failed to restore DWM presentation window z-order, error %lu.\n",
+                    GetLastError());
+    }
+
     if (SUCCEEDED(hr = wined3d_swapchain_present(swapchain->wined3d_swapchain, NULL, NULL, NULL, sync_interval, 0)))
     {
         InterlockedIncrement(&swapchain->present_count);

@@ -430,6 +430,14 @@ static struct x11drv_win_data *alloc_win_data( Display *display, HWND hwnd )
 }
 
 
+static BOOL is_compositor_output_window( HWND hwnd )
+{
+    static const DWORD ex_style_mask = WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP
+            | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_TRANSPARENT;
+
+    return (NtUserGetWindowLongW( hwnd, GWL_EXSTYLE ) & ex_style_mask) == ex_style_mask;
+}
+
 /***********************************************************************
  *		is_window_managed
  *
@@ -443,7 +451,11 @@ static BOOL is_window_managed( HWND hwnd, UINT swp_flags, BOOL fullscreen )
 
     /* child windows are not managed */
     style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
+    ex_style = NtUserGetWindowLongW( hwnd, GWL_EXSTYLE );
     if ((style & (WS_CHILD|WS_POPUP)) == WS_CHILD) return FALSE;
+    /* Keep compositor presentation overlays out of the window manager's
+     * reparented fullscreen layer so their Win32 z-order remains authoritative. */
+    if (is_compositor_output_window( hwnd )) return FALSE;
     /* activated windows are managed */
     if (!(swp_flags & (SWP_NOACTIVATE|SWP_HIDEWINDOW))) return TRUE;
     if (hwnd == get_active_window()) return TRUE;
@@ -459,7 +471,6 @@ static BOOL is_window_managed( HWND hwnd, UINT swp_flags, BOOL fullscreen )
         if (fullscreen) return TRUE;
     }
     /* application windows are managed */
-    ex_style = NtUserGetWindowLongW( hwnd, GWL_EXSTYLE );
     if (ex_style & WS_EX_APPWINDOW) return TRUE;
     /* windows that own popups are managed */
     if (has_owned_popups( hwnd )) return TRUE;
@@ -1402,7 +1413,7 @@ static void window_set_net_wm_state( struct x11drv_win_data *data, UINT new_stat
     }
 }
 
-static void window_set_config( struct x11drv_win_data *data, RECT rect, BOOL above )
+static void window_set_config( struct x11drv_win_data *data, RECT rect, BOOL above, BOOL force_raise )
 {
     const RECT *old_rect = &data->pending_state.rect;
     BOOL old_above = data->pending_state.above;
@@ -1420,7 +1431,8 @@ static void window_set_config( struct x11drv_win_data *data, RECT rect, BOOL abo
     data->desired_state.above = above;
     if (data->state_locks) return; /* win32 state is being updated, delay the change */
     if (!data->whole_window) return; /* no window, nothing to update */
-    if (EqualRect( old_rect, new_rect ) && (old_above || !above || data->managed)) return; /* rects are the same, no need to be raised, nothing to update */
+    if (EqualRect( old_rect, new_rect ) && !force_raise && (old_above || !above || data->managed))
+        return; /* rects are the same, no need to be raised, nothing to update */
     if (window_needs_config_change_delay( data ))
     {
         TRACE( "window %p/%lx is updating _NET_WM_STATE/_MOTIF_WM_HINTS, delaying request\n", data->hwnd, data->whole_window );
@@ -1566,6 +1578,46 @@ static void set_xembed_flags( struct x11drv_win_data *data, unsigned long flags 
                      x11drv_atom(_XEMBED_INFO), 32, PropModeReplace, (unsigned char*)info, 2 );
 }
 
+static void raise_compositor_outputs_after_map( struct x11drv_win_data *data )
+{
+    unsigned long count, remaining;
+    unsigned char *value;
+    Window root, parent, *children;
+    unsigned int i, child_count;
+    Atom type;
+    int format;
+
+    X11DRV_expect_error( data->display, host_window_error, NULL );
+    if (XQueryTree( data->display, root_window, &root, &parent, &children, &child_count ))
+    {
+        for (i = 0; i < child_count; ++i)
+        {
+            value = NULL;
+            if (XGetWindowProperty( data->display, children[i], x11drv_atom(_WINE_DWM_OUTPUT),
+                    0, 1, False, XA_CARDINAL, &type, &format, &count, &remaining, &value )
+                    == Success && type == XA_CARDINAL && format == 32 && count == 1)
+            {
+                TRACE( "raising compositor output %lx after mapping %p/%lx\n",
+                        children[i], data->hwnd, data->whole_window );
+                XRaiseWindow( data->display, children[i] );
+            }
+            if (value) XFree( value );
+        }
+        XFree( children );
+    }
+    XSync( data->display, False );
+    X11DRV_check_error();
+}
+
+static void mark_compositor_output( struct x11drv_win_data *data )
+{
+    unsigned long value = 1;
+
+    if (!is_compositor_output_window( data->hwnd )) return;
+    XChangeProperty( data->display, data->whole_window, x11drv_atom(_WINE_DWM_OUTPUT),
+            XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&value, 1 );
+}
+
 static void window_set_wm_state( struct x11drv_win_data *data, UINT new_state, BOOL activate )
 {
     UINT old_state = data->pending_state.wm_state;
@@ -1632,7 +1684,11 @@ static void window_set_wm_state( struct x11drv_win_data *data, UINT new_state, B
     case MAKELONG(WithdrawnState, NormalState):
     case MAKELONG(IconicState, NormalState):
         if (data->embedded) set_xembed_flags( data, XEMBED_MAPPED );
-        else XMapWindow( data->display, data->whole_window );
+        else
+        {
+            XMapWindow( data->display, data->whole_window );
+            raise_compositor_outputs_after_map( data );
+        }
         break;
     case MAKELONG(NormalState, WithdrawnState):
     case MAKELONG(IconicState, WithdrawnState):
@@ -1792,7 +1848,7 @@ static void window_request_desired_state( struct x11drv_win_data *data )
     window_set_net_wm_state( data, data->desired_state.net_wm_state );
     window_set_net_wm_fullscreen_monitors( data, &data->desired_state.monitors );
     window_set_mwm_hints( data, &data->desired_state.mwm_hints );
-    window_set_config( data, data->desired_state.rect, FALSE );
+    window_set_config( data, data->desired_state.rect, FALSE, FALSE );
 }
 
 /***********************************************************************
@@ -2168,7 +2224,7 @@ static void sync_window_position( struct x11drv_win_data *data, UINT swp_flags, 
     if (data->is_offscreen) OffsetRect( &new_rect, window_rect.left - old_rects->window.left,
                                         window_rect.top - old_rects->window.top );
 
-    window_set_config( data, new_rect, above );
+    window_set_config( data, new_rect, above, above && !(swp_flags & SWP_NOZORDER) );
 }
 
 
@@ -2462,6 +2518,7 @@ static void create_whole_window( struct x11drv_win_data *data )
 
     XSaveContext( data->display, data->whole_window, winContext, (char *)data->hwnd );
     NtUserSetProp( data->hwnd, whole_window_prop, (HANDLE)data->whole_window );
+    mark_compositor_output( data );
 
     /* set the window text */
     if (!NtUserInternalGetWindowText( data->hwnd, text, ARRAY_SIZE( text ))) text[0] = 0;
