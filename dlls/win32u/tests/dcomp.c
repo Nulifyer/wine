@@ -1755,7 +1755,10 @@ static void test_published_shared_resource_ordering(void)
 
 static void test_published_shared_resource_target_fifo(void)
 {
-    static const UINT expected_interaction[] = {16, 0x28, 1, 0x59};
+    static const UINT expected_interaction[] = {
+        16, 0x28, 1, 0x59,
+        16, 0xb9, 1, 0,
+    };
     static const UINT expected_manipulation[] =
     {
         16, 0x28, 1, 0x6a,
@@ -1923,7 +1926,10 @@ done:
 
 static void test_duplicate_prerequisite_selection(void)
 {
-    static const UINT expected_source[] = {16, 0x28, 1, 0x59};
+    static const UINT expected_source[] = {
+        16, 0x28, 1, 0x59,
+        16, 0xb9, 1, 0,
+    };
     static const UINT expected_system[] = {16, 0x28, 1, 0x82};
     UINT expected_source_begin[4] = {16, 0x26, 1, 0};
     UINT expected_system_begin[4] = {16, 0x26, 1, 0};
@@ -2111,7 +2117,10 @@ done:
 
 static void test_held_release_wire_id_reuse(void)
 {
-    static const UINT expected_initial[] = {16, 0x28, 1, 0x59};
+    static const UINT expected_initial[] = {
+        16, 0x28, 1, 0x59,
+        16, 0xb9, 1, 0,
+    };
     static const UINT expected_source[] =
     {
         16, 0x28, 1, 0x6a,
@@ -3944,10 +3953,16 @@ static void test_visual_target_root_lifecycle(void)
             0, 0x3f800000, 0, 0,
             0, 0, 0x3f800000, 0,
             0, 0, 0, 0x3f800000,
+        16, 0xb9, 9, 0,
         16, 0x194, 3, 9,
         16, 0x1a0, 3, 8,
         16, 0x18c, 3, 7,
         16, 0x16e, 5, 6,
+    };
+    static const UINT expected_interaction_update[] = {
+        24, 0xbb, 9, 0, 0x101, 1,
+        36, 0xba, 9, 1, 0, 1, 1, 1, 5,
+        28, 0xba, 9, 1, 1, 4, 2,
     };
     static const UINT expected_interaction_clear[] = {
         16, 0x194, 3, 0,
@@ -4128,6 +4143,34 @@ static void test_visual_target_root_lifecycle(void)
     ok( status == STATUS_SUCCESS, "got visual content batch status %#lx\n", status );
     check_dcomp_batch_payload( record, channel, expected_visual_content,
                                sizeof(expected_visual_content), "visual content" );
+
+    command[0] = 11; command[1] = 9; command[2] = 10; command[3] = 0;
+    command[4] = 1; command[5] = 0;
+    command[6] = 11; command[7] = 9; command[8] = 11; command[9] = 0;
+    command[10] = 1; command[11] = 0;
+    command[12] = 11; command[13] = 9; command[14] = 0x11; command[15] = 0;
+    command[16] = 1; command[17] = 0;
+    command[18] = 15; command[19] = 9; command[20] = 1; command[21] = 16;
+    command[22] = 1; command[23] = 1; command[24] = 1; command[25] = 3;
+    command[26] = 15; command[27] = 9; command[28] = 1; command[29] = 16;
+    command[30] = 1; command[31] = 1; command[32] = 1; command[33] = 4;
+    command[34] = 15; command[35] = 9; command[36] = 2; command[37] = 16;
+    command[38] = 1; command[39] = 1; command[40] = 1; command[41] = 2;
+    command[42] = 15; command[43] = 9; command[44] = 8; command[45] = 16;
+    command[46] = 4; command[47] = 3; command[48] = 0; command[49] = 0;
+    command[50] = 15; command[51] = 9; command[52] = 9; command[53] = 16;
+    command[54] = 4; command[55] = 1; command[56] = 0; command[57] = 0;
+    memcpy( buffer, command, 232 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 232, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got interaction update process status %#lx\n", status );
+    ok( processed == 8, "got interaction update process count %lu\n", processed );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got interaction update commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got interaction update batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_interaction_update,
+                               sizeof(expected_interaction_update), "interaction update" );
 
     command[0] = 15; command[1] = 8; command[2] = 9; command[3] = 64;
     memset( command + 4, 0, 64 );

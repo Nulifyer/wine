@@ -81,6 +81,22 @@ struct dcomp_weak_reference
     struct dcomp_resource_view *target;
 };
 
+struct dcomp_interaction_range
+{
+    UINT first;
+    UINT last;
+    UINT flags;
+};
+
+struct dcomp_interaction_configuration_group
+{
+    struct dcomp_interaction_range *ranges[3];
+    UINT range_count[3];
+    UINT mouse_flags;
+    UINT mouse_wheel_flags;
+    UINT dirty;
+};
+
 struct dcomp_resource_view
 {
     struct list entry;
@@ -287,6 +303,16 @@ struct dcomp_resource_view
     UINT manipulation_tracing_cookie;
     BOOL manipulation_components_dirty;
     BOOL manipulation_cookie_dirty;
+    struct dcomp_interaction_configuration_group interaction_groups[2];
+    UINT interaction_process_id;
+    UINT interaction_input_source;
+    BYTE interaction_flags[6];
+    BYTE interaction_rails[2];
+    BYTE interaction_disable_output_prediction;
+    BOOL interaction_process_id_dirty;
+    BOOL interaction_flags_dirty;
+    BOOL interaction_rails_dirty;
+    BOOL interaction_disable_output_prediction_dirty;
 };
 
 struct dcomp_connection_batch_view
@@ -806,7 +832,12 @@ static void release_dcomp_resource_reference( struct dcomp_resource_view *resour
 
 static void free_dcomp_resource_view( struct dcomp_resource_view *resource )
 {
+    UINT group, kind;
+
     if (resource->composition_surface) NtClose( resource->composition_surface );
+    for (group = 0; group < ARRAY_SIZE(resource->interaction_groups); ++group)
+        for (kind = 0; kind < ARRAY_SIZE(resource->interaction_groups[group].ranges); ++kind)
+            free( resource->interaction_groups[group].ranges[kind] );
     free( resource->properties );
     free( resource->expression_sources );
     free( resource->expression_reference_info );
@@ -1005,6 +1036,13 @@ static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource
     {
         resource->render_target_scale2 = 1.0f;
         resource->render_target_sdr_to_hdr = 1.0f;
+    }
+    if (type == 0x59)
+    {
+        resource->interaction_input_source = 4;
+        resource->interaction_rails[0] = 1;
+        resource->interaction_rails[1] = 1;
+        resource->interaction_process_id_dirty = TRUE;
     }
     if (type == 0x6a)
     {
@@ -1355,6 +1393,205 @@ static NTSTATUS set_dcomp_manipulation_buffer_property( struct dcomp_resource_vi
         return STATUS_INVALID_PARAMETER;
     memcpy( resource->manipulation_components + (property - 1) * 3, data, size );
     resource->manipulation_components_dirty = TRUE;
+    return STATUS_SUCCESS;
+}
+
+static void append_dcomp_interaction_range( struct dcomp_interaction_range *ranges,
+                                             UINT *count, UINT first, UINT last,
+                                             UINT flags )
+{
+    struct dcomp_interaction_range *previous;
+
+    if (!flags || first > last) return;
+    if (*count)
+    {
+        previous = ranges + *count - 1;
+        if (previous->flags == flags && previous->last != ~0u &&
+            previous->last + 1 == first)
+        {
+            previous->last = last;
+            return;
+        }
+    }
+    ranges[*count].first = first;
+    ranges[*count].last = last;
+    ranges[*count].flags = flags;
+    ++*count;
+}
+
+static NTSTATUS update_dcomp_interaction_ranges(
+        struct dcomp_interaction_configuration_group *group, UINT kind,
+        UINT property, UINT first, UINT last, UINT flags )
+{
+    struct dcomp_interaction_range *old_ranges = group->ranges[kind];
+    struct dcomp_interaction_range *new_ranges, *old;
+    UINT old_count = group->range_count[kind], new_count = 0, i;
+    UINT64 cursor;
+    size_t max_count;
+    BOOL add = property == 1 || property == 8;
+
+    if (first > last) return STATUS_INVALID_PARAMETER;
+    if (property == 3)
+    {
+        max_count = !!flags;
+        if (max_count && !(new_ranges = malloc( sizeof(*new_ranges) )))
+            return STATUS_NO_MEMORY;
+        if (!max_count) new_ranges = NULL;
+        else
+        {
+            new_ranges[0].first = first;
+            new_ranges[0].last = last;
+            new_ranges[0].flags = flags;
+            new_count = 1;
+        }
+    }
+    else
+    {
+        max_count = (size_t)old_count * 3 + 1;
+        if (!(new_ranges = malloc( max_count * sizeof(*new_ranges) )))
+            return STATUS_NO_MEMORY;
+
+        cursor = first;
+        for (i = 0; i < old_count; ++i)
+        {
+            UINT overlap_first, overlap_last, updated_flags;
+
+            old = old_ranges + i;
+            if (old->last < first)
+            {
+                append_dcomp_interaction_range( new_ranges, &new_count,
+                                                old->first, old->last, old->flags );
+                continue;
+            }
+            if (old->first > last)
+            {
+                if (add && cursor <= last)
+                {
+                    append_dcomp_interaction_range( new_ranges, &new_count,
+                                                    cursor, last, flags );
+                    cursor = (UINT64)last + 1;
+                }
+                append_dcomp_interaction_range( new_ranges, &new_count,
+                                                old->first, old->last, old->flags );
+                continue;
+            }
+            if (old->first < first)
+                append_dcomp_interaction_range( new_ranges, &new_count,
+                                                old->first, first - 1, old->flags );
+
+            overlap_first = max( old->first, first );
+            overlap_last = min( old->last, last );
+            if (add && cursor < overlap_first)
+                append_dcomp_interaction_range( new_ranges, &new_count, cursor,
+                                                overlap_first - 1, flags );
+            updated_flags = add ? old->flags | flags : old->flags & ~flags;
+            append_dcomp_interaction_range( new_ranges, &new_count, overlap_first,
+                                            overlap_last, updated_flags );
+            cursor = (UINT64)overlap_last + 1;
+
+            if (old->last > last)
+                append_dcomp_interaction_range( new_ranges, &new_count,
+                                                last + 1, old->last, old->flags );
+        }
+        if (add && cursor <= last)
+            append_dcomp_interaction_range( new_ranges, &new_count, cursor, last, flags );
+    }
+
+    if (new_count == old_count &&
+        (!new_count || !memcmp( new_ranges, old_ranges, new_count * sizeof(*new_ranges) )))
+    {
+        free( new_ranges );
+        return STATUS_SUCCESS;
+    }
+    free( old_ranges );
+    group->ranges[kind] = new_ranges;
+    group->range_count[kind] = new_count;
+    group->dirty |= 1u << kind;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_interaction_buffer_property( struct dcomp_resource_view *resource,
+                                                        UINT property, const BYTE *data,
+                                                        UINT size )
+{
+    struct dcomp_interaction_configuration_group *group;
+    UINT values[4], kind, flags, *target;
+
+    if (resource->type != 0x59) return STATUS_NOT_SUPPORTED;
+    if (size != sizeof(values)) return STATUS_INVALID_PARAMETER;
+    if (property >= 1 && property <= 3) group = resource->interaction_groups;
+    else if (property == 8 || property == 9) group = resource->interaction_groups + 1;
+    else return STATUS_NOT_SUPPORTED;
+
+    memcpy( values, data, sizeof(values) );
+    kind = values[0];
+    flags = values[3];
+    if (kind < 1 || kind > 5) return STATUS_INVALID_PARAMETER;
+    if (kind <= 3)
+        return update_dcomp_interaction_ranges( group, kind - 1, property,
+                                                values[1], values[2], flags );
+
+    target = kind == 4 ? &group->mouse_flags : &group->mouse_wheel_flags;
+    flags = property == 3 ? values[1] :
+            property == 1 || property == 8 ? *target | values[1] :
+                                             *target & ~values[1];
+    if (*target != flags)
+    {
+        *target = flags;
+        group->dirty |= 1u << (kind - 1);
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_interaction_integer_property( struct dcomp_resource_view *resource,
+                                                         UINT property, INT64 value )
+{
+    BYTE bool_value = !!value, *target;
+
+    if (resource->type != 0x59) return STATUS_NOT_SUPPORTED;
+    switch (property)
+    {
+    case 4:
+        if (resource->interaction_process_id == (UINT)value) return STATUS_SUCCESS;
+        resource->interaction_process_id = value;
+        resource->interaction_process_id_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 5: target = resource->interaction_flags + 0; break;
+    case 6: target = resource->interaction_flags + 1; break;
+    case 7: target = resource->interaction_flags + 2; break;
+    case 10: target = resource->interaction_flags + 4; break;
+    case 11: target = resource->interaction_flags + 5; break;
+    case 13: target = resource->interaction_rails + 0; break;
+    case 14: target = resource->interaction_rails + 1; break;
+    case 15:
+        target = &resource->interaction_disable_output_prediction;
+        if (*target == bool_value) return STATUS_SUCCESS;
+        *target = bool_value;
+        resource->interaction_disable_output_prediction_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 17:
+        if (resource->interaction_input_source == (UINT)value) return STATUS_SUCCESS;
+        resource->interaction_input_source = value;
+        resource->interaction_flags_dirty = TRUE;
+        return STATUS_SUCCESS;
+    case 18:
+        if (!value) return STATUS_INVALID_PARAMETER;
+        target = resource->interaction_flags + 3;
+        if (*target == bool_value) return STATUS_SUCCESS;
+        *target = bool_value;
+        resource->interaction_rails[0] = 0;
+        resource->interaction_rails[1] = 0;
+        resource->interaction_rails_dirty = TRUE;
+        resource->interaction_flags_dirty = TRUE;
+        return STATUS_SUCCESS;
+    default:
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    if (*target == bool_value) return STATUS_SUCCESS;
+    *target = bool_value;
+    if (property == 13 || property == 14) resource->interaction_rails_dirty = TRUE;
+    else resource->interaction_flags_dirty = TRUE;
     return STATUS_SUCCESS;
 }
 
@@ -2792,6 +3029,11 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                 status = set_dcomp_manipulation_integer_property( resource, property, value );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 0x59 && !resource->shared_duplicate)
+            {
+                status = set_dcomp_interaction_integer_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
             else if (resource->type == 0x41)
             {
                 if ((status = set_dcomp_gdi_sprite_integer_property( resource,
@@ -2911,6 +3153,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                 if ((status = set_dcomp_manipulation_buffer_property( resource, property,
                                                                        buffer + 16, size )))
                     return status;
+            }
+            else if (resource->type == 0x59 && !resource->shared_duplicate)
+            {
+                status = set_dcomp_interaction_buffer_property( resource, property,
+                                                                 buffer + 16, size );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
             else if (resource->type == 0x60)
             {
@@ -3912,6 +4160,144 @@ static BYTE *emit_dcomp_manipulation_updates( BYTE *cursor,
     return cursor;
 }
 
+static data_size_t dcomp_interaction_update_size( const struct dcomp_resource_view *resource )
+{
+    const struct dcomp_interaction_configuration_group *group;
+    data_size_t size = 0;
+    UINT i, kind;
+
+    if (resource->shared_duplicate) return 0;
+    if (resource->interaction_process_id_dirty) size += 16;
+    if (resource->interaction_flags_dirty) size += 24;
+    if (resource->interaction_rails_dirty) size += 16;
+    if (resource->interaction_disable_output_prediction_dirty) size += 16;
+    for (i = 0; i < ARRAY_SIZE(resource->interaction_groups); ++i)
+    {
+        group = resource->interaction_groups + i;
+        for (kind = 0; kind < 5; ++kind)
+        {
+            if (!(group->dirty & (1u << kind))) continue;
+            if (kind < 3) size += 24 + group->range_count[kind] * 12;
+            else if (kind == 3) size += 28;
+            else size += 36;
+        }
+    }
+    return size;
+}
+
+static BYTE *emit_dcomp_interaction_configuration(
+        BYTE *cursor, const struct dcomp_resource_view *resource, UINT group_index,
+        UINT kind )
+{
+    const struct dcomp_interaction_configuration_group *group =
+        resource->interaction_groups + group_index;
+    const struct dcomp_interaction_range *range;
+    UINT command[9], count, i, size;
+
+    memset( command, 0, sizeof(command) );
+    if (kind < 3)
+    {
+        count = group->range_count[kind];
+        size = 24 + count * 12;
+    }
+    else
+    {
+        count = 1;
+        size = kind == 3 ? 28 : 36;
+    }
+    command[0] = size;
+    command[1] = 0xba; /* MILCMD_INTERACTION_UPDATECONFIGURATION */
+    command[2] = resource->id;
+    command[3] = count;
+    command[4] = group_index;
+    command[5] = kind + 1;
+    memcpy( cursor, command, 24 );
+    cursor += 24;
+
+    if (kind < 3)
+    {
+        for (i = 0; i < count; ++i)
+        {
+            range = group->ranges[kind] + i;
+            memcpy( cursor, range, sizeof(*range) );
+            cursor += sizeof(*range);
+        }
+    }
+    else if (kind == 3)
+    {
+        memcpy( cursor, &group->mouse_flags, sizeof(group->mouse_flags) );
+        cursor += sizeof(group->mouse_flags);
+    }
+    else
+    {
+        command[0] = 1;
+        command[1] = ~0u;
+        command[2] = group->mouse_wheel_flags;
+        memcpy( cursor, command, 12 );
+        cursor += 12;
+    }
+    return cursor;
+}
+
+static BYTE *emit_dcomp_interaction_updates( BYTE *cursor,
+                                              const struct dcomp_resource_view *resource )
+{
+    const struct dcomp_interaction_configuration_group *group;
+    UINT command[6], i, kind;
+
+    if (resource->shared_duplicate) return cursor;
+    if (resource->interaction_process_id_dirty)
+    {
+        command[0] = 16;
+        command[1] = 0xb9; /* MILCMD_INTERACTION_SETPROCESSID */
+        command[2] = resource->id;
+        command[3] = resource->interaction_process_id;
+        memcpy( cursor, command, 16 );
+        cursor += 16;
+    }
+    if (resource->interaction_flags_dirty)
+    {
+        memset( command, 0, sizeof(command) );
+        command[0] = 24;
+        command[1] = 0xbb; /* MILCMD_INTERACTION_UPDATEFLAGS */
+        command[2] = resource->id;
+        memcpy( (BYTE *)command + 12, resource->interaction_flags,
+                sizeof(resource->interaction_flags) );
+        command[5] = resource->interaction_input_source;
+        memcpy( cursor, command, 24 );
+        cursor += 24;
+    }
+    if (resource->interaction_rails_dirty)
+    {
+        memset( command, 0, 16 );
+        command[0] = 16;
+        command[1] = 0xbc; /* MILCMD_INTERACTION_UPDATERAILS */
+        command[2] = resource->id;
+        memcpy( (BYTE *)command + 12, resource->interaction_rails,
+                sizeof(resource->interaction_rails) );
+        memcpy( cursor, command, 16 );
+        cursor += 16;
+    }
+    for (i = 0; i < ARRAY_SIZE(resource->interaction_groups); ++i)
+    {
+        group = resource->interaction_groups + i;
+        for (kind = 0; kind < 5; ++kind)
+            if (group->dirty & (1u << kind))
+                cursor = emit_dcomp_interaction_configuration( cursor, resource, i, kind );
+    }
+    if (resource->interaction_disable_output_prediction_dirty)
+    {
+        memset( command, 0, 16 );
+        command[0] = 16;
+        command[1] = 0xb5; /* MILCMD_INTERACTION_DISABLEOUTPUTPREDICTION */
+        command[2] = resource->id;
+        ((BYTE *)command)[12] = resource->interaction_disable_output_prediction;
+        memcpy( cursor, command, 16 );
+        cursor += 16;
+    }
+    return cursor;
+}
+
 static data_size_t dcomp_animation_update_size( const struct dcomp_resource_view *resource )
 {
     data_size_t size = 0;
@@ -4281,6 +4667,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             resource_size += dcomp_keyframe_update_size( resource );
         if (!resource->released && resource->type == 0x6a)
             resource_size += dcomp_manipulation_update_size( resource );
+        if (!resource->released && resource->type == 0x59)
+            resource_size += dcomp_interaction_update_size( resource );
         if (!resource->released && resource->type == 0x2a &&
             resource->composition_surface_dirty) resource_size += 28;
         if (!resource->released && resource->type == 0xa9)
@@ -4520,6 +4908,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             cursor = emit_dcomp_keyframe_updates( cursor, resource );
         if (resource->type == 0x6a)
             cursor = emit_dcomp_manipulation_updates( cursor, resource );
+        if (resource->type == 0x59)
+            cursor = emit_dcomp_interaction_updates( cursor, resource );
     }
     LIST_FOR_EACH_ENTRY( resource, &view->resources, struct dcomp_resource_view, entry )
     {
@@ -4676,6 +5066,12 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view,
             resource->keyframe_playback_state_dirty = FALSE;
             resource->manipulation_components_dirty = FALSE;
             resource->manipulation_cookie_dirty = FALSE;
+            resource->interaction_process_id_dirty = FALSE;
+            resource->interaction_flags_dirty = FALSE;
+            resource->interaction_rails_dirty = FALSE;
+            resource->interaction_disable_output_prediction_dirty = FALSE;
+            resource->interaction_groups[0].dirty = 0;
+            resource->interaction_groups[1].dirty = 0;
             if (resource->shared_section_bound) resource->shared_section_announced = TRUE;
         }
     }
