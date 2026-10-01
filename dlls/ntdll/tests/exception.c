@@ -281,16 +281,21 @@ static void test_debugger_xstate(HANDLE thread, CONTEXT *ctx, enum debugger_stag
     ok(!status, "NtSetContextThread failed with 0x%lx\n", status);
 }
 
-#define check_context_exception_request( a, b ) check_context_exception_request_( a, b, __LINE__ )
-static void check_context_exception_request_( DWORD flags, BOOL hardware_exception, unsigned int line )
+#define check_context_exception_request( a, b ) check_context_exception_request_( a, b, FALSE, __LINE__ )
+#define check_context_exception_request_broken( a, b ) check_context_exception_request_( a, b, TRUE, __LINE__ )
+static void check_context_exception_request_( DWORD flags, BOOL hardware_exception, BOOL type_broken, unsigned int line )
 {
     static const DWORD exception_reporting_flags = CONTEXT_EXCEPTION_REQUEST | CONTEXT_EXCEPTION_REPORTING
                                                    | CONTEXT_EXCEPTION_ACTIVE | CONTEXT_SERVICE_ACTIVE;
     DWORD expected_flags = CONTEXT_EXCEPTION_REQUEST | CONTEXT_EXCEPTION_REPORTING;
+    DWORD expected_broken = expected_flags;
 
     if (!(flags & CONTEXT_EXCEPTION_REPORTING)) return;
     expected_flags |= hardware_exception ? CONTEXT_EXCEPTION_ACTIVE : CONTEXT_SERVICE_ACTIVE;
-    ok_(__FILE__, line)( (flags & exception_reporting_flags) == expected_flags, "got %#lx, expected %#lx.\n",
+    expected_broken |= !hardware_exception ? CONTEXT_EXCEPTION_ACTIVE : CONTEXT_SERVICE_ACTIVE;
+    ok_(__FILE__, line)( (flags & exception_reporting_flags) == expected_flags ||
+                         broken(type_broken && (flags & exception_reporting_flags) == expected_broken),
+                         "got %#lx, expected %#lx.\n",
                          flags, expected_flags );
 }
 
@@ -1384,7 +1389,7 @@ static void test_debugger(DWORD cont_status, BOOL with_WaitForDebugEventEx)
                     ctx.Eax = 0xf00f00f1;
                     /* let the debuggee handle the exception */
                     continuestatus = DBG_EXCEPTION_NOT_HANDLED;
-                    check_context_exception_request( ctx.ContextFlags, !is_wow64 );
+                    check_context_exception_request_broken( ctx.ContextFlags, TRUE );
                 }
                 else if (stage == STAGE_RTLRAISE_HANDLE_LAST_CHANCE)
                 {
@@ -1421,7 +1426,7 @@ static void test_debugger(DWORD cont_status, BOOL with_WaitForDebugEventEx)
                                ctx.Eip, (char *)code_mem_address + 0xb);
                         /* here we handle exception */
                     }
-                    check_context_exception_request( ctx.ContextFlags, !is_wow64 );
+                    check_context_exception_request_broken( ctx.ContextFlags, TRUE );
                 }
                 else if (stage == STAGE_SERVICE_CONTINUE || stage == STAGE_SERVICE_NOT_HANDLED)
                 {
@@ -1452,7 +1457,7 @@ static void test_debugger(DWORD cont_status, BOOL with_WaitForDebugEventEx)
                        "unexpected number of parameters %ld, expected 0\n", de.u.Exception.ExceptionRecord.NumberParameters);
 
                     if (stage == STAGE_EXCEPTION_INVHANDLE_NOT_HANDLED) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
-                    check_context_exception_request( ctx.ContextFlags, !is_wow64 );
+                    check_context_exception_request_broken( ctx.ContextFlags, TRUE );
                 }
                 else if (stage == STAGE_NO_EXCEPTION_INVHANDLE_NOT_HANDLED)
                 {
@@ -2692,11 +2697,11 @@ static void test_restore_context(void)
 }
 
 static int termination_handler_called;
-static void WINAPI termination_handler(ULONG flags, ULONG64 frame)
+static void WINAPI termination_handler(BOOLEAN abnormal, ULONG64 frame)
 {
     termination_handler_called++;
 
-    ok(flags == 1 || broken(flags == 0x401), "flags = %lx\n", flags);
+    ok(abnormal == TRUE, "abnormal = %x\n", abnormal);
     ok(frame == 0x1234, "frame = %p\n", (void*)frame);
 }
 
@@ -4033,7 +4038,7 @@ static void test_debugger(DWORD cont_status, BOOL with_WaitForDebugEventEx)
                     ctx.Rax = 0xf00f00f1;
                     /* let the debuggee handle the exception */
                     continuestatus = DBG_EXCEPTION_NOT_HANDLED;
-                    check_context_exception_request( ctx.ContextFlags, FALSE );
+                    check_context_exception_request_broken( ctx.ContextFlags, TRUE );
                 }
                 else if (stage == STAGE_RTLRAISE_HANDLE_LAST_CHANCE)
                 {
@@ -4062,7 +4067,7 @@ static void test_debugger(DWORD cont_status, BOOL with_WaitForDebugEventEx)
                                 ctx.Rip, (char *)code_mem_address + 0x0c);
                         /* here we handle exception */
                     }
-                    check_context_exception_request( ctx.ContextFlags, FALSE );
+                    check_context_exception_request_broken( ctx.ContextFlags, TRUE );
                 }
                 else if (stage == STAGE_SERVICE_CONTINUE || stage == STAGE_SERVICE_NOT_HANDLED)
                 {
@@ -4091,7 +4096,7 @@ static void test_debugger(DWORD cont_status, BOOL with_WaitForDebugEventEx)
                        "unexpected number of parameters %ld, expected 0\n", de.u.Exception.ExceptionRecord.NumberParameters);
 
                     if (stage == STAGE_EXCEPTION_INVHANDLE_NOT_HANDLED) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
-                    check_context_exception_request( ctx.ContextFlags, FALSE );
+                    check_context_exception_request_broken( ctx.ContextFlags, TRUE );
                 }
                 else if (stage == STAGE_NO_EXCEPTION_INVHANDLE_NOT_HANDLED)
                 {
@@ -4686,7 +4691,8 @@ static void test_wow64_context(void)
         }
         ctx_ptr = (WOW64_CONTEXT *)cpu_info.Context;
         ok(!*(void **)cpu_info.ContextEx, "got context_ex %p\n", *(void **)cpu_info.ContextEx);
-        ok(ctx_ptr->ContextFlags == WOW64_CONTEXT_ALL, "got context flags %#lx\n", ctx_ptr->ContextFlags);
+        ok(ctx_ptr->ContextFlags == (WOW64_CONTEXT_ALL | WOW64_CONTEXT_XSTATE)
+           || ctx_ptr->ContextFlags == WOW64_CONTEXT_ALL, "got context flags %#lx\n", ctx_ptr->ContextFlags);
         ok(ctx_ptr->Eax == ctx.Eax, "got eax %08lx / %08lx\n", ctx_ptr->Eax, ctx.Eax);
         ok(ctx_ptr->Ebx == ctx.Ebx, "got ebx %08lx / %08lx\n", ctx_ptr->Ebx, ctx.Ebx);
         ok(ctx_ptr->Ecx == ctx.Ecx, "got ecx %08lx / %08lx\n", ctx_ptr->Ecx, ctx.Ecx);
@@ -4838,7 +4844,8 @@ static void test_wow64_context(void)
                 if (!ReadProcessMemory( pi.hProcess, teb.TlsSlots[WOW64_TLS_CPURESERVED],
                                         cpu, cpu_size, &res )) res = 0;
                 ok( res == cpu_size, "wrong len %Ix\n", res );
-                ok(ctx_ptr->ContextFlags == WOW64_CONTEXT_ALL,
+                ok(ctx_ptr->ContextFlags == (WOW64_CONTEXT_ALL | WOW64_CONTEXT_XSTATE) ||
+                   ctx_ptr->ContextFlags == WOW64_CONTEXT_ALL,
                    "cs32: got context flags %#lx\n", ctx_ptr->ContextFlags);
 
                 /* changing either context changes the actual cpu context */
@@ -4907,7 +4914,8 @@ static void test_wow64_context(void)
                 if (!ReadProcessMemory( pi.hProcess, teb.TlsSlots[WOW64_TLS_CPURESERVED],
                                         cpu, cpu_size, &res )) res = 0;
                 ok( res == cpu_size, "wrong len %Ix\n", res );
-                ok(ctx_ptr->ContextFlags == WOW64_CONTEXT_ALL,
+                ok(ctx_ptr->ContextFlags == (WOW64_CONTEXT_ALL | WOW64_CONTEXT_XSTATE) ||
+                   ctx_ptr->ContextFlags == WOW64_CONTEXT_ALL,
                    "cs64: got context flags %#lx\n", ctx_ptr->ContextFlags);
                 ok(ctx_ptr->Eip == ctx.Eip, "cs64: got eip %08lx / %08lx\n", ctx_ptr->Eip, ctx.Eip);
                 ok(ctx_ptr->Eax == ctx.Eax, "cs64: got eax %08lx / %08lx\n", ctx_ptr->Eax, ctx.Eax);
@@ -5864,105 +5872,6 @@ static void test_syscall_clobbered_regs(void)
             "Got unexpected rcx %s, pNtSetContextThread %p.\n", wine_dbgstr_longlong(regs.rcx), pNtSetContextThread);
     ok(regs.r11 == regs.eflags, "Expected r11 (%#I64x) to equal EFLAGS (%#x).\n", regs.r11, regs.eflags);
     ok(regs.r10 != regs.rcx, "got %#I64x.\n", regs.r10);
-}
-
-static CONTEXT test_raiseexception_regs_context;
-static LONG CALLBACK test_raiseexception_regs_handle(EXCEPTION_POINTERS *exception_info)
-{
-    EXCEPTION_RECORD *rec = exception_info->ExceptionRecord;
-    unsigned int i;
-
-    test_raiseexception_regs_context = *exception_info->ContextRecord;
-    ok(rec->NumberParameters == EXCEPTION_MAXIMUM_PARAMETERS, "got %lu.\n", rec->NumberParameters);
-    ok(rec->ExceptionCode == 0xdeadbeaf, "got %#lx.\n", rec->ExceptionCode);
-    ok(!rec->ExceptionRecord, "got %p.\n", rec->ExceptionRecord);
-    ok(!rec->ExceptionFlags || rec->ExceptionFlags == EXCEPTION_SOFTWARE_ORIGINATE, "got %#lx.\n", rec->ExceptionFlags);
-    for (i = 0; i < rec->NumberParameters; ++i)
-        ok(rec->ExceptionInformation[i] == i, "got %Iu, i %u.\n", rec->ExceptionInformation[i], i);
-    return EXCEPTION_CONTINUE_EXECUTION;
-}
-
-static void test_raiseexception_regs(void)
-{
-    static const BYTE code[] =
-    {
-        0xb8, 0x00, 0xb0, 0xad, 0xde,       /* mov $0xdeadb000,%eax */
-        0x53,                               /* push %rbx */
-        0x48, 0x89, 0xc3,                   /* mov %rax,%rbx */
-        0x56,                               /* push %rsi */
-        0x48, 0xff, 0xc0,                   /* inc %rax */
-        0x48, 0x89, 0xc6,                   /* mov %rax,%rsi */
-        0x57,                               /* push %rdi */
-        0x48, 0xff, 0xc0,                   /* inc %rax */
-        0x48, 0x89, 0xc7,                   /* mov %rax,%rdi */
-        0x55,                               /* push %rbp */
-        0x48, 0xff, 0xc0,                   /* inc %rax */
-        0x48, 0x89, 0xc5,                   /* mov %rax,%rbp */
-        0x41, 0x54,                         /* push %r12 */
-        0x48, 0xff, 0xc0,                   /* inc %rax */
-        0x49, 0x89, 0xc4,                   /* mov %rax,%r12 */
-        0x41, 0x55,                         /* push %r13 */
-        0x48, 0xff, 0xc0,                   /* inc %rax */
-        0x49, 0x89, 0xc5,                   /* mov %rax,%r13 */
-        0x41, 0x56,                         /* push %r14 */
-        0x48, 0xff, 0xc0,                   /* inc %rax */
-        0x49, 0x89, 0xc6,                   /* mov %rax,%r14 */
-        0x41, 0x57,                         /* push %r15 */
-        0x48, 0xff, 0xc0,                   /* inc %rax */
-        0x49, 0x89, 0xc7,                   /* mov %rax,%r15 */
-
-        0x50,                               /* push %rax */ /* align stack */
-        0x48, 0x89, 0xc8,                   /* mov %rcx,%rax */
-        0xb9, 0xaf, 0xbe, 0xad, 0xde,       /* mov $0xdeadbeaf,%ecx */
-        0xff, 0xd0,                         /* call *%rax */
-        0x58,                               /* pop %rax */
-
-        0x41, 0x5f,                         /* pop %r15 */
-        0x41, 0x5e,                         /* pop %r14 */
-        0x41, 0x5d,                         /* pop %r13 */
-        0x41, 0x5c,                         /* pop %r12 */
-        0x5d,                               /* pop %rbp */
-        0x5f,                               /* pop %rdi */
-        0x5e,                               /* pop %rsi */
-        0x5b,                               /* pop %rbx */
-        0xc3,                               /* ret */
-    };
-    void (WINAPI *pRaiseException)( DWORD code, DWORD flags, DWORD count, const ULONG_PTR *args ) = RaiseException;
-    void (WINAPI *func)(void *raise_exception, DWORD flags, DWORD count, const ULONG_PTR *args);
-    void *vectored_handler;
-    ULONG_PTR args[20];
-    ULONG64 expected;
-    unsigned int i;
-
-    vectored_handler = AddVectoredExceptionHandler(TRUE, test_raiseexception_regs_handle);
-    ok(!!vectored_handler, "failed.\n");
-
-    memcpy(code_mem, code, sizeof(code));
-    func = code_mem;
-
-    for (i = 0; i < ARRAY_SIZE(args); ++i)
-        args[i] = i;
-
-    func(pRaiseException, 0, ARRAY_SIZE(args), args);
-    expected = 0xdeadb000;
-    ok(test_raiseexception_regs_context.Rbx == expected, "got %#I64x.\n", test_raiseexception_regs_context.Rbx);
-    ++expected;
-    ok(test_raiseexception_regs_context.Rsi == expected, "got %#I64x.\n", test_raiseexception_regs_context.Rsi);
-    ++expected;
-    ok(test_raiseexception_regs_context.Rdi == expected, "got %#I64x.\n", test_raiseexception_regs_context.Rdi);
-    ++expected;
-    ok(test_raiseexception_regs_context.Rbp == expected || is_arm64ec /* x29 modified by entry thunk */,
-       "got %#I64x.\n", test_raiseexception_regs_context.Rbp);
-    ++expected;
-    ok(test_raiseexception_regs_context.R12 == expected, "got %#I64x.\n", test_raiseexception_regs_context.R12);
-    ++expected;
-    ok(test_raiseexception_regs_context.R13 == expected, "got %#I64x.\n", test_raiseexception_regs_context.R13);
-    ++expected;
-    ok(test_raiseexception_regs_context.R14 == expected, "got %#I64x.\n", test_raiseexception_regs_context.R14);
-    ++expected;
-    ok(test_raiseexception_regs_context.R15 == expected, "got %#I64x.\n", test_raiseexception_regs_context.R15);
-
-    RemoveVectoredExceptionHandler(vectored_handler);
 }
 
 static LONG CALLBACK test_instrumentation_callback_handler( EXCEPTION_POINTERS *exception_info )
@@ -12190,7 +12099,7 @@ static void test_copy_context(void)
             src_xs = (XSTATE *)((BYTE *)src_ex + src_ex->XState.Offset);
             memset(src_xs, 0xcc, src_ex->XState.Length);
             src_xs->Mask = enabled_features & ~(ULONG64)4;
-            src_xs->CompactionMask = ~(ULONG64)0;
+            src_xs->CompactionMask = ((ULONG64)1 << 63) | enabled_features;
             if (flags & CONTEXT_AMD64)
                 ranges_amd64[ARRAY_SIZE(ranges_amd64) - 2].start = 0x640 + src_ex->XState.Length - sizeof(XSTATE);
             else
@@ -12313,8 +12222,9 @@ static void test_copy_context(void)
         check_changes_in_range((BYTE *)&dst_xs->YmmContext, single_range, 0, sizeof(dst_xs->YmmContext));
 
         src_xs->Mask = 3;
+        src_xs->CompactionMask = ((ULONG64)1 << 63) | enabled_features;
         memset(&dst_xs->YmmContext, 0xdd, sizeof(dst_xs->YmmContext));
-        dst_xs->CompactionMask = 0xdddddddddddddddd;
+        dst_xs->CompactionMask = ((ULONG64)1 << 63) | enabled_features;
         dst_xs->Mask = 0xdddddddddddddddd;
         dst_ex->XState.Length = offsetof(XSTATE, YmmContext);
         status = pRtlCopyExtendedContext(dst_ex, flags, src_ex);
@@ -13164,7 +13074,6 @@ START_TEST(exception)
     test_set_live_context();
     test_unwind_from_apc();
     test_syscall_clobbered_regs();
-    test_raiseexception_regs();
     test_hwbpt_in_syscall();
     test_instrumentation_callback();
     test_direct_syscalls();

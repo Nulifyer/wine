@@ -391,7 +391,8 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         0,    /* TokenIsLessPrivilegedAppContainer */
         sizeof(DWORD), /* TokenIsSandboxed */
         0,    /* TokenIsAppSilo */
-        0     /* TokenLoggingInformation */
+        0,    /* TokenLoggingInformation */
+        0,    /* TokenLearningMode */
     };
 
     ULONG len = 0;
@@ -425,7 +426,7 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         return STATUS_SUCCESS;
     }
 
-    if (class < MaxTokenInfoClass) len = info_len[class];
+    if (class < ARRAY_SIZE(info_len)) len = info_len[class];
     if (retlen) *retlen = len;
     if (length < len) return STATUS_BUFFER_TOO_SMALL;
 

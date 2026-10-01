@@ -65,7 +65,7 @@ struct extension_entry
 };
 
 #define USE_GL_EXT(x) [x] = { .name = #x, .len = sizeof(#x) - 1 },
-static const struct extension_entry all_extensions[] = { ALL_GL_EXTS ALL_WGL_EXTS };
+static const struct extension_entry all_extensions[] = { ALL_EGL_EXTS ALL_GL_EXTS ALL_WGL_EXTS };
 #undef USE_GL_EXT
 #define USE_GL_EXT(x) + sizeof(#x)
 static const UINT MAX_EXTENSION_STR = 1 ALL_GL_EXTS ALL_WGL_EXTS;
@@ -138,12 +138,12 @@ static void init_wgl_extensions( const BOOLEAN extensions[GL_EXTENSION_COUNT] )
     UINT pos = 0, len = 0, ext;
     char *str;
 
-    for (ext = WGL_FIRST_EXTENSION; ext < GL_EXTENSION_COUNT; ext++)
+    for (ext = MIN_WGL_EXTENSION; ext <= MAX_WGL_EXTENSION; ext++)
         if (extensions[ext]) len += all_extensions[ext].len + 1;
 
     if (!(str = malloc( len + 1 ))) return;
 
-    for (ext = WGL_FIRST_EXTENSION; ext < GL_EXTENSION_COUNT; ext++)
+    for (ext = MIN_WGL_EXTENSION; ext <= MAX_WGL_EXTENSION; ext++)
         if (extensions[ext]) pos += sprintf( str + pos, "%s ", all_extensions[ext].name );
     str[pos - 1] = 0;
 
@@ -516,17 +516,17 @@ static struct display_lists *display_lists_acquire( struct display_lists *lists 
     return lists;
 }
 
-static void display_lists_release( struct display_lists *lists, BOOL destroy )
+static void display_lists_release( struct display_lists *lists, UINT64 root_context )
 {
-    BOOL current;
+    BOOL destroy = !!root_context;
 
     if (InterlockedDecrement( &lists->refcount )) return;
 
-    /* make sure there's a (dummy) context before destroying display list objects */
-    if ((current = destroy && !NtCurrentTeb()->glCurrentRC))
+    if (destroy)
     {
-        struct wglMakeContextCurrentARB_params args = { .teb = NtCurrentTeb(), .hglrc = (HGLRC)-1 };
-        UNIX_CALL( wglMakeContextCurrentARB, &args );
+        /* select the correct root context before destroying display list objects */
+        struct set_root_context_params params = { .teb = NtCurrentTeb(), .root_context = root_context };
+        UNIX_CALL( set_root_context, &params );
     }
 
     for (UINT i = 0; i < OBJ_TYPE_COUNT; i++)
@@ -542,10 +542,11 @@ static void display_lists_release( struct display_lists *lists, BOOL destroy )
         free( entry->user_data );
     }
 
-    if (current)
+    if (destroy)
     {
-        struct wglMakeContextCurrentARB_params args = { .teb = NtCurrentTeb() };
-        UNIX_CALL( wglMakeContextCurrentARB, &args );
+        /* restore the client context and drawables, or default root context */
+        struct set_root_context_params params = { .teb = NtCurrentTeb() };
+        UNIX_CALL( set_root_context, &params );
     }
 
     free( lists );
@@ -674,7 +675,7 @@ static struct handle_entry *alloc_client_context( struct context *share )
     if (!(context->lists = share ? display_lists_acquire( share->lists ) : display_lists_create())) goto failed;
     if ((ptr = alloc_handle( &contexts, context ))) return ptr;
 
-    display_lists_release( context->lists, share ? !share->base.broken_sharing : TRUE );
+    display_lists_release( context->lists, share ? share->base.root_context : 0 );
 failed:
     free( context );
     return NULL;
@@ -688,7 +689,7 @@ static void free_client_context( struct handle_entry *ptr )
     RB_FOR_EACH_ENTRY_DESTRUCTOR( str, next, &context->wow64_strings, struct string_entry, entry )
         free( str );
 
-    display_lists_release( context->lists, !context->base.broken_sharing );
+    display_lists_release( context->lists, context->base.root_context );
     free( context->extensions );
 
     free_handle( &contexts, ptr );
@@ -807,11 +808,11 @@ static void alloc_client_objects( struct context *ctx, enum object_type type, UI
 
 static BOOL is_core_context( struct opengl_client_context *ctx )
 {
-    if (ctx->major_version < 3) return FALSE;
-    if (ctx->major_version > 3) return !!(ctx->profile_mask & WGL_CONTEXT_CORE_PROFILE_BIT_ARB);
-    if (ctx->minor_version > 1) return !!(ctx->profile_mask & WGL_CONTEXT_CORE_PROFILE_BIT_ARB);
-    if (ctx->minor_version == 1) return !ctx->extensions[GL_ARB_compatibility];
-    return !!(ctx->context_flags & GL_CONTEXT_FLAG_FORWARD_COMPATIBLE_BIT);
+    if (ctx->attrs.major < 3) return FALSE;
+    if (ctx->attrs.major > 3) return !!(ctx->attrs.profile & WGL_CONTEXT_CORE_PROFILE_BIT_ARB);
+    if (ctx->attrs.minor > 1) return !!(ctx->attrs.profile & WGL_CONTEXT_CORE_PROFILE_BIT_ARB);
+    if (ctx->attrs.minor == 1) return !ctx->extensions[GL_ARB_compatibility];
+    return !!(ctx->attrs.flags & GL_CONTEXT_FLAG_FORWARD_COMPATIBLE_BIT);
 }
 
 BOOL alloc_context_objects( enum object_type type, UINT n, const GLuint *handles, BOOL extension )
@@ -1086,11 +1087,6 @@ HGLRC WINAPI wglCreateContextAttribsARB( HDC hdc, HGLRC share, const int *attrib
         SetLastError( ERROR_INVALID_OPERATION );
         return NULL;
     }
-    if (share_context && share_context->base.broken_sharing)
-    {
-        ERR( "Shared context %p has broken display list sharing\n", share );
-        share = NULL;
-    }
     if (share) args.hShareContext = &share_context->base.obj;
 
     if (!(ptr = alloc_client_context( share ? share_context : NULL ))) return NULL;
@@ -1187,15 +1183,16 @@ BOOL WINAPI wglShareLists( HGLRC src_handle, HGLRC dst_handle )
     if (!(dst_context = context_from_handle( dst_handle ))) return FALSE;
     if (ReadNoFence( &dst_context->lists->modified )) return FALSE;
 
-    if (src_context->base.broken_sharing || dst_context->base.broken_sharing)
+    if (src_context->base.root_context != dst_context->base.root_context)
     {
-        ERR( "Either source or destination context has broken sharing\n" );
+        ERR( "Cannot share contexts with different roots\n" );
+        RtlSetLastWin32Error( ERROR_INCOMPATIBLE_DEVICE_CONTEXTS_ARB );
         return FALSE;
     }
 
     lists = display_lists_acquire( src_context->lists );
     lists = InterlockedExchangePointer( (void *)&dst_context->lists, lists );
-    display_lists_release( lists, TRUE );
+    display_lists_release( lists, dst_context->base.root_context );
 
     return TRUE;
 }
@@ -1294,7 +1291,7 @@ BOOL WINAPI wglCopyContext( HGLRC src_handle, HGLRC dst_handle, UINT mask )
     if (src != dst && dst->used == -1) FIXME( "Unsupported attributes on context %p\n", dst );
 
     if (!(hwnd = CreateWindowExW( 0, L"static", L"static", WS_POPUP, 0, 0, 0, 0, NULL, NULL, NULL, NULL )) ||
-        !(hdc = GetWindowDC( hwnd )) || !SetPixelFormat( hdc, dst->base.format, NULL ))
+        !(hdc = GetWindowDC( hwnd )) || !SetPixelFormat( hdc, dst->base.attrs.format, NULL ))
     {
         WARN( "Failed to create dummy window to update context attributes\n" );
         if (hdc) ReleaseDC( hwnd, hdc );
@@ -2283,14 +2280,11 @@ PROC WINAPI wglGetProcAddress( LPCSTR name )
         LeaveCriticalSection( &wgl_cs );
     }
 
-    if (func->major && (ctx->base.major_version > func->major
-                        || (ctx->base.major_version == func->major && ctx->base.minor_version >= func->minor)))
-        return func->func;
+    if (func->major && ctx->base.attrs.major > func->major) return func->func;
+    if (func->major && ctx->base.attrs.major == func->major && ctx->base.attrs.minor >= func->minor) return func->func;
 
     for (ext = func->extensions; *ext != GL_EXTENSION_COUNT; ext++)
-    {
         if (ctx->base.extensions[*ext]) return func->func;
-    }
 
     WARN( "Extensions required for %s not supported\n", name );
     return NULL;
@@ -3019,16 +3013,16 @@ BOOL get_integer( GLenum name, GLuint index, GLint value, GLint *data )
     switch (name)
     {
     case GL_CONTEXT_FLAGS:
-        *data = ctx->base.context_flags;
+        *data = ctx->base.attrs.flags;
         return TRUE;
     case GL_CONTEXT_PROFILE_MASK:
-        *data = ctx->base.profile_mask;
+        *data = ctx->base.attrs.profile;
         return TRUE;
     case GL_MAJOR_VERSION:
-        *data = ctx->base.major_version;
+        *data = ctx->base.attrs.major;
         return TRUE;
     case GL_MINOR_VERSION:
-        *data = ctx->base.minor_version;
+        *data = ctx->base.attrs.minor;
         return TRUE;
     case GL_NUM_EXTENSIONS:
         *data = ctx->base.extension_count;

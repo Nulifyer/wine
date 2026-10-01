@@ -2996,7 +2996,19 @@ static void test_parse_errors(void)
             /* Hex literal overflow */
             L"x = &H100000001\n",
             0, 4,
-            L"x = &H100000001", S_OK
+            L"x = &H100000001", S_OK, 1002
+        },
+        {
+            /* Octal literal overflow */
+            L"x = &O40000000000\n",
+            0, 4,
+            L"x = &O40000000000", S_OK, 1002
+        },
+        {
+            /* Overflowing literal at the start of a statement */
+            L"x = 1\n&H100000000\n",
+            1, 0,
+            L"&H100000000", S_OK, -1024
         },
         {
             /* Unterminated string constant - error 1033 */
@@ -3533,6 +3545,12 @@ static void test_parse_errors(void)
             L"Dim x\nFor Each x.y In Array(1)\nNext\n",
             1, 13,
             NULL, S_OK, 1040
+        },
+        {
+            /* Assignment to an expression in parentheses - error 1024 */
+            L"Dim x\n  (x) = 1\n",
+            1, 2,
+            L"  (x) = 1", S_OK, 1024
         }
     };
     HRESULT hres;
@@ -4284,7 +4302,7 @@ static void run_tests(void)
     CHECK_CALLED(global_setobj_i);
 
     hres = parse_script_wr(L"dim x\nx = testObj.rem");
-    ok(hres == S_OK, "use of 'rem' as dot identifier failed: %lx08\n", hres);
+    ok(hres == S_OK, "use of 'rem' as dot identifier failed: %08lx\n", hres);
 
     SET_EXPECT(testobj_propget_d);
     SET_EXPECT(testobj_propget_i);

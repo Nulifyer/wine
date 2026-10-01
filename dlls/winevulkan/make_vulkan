@@ -499,6 +499,10 @@ class Define(Type):
 
         if "#define VK_USE_64_BIT_PTR_DEFINES" in value:
             value = "#define VK_USE_64_BIT_PTR_DEFINES 0"
+        if "#ifdef __OBJC__" in value:
+            name = define.findtext("name").strip("_id")
+            value = value.replace("typedef void* ", f"typedef struct __{name} *")
+            value = value.replace("typedef void ",  f"typedef struct __{name} ")
 
         name = define.findtext("name") or value.replace("\n", "")
         name = re.sub(r"^.*?#define\s+(\w+).*$", r"\1", name)

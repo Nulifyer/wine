@@ -550,7 +550,7 @@
 @ stdcall KeBugCheck(long)
 @ stdcall KeBugCheckEx(long long long long long)
 @ stdcall KeCancelTimer(ptr)
-@ stub KeCapturePersistentThreadState
+@ stdcall KeCapturePersistentThreadState(ptr ptr long long long long long ptr)
 @ stdcall KeClearEvent(ptr)
 @ stub KeConnectInterrupt
 @ stub KeDcacheFlushCount
@@ -729,9 +729,9 @@
 @ stdcall MmFreeNonCachedMemory(ptr long)
 @ stub MmFreePagesFromMdl
 @ stdcall MmGetPhysicalAddress(ptr)
-@ stub MmGetPhysicalMemoryRanges
+@ stdcall MmGetPhysicalMemoryRanges()
 @ stdcall MmGetSystemRoutineAddress(ptr)
-@ stub MmGetVirtualForPhysical
+@ stdcall MmGetVirtualForPhysical(int64)
 @ stub MmGrowKernelStack
 @ stub MmHighestUserAddress
 @ stdcall MmIsAddressValid(ptr)
@@ -929,7 +929,7 @@
 @ stub PsGetProcessExitStatus
 @ stub PsGetProcessExitTime
 @ stdcall PsGetProcessId(ptr)
-@ stub PsGetProcessImageFileName
+@ stdcall PsGetProcessImageFileName(ptr)
 @ stdcall PsGetProcessInheritedFromUniqueProcessId(ptr)
 @ stub PsGetProcessJob
 @ stdcall PsGetProcessPeb(ptr)

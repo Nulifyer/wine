@@ -70,6 +70,7 @@ USHORT *uctable = NULL, *lctable = NULL;
 SIZE_T startup_info_size = 0;
 BOOL is_prefix_bootstrap = FALSE;
 BOOL is_native_machine = FALSE;
+ULONG session_id = 0;
 
 static const WCHAR bootstrapW[] = {'W','I','N','E','B','O','O','T','S','T','R','A','P','M','O','D','E'};
 
@@ -1828,10 +1829,11 @@ static void *build_wow64_parameters( const RTL_USER_PROCESS_PARAMETERS *params )
 /*************************************************************************
  *		init_peb
  */
-static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module, BOOL debugged )
+static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, BOOL debugged )
 {
-    peb->ImageBaseAddress           = module;
+    peb->ImageBaseAddress           = main_module;
     peb->ProcessParameters          = params;
+    peb->NumberOfProcessors         = cpu_count;
     peb->OSMajorVersion             = 10;
     peb->OSMinorVersion             = 0;
     peb->OSBuildNumber              = 19045;
@@ -1839,19 +1841,8 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module, BOOL de
     peb->ImageSubSystem             = main_image_info.SubSystemType;
     peb->ImageSubSystemMajorVersion = main_image_info.MajorSubsystemVersion;
     peb->ImageSubSystemMinorVersion = main_image_info.MinorSubsystemVersion;
+    peb->SessionId                  = session_id;
 
-#ifdef _WIN64
-    if (!is_machine_64bit( main_image_info.Machine ))
-    {
-        struct thread_data *data = get_thread_data();
-        data->teb->WowTebOffset = teb_offset;
-        data->teb->Tib.ExceptionList = (void *)((char *)data->teb + teb_offset);
-        wow_peb = (PEB32 *)((char *)peb + page_size);
-        set_thread_id( data );
-    }
-#endif
-
-    virtual_set_large_address_space();
     load_global_options( &params->ImagePathName, debugged );
 
     if (wow_peb)
@@ -1884,7 +1875,7 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module, BOOL de
  *
  * Build process parameters from scratch, for processes without a parent.
  */
-static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+static RTL_USER_PROCESS_PARAMETERS *build_initial_params(void)
 {
     static const WCHAR valueW[] = {'1',0};
     static const WCHAR pathW[] = {'P','A','T','H'};
@@ -1895,9 +1886,9 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     WCHAR *curdir = get_initial_directory();
     UNICODE_STRING nt_name;
     NTSTATUS status;
-    TEB64 *teb64 = get_teb64( NtCurrentTeb() );
+    struct thread_data *data = get_thread_data();
 
-    if (teb64) teb64->TlsSlots[WOW64_TLS_FILESYSREDIR] = TRUE;
+    data->filesys_redir = TRUE;
 
     /* store the initial PATH value */
     path = get_env_var( env, env_pos, pathW, 4 );
@@ -1920,7 +1911,7 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     env[env_pos++] = 0;
 
     get_full_path( main_argv[1], curdir, &nt_name );
-    status = load_main_exe( &nt_name, 0, module );
+    status = load_main_exe( &nt_name, 0 );
     /* fail only if the file contained an explicit path */
     if (status == STATUS_DLL_NOT_FOUND &&
         (strpbrk( main_argv[1], "/\\" ) || (main_argv[1][0] && main_argv[1][1] == ':')))
@@ -1946,15 +1937,17 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     {
         static const char *args[] = { "start.exe", "/exec" };
         free( nt_name.Buffer );
-        if (*module) NtUnmapViewOfSection( GetCurrentProcess(), *module );
-        load_start_exe( &nt_name, module );
+        if (main_module) NtUnmapViewOfSection( GetCurrentProcess(), main_module );
+        load_start_exe( &nt_name );
         prepend_argv( args, 2 );
     }
     else
     {
         rebuild_argv();
-        if (teb64) teb64->TlsSlots[WOW64_TLS_FILESYSREDIR] = FALSE;
+        data->filesys_redir = FALSE;
     }
+
+    virtual_alloc_first_teb();
 
     main_wargv = build_wargv( get_dos_path( nt_name.Buffer ));
     cmdline = build_command_line( main_wargv );
@@ -2008,7 +2001,6 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
 void init_startup_info(void)
 {
     WCHAR *src, *dst, *env;
-    void *module = NULL;
     unsigned int status;
     SIZE_T size, info_size, env_size, env_pos;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
@@ -2019,8 +2011,8 @@ void init_startup_info(void)
 
     if (!startup_info_size)
     {
-        params = build_initial_params( &module );
-        init_peb( params, module, FALSE );
+        params = build_initial_params();
+        init_peb( params, FALSE );
         return;
     }
 
@@ -2047,12 +2039,14 @@ void init_startup_info(void)
 
     nt_name.Buffer = (WCHAR *)(info + 1);
     nt_name.Length = info->imagepath_len;
-    status = load_main_exe( &nt_name, machine, &module );
+    status = load_main_exe( &nt_name, machine );
     if (!NT_SUCCESS(status))
     {
         MESSAGE( "wine: failed to start %s: %x\n", debugstr_us(&nt_name), status );
         NtTerminateProcess( GetCurrentProcess(), status );
     }
+
+    virtual_alloc_first_teb();
 
     size = (sizeof(*params)
             + info->imagepath_len + sizeof(WCHAR)
@@ -2123,7 +2117,7 @@ void init_startup_info(void)
 
     rebuild_argv();
     main_wargv = build_wargv( params->ImagePathName.Buffer );
-    init_peb( params, module, debugged );
+    init_peb( params, debugged );
 }
 
 

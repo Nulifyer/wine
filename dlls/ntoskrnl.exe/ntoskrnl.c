@@ -2510,6 +2510,33 @@ NTSTATUS WINAPI FsRtlRegisterUncProvider(PHANDLE MupHandle, PUNICODE_STRING Redi
     return STATUS_NOT_IMPLEMENTED;
 }
 
+static void get_process_image_file_name( HANDLE handle, PEPROCESS process )
+{
+    UNICODE_STRING *image;
+    WCHAR *p, *end;
+    ULONG len;
+
+    if (NtQueryInformationProcess( handle, ProcessImageFileName, NULL, 0, &len ) != STATUS_INFO_LENGTH_MISMATCH)
+        return;
+
+    len += sizeof(WCHAR) + sizeof(UNICODE_STRING);
+
+    if (!(image = malloc( len )))
+        return;
+
+    if (!NtQueryInformationProcess( handle, ProcessImageFileName, image, len, NULL ))
+    {
+        end = image->Buffer + image->Length / sizeof(WCHAR);
+        p = end;
+
+        while (p > image->Buffer && p[-1] != '\\')
+            p--;
+
+        RtlUnicodeToMultiByteN( process->image_name, sizeof(process->image_name) - 1, &len, p, (end - p) * sizeof(WCHAR) );
+        process->image_name[len] = 0;
+    }
+    free( image );
+}
 
 static void *create_process_object( HANDLE handle )
 {
@@ -2522,6 +2549,7 @@ static void *create_process_object( HANDLE handle )
     NtQueryInformationProcess( handle, ProcessBasicInformation, &process->info, sizeof(process->info), NULL );
     NtQueryInformationProcess( handle, ProcessSessionInformation, &process->session_id, sizeof(process->session_id), NULL );
     NtQueryInformationProcess( handle, ProcessTimes, &process->times, sizeof(process->times), NULL );
+    get_process_image_file_name( handle, process );
     IsWow64Process( handle, &process->wow64 );
 
     return process;
@@ -2609,6 +2637,15 @@ LONGLONG WINAPI PsGetProcessCreateTimeQuadPart( PEPROCESS process )
 {
     TRACE("%p -> %I64x\n", process, process->times.CreateTime.QuadPart);
     return process->times.CreateTime.QuadPart;
+}
+
+/*********************************************************************
+ *           PsGetProcessImageFileName    (NTOSKRNL.@)
+ */
+const char *WINAPI PsGetProcessImageFileName( PEPROCESS process )
+{
+    TRACE("%p -> %s\n", process, debugstr_a(process->image_name));
+    return process->image_name;
 }
 
 static void *create_thread_object( HANDLE handle )
@@ -2872,6 +2909,7 @@ KAFFINITY WINAPI KeSetSystemAffinityThreadEx(KAFFINITY affinity)
     TRACE("affinity %#Ix.\n", affinity);
 
     affinity &= system_affinity;
+    if (!affinity) return 0;
 
     NtQueryInformationThread(GetCurrentThread(), ThreadGroupInformation,
             &old, sizeof(old), NULL);
@@ -3078,6 +3116,44 @@ PHYSICAL_ADDRESS WINAPI MmGetPhysicalAddress(void *virtual_address)
     FIXME("(%p): semi-stub\n", virtual_address);
     ret.QuadPart = (ULONG_PTR)virtual_address;
     return ret;
+}
+
+/***********************************************************************
+ *           MmGetPhysicalMemoryRanges   (NTOSKRNL.EXE.@)
+ */
+PHYSICAL_MEMORY_RANGE * WINAPI MmGetPhysicalMemoryRanges(void)
+{
+    SYSTEM_BASIC_INFORMATION info;
+    PHYSICAL_MEMORY_RANGE *ranges;
+    NTSTATUS status;
+
+    TRACE( "()\n" );
+
+    if ((status = NtQuerySystemInformation( SystemBasicInformation, &info, sizeof(info), NULL )))
+    {
+        WARN( "failed to query system information, status %#lx\n", status );
+        return NULL;
+    }
+
+    if (!(ranges = ExAllocatePool( NonPagedPool, 2 * sizeof(*ranges) )))
+        return NULL;
+
+    /* FIXME: Windows returns actual hardware ranges, we report the correct size but in one range */
+    ranges[0].BaseAddress.QuadPart = (ULONGLONG)info.MmLowestPhysicalPage * info.PageSize;
+    ranges[0].NumberOfBytes.QuadPart = (ULONGLONG)info.MmNumberOfPhysicalPages * info.PageSize;
+    memset( &ranges[1], 0, sizeof(ranges[1]) );
+
+    return ranges;
+}
+
+/***********************************************************************
+ *           MmGetVirtualForPhysical   (NTOSKRNL.EXE.@)
+ */
+void *WINAPI MmGetVirtualForPhysical(PHYSICAL_ADDRESS addr)
+{
+    ULONG_PTR ret = addr.QuadPart;
+    FIXME("(%s): semi-stub\n", wine_dbgstr_longlong(addr.QuadPart));
+    return (void *)ret;
 }
 
 /***********************************************************************
@@ -4613,9 +4689,46 @@ BOOLEAN WINAPI SePrivilegeCheck(PRIVILEGE_SET *privileges, SECURITY_SUBJECT_CONT
  */
 NTSTATUS WINAPI SeLocateProcessImageName(PEPROCESS process, UNICODE_STRING **image_name)
 {
-    FIXME("stub: %p %p\n", process, image_name);
-    if (image_name) *image_name = NULL;
-    return STATUS_NOT_IMPLEMENTED;
+    ULONG len;
+    NTSTATUS status;
+    HANDLE h;
+
+    TRACE("%p %p\n", process, image_name);
+
+    if (!image_name) return STATUS_INVALID_PARAMETER;
+
+    if ((status = ObOpenObjectByPointer(process, 0, NULL, PROCESS_ALL_ACCESS, NULL, KernelMode, &h)))
+    {
+        WARN("Error opening process object, status %#lx.\n", status);
+        return status;
+    }
+
+    status = NtQueryInformationProcess(h, ProcessImageFileName, NULL, 0, &len);
+    if (status != STATUS_INFO_LENGTH_MISMATCH)
+    {
+        NtClose(h);
+        return status;
+    }
+
+    len += sizeof(WCHAR) + sizeof(UNICODE_STRING);
+
+    if (!(*image_name = ExAllocatePool(PagedPool, len)))
+    {
+        NtClose(h);
+        return STATUS_NO_MEMORY;
+    }
+
+    if ((status = NtQueryInformationProcess(h, ProcessImageFileName,
+                                            *image_name, len - sizeof(WCHAR), &len)))
+    {
+        ExFreePool(*image_name);
+        *image_name = NULL;
+        NtClose(h);
+        return status;
+    }
+
+    NtClose(h);
+    return STATUS_SUCCESS;
 }
 
 /*********************************************************************
@@ -4959,6 +5072,13 @@ NTSTATUS WINAPI KdChangeOption(ULONG option, ULONG in_size, PVOID in_buffer,
 {
     FIXME( "stub: %lu %lu %p %lu %p %p\n", option, in_size, in_buffer, out_size, out_buffer, ret_size );
     return STATUS_DEBUGGER_INACTIVE;
+}
+
+NTSTATUS WINAPI KeCapturePersistentThreadState(CONTEXT *context, PKTHREAD thread, ULONG code,
+                                               ULONG param1, ULONG param2, ULONG param3, ULONG param4, void *addr)
+{
+    FIXME("stub: %p %p %lu %lu %lu %lu %lu %p\n", context, thread, code, param1, param2, param3, param4, addr);
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS WINAPI KdDisableDebugger(void)

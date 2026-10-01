@@ -154,8 +154,13 @@
 # endif
 #endif
 
+#ifndef _HAS_EXCEPTIONS
+#define _HAS_EXCEPTIONS 1
+#endif
+
 #define _ARGMAX 100
 #define _CRT_INT_MAX 0x7fffffff
+#define _TRUNCATE ((size_t)-1)
 
 #ifndef _MSVCRT_LONG_DEFINED
 #define _MSVCRT_LONG_DEFINED
@@ -221,12 +226,8 @@ typedef __int64 _CRT_ALIGN(8) __time64_t;
 #define _TIME64_T_DEFINED
 #endif
 
-#ifdef _USE_32BIT_TIME_T
-# ifdef _WIN64
+#if defined(_USE_32BIT_TIME_T) && defined(_WIN64)
 #  error You cannot use 32-bit time_t in Win64
-# endif
-#elif !defined(_WIN64)
-# define _USE_32BIT_TIME_T
 #endif
 
 #ifndef _TIME_T_DEFINED
@@ -354,5 +355,7 @@ typedef struct threadlocaleinfostruct {
 #else
 #define __WINE_MALLOC
 #endif
+
+#define _SECURECRT_FILL_BUFFER_PATTERN 0xFE
 
 #endif /* __WINE_CORECRT_H */

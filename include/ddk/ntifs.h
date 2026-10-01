@@ -242,5 +242,6 @@ char WINAPI RtlQueryProcessPlaceholderCompatibilityMode(void);
 char WINAPI RtlQueryThreadPlaceholderCompatibilityMode(void);
 char WINAPI RtlSetProcessPlaceholderCompatibilityMode(char);
 char WINAPI RtlSetThreadPlaceholderCompatibilityMode(char);
+NTSTATUS WINAPI SeLocateProcessImageName(PEPROCESS,UNICODE_STRING**);
 
 #endif

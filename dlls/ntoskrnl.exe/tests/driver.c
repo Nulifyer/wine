@@ -341,6 +341,50 @@ static void test_mdl_map(void)
     ExFreePool(pool);
 }
 
+static void test_physical_memory_ranges(void)
+{
+    NTSTATUS (WINAPI *pZwQuerySystemInformation)(SYSTEM_INFORMATION_CLASS,void*,ULONG,ULONG*);
+    ULONGLONG total = 0, expect, prev_end = 0;
+    SYSTEM_BASIC_INFORMATION info;
+    PHYSICAL_MEMORY_RANGE *ranges;
+    unsigned int i;
+    NTSTATUS status;
+
+    pZwQuerySystemInformation = get_proc_address("ZwQuerySystemInformation");
+    ok(!!pZwQuerySystemInformation, "ZwQuerySystemInformation not found\n");
+
+    ranges = MmGetPhysicalMemoryRanges();
+    ok(ranges != NULL, "MmGetPhysicalMemoryRanges failed\n");
+    if (!ranges) return;
+
+    for (i = 0; ranges[i].BaseAddress.QuadPart || ranges[i].NumberOfBytes.QuadPart; ++i)
+    {
+        ok(ranges[i].NumberOfBytes.QuadPart > 0, "range %u: got size %#I64x\n",
+           i, ranges[i].NumberOfBytes.QuadPart);
+        ok(!(ranges[i].BaseAddress.QuadPart & (PAGE_SIZE - 1)), "range %u: got unaligned base %#I64x\n",
+           i, ranges[i].BaseAddress.QuadPart);
+        ok(!(ranges[i].NumberOfBytes.QuadPart & (PAGE_SIZE - 1)), "range %u: got unaligned size %#I64x\n",
+           i, ranges[i].NumberOfBytes.QuadPart);
+        ok(ranges[i].BaseAddress.QuadPart >= prev_end, "range %u: got base %#I64x, previous range ends at %#I64x\n",
+           i, ranges[i].BaseAddress.QuadPart, prev_end);
+        prev_end = ranges[i].BaseAddress.QuadPart + ranges[i].NumberOfBytes.QuadPart;
+        total += ranges[i].NumberOfBytes.QuadPart;
+    }
+    ok(i > 0, "got no ranges\n");
+
+    if (pZwQuerySystemInformation)
+    {
+        status = pZwQuerySystemInformation(SystemBasicInformation, &info, sizeof(info), NULL);
+        ok(!status, "got status %#lx\n", status);
+        expect = (ULONGLONG)info.MmNumberOfPhysicalPages * info.PageSize;
+        ok(total == expect, "got total %#I64x, expected %#I64x\n", total, expect);
+        ok(ranges[0].BaseAddress.QuadPart == (ULONGLONG)info.MmLowestPhysicalPage * info.PageSize,
+           "got base %#I64x\n", ranges[0].BaseAddress.QuadPart);
+    }
+
+    ExFreePool(ranges);
+}
+
 static void test_init_funcs(void)
 {
     KTIMER timer, timer2;
@@ -478,14 +522,18 @@ static NTSTATUS wait_single_handle(HANDLE handle, ULONGLONG timeout)
 
 static void test_current_thread(BOOL is_system)
 {
+    UNICODE_STRING image, *image_name, *expect_name;
     PROCESS_BASIC_INFORMATION info;
+    char expect_file_name[15];
     DISPATCHER_HEADER *header;
     HANDLE process_handle, id;
     KERNEL_USER_TIMES times;
+    const char *file_name;
     LONGLONG create_time;
-    ULONG session_id;
+    ULONG session_id, len;
     PEPROCESS current;
     PETHREAD thread;
+    WCHAR *p, *end;
     NTSTATUS ret;
     PEB *peb;
 
@@ -552,6 +600,49 @@ static void test_current_thread(BOOL is_system)
 
     peb = PsGetProcessPeb(current);
     ok(peb == info.PebBaseAddress, "got peb %p, expected %p\n", peb, info.PebBaseAddress);
+
+    if (!is_system)
+    {
+        ret = ZwQueryInformationProcess(process_handle, ProcessImageFileName, &image, sizeof(image), &len);
+        ok(ret == STATUS_INFO_LENGTH_MISMATCH, "got %#lx\n", ret);
+        expect_name = ExAllocatePool(PagedPool, len);
+
+        ret = ZwQueryInformationProcess(process_handle, ProcessImageFileName, expect_name, len, NULL);
+        ok(!ret, "ZwQueryInformationProcess failed: %#lx\n", ret);
+        if (!ret)
+        {
+            ret = SeLocateProcessImageName(current, &image_name);
+            ok(!ret, "SeLocateProcessImageName failed: %#lx\n", ret);
+            if (!ret)
+            {
+                ok(RtlEqualUnicodeString(image_name, expect_name, FALSE), "got %.*ls, expected %.*ls\n",
+                   (int)(image_name->Length / sizeof(WCHAR)), image_name->Buffer,
+                   (int)(expect_name->Length / sizeof(WCHAR)), expect_name->Buffer);
+
+                ok(image_name->MaximumLength == image_name->Length + sizeof(WCHAR), "got length %u, maximum %u\n",
+                   image_name->Length, image_name->MaximumLength);
+                ok(!image_name->Buffer[image_name->Length / sizeof(WCHAR)], "got %#x\n",
+                   image_name->Buffer[image_name->Length / sizeof(WCHAR)]);
+
+                ExFreePool(image_name);
+            }
+
+            end = expect_name->Buffer + expect_name->Length / sizeof(WCHAR);
+            p = end;
+            while (p > expect_name->Buffer && p[-1] != '\\')
+                p--;
+
+            memset(expect_file_name, 0, sizeof(expect_file_name));
+            RtlUnicodeToMultiByteN(expect_file_name, sizeof(expect_file_name) - 1, NULL, p, (end - p) * sizeof(WCHAR));
+
+            file_name = PsGetProcessImageFileName(current);
+            ok(!!file_name, "got NULL image file name\n");
+            if (file_name)
+                ok(!strncmp(file_name, expect_file_name, sizeof(expect_file_name)), "got %.*s, expected %s\n",
+                   (int)sizeof(expect_file_name), file_name, expect_file_name);
+        }
+        ExFreePool(expect_name);
+    }
 
     ret = ZwClose(process_handle);
     ok(!ret, "ZwClose failed: %#lx\n", ret);
@@ -2800,6 +2891,7 @@ static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *st
     test_current_thread(FALSE);
     test_critical_region(TRUE);
     test_mdl_map();
+    test_physical_memory_ranges();
     test_init_funcs();
     test_load_driver();
     test_sync();

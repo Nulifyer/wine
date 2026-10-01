@@ -372,9 +372,10 @@ NTSTATUS WINAPI LsaEnumerateLogonSessions(PULONG LogonSessionCount,
 
 NTSTATUS WINAPI LsaFreeReturnBuffer(PVOID buffer)
 {
+    SIZE_T size = 0;
+
     TRACE("%p\n", buffer);
-    if (VirtualFree(buffer, 0, MEM_RELEASE)) return STATUS_SUCCESS;
-    return STATUS_UNSUCCESSFUL;
+    return NtFreeVirtualMemory(GetCurrentProcess(), &buffer, &size, MEM_RELEASE);
 }
 
 NTSTATUS WINAPI LsaGetLogonSessionData(PLUID LogonId,

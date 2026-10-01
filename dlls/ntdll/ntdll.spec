@@ -313,6 +313,7 @@
 @ stdcall -syscall NtOpenKeyedEvent(ptr long ptr)
 @ stdcall -syscall NtOpenMutant(ptr long ptr)
 # @ stub NtOpenObjectAuditAlarm
+@ stdcall -syscall NtOpenPrivateNamespace(ptr long ptr ptr)
 @ stdcall -syscall=0x0026 NtOpenProcess(ptr long ptr ptr)
 @ stdcall -syscall NtOpenPartition(ptr long ptr)
 @ stdcall -syscall NtOpenProcessToken(long long ptr)
@@ -1490,6 +1491,7 @@
 @ stdcall -private ZwOpenKeyedEvent(ptr long ptr) NtOpenKeyedEvent
 @ stdcall -private ZwOpenMutant(ptr long ptr) NtOpenMutant
 # @ stub ZwOpenObjectAuditAlarm
+@ stdcall -private ZwOpenPrivateNamespace(ptr long ptr ptr) NtOpenPrivateNamespace
 @ stdcall -private ZwOpenProcess(ptr long ptr ptr) NtOpenProcess
 @ stdcall -private ZwOpenProcessToken(long long ptr) NtOpenProcessToken
 @ stdcall -private ZwOpenProcessTokenEx(long long long ptr) NtOpenProcessTokenEx

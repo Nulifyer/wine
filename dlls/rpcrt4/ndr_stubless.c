@@ -2417,6 +2417,8 @@ RPC_STATUS NdrpAbortAsyncServerCall(RPC_ASYNC_STATE *pAsync, ULONG exception_cod
     return status;
 }
 
+#ifdef _WIN64
+
 LONG_PTR CDECL ndr64_client_call( MIDL_STUBLESS_PROXY_INFO *info,
         ULONG proc, void *retval, void **stack_top )
 {
@@ -2568,3 +2570,5 @@ __ASM_GLOBAL_FUNC( Ndr64AsyncClientCall,
                    __ASM_CFI(".cfi_adjust_cfa_offset -0x28\n\t")
                    "ret" )
 #endif
+
+#endif /* _WIN64 */
