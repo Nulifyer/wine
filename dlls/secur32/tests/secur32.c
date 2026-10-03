@@ -797,6 +797,7 @@ static void test_local_interactive_logon(void)
     struct test_msv1_0_interactive_profile *profile;
     struct test_auth_buffer auth;
     struct test_sspiex_logon_user sspiex;
+    SECURITY_LOGON_SESSION_DATA *session_data;
     TOKEN_SOURCE source = {{'W','i','n','l','o','g','o','n'}};
     TOKEN_STATISTICS statistics;
     TOKEN_DEFAULT_DACL *token_default;
@@ -903,12 +904,35 @@ static void test_local_interactive_logon(void)
     ok( !!token, "expected a primary token.\n" );
     if (profile)
     {
+        WCHAR *full_name = profile->full_name.Buffer;
+
         ok( profile->message_type == 2, "got profile type %lu.\n", profile->message_type );
+        ok( !profile->logon_script.Length && !profile->logon_script.MaximumLength &&
+            !profile->logon_script.Buffer, "got empty logon script %u/%u at %p.\n",
+            profile->logon_script.Length, profile->logon_script.MaximumLength,
+            profile->logon_script.Buffer );
+        ok( !profile->home_directory_drive.Length && !profile->home_directory_drive.MaximumLength &&
+            !profile->home_directory_drive.Buffer, "got empty home-directory drive %u/%u at %p.\n",
+            profile->home_directory_drive.Length, profile->home_directory_drive.MaximumLength,
+            profile->home_directory_drive.Buffer );
         ok( !wcsicmp( profile->full_name.Buffer, username ), "got profile user %s.\n",
             wine_dbgstr_w(profile->full_name.Buffer) );
         ok( profile->profile_path.Buffer >= (WCHAR *)profile &&
             (BYTE *)profile->profile_path.Buffer < (BYTE *)profile + profile_len,
             "profile path %p is outside returned allocation.\n", profile->profile_path.Buffer );
+        session_data = NULL;
+        status = LsaGetLogonSessionData( &logon_id, &session_data );
+        ok( status == STATUS_SUCCESS, "LsaGetLogonSessionData returned %#lx.\n", status );
+        ok( !!session_data, "expected logon-session data.\n" );
+        if (session_data)
+        {
+            status = LsaFreeReturnBuffer( session_data );
+            ok( status == STATUS_SUCCESS, "session-data LsaFreeReturnBuffer returned %#lx.\n", status );
+        }
+        ok( profile->full_name.Buffer == full_name, "profile full-name pointer changed.\n" );
+        ok( !wcsicmp( profile->full_name.Buffer, username ),
+            "profile became invalid after freeing session data, got %s.\n",
+            wine_dbgstr_w(profile->full_name.Buffer) );
         status = LsaFreeReturnBuffer( profile );
         ok( status == STATUS_SUCCESS, "LsaFreeReturnBuffer returned %#lx.\n", status );
     }

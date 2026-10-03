@@ -507,13 +507,20 @@ NTSTATUS WINAPI LsaLogonUser(HANDLE LsaHandle, PLSA_STRING OriginName,
     total = sizeof(*profile);
     for (i = 0; i < ARRAY_SIZE(strings); ++i)
     {
-        SIZE_T bytes;
-        if (!strings[i] || wcslen(strings[i]) > (USHRT_MAX / sizeof(WCHAR)) - 1)
+        SIZE_T chars, bytes;
+
+        if (!strings[i])
         {
             status = STATUS_INVALID_BUFFER_SIZE;
             goto done;
         }
-        bytes = (wcslen(strings[i]) + 1) * sizeof(WCHAR);
+        chars = wcslen(strings[i]);
+        if (chars > (USHRT_MAX / sizeof(WCHAR)) - 1)
+        {
+            status = STATUS_INVALID_BUFFER_SIZE;
+            goto done;
+        }
+        bytes = chars ? (chars + 1) * sizeof(WCHAR) : 0;
         if (total > ~(SIZE_T)0 - bytes)
         {
             status = STATUS_INTEGER_OVERFLOW;
@@ -547,8 +554,11 @@ NTSTATUS WINAPI LsaLogonUser(HANDLE LsaHandle, PLSA_STRING OriginName,
     offset = sizeof(*profile);
     for (i = 0; i < ARRAY_SIZE(strings); ++i)
     {
-        SIZE_T chars = wcslen(strings[i]), bytes = (chars + 1) * sizeof(WCHAR);
+        SIZE_T chars = wcslen(strings[i]), bytes;
         WCHAR *buffer = (WCHAR *)((BYTE *)profile + offset);
+
+        if (!chars) continue;
+        bytes = (chars + 1) * sizeof(WCHAR);
         memcpy( buffer, strings[i], bytes );
         dest_strings[i]->Length = chars * sizeof(WCHAR);
         dest_strings[i]->MaximumLength = bytes;
