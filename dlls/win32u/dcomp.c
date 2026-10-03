@@ -2226,6 +2226,21 @@ static NTSTATUS set_dcomp_rectangle_buffer_property( struct dcomp_resource_view 
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS set_dcomp_rectangle_float_property( struct dcomp_resource_view *resource,
+                                                     UINT property, float value )
+{
+    UINT index;
+
+    if (property < 5 || property > 16) return STATUS_NOT_SUPPORTED;
+    if (resource->rectangle_expression_mode) return STATUS_INVALID_PARAMETER;
+    index = property - 5;
+    value = clamp_dcomp_rectangle_value( value );
+    if (resource->rectangle[index] == value) return STATUS_SUCCESS;
+    resource->rectangle[index] = value;
+    resource->rectangle_dirty |= index < 4 ? 2 << index : 1;
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS set_dcomp_region_buffer_property( struct dcomp_resource_view *resource,
                                                    UINT property, const BYTE *data, UINT size )
 {
@@ -3084,6 +3099,11 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             else if (resource->type == 0x5c)
             {
                 status = set_dcomp_keyframe_float_property( resource, property, value );
+                if (status != STATUS_NOT_SUPPORTED && status) return status;
+            }
+            else if (resource->type == 0x7f)
+            {
+                status = set_dcomp_rectangle_float_property( resource, property, value );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
         }

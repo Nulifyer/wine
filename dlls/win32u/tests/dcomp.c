@@ -3964,6 +3964,15 @@ static void test_visual_target_root_lifecycle(void)
         36, 0xba, 9, 1, 0, 1, 1, 1, 5,
         28, 0xba, 9, 1, 1, 4, 2,
     };
+    static const UINT expected_rectangle_float_update[] = {
+        48, 0x13f, 7,
+            0x41100000, 0x41200000, 0x41300000, 0x41400000,
+            0x41500000, 0x41600000, 0x41700000, 0x41800000, 1,
+        16, 0x13d, 7, 0x40a00000,
+        16, 0x142, 7, 0x40c00000,
+        16, 0x140, 7, 0x40e00000,
+        16, 0x13c, 7, 0x41000000,
+    };
     static const UINT expected_interaction_clear[] = {
         16, 0x194, 3, 0,
         12, 0x29, 9,
@@ -4143,6 +4152,30 @@ static void test_visual_target_root_lifecycle(void)
     ok( status == STATUS_SUCCESS, "got visual content batch status %#lx\n", status );
     check_dcomp_batch_payload( record, channel, expected_visual_content,
                                sizeof(expected_visual_content), "visual content" );
+
+    command[0] = 12; command[1] = 7; command[2] = 5; command[3] = 0x40a00000;
+    command[4] = 12; command[5] = 7; command[6] = 6; command[7] = 0x40c00000;
+    command[8] = 12; command[9] = 7; command[10] = 7; command[11] = 0x40e00000;
+    command[12] = 12; command[13] = 7; command[14] = 8; command[15] = 0x41000000;
+    command[16] = 12; command[17] = 7; command[18] = 9; command[19] = 0x41100000;
+    command[20] = 12; command[21] = 7; command[22] = 10; command[23] = 0x41200000;
+    command[24] = 12; command[25] = 7; command[26] = 11; command[27] = 0x41300000;
+    command[28] = 12; command[29] = 7; command[30] = 12; command[31] = 0x41400000;
+    command[32] = 12; command[33] = 7; command[34] = 13; command[35] = 0x41500000;
+    command[36] = 12; command[37] = 7; command[38] = 14; command[39] = 0x41600000;
+    command[40] = 12; command[41] = 7; command[42] = 15; command[43] = 0x41700000;
+    command[44] = 12; command[45] = 7; command[46] = 16; command[47] = 0x41800000;
+    memcpy( buffer, command, 192 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 192, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got rectangle float update process status %#lx\n", status );
+    ok( processed == 12, "got rectangle float update process count %lu\n", processed );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got rectangle float update commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got rectangle float update batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_rectangle_float_update,
+                               sizeof(expected_rectangle_float_update), "rectangle float update" );
 
     command[0] = 11; command[1] = 9; command[2] = 10; command[3] = 0;
     command[4] = 1; command[5] = 0;
