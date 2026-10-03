@@ -93,6 +93,7 @@ static INT (WINAPI *pFindNLSStringEx)(LPCWSTR, DWORD, LPCWSTR, INT, LPCWSTR, INT
 static void * (WINAPI *pNlsValidateLocale)(LCID*,ULONG);
 static LANGID (WINAPI *pSetThreadUILanguage)(LANGID);
 static LANGID (WINAPI *pGetThreadUILanguage)(VOID);
+static BOOL (WINAPI *pNotifyUILanguageChange)(DWORD, PCWSTR, PCWSTR, DWORD, PDWORD);
 static INT (WINAPI *pNormalizeString)(NORM_FORM, LPCWSTR, INT, LPWSTR, INT);
 static INT (WINAPI *pFindStringOrdinal)(DWORD, LPCWSTR lpStringSource, INT, LPCWSTR, INT, BOOL);
 static BOOL (WINAPI *pGetNLSVersion)(NLS_FUNCTION,LCID,NLSVERSIONINFO*);
@@ -148,6 +149,7 @@ static void InitFunctionPointers(void)
   X(SetThreadPreferredUILanguages);
   X(SetThreadUILanguage);
   X(GetThreadUILanguage);
+  X(NotifyUILanguageChange);
   X(NormalizeString);
   X(FindStringOrdinal);
   X(GetNLSVersion);
@@ -7286,6 +7288,29 @@ static void test_SetThreadUILanguage(void)
     "expected %d got %d\n", MAKELANGID(LANG_DUTCH, SUBLANG_DUTCH_BELGIAN), res);
 }
 
+static void test_NotifyUILanguageChange(void)
+{
+    DWORD status = 0xdeadbeef;
+    BOOL ret;
+
+    if (!pNotifyUILanguageChange)
+    {
+        win_skip("NotifyUILanguageChange is not available.\n");
+        return;
+    }
+
+    SetLastError( 0xdeadbeef );
+    ret = pNotifyUILanguageChange( 0x20, NULL, NULL, 0, NULL );
+    ok( ret, "NotifyUILanguageChange failed, error %lu.\n", GetLastError() );
+    ok( GetLastError() == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %lu.\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = pNotifyUILanguageChange( 0x20, NULL, NULL, 0, &status );
+    ok( ret, "NotifyUILanguageChange failed, error %lu.\n", GetLastError() );
+    ok( status == ERROR_SUCCESS, "Expected status ERROR_SUCCESS, got %#lx.\n", status );
+    ok( GetLastError() == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %lu.\n", GetLastError() );
+}
+
 /* read a Unicode string from NormalizationTest.txt format; helper for test_NormalizeString */
 static int read_str( char *str, WCHAR res[32] )
 {
@@ -8841,6 +8866,7 @@ START_TEST(locale)
   test_FindNLSStringEx();
   test_FindStringOrdinal();
   test_SetThreadUILanguage();
+  test_NotifyUILanguageChange();
   test_NormalizeString();
   test_SpecialCasing();
   test_NLSVersion();

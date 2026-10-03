@@ -1151,7 +1151,7 @@
 @ stdcall -import NormalizeString(long wstr long ptr long)
 # @ stub NotifyMountMgr
 @ stub NotifyNLSUserCache
-# @ stub NotifyUILanguageChange
+@ stdcall NotifyUILanguageChange(long wstr wstr long ptr)
 # @ stub NumaVirtualQueryNode
 @ stdcall OOBEComplete(ptr)
 @ stdcall OpenConsoleW(wstr long long long)

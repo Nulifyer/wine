@@ -181,6 +181,21 @@ BOOL WINAPI GetDaylightFlag(void)
 
 
 /***********************************************************************
+ *           NotifyUILanguageChange   (KERNEL32.@)
+ */
+BOOL WINAPI NotifyUILanguageChange( DWORD flags, PCWSTR new_language, PCWSTR previous_language,
+                                    DWORD reserved, PDWORD status )
+{
+    FIXME( "flags %#lx, new language %s, previous language %s, reserved %#lx, status %p: stub\n",
+           flags, debugstr_w(new_language), debugstr_w(previous_language), reserved, status );
+
+    if (status) *status = ERROR_SUCCESS;
+    SetLastError( ERROR_SUCCESS );
+    return TRUE;
+}
+
+
+/***********************************************************************
  *              EnumSystemCodePagesA   (KERNEL32.@)
  */
 BOOL WINAPI EnumSystemCodePagesA( CODEPAGE_ENUMPROCA proc, DWORD flags )
