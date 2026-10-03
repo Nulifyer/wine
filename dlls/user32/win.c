@@ -1410,6 +1410,22 @@ BOOL WINAPI IsCoreWindow( HWND hwnd )
 
 
 /*******************************************************************
+ *           IsShellFrameWindow   (USER32.2573)
+ */
+BOOL WINAPI IsShellFrameWindow( HWND hwnd )
+{
+    if (!NtUserIsWindow( hwnd ))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    /* Wine does not yet maintain native shell-frame window state. */
+    return FALSE;
+}
+
+
+/*******************************************************************
  *           IsShellManagedWindow   (USER32.2574)
  */
 BOOL WINAPI IsShellManagedWindow( HWND hwnd )

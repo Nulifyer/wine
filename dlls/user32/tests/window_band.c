@@ -15,6 +15,7 @@ static HWND (WINAPI *pCreateWindowInBandEx)(DWORD, LPCWSTR, LPCWSTR, DWORD, INT,
                                              INT, INT, HWND, HMENU, HINSTANCE, void *,
                                              DWORD, DWORD);
 static BOOL (WINAPI *pGetWindowBand)(HWND, DWORD *);
+static BOOL (WINAPI *pIsShellFrameWindow)(HWND);
 static BOOL (WINAPI *pSetWindowBand)(HWND, HWND, DWORD);
 
 static void test_create_window_in_band_ex(void)
@@ -151,18 +152,99 @@ static void test_set_window_band(void)
     }
 }
 
+static void test_is_shell_frame_window(void)
+{
+    const struct
+    {
+        const char *name;
+        HWND hwnd;
+    }
+    shared_cases[] =
+    {
+        {"desktop", GetDesktopWindow()},
+        {"shell", GetShellWindow()},
+        {"foreground", GetForegroundWindow()},
+    };
+    HWND hwnd, child, stale;
+    unsigned int i;
+    BOOL ret;
+
+    SetLastError( 0x13579bdf );
+    ret = pIsShellFrameWindow( NULL );
+    ok( !ret, "null window unexpectedly reported a shell frame\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "null window returned error %lu\n",
+        GetLastError() );
+
+    SetLastError( 0x13579bdf );
+    ret = pIsShellFrameWindow( (HWND)0x1234 );
+    ok( !ret, "invalid window unexpectedly reported a shell frame\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "invalid window returned error %lu\n",
+        GetLastError() );
+
+    stale = CreateWindowW( L"static", NULL, WS_POPUP, 0, 0, 32, 32,
+                           NULL, NULL, NULL, NULL );
+    ok( !!stale, "failed to create stale window, error %lu\n", GetLastError() );
+    ok( DestroyWindow( stale ), "failed to destroy stale window, error %lu\n", GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = pIsShellFrameWindow( stale );
+    ok( !ret, "stale window unexpectedly reported a shell frame\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "stale window returned error %lu\n",
+        GetLastError() );
+
+    for (i = 0; i < ARRAY_SIZE(shared_cases); ++i)
+    {
+        if (!shared_cases[i].hwnd) continue;
+        SetLastError( 0x13579bdf );
+        ret = pIsShellFrameWindow( shared_cases[i].hwnd );
+        ok( !ret, "%s window unexpectedly reported a shell frame\n", shared_cases[i].name );
+        ok( GetLastError() == 0x13579bdf, "%s window changed last error to %lu\n",
+            shared_cases[i].name, GetLastError() );
+    }
+
+    hwnd = CreateWindowW( L"static", NULL, WS_POPUP, 0, 0, 32, 32,
+                          NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "failed to create popup window, error %lu\n", GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = pIsShellFrameWindow( hwnd );
+    ok( !ret, "popup window unexpectedly reported a shell frame\n" );
+    ok( GetLastError() == 0x13579bdf, "popup window changed last error to %lu\n",
+        GetLastError() );
+
+    child = CreateWindowW( L"static", NULL, WS_CHILD, 0, 0, 32, 32,
+                           hwnd, NULL, NULL, NULL );
+    ok( !!child, "failed to create child window, error %lu\n", GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = pIsShellFrameWindow( child );
+    ok( !ret, "child window unexpectedly reported a shell frame\n" );
+    ok( GetLastError() == 0x13579bdf, "child window changed last error to %lu\n",
+        GetLastError() );
+    ok( DestroyWindow( hwnd ), "failed to destroy popup window, error %lu\n", GetLastError() );
+
+    hwnd = CreateWindowW( L"static", NULL, 0, 0, 0, 32, 32,
+                          HWND_MESSAGE, NULL, NULL, NULL );
+    ok( !!hwnd, "failed to create message window, error %lu\n", GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = pIsShellFrameWindow( hwnd );
+    ok( !ret, "message window unexpectedly reported a shell frame\n" );
+    ok( GetLastError() == 0x13579bdf, "message window changed last error to %lu\n",
+        GetLastError() );
+    ok( DestroyWindow( hwnd ), "failed to destroy message window, error %lu\n", GetLastError() );
+}
+
 START_TEST(window_band)
 {
     HMODULE user32 = GetModuleHandleW( L"user32.dll" );
 
     pCreateWindowInBandEx = (void *)GetProcAddress( user32, "CreateWindowInBandEx" );
     pGetWindowBand = (void *)GetProcAddress( user32, "GetWindowBand" );
+    pIsShellFrameWindow = (void *)GetProcAddress( user32, (const char *)2573 );
     pSetWindowBand = (void *)GetProcAddress( user32, "SetWindowBand" );
-    if (!pCreateWindowInBandEx || !pGetWindowBand || !pSetWindowBand)
+    if (!pCreateWindowInBandEx || !pGetWindowBand || !pIsShellFrameWindow || !pSetWindowBand)
     {
         win_skip( "window-band entry points are unavailable\n" );
         return;
     }
     test_create_window_in_band_ex();
     test_set_window_band();
+    test_is_shell_frame_window();
 }

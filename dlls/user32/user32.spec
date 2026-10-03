@@ -89,7 +89,7 @@
 2570 stub @
 2571 stdcall SetCoreWindow(long long) NtUserSetCoreWindow
 2572 stdcall -noname IsCoreWindow(long)
-2573 stub @
+2573 stdcall -noname IsShellFrameWindow(long)
 2574 stdcall -noname IsShellManagedWindow(long)
 2575 stub @
 2576 stub -noname SetCoreWindowPartner  # NtUserSetCoreWindowPartner
