@@ -1255,6 +1255,7 @@ W32KAPI INT     WINAPI NtUserScrollWindowEx( HWND hwnd, INT dx, INT dy, const RE
                                              RECT *update_rect, UINT flags );
 W32KAPI HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE palette, WORD force_background );
 W32KAPI UINT     WINAPI NtUserSendInput( UINT count, INPUT *inputs, int size );
+W32KAPI BOOL     WINAPI NtUserSetActiveProcessForMonitor( DWORD process_id, HMONITOR monitor );
 W32KAPI HWND     WINAPI NtUserSetActiveWindow( HWND hwnd );
 W32KAPI BOOL     WINAPI NtUserSetBrokeredForeground( HWND hwnd );
 W32KAPI BOOL     WINAPI NtUserSetAdditionalForegroundBoostProcesses( HWND hwnd, DWORD count, HANDLE *handles );

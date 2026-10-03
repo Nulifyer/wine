@@ -29,8 +29,10 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     BOOL (WINAPI *enable_iam_access)(ULONGLONG, BOOL);
     BOOL (WINAPI *set_shell_change_notify_window)(HWND);
     BOOL (WINAPI *set_shell_window)(HWND);
+    BOOL (WINAPI *set_active_process_for_monitor)(DWORD, HMONITOR);
     ULONGLONG key, second_key;
     DWORD band;
+    HMONITOR monitor;
     HWND band_hwnd, hwnd;
     BOOL ret;
 
@@ -44,6 +46,7 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     enable_iam_access = (void *)GetProcAddress( user32, (const char *)2510 );
     set_shell_change_notify_window = (void *)GetProcAddress( user32, "SetShellChangeNotifyWindow" );
     set_shell_window = (void *)GetProcAddress( user32, "SetShellWindow" );
+    set_active_process_for_monitor = (void *)GetProcAddress( user32, (const char *)2513 );
     ok( !!create_window_in_band, "CreateWindowInBand is unavailable\n" );
     ok( !!get_shell_change_notify_window, "GetShellChangeNotifyWindow is unavailable\n" );
     ok( !!get_window_band, "GetWindowBand is unavailable\n" );
@@ -51,9 +54,10 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     ok( !!enable_iam_access, "EnableIAMAccess is unavailable\n" );
     ok( !!set_shell_change_notify_window, "SetShellChangeNotifyWindow is unavailable\n" );
     ok( !!set_shell_window, "SetShellWindow is unavailable\n" );
+    ok( !!set_active_process_for_monitor, "SetActiveProcessForMonitor is unavailable\n" );
     if (!create_window_in_band || !get_shell_change_notify_window || !get_window_band ||
         !acquire_iam_key || !enable_iam_access || !set_shell_change_notify_window ||
-        !set_shell_window)
+        !set_shell_window || !set_active_process_for_monitor)
         return 0;
 
     hwnd = CreateWindowExA( 0, "#32770", "shell notify test", WS_OVERLAPPEDWINDOW,
@@ -74,6 +78,30 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
 
     ret = set_shell_window( hwnd );
     ok( ret, "failed to register shell window, error %lu\n", GetLastError() );
+
+    monitor = MonitorFromPoint( (POINT){0, 0}, MONITOR_DEFAULTTOPRIMARY );
+    ok( !!monitor, "failed to find primary monitor, error %lu\n", GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = set_active_process_for_monitor( GetCurrentProcessId(), NULL );
+    ok( ret, "failed to select current process, error %lu\n", GetLastError() );
+    ok( GetLastError() == 0x13579bdf, "current process changed last error to %lu\n",
+        GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = set_active_process_for_monitor( GetCurrentProcessId(), monitor );
+    ok( ret, "failed to select current process for primary monitor, error %lu\n", GetLastError() );
+    ok( GetLastError() == 0x13579bdf, "primary monitor changed last error to %lu\n",
+        GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = set_active_process_for_monitor( GetCurrentProcessId(), (HMONITOR)0x1234 );
+    ok( !ret, "invalid monitor unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "invalid monitor returned error %lu\n",
+        GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = set_active_process_for_monitor( ~0u, NULL );
+    ok( !ret, "invalid process unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "invalid process returned error %lu\n",
+        GetLastError() );
+
     key = 0;
     ret = acquire_iam_key( &key );
     ok( ret, "failed to acquire IAM key, error %lu\n", GetLastError() );

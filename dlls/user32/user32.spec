@@ -29,7 +29,7 @@
 2510 stdcall -noname EnableIAMAccess(int64 long)
 2511 stub -noname SetFallbackForeground  # NtUserSetFallbackForeground
 2512 stub -noname GetDisplayAutoRotationPreferencesByProcessId  # NtUserGetDisplayAutoRotationPreferencesByProcessId
-2513 stub -noname SetActiveProcessForMonitor  # NtUserSetActiveProcessForMonitor
+2513 stdcall -noname SetActiveProcessForMonitor(long long) NtUserSetActiveProcessForMonitor
 2514 stub @
 2515 stub @
 2516 stub -noname DelegateCapturePointers  # NtUserDelegateCapturePointers

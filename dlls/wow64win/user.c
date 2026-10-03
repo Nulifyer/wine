@@ -4737,6 +4737,14 @@ NTSTATUS WINAPI wow64_NtUserSetActiveWindow( UINT *args )
     return HandleToUlong( NtUserSetActiveWindow( hwnd ));
 }
 
+NTSTATUS WINAPI wow64_NtUserSetActiveProcessForMonitor( UINT *args )
+{
+    DWORD process_id = get_ulong( &args );
+    HMONITOR monitor = get_handle( &args );
+
+    return NtUserSetActiveProcessForMonitor( process_id, monitor );
+}
+
 NTSTATUS WINAPI wow64_NtUserSetAdditionalForegroundBoostProcesses( UINT *args )
 {
     HWND hwnd = get_handle( &args );

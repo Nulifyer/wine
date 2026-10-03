@@ -1330,7 +1330,7 @@
     SYSCALL_ENTRY( 0x152e, NtUserSendInput, 12 ) \
     SYSCALL_ENTRY( 0x152f, NtUserSendInteractiveControlHapticsReport, 0 ) \
     SYSCALL_ENTRY( 0x1530, NtUserSetActivationFilter, 0 ) \
-    SYSCALL_ENTRY( 0x1531, NtUserSetActiveProcessForMonitor, 0 ) \
+    SYSCALL_ENTRY( 0x1531, NtUserSetActiveProcessForMonitor, 8 ) \
     SYSCALL_ENTRY( 0x1532, NtUserSetActiveWindow, 4 ) \
     SYSCALL_ENTRY( 0x1533, NtUserSetAdditionalForegroundBoostProcesses, 12 ) \
     SYSCALL_ENTRY( 0x1534, NtUserSetAppImeLevel, 0 ) \
@@ -2872,7 +2872,7 @@
     SYSCALL_ENTRY( 0x152e, NtUserSendInput, 24 ) \
     SYSCALL_ENTRY( 0x152f, NtUserSendInteractiveControlHapticsReport, 0 ) \
     SYSCALL_ENTRY( 0x1530, NtUserSetActivationFilter, 0 ) \
-    SYSCALL_ENTRY( 0x1531, NtUserSetActiveProcessForMonitor, 0 ) \
+    SYSCALL_ENTRY( 0x1531, NtUserSetActiveProcessForMonitor, 16 ) \
     SYSCALL_ENTRY( 0x1532, NtUserSetActiveWindow, 8 ) \
     SYSCALL_ENTRY( 0x1533, NtUserSetAdditionalForegroundBoostProcesses, 24 ) \
     SYSCALL_ENTRY( 0x1534, NtUserSetAppImeLevel, 0 ) \
@@ -3891,7 +3891,6 @@
     SYSCALL_STUB( NtUserSendEventMessage ) \
     SYSCALL_STUB( NtUserSendInteractiveControlHapticsReport ) \
     SYSCALL_STUB( NtUserSetActivationFilter ) \
-    SYSCALL_STUB( NtUserSetActiveProcessForMonitor ) \
     SYSCALL_STUB( NtUserSetAppImeLevel ) \
     SYSCALL_STUB( NtUserSetAutoRotation ) \
     SYSCALL_STUB( NtUserSetBridgeWindowChild ) \

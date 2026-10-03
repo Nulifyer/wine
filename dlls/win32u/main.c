@@ -2426,6 +2426,11 @@ HWND SYSCALL_API NtUserSetActiveWindow( HWND hwnd )
     SYSCALL_FUNC( NtUserSetActiveWindow );
 }
 
+BOOL SYSCALL_API NtUserSetActiveProcessForMonitor( DWORD process_id, HMONITOR monitor )
+{
+    SYSCALL_FUNC( NtUserSetActiveProcessForMonitor );
+}
+
 BOOL SYSCALL_API NtUserSetAdditionalForegroundBoostProcesses( HWND hwnd, DWORD count, HANDLE *handles )
 {
     SYSCALL_FUNC( NtUserSetAdditionalForegroundBoostProcesses );

@@ -1328,7 +1328,7 @@
 @ stdcall -syscall NtUserSendInput(long ptr long)
 @ stub -syscall NtUserSendInteractiveControlHapticsReport
 @ stub -syscall NtUserSetActivationFilter
-@ stub -syscall NtUserSetActiveProcessForMonitor
+@ stdcall -syscall NtUserSetActiveProcessForMonitor(long long)
 @ stdcall -syscall NtUserSetActiveWindow(long)
 @ stdcall -syscall NtUserSetAdditionalForegroundBoostProcesses(ptr long ptr)
 @ stub -syscall NtUserSetAppImeLevel

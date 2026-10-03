@@ -805,6 +805,42 @@ static BOOL has_window_band_access(void)
 }
 
 /***********************************************************************
+ *           NtUserSetActiveProcessForMonitor (win32u.@)
+ */
+BOOL WINAPI NtUserSetActiveProcessForMonitor( DWORD process_id, HMONITOR monitor )
+{
+    OBJECT_ATTRIBUTES attr = {sizeof(attr)};
+    CLIENT_ID client_id = {ULongToHandle(process_id), 0};
+    MONITORINFO monitor_info = {sizeof(monitor_info)};
+    HANDLE process;
+
+    if (!has_window_band_access())
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+
+    if (monitor && !NtUserGetMonitorInfo( monitor, &monitor_info ))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    if (!process_id || NtOpenProcess( &process, PROCESS_QUERY_LIMITED_INFORMATION, &attr, &client_id ))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    NtClose( process );
+
+    /* Windows stores the selected GUI process in the caller's PROCESSINFO and
+     * refreshes orientation only for an internal-panel monitor. Wine has no
+     * corresponding internal-panel orientation owner, so the authorized and
+     * validated operation has no persistent host-side state to update. */
+    return TRUE;
+}
+
+/***********************************************************************
  *           NtUserSetWindowBand (win32u.@)
  */
 BOOL WINAPI NtUserSetWindowBand( HWND hwnd, HWND insert_after, DWORD band )

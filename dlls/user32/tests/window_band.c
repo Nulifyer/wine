@@ -16,6 +16,7 @@ static HWND (WINAPI *pCreateWindowInBandEx)(DWORD, LPCWSTR, LPCWSTR, DWORD, INT,
                                              DWORD, DWORD);
 static BOOL (WINAPI *pGetWindowBand)(HWND, DWORD *);
 static BOOL (WINAPI *pIsShellFrameWindow)(HWND);
+static BOOL (WINAPI *pSetActiveProcessForMonitor)(DWORD, HMONITOR);
 static BOOL (WINAPI *pSetWindowBand)(HWND, HWND, DWORD);
 
 static void test_create_window_in_band_ex(void)
@@ -231,6 +232,43 @@ static void test_is_shell_frame_window(void)
     ok( DestroyWindow( hwnd ), "failed to destroy message window, error %lu\n", GetLastError() );
 }
 
+static void test_set_active_process_for_monitor(void)
+{
+    HMONITOR monitor = MonitorFromPoint( (POINT){0, 0}, MONITOR_DEFAULTTOPRIMARY );
+    static const DWORD process_ids[] = {0, ~0u};
+    unsigned int i;
+    BOOL ret;
+
+    ok( !!monitor, "failed to find the primary monitor, error %lu\n", GetLastError() );
+
+    for (i = 0; i < ARRAY_SIZE(process_ids); ++i)
+    {
+        SetLastError( 0x13579bdf );
+        ret = pSetActiveProcessForMonitor( process_ids[i], NULL );
+        ok( !ret, "process %lu unexpectedly succeeded\n", process_ids[i] );
+        ok( GetLastError() == ERROR_ACCESS_DENIED, "process %lu returned error %lu\n",
+            process_ids[i], GetLastError() );
+    }
+
+    SetLastError( 0x13579bdf );
+    ret = pSetActiveProcessForMonitor( GetCurrentProcessId(), NULL );
+    ok( !ret, "current process unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "current process returned error %lu\n",
+        GetLastError() );
+
+    SetLastError( 0x13579bdf );
+    ret = pSetActiveProcessForMonitor( GetCurrentProcessId(), monitor );
+    ok( !ret, "current process with primary monitor unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "primary monitor returned error %lu\n",
+        GetLastError() );
+
+    SetLastError( 0x13579bdf );
+    ret = pSetActiveProcessForMonitor( GetCurrentProcessId(), (HMONITOR)0x1234 );
+    ok( !ret, "current process with invalid monitor unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "invalid monitor returned error %lu\n",
+        GetLastError() );
+}
+
 START_TEST(window_band)
 {
     HMODULE user32 = GetModuleHandleW( L"user32.dll" );
@@ -238,8 +276,10 @@ START_TEST(window_band)
     pCreateWindowInBandEx = (void *)GetProcAddress( user32, "CreateWindowInBandEx" );
     pGetWindowBand = (void *)GetProcAddress( user32, "GetWindowBand" );
     pIsShellFrameWindow = (void *)GetProcAddress( user32, (const char *)2573 );
+    pSetActiveProcessForMonitor = (void *)GetProcAddress( user32, (const char *)2513 );
     pSetWindowBand = (void *)GetProcAddress( user32, "SetWindowBand" );
-    if (!pCreateWindowInBandEx || !pGetWindowBand || !pIsShellFrameWindow || !pSetWindowBand)
+    if (!pCreateWindowInBandEx || !pGetWindowBand || !pIsShellFrameWindow ||
+        !pSetActiveProcessForMonitor || !pSetWindowBand)
     {
         win_skip( "window-band entry points are unavailable\n" );
         return;
@@ -247,4 +287,5 @@ START_TEST(window_band)
     test_create_window_in_band_ex();
     test_set_window_band();
     test_is_shell_frame_window();
+    test_set_active_process_for_monitor();
 }
