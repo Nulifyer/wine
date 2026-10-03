@@ -1,0 +1,5 @@
+MODULE    = winerpcss.dll
+IMPORTS   = advapi32
+
+SOURCES = \
+	main.c

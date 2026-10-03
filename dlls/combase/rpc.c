@@ -372,74 +372,98 @@ static BOOL service_uses_shared_host(SC_HANDLE service)
     return ret;
 }
 
-static BOOL start_rpcss(void)
+static DWORD start_service_and_wait( const WCHAR *name, DWORD access, BOOL skip_shared_host_wait )
 {
-    static LONG standalone_started;
-    static const WCHAR pipeW[] = L"\\\\.\\pipe\\lrpc\\irpcss";
-    WCHAR commandW[] = L"C:\\windows\\system32\\rpcss.exe --standalone";
-    SERVICE_STATUS_PROCESS status;
-    STARTUPINFOW startup = { sizeof(startup) };
-    PROCESS_INFORMATION process;
+    SERVICE_STATUS_PROCESS status = {0};
     SC_HANDLE scm, service;
-    BOOL shared_host;
-    BOOL ret = FALSE;
+    DWORD error = ERROR_SUCCESS;
 
-    TRACE("\n");
-
-    if (!(scm = OpenSCManagerW(NULL, NULL, 0)))
+    if (!(scm = OpenSCManagerW( NULL, NULL, 0 )))
     {
-        ERR("Failed to open service manager\n");
-        return FALSE;
+        error = GetLastError();
+        ERR( "failed to open service manager for %s, error %lu\n", debugstr_w(name), error );
+        return error;
     }
-
-    if (!(service = OpenServiceW(scm, L"RpcSs", SERVICE_START | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG)))
+    if (!(service = OpenServiceW( scm, name, access )))
     {
-        ERR("Failed to open RpcSs service\n");
+        error = GetLastError();
         CloseServiceHandle( scm );
-        return FALSE;
+        return error;
     }
-
-    shared_host = service_uses_shared_host(service);
-    if (StartServiceW(service, 0, NULL) || GetLastError() == ERROR_SERVICE_ALREADY_RUNNING)
+    if (StartServiceW( service, 0, NULL ) || GetLastError() == ERROR_SERVICE_ALREADY_RUNNING)
     {
-        if (shared_host)
-        {
-            /* A native, svchost-hosted RpcSs does not publish Wine's private
-             * irpcss/irot endpoints.  Let the standalone adapter own them
-             * without waiting for the native service to finish starting. */
-            ret = TRUE;
-        }
-        else
+        if (!skip_shared_host_wait || !service_uses_shared_host( service ))
         {
             ULONGLONG start_time = GetTickCount64();
             do
             {
                 DWORD dummy;
 
-                if (!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, (BYTE *)&status, sizeof(status), &dummy))
-                    break;
-                if (status.dwCurrentState == SERVICE_RUNNING)
+                if (!QueryServiceStatusEx( service, SC_STATUS_PROCESS_INFO,
+                                           (BYTE *)&status, sizeof(status), &dummy ))
                 {
-                    ret = TRUE;
+                    error = GetLastError();
                     break;
                 }
-                if (GetTickCount64() - start_time > 30000) break;
+                if (status.dwCurrentState == SERVICE_RUNNING)
+                    break;
+                if (GetTickCount64() - start_time > 30000)
+                {
+                    error = ERROR_SERVICE_REQUEST_TIMEOUT;
+                    break;
+                }
                 Sleep( 100 );
 
             } while (status.dwCurrentState == SERVICE_START_PENDING);
 
-            if (status.dwCurrentState != SERVICE_RUNNING)
-                WARN("RpcSs failed to start %lu\n", status.dwCurrentState);
+            if (!error && status.dwCurrentState != SERVICE_RUNNING)
+                error = status.dwWin32ExitCode ? status.dwWin32ExitCode : ERROR_SERVICE_NOT_ACTIVE;
         }
     }
-    else
-        ERR("Failed to start RpcSs service\n");
+    else error = GetLastError();
 
-    CloseServiceHandle(service);
-    CloseServiceHandle(scm);
+    CloseServiceHandle( service );
+    CloseServiceHandle( scm );
+    return error;
+}
 
-    if (ret && !wait_for_named_pipe( pipeW, 1000 ) &&
-        !InterlockedCompareExchange( &standalone_started, 1, 0 ))
+static BOOL start_rpcss(void)
+{
+    static LONG standalone_started;
+    static const WCHAR pipeW[] = L"\\\\.\\pipe\\lrpc\\irpcss";
+    static const WCHAR wine_rpcss_serviceW[] = L"WineRpcSs";
+    WCHAR commandW[] = L"C:\\windows\\system32\\rpcss.exe --standalone";
+    STARTUPINFOW startup = { sizeof(startup) };
+    PROCESS_INFORMATION process;
+    DWORD error;
+
+    TRACE("\n");
+
+    if ((error = start_service_and_wait( L"RpcSs",
+                                         SERVICE_START | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG,
+                                         TRUE )))
+    {
+        ERR( "failed to start RpcSs service, error %lu\n", error );
+        return FALSE;
+    }
+
+    if (wait_for_named_pipe( pipeW, 1000 )) return TRUE;
+
+    error = start_service_and_wait( wine_rpcss_serviceW,
+                                    SERVICE_START | SERVICE_QUERY_STATUS, FALSE );
+    if (!error)
+    {
+        if (wait_for_named_pipe( pipeW, 5000 )) return TRUE;
+        WARN( "Wine RPCSS service is running without its private endpoint\n" );
+        return FALSE;
+    }
+    if (error != ERROR_SERVICE_DOES_NOT_EXIST)
+    {
+        ERR( "failed to start Wine RPCSS service, error %lu\n", error );
+        return FALSE;
+    }
+
+    if (!InterlockedCompareExchange( &standalone_started, 1, 0 ))
     {
         if (CreateProcessW( NULL, commandW, NULL, NULL, FALSE, DETACHED_PROCESS,
                             NULL, NULL, &startup, &process ))
@@ -453,12 +477,13 @@ static BOOL start_rpcss(void)
             InterlockedExchange( &standalone_started, 0 );
         }
     }
-    if (ret && !(ret = wait_for_named_pipe( pipeW, 5000 )))
+    if (!wait_for_named_pipe( pipeW, 5000 ))
     {
         WARN( "RpcSs host adapter endpoint is unavailable\n" );
         InterlockedExchange( &standalone_started, 0 );
+        return FALSE;
     }
-    return ret;
+    return TRUE;
 }
 
 static RPC_BINDING_HANDLE get_rpc_handle(unsigned short *protseq, unsigned short *endpoint)

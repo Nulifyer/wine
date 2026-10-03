@@ -176,10 +176,10 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
     TRACE( "service stopped\n" );
 }
 
-static int run_standalone(void)
+static int run_standalone(HANDLE stop_event, HANDLE ready_event)
 {
     static const WCHAR mutex_name[] = L"__wine_rpcss_standalone_mutex";
-    HANDLE shutdown_event = NULL;
+    HANDLE shutdown_event = stop_event;
     HANDLE mutex;
     RPC_STATUS ret;
     NTSTATUS status;
@@ -206,9 +206,13 @@ static int run_standalone(void)
         return ret;
     }
 
-    status = NtSetInformationProcess( GetCurrentProcess(), ProcessWineMakeProcessSystem,
-                                      &shutdown_event, sizeof(shutdown_event) );
-    if (status)
+    if (ready_event) SetEvent(ready_event);
+
+    status = 0;
+    if (!shutdown_event)
+        status = NtSetInformationProcess( GetCurrentProcess(), ProcessWineMakeProcessSystem,
+                                          &shutdown_event, sizeof(shutdown_event) );
+    if (status || !shutdown_event)
     {
         WARN( "Failed to acquire standalone shutdown event, status %#lx.\n", status );
         RpcMgmtStopServerListening( NULL );
@@ -223,8 +227,25 @@ static int run_standalone(void)
     RpcServerUnregisterIf( Irpcss_v0_0_s_ifspec, NULL, TRUE );
     RpcMgmtWaitServerListen();
     if (shutdown_event) CloseHandle( shutdown_event );
+    if (ready_event) CloseHandle( ready_event );
     CloseHandle( mutex );
     return status ? RtlNtStatusToDosError( status ) : 0;
+}
+
+static HANDLE parse_inherited_handle( const WCHAR *string )
+{
+    WCHAR *end;
+    ULONGLONG value;
+    DWORD flags;
+    HANDLE handle;
+
+    value = wcstoull( string, &end, 16 );
+    if (!string[0] || *end || !value || (ULONGLONG)(ULONG_PTR)value != value)
+        return NULL;
+
+    handle = (HANDLE)(ULONG_PTR)value;
+    if (!GetHandleInformation( handle, &flags )) return NULL;
+    return handle;
 }
 
 int __cdecl wmain( int argc, WCHAR *argv[] )
@@ -235,8 +256,15 @@ int __cdecl wmain( int argc, WCHAR *argv[] )
         { NULL, NULL }
     };
 
-    if (argc == 2 && !wcscmp( argv[1], L"--standalone" )) return run_standalone();
+    if (argc == 2 && !wcscmp( argv[1], L"--standalone" )) return run_standalone( NULL, NULL );
+    if (argc == 4 && !wcscmp( argv[1], L"--adapter-child" ))
+    {
+        HANDLE stop_event = parse_inherited_handle( argv[2] );
+        HANDLE ready_event = parse_inherited_handle( argv[3] );
 
+        if (!stop_event || !ready_event) return ERROR_INVALID_HANDLE;
+        return run_standalone( stop_event, ready_event );
+    }
     StartServiceCtrlDispatcherW( service_table );
     return 0;
 }

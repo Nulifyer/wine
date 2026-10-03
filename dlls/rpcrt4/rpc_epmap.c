@@ -85,6 +85,7 @@ static const struct epm_endpoints
 };
 
 static const WCHAR wine_epmapper_pipeW[] = L"\\\\.\\pipe\\lrpc\\wine_epmapper";
+static const WCHAR wine_rpcss_serviceW[] = L"WineRpcSs";
 
 static BOOL wait_for_named_pipe(const WCHAR *name, DWORD timeout)
 {
@@ -99,28 +100,23 @@ static BOOL wait_for_named_pipe(const WCHAR *name, DWORD timeout)
     return FALSE;
 }
 
-static BOOL start_rpcss(void)
+static DWORD start_service_and_wait( const WCHAR *name )
 {
-    static LONG standalone_started;
-    WCHAR commandW[] = L"C:\\windows\\system32\\rpcss.exe --standalone";
     SC_HANDLE scm, service;
-    SERVICE_STATUS_PROCESS status;
-    STARTUPINFOW startup = { sizeof(startup) };
-    PROCESS_INFORMATION process;
-    BOOL ret = FALSE;
-
-    TRACE("\n");
+    SERVICE_STATUS_PROCESS status = {0};
+    DWORD error = ERROR_SUCCESS;
 
     if (!(scm = OpenSCManagerW( NULL, NULL, 0 )))
     {
-        ERR( "failed to open service manager\n" );
-        return FALSE;
+        error = GetLastError();
+        ERR( "failed to open service manager for %s, error %lu\n", debugstr_w(name), error );
+        return error;
     }
-    if (!(service = OpenServiceW( scm, L"RpcSs", SERVICE_START | SERVICE_QUERY_STATUS )))
+    if (!(service = OpenServiceW( scm, name, SERVICE_START | SERVICE_QUERY_STATUS )))
     {
-        ERR( "failed to open RpcSs service\n" );
+        error = GetLastError();
         CloseServiceHandle( scm );
-        return FALSE;
+        return error;
     }
     if (StartServiceW( service, 0, NULL ) || GetLastError() == ERROR_SERVICE_ALREADY_RUNNING)
     {
@@ -131,27 +127,64 @@ static BOOL start_rpcss(void)
 
             if (!QueryServiceStatusEx( service, SC_STATUS_PROCESS_INFO,
                                        (BYTE *)&status, sizeof(status), &dummy ))
-                break;
-            if (status.dwCurrentState == SERVICE_RUNNING)
             {
-                ret = TRUE;
+                error = GetLastError();
                 break;
             }
-            if (GetTickCount64() - start_time > 30000) break;
+            if (status.dwCurrentState == SERVICE_RUNNING)
+                break;
+            if (GetTickCount64() - start_time > 30000)
+            {
+                error = ERROR_SERVICE_REQUEST_TIMEOUT;
+                break;
+            }
             Sleep( 100 );
 
         } while (status.dwCurrentState == SERVICE_START_PENDING);
 
-        if (status.dwCurrentState != SERVICE_RUNNING)
-            WARN( "RpcSs failed to start %lu\n", status.dwCurrentState );
+        if (!error && status.dwCurrentState != SERVICE_RUNNING)
+            error = status.dwWin32ExitCode ? status.dwWin32ExitCode : ERROR_SERVICE_NOT_ACTIVE;
     }
-    else ERR( "failed to start RpcSs service\n" );
+    else error = GetLastError();
 
     CloseServiceHandle( service );
     CloseServiceHandle( scm );
 
-    if (ret && !wait_for_named_pipe( wine_epmapper_pipeW, 1000 ) &&
-        !InterlockedCompareExchange( &standalone_started, 1, 0 ))
+    return error;
+}
+
+static BOOL start_rpcss(void)
+{
+    static LONG standalone_started;
+    WCHAR commandW[] = L"C:\\windows\\system32\\rpcss.exe --standalone";
+    STARTUPINFOW startup = { sizeof(startup) };
+    PROCESS_INFORMATION process;
+    DWORD error;
+
+    TRACE("\n");
+
+    if ((error = start_service_and_wait( L"RpcSs" )))
+    {
+        ERR( "failed to start RpcSs service, error %lu\n", error );
+        return FALSE;
+    }
+
+    if (wait_for_named_pipe( wine_epmapper_pipeW, 1000 )) return TRUE;
+
+    error = start_service_and_wait( wine_rpcss_serviceW );
+    if (!error)
+    {
+        if (wait_for_named_pipe( wine_epmapper_pipeW, 5000 )) return TRUE;
+        WARN( "Wine RPCSS service is running without its endpoint mapper\n" );
+        return FALSE;
+    }
+    if (error != ERROR_SERVICE_DOES_NOT_EXIST)
+    {
+        ERR( "failed to start Wine RPCSS service, error %lu\n", error );
+        return FALSE;
+    }
+
+    if (!InterlockedCompareExchange( &standalone_started, 1, 0 ))
     {
         if (CreateProcessW( NULL, commandW, NULL, NULL, FALSE, DETACHED_PROCESS,
                             NULL, NULL, &startup, &process ))
@@ -165,12 +198,13 @@ static BOOL start_rpcss(void)
             InterlockedExchange( &standalone_started, 0 );
         }
     }
-    if (ret && !(ret = wait_for_named_pipe( wine_epmapper_pipeW, 5000 )))
+    if (!wait_for_named_pipe( wine_epmapper_pipeW, 5000 ))
     {
         WARN( "RpcSs host adapter endpoint mapper is unavailable\n" );
         InterlockedExchange( &standalone_started, 0 );
+        return FALSE;
     }
-    return ret;
+    return TRUE;
 }
 
 static inline BOOL is_epm_destination_local(RPC_BINDING_HANDLE handle)
