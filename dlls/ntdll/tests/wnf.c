@@ -51,6 +51,7 @@
 #define WNF_HAM_SYSTEM_STATE_CHANGED 0x418b0f25a3bc0875ULL
 #define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
 #define WNF_SHEL_LOCKSCREEN_ACTIVE 0x0d83063ea3bc5835ULL
+#define WNF_SHEL_WINDOW_ACTIVATED 0x0d83063ea3bfb035ULL
 #define WNF_THME_THEME_CHANGED 0x048b0639a3bc0875ULL
 #define WNF_TMCN_ISTABLETMODE 0x0f850339a3bc0835ULL
 #define WNF_UMGR_SIHOST_READY 0x13810338a3bc0835ULL
@@ -520,6 +521,7 @@ START_TEST(wnf)
             WNF_HAM_SYSTEM_STATE_CHANGED,
             WNF_RPCF_FWMAN_RUNNING,
             WNF_SHEL_LOCKSCREEN_ACTIVE,
+            WNF_SHEL_WINDOW_ACTIVATED,
             WNF_THME_THEME_CHANGED,
             WNF_TMCN_ISTABLETMODE,
             WNF_UMGR_SIHOST_READY,
@@ -636,6 +638,29 @@ START_TEST(wnf)
         ok( status == STATUS_INVALID_PARAMETER,
             "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
         status = pNtDeleteWnfStateData( &((ULONGLONG){WNF_UMGR_USER_PICTURE_ID}), NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+    }
+
+    {
+        ULONG value = 0, queried = 0xdeadbeef;
+        ULONGLONG name = WNF_SHEL_WINDOW_ACTIVATED;
+
+        status = pRtlPublishWnfStateData( name, NULL, &value, sizeof(value), NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+
+        stamp = 0xdeadbeef;
+        size = sizeof(queried);
+        status = pNtQueryWnfStateData( &name, NULL, NULL, &stamp, &queried, &size );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+        ok( stamp == 1, "expected stamp 1, got %lu\n", stamp );
+        ok( size == sizeof(queried), "expected %Iu bytes, got %lu\n", sizeof(queried), size );
+        ok( !queried, "expected value 0, got %#lx\n", queried );
+
+        status = pRtlPublishWnfStateData( name, NULL, &((ULONGLONG){0}), sizeof(ULONGLONG), NULL );
+        ok( status == STATUS_INVALID_PARAMETER,
+            "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+
+        status = pNtDeleteWnfStateData( &name, NULL );
         ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
     }
 
