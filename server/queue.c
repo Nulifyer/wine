@@ -184,9 +184,11 @@ struct hotkey
     struct list         entry;        /* entry in desktop hotkey list */
     struct msg_queue   *queue;        /* queue owning this hotkey */
     user_handle_t       win;          /* window handle */
+    user_handle_t       foreground;   /* optional shell foreground target */
     int                 id;           /* hotkey id */
     unsigned int        vkey;         /* virtual key code */
     unsigned int        flags;        /* key modifiers */
+    int                 shell;        /* shell-owned registration */
 };
 
 static void msg_queue_dump( struct object *obj, int verbose );
@@ -1877,6 +1879,8 @@ static int queue_hotkey_message( struct desktop *desktop, struct message *msg )
     return 0;
 
 found:
+    /* Preserve shell registration metadata even though Wine does not yet have
+     * the native shell-hotkey notification path that consumes it. */
     msg->type      = MSG_POSTED;
     msg->win       = hotkey->win;
     msg->msg       = WM_HOTKEY;
@@ -3753,6 +3757,7 @@ DECL_HANDLER(register_hotkey)
 {
     struct desktop *desktop;
     user_handle_t win_handle = req->window;
+    user_handle_t foreground_handle = req->foreground;
     struct hotkey *hotkey;
     struct hotkey *new_hotkey = NULL;
     struct thread *thread;
@@ -3777,6 +3782,12 @@ DECL_HANDLER(register_hotkey)
             set_win32_error( ERROR_WINDOW_OF_OTHER_THREAD );
             return;
         }
+    }
+
+    if (foreground_handle && !(foreground_handle = get_valid_window_handle( foreground_handle )))
+    {
+        release_object( desktop );
+        return;
     }
 
     LIST_FOR_EACH_ENTRY( hotkey, &desktop->hotkeys, struct hotkey, entry )
@@ -3804,16 +3815,18 @@ DECL_HANDLER(register_hotkey)
         if (new_hotkey)
         {
             list_add_tail( &desktop->hotkeys, &new_hotkey->entry );
-            new_hotkey->queue  = current->queue;
-            new_hotkey->win    = win_handle;
-            new_hotkey->id     = req->id;
+            new_hotkey->queue = current->queue;
+            new_hotkey->win   = win_handle;
+            new_hotkey->id    = req->id;
         }
     }
 
     if (new_hotkey)
     {
-        new_hotkey->flags = req->flags;
-        new_hotkey->vkey  = req->vkey;
+        new_hotkey->flags      = req->flags;
+        new_hotkey->vkey       = req->vkey;
+        new_hotkey->foreground = foreground_handle;
+        new_hotkey->shell      = req->shell;
     }
 
     release_object( desktop );

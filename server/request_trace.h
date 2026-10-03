@@ -2343,9 +2343,11 @@ static void dump_set_user_object_info_reply( const struct set_user_object_info_r
 static void dump_register_hotkey_request( const struct register_hotkey_request *req )
 {
     fprintf( stderr, " window=%08x", req->window );
+    fprintf( stderr, ", foreground=%08x", req->foreground );
     fprintf( stderr, ", id=%d", req->id );
     fprintf( stderr, ", flags=%08x", req->flags );
     fprintf( stderr, ", vkey=%08x", req->vkey );
+    fprintf( stderr, ", shell=%d", req->shell );
 }
 
 static void dump_register_hotkey_reply( const struct register_hotkey_reply *req )

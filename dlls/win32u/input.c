@@ -2129,9 +2129,10 @@ BOOL WINAPI NtUserGetKeyboardLayoutName( WCHAR *name )
 }
 
 /***********************************************************************
- *	     NtUserRegisterHotKey (win32u.@)
+ *	     register_hotkey
  */
-BOOL WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk )
+static BOOL register_hotkey( HWND hwnd, INT id, UINT modifiers, UINT vk,
+                             HWND foreground, BOOL shell )
 {
     BOOL ret;
     int replaced = 0;
@@ -2145,9 +2146,11 @@ BOOL WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk )
     SERVER_START_REQ( register_hotkey )
     {
         req->window = wine_server_user_handle( hwnd );
+        req->foreground = wine_server_user_handle( foreground );
         req->id = id;
         req->flags = modifiers;
         req->vkey = vk;
+        req->shell = shell;
         if ((ret = !wine_server_call_err( req )))
         {
             replaced = reply->replaced;
@@ -2160,6 +2163,40 @@ BOOL WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk )
     if (ret && replaced)
         user_driver->pUnregisterHotKey(hwnd, modifiers, vk);
 
+    return ret;
+}
+
+/***********************************************************************
+ *	     NtUserRegisterHotKey (win32u.@)
+ */
+BOOL WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk )
+{
+    return register_hotkey( hwnd, id, modifiers, vk, NULL, FALSE );
+}
+
+/***********************************************************************
+ *	     NtUserShellRegisterHotKey (win32u.@)
+ */
+BOOL WINAPI NtUserShellRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk, HWND foreground )
+{
+    BOOL ret;
+
+    TRACE_(keyboard)( "(%p,%d,0x%08x,%X,%p)\n", hwnd, id, modifiers, vk, foreground );
+
+    if (modifiers & ~0x600f)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_FLAGS );
+        return FALSE;
+    }
+    if (!has_window_band_access())
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+    if ((hwnd && !is_window( hwnd )) || (foreground && !is_window( foreground ))) return FALSE;
+
+    ret = register_hotkey( hwnd, id, modifiers, vk, foreground, TRUE );
+    if (!ret) RtlSetLastWin32Error( ERROR_HOTKEY_ALREADY_REGISTERED );
     return ret;
 }
 

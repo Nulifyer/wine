@@ -4533,10 +4533,12 @@ struct register_hotkey_request
 {
     struct request_header __header;
     user_handle_t  window;
+    user_handle_t  foreground;
     int            id;
     unsigned int   flags;
     unsigned int   vkey;
-    char __pad_28[4];
+    int            shell;
+    char __pad_36[4];
 };
 struct register_hotkey_reply
 {
@@ -9563,6 +9565,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1078
+#define SERVER_PROTOCOL_VERSION 1079
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

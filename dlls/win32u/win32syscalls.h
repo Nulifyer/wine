@@ -1462,7 +1462,7 @@
     SYSCALL_ENTRY( 0x15b2, NtUserShellHandwritingHandleDelegatedInput, 0 ) \
     SYSCALL_ENTRY( 0x15b3, NtUserShellHandwritingUndelegateInput, 0 ) \
     SYSCALL_ENTRY( 0x15b4, NtUserShellMigrateWindow, 0 ) \
-    SYSCALL_ENTRY( 0x15b5, NtUserShellRegisterHotKey, 0 ) \
+    SYSCALL_ENTRY( 0x15b5, NtUserShellRegisterHotKey, 20 ) \
     SYSCALL_ENTRY( 0x15b6, NtUserShellSetWindowPos, 0 ) \
     SYSCALL_ENTRY( 0x15b7, NtUserShowCaret, 4 ) \
     SYSCALL_ENTRY( 0x15b8, NtUserShowCursor, 4 ) \
@@ -3004,7 +3004,7 @@
     SYSCALL_ENTRY( 0x15b2, NtUserShellHandwritingHandleDelegatedInput, 0 ) \
     SYSCALL_ENTRY( 0x15b3, NtUserShellHandwritingUndelegateInput, 0 ) \
     SYSCALL_ENTRY( 0x15b4, NtUserShellMigrateWindow, 0 ) \
-    SYSCALL_ENTRY( 0x15b5, NtUserShellRegisterHotKey, 0 ) \
+    SYSCALL_ENTRY( 0x15b5, NtUserShellRegisterHotKey, 40 ) \
     SYSCALL_ENTRY( 0x15b6, NtUserShellSetWindowPos, 0 ) \
     SYSCALL_ENTRY( 0x15b7, NtUserShowCaret, 8 ) \
     SYSCALL_ENTRY( 0x15b8, NtUserShowCursor, 8 ) \
@@ -3966,7 +3966,6 @@
     SYSCALL_STUB( NtUserShellHandwritingHandleDelegatedInput ) \
     SYSCALL_STUB( NtUserShellHandwritingUndelegateInput ) \
     SYSCALL_STUB( NtUserShellMigrateWindow ) \
-    SYSCALL_STUB( NtUserShellRegisterHotKey ) \
     SYSCALL_STUB( NtUserShellSetWindowPos ) \
     SYSCALL_STUB( NtUserShowStartGlass ) \
     SYSCALL_STUB( NtUserShowSystemCursor ) \

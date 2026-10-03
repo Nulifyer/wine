@@ -2302,6 +2302,11 @@ BOOL SYSCALL_API NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT v
     SYSCALL_FUNC( NtUserRegisterHotKey );
 }
 
+BOOL SYSCALL_API NtUserShellRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk, HWND foreground )
+{
+    SYSCALL_FUNC( NtUserShellRegisterHotKey );
+}
+
 BOOL SYSCALL_API NtUserRegisterLogonProcess( DWORD process_id, BOOL secure )
 {
     SYSCALL_FUNC( NtUserRegisterLogonProcess );

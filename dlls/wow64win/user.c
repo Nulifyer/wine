@@ -5053,6 +5053,17 @@ NTSTATUS WINAPI wow64_NtUserSetShellWindowEx( UINT *args )
     return NtUserSetShellWindowEx( shell, list_view );
 }
 
+NTSTATUS WINAPI wow64_NtUserShellRegisterHotKey( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    INT id = get_ulong( &args );
+    UINT modifiers = get_ulong( &args );
+    UINT vk = get_ulong( &args );
+    HWND foreground = get_handle( &args );
+
+    return NtUserShellRegisterHotKey( hwnd, id, modifiers, vk, foreground );
+}
+
 NTSTATUS WINAPI wow64_NtUserSetSysColors( UINT *args )
 {
     INT count = get_ulong( &args );

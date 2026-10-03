@@ -297,6 +297,7 @@ extern HWND get_window_relative( HWND hwnd, UINT rel );
 extern DWORD get_window_thread( HWND hwnd, DWORD *process );
 extern HWND is_current_process_window( HWND hwnd );
 extern HWND is_current_thread_window( HWND hwnd );
+extern BOOL has_window_band_access(void);
 extern BOOL is_desktop_window( HWND hwnd );
 extern BOOL is_iconic( HWND hwnd );
 extern BOOL is_window_drawable( HWND hwnd, BOOL icon );

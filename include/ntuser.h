@@ -1234,6 +1234,7 @@ W32KAPI BOOL    WINAPI NtUserRegisterUserApiHook( UNICODE_STRING *module64, UNIC
                                                   UNICODE_STRING *module32, UNICODE_STRING *proc32 );
 W32KAPI BOOL    WINAPI NtUserRegisterBSDRWindow( HWND hwnd, DWORD flags );
 W32KAPI BOOL    WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk );
+W32KAPI BOOL    WINAPI NtUserShellRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk, HWND foreground );
 W32KAPI BOOL    WINAPI NtUserRegisterLogonProcess( DWORD process_id, BOOL secure );
 W32KAPI BOOL    WINAPI NtUserRegisterSessionPort( HANDLE port );
 W32KAPI BOOL    WINAPI NtUserRegisterRawInputDevices( const RAWINPUTDEVICE *devices, UINT device_count, UINT size );

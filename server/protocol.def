@@ -3295,9 +3295,11 @@ enum coords_relative
 /* Register a hotkey */
 @REQ(register_hotkey)
     user_handle_t  window;        /* handle to the window */
+    user_handle_t  foreground;    /* optional shell foreground target */
     int            id;            /* hotkey identifier */
     unsigned int   flags;         /* modifier keys */
     unsigned int   vkey;          /* virtual key code */
+    int            shell;         /* shell-owned registration */
 @REPLY
     int            replaced;      /* did we replace an existing hotkey? */
     unsigned int   flags;         /* flags of replaced hotkey */

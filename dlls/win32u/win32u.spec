@@ -1460,7 +1460,7 @@
 @ stub -syscall NtUserShellHandwritingHandleDelegatedInput
 @ stub -syscall NtUserShellHandwritingUndelegateInput
 @ stub -syscall NtUserShellMigrateWindow
-@ stub -syscall NtUserShellRegisterHotKey
+@ stdcall -syscall NtUserShellRegisterHotKey(long long long long long)
 @ stub -syscall NtUserShellSetWindowPos
 @ stdcall -syscall NtUserShowCaret(long)
 @ stdcall -syscall NtUserShowCursor(long)

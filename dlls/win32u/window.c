@@ -794,7 +794,7 @@ BOOL WINAPI NtUserSetWindowMessageCapability( HWND hwnd, UINT message, PSID sid,
 static const WCHAR window_band_prop[] =
     {'_','_','w','i','n','e','_','w','i','n','d','o','w','_','b','a','n','d',0};
 
-static BOOL has_window_band_access(void)
+BOOL has_window_band_access(void)
 {
     struct user_thread_info *thread_info = get_user_thread_info();
     DWORD shell_process;

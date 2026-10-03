@@ -17,6 +17,7 @@ static HWND (WINAPI *pCreateWindowInBandEx)(DWORD, LPCWSTR, LPCWSTR, DWORD, INT,
 static BOOL (WINAPI *pGetWindowBand)(HWND, DWORD *);
 static BOOL (WINAPI *pIsShellFrameWindow)(HWND);
 static BOOL (WINAPI *pSetActiveProcessForMonitor)(DWORD, HMONITOR);
+static BOOL (WINAPI *pShellRegisterHotKey)(HWND, INT, UINT, UINT, HWND);
 static BOOL (WINAPI *pSetWindowBand)(HWND, HWND, DWORD);
 
 static void test_create_window_in_band_ex(void)
@@ -269,6 +270,35 @@ static void test_set_active_process_for_monitor(void)
         GetLastError() );
 }
 
+static void test_shell_register_hot_key(void)
+{
+    BOOL ret;
+
+    SetLastError( 0x13579bdf );
+    ret = pShellRegisterHotKey( NULL, 1, 0x10, VK_F24, NULL );
+    ok( !ret, "invalid modifier unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_FLAGS, "invalid modifier returned error %lu\n",
+        GetLastError() );
+
+    SetLastError( 0x13579bdf );
+    ret = pShellRegisterHotKey( NULL, 1, 0, VK_F24, NULL );
+    ok( !ret, "ordinary registration unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "ordinary registration returned error %lu\n",
+        GetLastError() );
+
+    SetLastError( 0x13579bdf );
+    ret = pShellRegisterHotKey( (HWND)0x1234, 1, 0, VK_F24, NULL );
+    ok( !ret, "invalid primary window unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "invalid primary window returned error %lu\n",
+        GetLastError() );
+
+    SetLastError( 0x13579bdf );
+    ret = pShellRegisterHotKey( NULL, 1, 0, VK_F24, (HWND)0x1234 );
+    ok( !ret, "invalid foreground window unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "invalid foreground window returned error %lu\n",
+        GetLastError() );
+}
+
 START_TEST(window_band)
 {
     HMODULE user32 = GetModuleHandleW( L"user32.dll" );
@@ -277,9 +307,10 @@ START_TEST(window_band)
     pGetWindowBand = (void *)GetProcAddress( user32, "GetWindowBand" );
     pIsShellFrameWindow = (void *)GetProcAddress( user32, (const char *)2573 );
     pSetActiveProcessForMonitor = (void *)GetProcAddress( user32, (const char *)2513 );
+    pShellRegisterHotKey = (void *)GetProcAddress( user32, (const char *)2671 );
     pSetWindowBand = (void *)GetProcAddress( user32, "SetWindowBand" );
     if (!pCreateWindowInBandEx || !pGetWindowBand || !pIsShellFrameWindow ||
-        !pSetActiveProcessForMonitor || !pSetWindowBand)
+        !pSetActiveProcessForMonitor || !pShellRegisterHotKey || !pSetWindowBand)
     {
         win_skip( "window-band entry points are unavailable\n" );
         return;
@@ -288,4 +319,5 @@ START_TEST(window_band)
     test_set_window_band();
     test_is_shell_frame_window();
     test_set_active_process_for_monitor();
+    test_shell_register_hot_key();
 }
