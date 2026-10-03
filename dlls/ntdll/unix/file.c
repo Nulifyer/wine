@@ -7689,6 +7689,28 @@ NTSTATUS WINAPI NtQueryVolumeInformationFile( HANDLE handle, IO_STATUS_BLOCK *io
         }
         break;
 
+    case FileFsSectorSizeInformation:
+        if (length < sizeof(FILE_FS_SECTOR_SIZE_INFORMATION))
+            status = STATUS_INFO_LENGTH_MISMATCH;
+        else
+        {
+            FILE_FS_SECTOR_SIZE_INFORMATION *info = buffer;
+            FILE_FS_FULL_SIZE_INFORMATION full_info;
+
+            if ((status = get_full_size_info( fd, &full_info )) == STATUS_SUCCESS)
+            {
+                info->LogicalBytesPerSector = full_info.BytesPerSector;
+                info->PhysicalBytesPerSectorForAtomicity = full_info.BytesPerSector;
+                info->PhysicalBytesPerSectorForPerformance = full_info.BytesPerSector;
+                info->FileSystemEffectivePhysicalBytesPerSectorForAtomicity = full_info.BytesPerSector;
+                info->Flags = SSINFO_FLAGS_ALIGNED_DEVICE | SSINFO_FLAGS_PARTITION_ALIGNED_ON_DEVICE;
+                info->ByteOffsetForSectorAlignment = 0;
+                info->ByteOffsetForPartitionAlignment = 0;
+                io->Information = sizeof(*info);
+            }
+        }
+        break;
+
     case FileFsFullSizeInformationEx:
         if (length < sizeof(FILE_FS_FULL_SIZE_INFORMATION_EX))
             status = STATUS_BUFFER_TOO_SMALL;

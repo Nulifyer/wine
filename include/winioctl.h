@@ -653,6 +653,23 @@ typedef struct _FILE_FS_FULL_SIZE_INFORMATION {
 	ULONG		BytesPerSector;
 } FILE_FS_FULL_SIZE_INFORMATION, *PFILE_FS_FULL_SIZE_INFORMATION;
 
+/* FileFsSectorSizeInformation = 11 */
+#define SSINFO_FLAGS_ALIGNED_DEVICE              0x00000001
+#define SSINFO_FLAGS_PARTITION_ALIGNED_ON_DEVICE 0x00000002
+#define SSINFO_FLAGS_NO_SEEK_PENALTY              0x00000004
+#define SSINFO_FLAGS_TRIM_ENABLED                 0x00000008
+#define SSINFO_OFFSET_UNKNOWN                     0xffffffff
+
+typedef struct _FILE_FS_SECTOR_SIZE_INFORMATION {
+    ULONG LogicalBytesPerSector;
+    ULONG PhysicalBytesPerSectorForAtomicity;
+    ULONG PhysicalBytesPerSectorForPerformance;
+    ULONG FileSystemEffectivePhysicalBytesPerSectorForAtomicity;
+    ULONG Flags;
+    ULONG ByteOffsetForSectorAlignment;
+    ULONG ByteOffsetForPartitionAlignment;
+} FILE_FS_SECTOR_SIZE_INFORMATION, *PFILE_FS_SECTOR_SIZE_INFORMATION;
+
 /* FileFsFullSizeInformationEx = 14 */
 typedef struct _FILE_FS_FULL_SIZE_INFORMATION_EX {
     ULONGLONG ActualTotalAllocationUnits;

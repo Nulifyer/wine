@@ -520,6 +520,20 @@ typedef struct _FILE_IO_PRIORITY_HINT_INFO {
     PRIORITY_HINT PriorityHint;
 } FILE_IO_PRIORITY_HINT_INFO;
 
+#define STORAGE_INFO_FLAGS_ALIGNED_DEVICE              0x00000001
+#define STORAGE_INFO_FLAGS_PARTITION_ALIGNED_ON_DEVICE 0x00000002
+#define STORAGE_INFO_OFFSET_UNKNOWN                    0xffffffff
+
+typedef struct _FILE_STORAGE_INFO {
+    ULONG LogicalBytesPerSector;
+    ULONG PhysicalBytesPerSectorForAtomicity;
+    ULONG PhysicalBytesPerSectorForPerformance;
+    ULONG FileSystemEffectivePhysicalBytesPerSectorForAtomicity;
+    ULONG Flags;
+    ULONG ByteOffsetForSectorAlignment;
+    ULONG ByteOffsetForPartitionAlignment;
+} FILE_STORAGE_INFO, *PFILE_STORAGE_INFO;
+
 typedef struct _FILE_ALLOCATION_INFO {
     LARGE_INTEGER AllocationSize;
 } FILE_ALLOCATION_INFO, *PFILE_ALLOCATION_INFO;

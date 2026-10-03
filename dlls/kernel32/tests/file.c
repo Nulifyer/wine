@@ -4666,6 +4666,7 @@ static void test_GetFileInformationByHandleEx(void)
     FILE_ID_BOTH_DIR_INFO *bothDirInfo;
     FILE_BASIC_INFO *basicInfo;
     FILE_STANDARD_INFO *standardInfo;
+    FILE_STORAGE_INFO storageInfo, storageSentinel;
     FILE_NAME_INFO *nameInfo;
     LARGE_INTEGER prevWrite;
     FILE_IO_PRIORITY_HINT_INFO priohintinfo;
@@ -4783,6 +4784,35 @@ static void test_GetFileInformationByHandleEx(void)
     ok(standardInfo->NumberOfLinks == 1, "GetFileInformationByHandleEx: Unexpected number of links\n");
     ok(standardInfo->DeletePending == FALSE, "GetFileInformationByHandleEx: Unexpected pending delete\n");
     ok(standardInfo->Directory == FALSE, "GetFileInformationByHandleEx: Incorrect directory flag\n");
+
+    memset(&storageInfo, 0xa5, sizeof(storageInfo));
+    SetLastError(0xdeadbeef);
+    ret = pGetFileInformationByHandleEx(file, FileStorageInfo, &storageInfo, sizeof(storageInfo));
+    ok(ret, "GetFileInformationByHandleEx: failed to get FileStorageInfo, %lu\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "success changed last error to %lu\n", GetLastError());
+    ok(storageInfo.LogicalBytesPerSector != 0, "expected nonzero logical sector size\n");
+    ok(storageInfo.PhysicalBytesPerSectorForAtomicity != 0, "expected nonzero atomic sector size\n");
+    ok(storageInfo.PhysicalBytesPerSectorForPerformance != 0, "expected nonzero performance sector size\n");
+    ok(storageInfo.FileSystemEffectivePhysicalBytesPerSectorForAtomicity != 0,
+       "expected nonzero effective atomic sector size\n");
+
+    memset(&storageInfo, 0xa5, sizeof(storageInfo));
+    storageSentinel = storageInfo;
+    SetLastError(0xdeadbeef);
+    ret = pGetFileInformationByHandleEx(file, FileStorageInfo, &storageInfo, sizeof(storageInfo) - 1);
+    ok(!ret && GetLastError() == ERROR_BAD_LENGTH, "got %d, error %lu\n", ret, GetLastError());
+    ok(!memcmp(&storageInfo, &storageSentinel, sizeof(storageInfo)), "short query modified output\n");
+
+    SetLastError(0xdeadbeef);
+    ret = pGetFileInformationByHandleEx(file, FileStorageInfo, NULL, sizeof(storageInfo));
+    ok(!ret && GetLastError() == ERROR_NOACCESS, "got %d, error %lu\n", ret, GetLastError());
+
+    memset(&storageInfo, 0xa5, sizeof(storageInfo));
+    storageSentinel = storageInfo;
+    SetLastError(0xdeadbeef);
+    ret = pGetFileInformationByHandleEx((HANDLE)0xdeadbeef, FileStorageInfo, &storageInfo, sizeof(storageInfo));
+    ok(!ret && GetLastError() == ERROR_INVALID_HANDLE, "got %d, error %lu\n", ret, GetLastError());
+    ok(!memcmp(&storageInfo, &storageSentinel, sizeof(storageInfo)), "invalid-handle query modified output\n");
 
     /* Test FileNameInfo */
     memset(buffer, 0xff, sizeof(buffer));

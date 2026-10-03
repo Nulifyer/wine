@@ -1394,10 +1394,12 @@ static void test_file_io_completion(void)
 static void test_file_full_size_information(void)
 {
     IO_STATUS_BLOCK io;
+    FILE_FS_SECTOR_SIZE_INFORMATION sector_info, sector_sentinel;
     FILE_FS_FULL_SIZE_INFORMATION_EX ffsie;
     FILE_FS_FULL_SIZE_INFORMATION ffsi;
     FILE_FS_SIZE_INFORMATION fsi;
     ULONGLONG expected;
+    ULONG sector_bytes;
     HANDLE h;
     NTSTATUS res;
 
@@ -1406,6 +1408,29 @@ static void test_file_full_size_information(void)
     memset(&ffsie,0,sizeof(ffsie));
     memset(&ffsi,0,sizeof(ffsi));
     memset(&fsi,0,sizeof(fsi));
+
+    memset(&sector_info, 0xcc, sizeof(sector_info));
+    res = pNtQueryVolumeInformationFile(h, &io, &sector_info, sizeof(sector_info),
+                                        FileFsSectorSizeInformation);
+    ok(res == STATUS_SUCCESS, "cannot get sector size information, res %lx\n", res);
+    ok(io.Information == sizeof(sector_info), "expected %Iu bytes, got %Iu\n",
+       sizeof(sector_info), io.Information);
+    ok(sector_info.LogicalBytesPerSector != 0, "expected nonzero logical sector size\n");
+    ok(sector_info.PhysicalBytesPerSectorForAtomicity != 0, "expected nonzero atomic sector size\n");
+    ok(sector_info.PhysicalBytesPerSectorForPerformance != 0, "expected nonzero performance sector size\n");
+    ok(sector_info.FileSystemEffectivePhysicalBytesPerSectorForAtomicity != 0,
+       "expected nonzero effective atomic sector size\n");
+    ok((sector_info.Flags & (SSINFO_FLAGS_ALIGNED_DEVICE | SSINFO_FLAGS_PARTITION_ALIGNED_ON_DEVICE)) ==
+       (SSINFO_FLAGS_ALIGNED_DEVICE | SSINFO_FLAGS_PARTITION_ALIGNED_ON_DEVICE),
+       "expected aligned device and partition flags, got %#lx\n", sector_info.Flags);
+    sector_bytes = sector_info.LogicalBytesPerSector;
+
+    memset(&sector_info, 0xa5, sizeof(sector_info));
+    sector_sentinel = sector_info;
+    res = pNtQueryVolumeInformationFile(h, &io, &sector_info, sizeof(sector_info) - 1,
+                                        FileFsSectorSizeInformation);
+    ok(res == STATUS_INFO_LENGTH_MISMATCH, "expected STATUS_INFO_LENGTH_MISMATCH, got %lx\n", res);
+    ok(!memcmp(&sector_info, &sector_sentinel, sizeof(sector_info)), "short query modified output\n");
 
     /* Assume No Quota Settings configured on Wine Testbot */
     res = pNtQueryVolumeInformationFile(h, &io, &ffsi, sizeof ffsi, FileFsFullSizeInformation);
@@ -1424,6 +1449,8 @@ static void test_file_full_size_information(void)
     /* Assume file system is NTFS */
     ok(fsi.BytesPerSector == 512, "[fsi] BytesPerSector expected 512, got %ld\n",fsi.BytesPerSector);
     ok(fsi.SectorsPerAllocationUnit == 8, "[fsi] SectorsPerAllocationUnit expected 8, got %ld\n",fsi.SectorsPerAllocationUnit);
+    ok(sector_bytes == fsi.BytesPerSector, "sector size mismatch, got %lu and %lu\n",
+       sector_bytes, fsi.BytesPerSector);
 
     ok(ffsi.TotalAllocationUnits.QuadPart > 0,
         "[ffsi] TotalAllocationUnits expected positive, got negative value 0x%s\n",
