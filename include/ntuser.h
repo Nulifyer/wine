@@ -1314,6 +1314,7 @@ W32KAPI NTSTATUS WINAPI NtUserSetInformationThread( HANDLE thread, USERTHREADINF
                                                      void *info, ULONG length );
 W32KAPI BOOL    WINAPI NtUserSetThreadDesktop( HDESK handle );
 W32KAPI UINT_PTR WINAPI NtUserSetTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc, ULONG tolerance );
+W32KAPI BOOL    WINAPI NtUserSetWindowBand( HWND hwnd, HWND insert_after, DWORD band );
 W32KAPI BOOL    WINAPI NtUserSetWindowContextHelpId( HWND hwnd, DWORD id );
 W32KAPI BOOL    WINAPI NtUserSetWindowFNID( HWND hwnd, WORD fnid );
 W32KAPI LONG    WINAPI NtUserSetWindowLong( HWND hwnd, INT offset, LONG newval, BOOL ansi );

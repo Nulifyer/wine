@@ -1108,7 +1108,7 @@
 @ stdcall SetUserObjectInformationW(long long ptr long) NtUserSetObjectInformation
 @ stdcall SetUserObjectSecurity(long ptr ptr)
 @ stdcall SetWinEventHook(long long long ptr long long long)
-# @ stub SetWindowBand
+@ stdcall SetWindowBand(long long long) NtUserSetWindowBand
 @ stdcall SetWindowCompositionAttribute(ptr ptr)
 @ stdcall SetWindowCompositionTransition(long long ptr ptr ptr ptr ptr) NtUserSetWindowCompositionTransition
 @ stdcall SetWindowContextHelpId(long long) NtUserSetWindowContextHelpId

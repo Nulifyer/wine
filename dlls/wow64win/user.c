@@ -5115,6 +5115,15 @@ NTSTATUS WINAPI wow64_NtUserSetWinEventHook( UINT *args )
     return HandleToUlong( ret );
 }
 
+NTSTATUS WINAPI wow64_NtUserSetWindowBand( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    HWND insert_after = get_handle( &args );
+    DWORD band = get_ulong( &args );
+
+    return NtUserSetWindowBand( hwnd, insert_after, band );
+}
+
 NTSTATUS WINAPI wow64_NtUserSetWindowContextHelpId( UINT *args )
 {
     HWND hwnd = get_handle( &args );

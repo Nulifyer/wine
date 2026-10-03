@@ -1436,7 +1436,7 @@
     SYSCALL_ENTRY( 0x1598, NtUserSetWatermarkStrings, 0 ) \
     SYSCALL_ENTRY( 0x1599, NtUserSetWinEventHook, 32 ) \
     SYSCALL_ENTRY( 0x159a, NtUserSetWindowArrangement, 0 ) \
-    SYSCALL_ENTRY( 0x159b, NtUserSetWindowBand, 0 ) \
+    SYSCALL_ENTRY( 0x159b, NtUserSetWindowBand, 12 ) \
     SYSCALL_ENTRY( 0x159c, NtUserSetWindowCompositionAttribute, 8 ) \
     SYSCALL_ENTRY( 0x159d, NtUserSetWindowCompositionTransition, 28 ) \
     SYSCALL_ENTRY( 0x159e, NtUserSetWindowContextHelpId, 8 ) \
@@ -2978,7 +2978,7 @@
     SYSCALL_ENTRY( 0x1598, NtUserSetWatermarkStrings, 0 ) \
     SYSCALL_ENTRY( 0x1599, NtUserSetWinEventHook, 64 ) \
     SYSCALL_ENTRY( 0x159a, NtUserSetWindowArrangement, 0 ) \
-    SYSCALL_ENTRY( 0x159b, NtUserSetWindowBand, 0 ) \
+    SYSCALL_ENTRY( 0x159b, NtUserSetWindowBand, 24 ) \
     SYSCALL_ENTRY( 0x159c, NtUserSetWindowCompositionAttribute, 16 ) \
     SYSCALL_ENTRY( 0x159d, NtUserSetWindowCompositionTransition, 56 ) \
     SYSCALL_ENTRY( 0x159e, NtUserSetWindowContextHelpId, 16 ) \
@@ -3954,7 +3954,6 @@
     SYSCALL_STUB( NtUserSetWaitForQueueAttach ) \
     SYSCALL_STUB( NtUserSetWatermarkStrings ) \
     SYSCALL_STUB( NtUserSetWindowArrangement ) \
-    SYSCALL_STUB( NtUserSetWindowBand ) \
     SYSCALL_STUB( NtUserSetWindowDisplayAffinity ) \
     SYSCALL_STUB( NtUserSetWindowFeedbackSetting ) \
     SYSCALL_STUB( NtUserSetWindowGroup ) \

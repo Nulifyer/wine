@@ -2628,6 +2628,11 @@ BOOL SYSCALL_API NtUserSetWindowCompositionTransition( HWND hwnd, UINT transitio
     SYSCALL_FUNC( NtUserSetWindowCompositionTransition );
 }
 
+BOOL SYSCALL_API NtUserSetWindowBand( HWND hwnd, HWND insert_after, DWORD band )
+{
+    SYSCALL_FUNC( NtUserSetWindowBand );
+}
+
 BOOL SYSCALL_API NtUserSetWindowContextHelpId( HWND hwnd, DWORD id )
 {
     SYSCALL_FUNC( NtUserSetWindowContextHelpId );

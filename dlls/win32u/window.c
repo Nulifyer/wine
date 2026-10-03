@@ -791,6 +791,61 @@ BOOL WINAPI NtUserSetWindowMessageCapability( HWND hwnd, UINT message, PSID sid,
     return FALSE;
 }
 
+static const WCHAR window_band_prop[] =
+    {'_','_','w','i','n','e','_','w','i','n','d','o','w','_','b','a','n','d',0};
+
+static BOOL has_window_band_access(void)
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    DWORD shell_process;
+
+    if (thread_info->client_info->iam_access) return TRUE;
+    return get_window_thread( get_shell_window(), &shell_process ) &&
+           shell_process == GetCurrentProcessId();
+}
+
+/***********************************************************************
+ *           NtUserSetWindowBand (win32u.@)
+ */
+BOOL WINAPI NtUserSetWindowBand( HWND hwnd, HWND insert_after, DWORD band )
+{
+    DWORD error;
+
+    if (!is_window( hwnd ))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+    if (is_desktop_window( hwnd )) return FALSE;
+
+    if ((insert_after == HWND_TOPMOST || insert_after == HWND_NOTOPMOST) && band != 1)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    if (!has_window_band_access())
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+    if (band > 18)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    if (!NtUserSetWindowPos( hwnd, insert_after, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE ))
+        return FALSE;
+
+    error = RtlGetLastWin32Error();
+    if (band == 1)
+        NtUserRemoveProp( hwnd, window_band_prop );
+    else if (!NtUserSetProp( hwnd, window_band_prop, ULongToHandle( band + 1 ) ))
+        return FALSE;
+    RtlSetLastWin32Error( error );
+    return TRUE;
+}
+
 /* see GetParent */
 HWND get_parent( HWND hwnd )
 {

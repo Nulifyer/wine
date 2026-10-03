@@ -1434,7 +1434,7 @@
 @ stub -syscall NtUserSetWatermarkStrings
 @ stdcall -syscall NtUserSetWinEventHook(long long long ptr ptr long long long)
 @ stub -syscall NtUserSetWindowArrangement
-@ stub -syscall NtUserSetWindowBand
+@ stdcall -syscall NtUserSetWindowBand(long long long)
 @ stdcall -syscall NtUserSetWindowCompositionAttribute(long ptr)
 @ stdcall -syscall NtUserSetWindowCompositionTransition(long long ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtUserSetWindowContextHelpId(long long)
