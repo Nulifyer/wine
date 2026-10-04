@@ -1,4 +1,4 @@
-/* Proxy for TwinUI's multitasking view service provider marker. */
+/* Proxies for TwinUI's multitasking view manager and service provider. */
 
 #pragma makedep proxy
 #pragma makedep register
@@ -8,11 +8,56 @@ import "objidl.idl";
 
 [
     object,
+    local,
+    uuid(1841c6d7-4f9d-42c0-af41-8747538f10e5),
+    pointer_default(unique)
+]
+interface IApplicationViewCollection : IUnknown
+{
+}
+
+[
+    object,
+    uuid(537b455d-1240-433b-82af-10929138b8be),
+    pointer_default(unique)
+]
+interface IMultitaskingViewManager : IUnknown
+{
+    HRESULT CreateMultitaskingView(
+            [in] LONG view_type,
+            [in] REFIID iid,
+            [out, iid_is(iid)] void **view);
+
+    HRESULT CreateMultitaskingViewWithFilter(
+            [in] LONG view_type,
+            [in] IApplicationViewCollection *filter,
+            [in] REFIID iid,
+            [out, iid_is(iid)] void **view);
+
+    HRESULT GetMultitaskingView(
+            [in] LONG view_type,
+            [in] REFIID iid,
+            [out, iid_is(iid)] void **view);
+
+    HRESULT IsMultitaskingViewVisible(
+            [in] LONG view_type,
+            [out] BOOL *visible);
+
+    HRESULT GetSnapAssistTabEnablement(
+            [out] BOOL *snap_assist_enabled,
+            [out] BOOL *tabs_enabled);
+
+    HRESULT Destroy();
+}
+
+[
+    object,
     uuid(90adbab9-cdb8-43dd-8daa-ba1180be5215),
     pointer_default(unique)
 ]
 interface IMultitaskingViewServiceProvider : IUnknown
 {
+    HRESULT SetManagerReference([in] IMultitaskingViewManager *manager);
 }
 
 [

@@ -9,6 +9,7 @@
  */
 
 #include <stdarg.h>
+#include <string.h>
 
 #define COBJMACROS
 #include "windef.h"
@@ -27,6 +28,8 @@ static const IID settings_flow_controller_iid =
     {0x87324ffd, 0xbd0a, 0x4de8, {0x84, 0x0a, 0xb6, 0x0e, 0x34, 0x5a, 0x33, 0x6f}};
 static const IID multitasking_view_service_provider_iid =
     {0x90adbab9, 0xcdb8, 0x43dd, {0x8d, 0xaa, 0xba, 0x11, 0x80, 0xbe, 0x52, 0x15}};
+static const IID multitasking_view_manager_iid =
+    {0x537b455d, 0x1240, 0x433b, {0x82, 0xaf, 0x10, 0x92, 0x91, 0x38, 0xb8, 0xbe}};
 static const IID tablet_mode_view_manager_iid =
     {0x373e56cf, 0x0a1b, 0x4b4a, {0xa1, 0xa4, 0xa4, 0x6b, 0x25, 0xff, 0xd7, 0xe3}};
 
@@ -34,6 +37,7 @@ static HRESULT WINAPI marker_QueryInterface(IUnknown *iface, REFIID iid, void **
 {
     if (IsEqualIID(iid, &IID_IUnknown) || IsEqualIID(iid, &settings_flow_controller_iid) ||
             IsEqualIID(iid, &multitasking_view_service_provider_iid) ||
+            IsEqualIID(iid, &multitasking_view_manager_iid) ||
             IsEqualIID(iid, &tablet_mode_view_manager_iid))
     {
         *out = iface;
@@ -64,11 +68,15 @@ static const IUnknownVtbl marker_vtbl =
 
 static IUnknown marker = {&marker_vtbl};
 
-static void test_proxy(IPSFactoryBuffer *factory, const IID *iid, const char *name)
+static void test_proxy(IPSFactoryBuffer *factory, const IID *iid, const char *name,
+        unsigned int method_count)
 {
     IRpcProxyBuffer *proxy = NULL;
     IRpcStubBuffer *stub = NULL;
     IUnknown *object = NULL;
+    MEMORY_BASIC_INFORMATION info;
+    void **vtable;
+    unsigned int i;
     HRESULT hr;
 
     hr = IPSFactoryBuffer_CreateStub(factory, iid, &marker, &stub);
@@ -79,6 +87,20 @@ static void test_proxy(IPSFactoryBuffer *factory, const IID *iid, const char *na
     ok(hr == S_OK, "%s CreateProxy returned %#lx.\n", name, hr);
     ok(!!proxy, "%s CreateProxy returned a NULL proxy buffer.\n", name);
     ok(!!object, "%s CreateProxy returned a NULL interface.\n", name);
+    if (object)
+    {
+        vtable = *(void ***)object;
+        for (i = 3; i < method_count; ++i)
+        {
+            memset(&info, 0, sizeof(info));
+            ok(VirtualQuery(vtable[i], &info, sizeof(info)) == sizeof(info),
+                    "%s method %u has invalid proxy entry %p.\n", name, i, vtable[i]);
+            ok(info.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+                    PAGE_EXECUTE_WRITECOPY),
+                    "%s method %u proxy entry %p is not executable, protection %#lx.\n",
+                    name, i, vtable[i], info.Protect);
+        }
+    }
 
     if (stub) IRpcStubBuffer_Release(stub);
     if (object) IUnknown_Release(object);
@@ -109,10 +131,11 @@ static void test_private_interfaces(void)
     ok(!!factory, "DllGetClassObject returned a NULL factory.\n");
     if (!factory) goto done;
 
-    test_proxy(factory, &settings_flow_controller_iid, "ISettingsFlowController");
+    test_proxy(factory, &settings_flow_controller_iid, "ISettingsFlowController", 3);
+    test_proxy(factory, &multitasking_view_manager_iid, "IMultitaskingViewManager", 9);
     test_proxy(factory, &multitasking_view_service_provider_iid,
-            "IMultitaskingViewServiceProvider");
-    test_proxy(factory, &tablet_mode_view_manager_iid, "ITabletModeViewManager");
+            "IMultitaskingViewServiceProvider", 4);
+    test_proxy(factory, &tablet_mode_view_manager_iid, "ITabletModeViewManager", 3);
 
     hr = register_server();
     ok(hr == S_OK, "DllRegisterServer returned %#lx.\n", hr);
@@ -129,6 +152,11 @@ static void test_private_interfaces(void)
         ok(hr == S_OK, "IMultitaskingViewServiceProvider CoGetPSClsid returned %#lx.\n", hr);
         ok(IsEqualCLSID(&clsid, &actxprxy_factory_clsid),
                 "IMultitaskingViewServiceProvider has unexpected factory %s.\n",
+                wine_dbgstr_guid(&clsid));
+        hr = CoGetPSClsid(&multitasking_view_manager_iid, &clsid);
+        ok(hr == S_OK, "IMultitaskingViewManager CoGetPSClsid returned %#lx.\n", hr);
+        ok(IsEqualCLSID(&clsid, &actxprxy_factory_clsid),
+                "IMultitaskingViewManager has unexpected factory %s.\n",
                 wine_dbgstr_guid(&clsid));
         hr = CoGetPSClsid(&tablet_mode_view_manager_iid, &clsid);
         ok(hr == S_OK, "ITabletModeViewManager CoGetPSClsid returned %#lx.\n", hr);
