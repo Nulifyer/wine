@@ -7139,6 +7139,58 @@ BOOL WINAPI NtUserRegisterLogonProcess( DWORD process_id, BOOL secure )
 }
 
 /*******************************************************************
+ *           NtUserRegisterWindowArrangementCallout (win32u.@)
+ */
+BOOL WINAPI NtUserRegisterWindowArrangementCallout( HWND hwnd, BOOL enable )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    DWORD shell_process;
+    DWORD last_error;
+    BOOL ret = FALSE;
+
+    if (!is_window( hwnd ))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+    if (!thread_info->client_info->iam_access ||
+        get_window_thread( hwnd, NULL ) != GetCurrentThreadId() ||
+        !get_window_thread( get_shell_window(), &shell_process ) ||
+        shell_process != GetCurrentProcessId())
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+    if (enable &&
+        (NtUserGetAncestor( hwnd, GA_PARENT ) != get_hwnd_message_parent() ||
+         HandleToUlong( NtUserGetProp( hwnd, window_band_prop ) ) != 3))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    SERVER_START_REQ(set_window_arrangement_callout)
+    {
+        req->window = wine_server_user_handle( hwnd );
+        req->enable = enable;
+        if (!wine_server_call_err( req ))
+        {
+            ret = reply->success;
+            if (!ret && enable && reply->old_window)
+                RtlSetLastWin32Error( ERROR_ALREADY_REGISTERED );
+            else if (ret && !enable && reply->old_window)
+            {
+                last_error = RtlGetLastWin32Error();
+                NtUserUnregisterHotKey( hwnd, 0xf060 );
+                RtlSetLastWin32Error( last_error );
+            }
+        }
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/*******************************************************************
  *           NtUserQueryWindow (win32u.@)
  */
 HANDLE WINAPI NtUserQueryWindow( HWND hwnd, WINDOWINFOCLASS cls )

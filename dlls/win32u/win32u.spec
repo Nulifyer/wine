@@ -1285,7 +1285,7 @@
 @ stdcall -syscall NtUserRegisterTouchPadCapable(long)
 @ stdcall -syscall NtUserRegisterUserApiHook(ptr ptr ptr ptr)
 @ stub -syscall NtUserRegisterUserHungAppHandlers
-@ stub -syscall NtUserRegisterWindowArrangementCallout
+@ stdcall -syscall NtUserRegisterWindowArrangementCallout(long long)
 @ stdcall -syscall NtUserRegisterWindowMessage(ptr)
 @ stdcall -syscall NtUserReleaseCapture()
 @ stdcall -syscall NtUserReleaseDC(long long)

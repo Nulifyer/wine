@@ -30,11 +30,13 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     BOOL (WINAPI *set_shell_change_notify_window)(HWND);
     BOOL (WINAPI *set_shell_window)(HWND);
     BOOL (WINAPI *set_active_process_for_monitor)(DWORD, HMONITOR);
+    BOOL (WINAPI *register_window_arrangement_callout)(HWND, BOOL);
     BOOL (WINAPI *shell_register_hot_key)(HWND, INT, UINT, UINT, HWND);
     ULONGLONG key, second_key;
     DWORD band;
     HMONITOR monitor;
     HWND band_hwnd, hwnd;
+    HWND arrangement_hwnd, ordinary_message_hwnd;
     BOOL ret;
 
     ret = SetThreadDesktop( desktop );
@@ -48,6 +50,7 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     set_shell_change_notify_window = (void *)GetProcAddress( user32, "SetShellChangeNotifyWindow" );
     set_shell_window = (void *)GetProcAddress( user32, "SetShellWindow" );
     set_active_process_for_monitor = (void *)GetProcAddress( user32, (const char *)2513 );
+    register_window_arrangement_callout = (void *)GetProcAddress( user32, (const char *)2564 );
     shell_register_hot_key = (void *)GetProcAddress( user32, (const char *)2671 );
     ok( !!create_window_in_band, "CreateWindowInBand is unavailable\n" );
     ok( !!get_shell_change_notify_window, "GetShellChangeNotifyWindow is unavailable\n" );
@@ -57,11 +60,25 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     ok( !!set_shell_change_notify_window, "SetShellChangeNotifyWindow is unavailable\n" );
     ok( !!set_shell_window, "SetShellWindow is unavailable\n" );
     ok( !!set_active_process_for_monitor, "SetActiveProcessForMonitor is unavailable\n" );
+    ok( !!register_window_arrangement_callout,
+        "RegisterWindowArrangementCallout is unavailable\n" );
     ok( !!shell_register_hot_key, "ShellRegisterHotKey is unavailable\n" );
     if (!create_window_in_band || !get_shell_change_notify_window || !get_window_band ||
         !acquire_iam_key || !enable_iam_access || !set_shell_change_notify_window ||
-        !set_shell_window || !set_active_process_for_monitor || !shell_register_hot_key)
+        !set_shell_window || !set_active_process_for_monitor ||
+        !register_window_arrangement_callout || !shell_register_hot_key)
         return 0;
+
+    SetLastError( 0x13579bdf );
+    ret = register_window_arrangement_callout( NULL, FALSE );
+    ok( !ret, "unregistered a null arrangement callout window\n" );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
+        "null arrangement unregister returned error %lu\n", GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = register_window_arrangement_callout( NULL, TRUE );
+    ok( !ret, "registered a null arrangement callout window\n" );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
+        "null arrangement registration returned error %lu\n", GetLastError() );
 
     hwnd = CreateWindowExA( 0, "#32770", "shell notify test", WS_OVERLAPPEDWINDOW,
                             0, 0, 100, 100, NULL, NULL, GetModuleHandleA( NULL ), NULL );
@@ -153,6 +170,66 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
 
     ret = enable_iam_access( key, TRUE );
     ok( ret, "failed to enable IAM access, error %lu\n", GetLastError() );
+
+    ordinary_message_hwnd = CreateWindowExA( 0, "static", "ordinary message window", WS_POPUP,
+                                              0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL );
+    ok( !!ordinary_message_hwnd, "failed to create ordinary message window, error %lu\n",
+        GetLastError() );
+    arrangement_hwnd = create_window_in_band( 0, L"static", L"arrangement callout", WS_POPUP,
+                                               0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL, 2 );
+    ok( !!arrangement_hwnd, "failed to create arrangement callout window, error %lu\n",
+        GetLastError() );
+    if (ordinary_message_hwnd)
+    {
+        SetLastError( 0x13579bdf );
+        ret = register_window_arrangement_callout( ordinary_message_hwnd, TRUE );
+        ok( !ret, "registered a band-1 arrangement callout window\n" );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER,
+            "band-1 arrangement callout returned error %lu\n", GetLastError() );
+    }
+
+    if (arrangement_hwnd)
+    {
+        SetLastError( 0x13579bdf );
+        ret = register_window_arrangement_callout( arrangement_hwnd, TRUE );
+        ok( ret, "failed to register arrangement callout, error %lu\n", GetLastError() );
+        ok( GetLastError() == 0x13579bdf,
+            "arrangement callout registration changed last error to %lu\n", GetLastError() );
+
+        SetLastError( 0x13579bdf );
+        ret = register_window_arrangement_callout( arrangement_hwnd, TRUE );
+        ok( !ret, "duplicate arrangement callout registration succeeded\n" );
+        ok( GetLastError() == ERROR_ALREADY_REGISTERED,
+            "duplicate arrangement callout returned error %lu\n", GetLastError() );
+
+        if (ordinary_message_hwnd)
+        {
+            SetLastError( 0x13579bdf );
+            ret = register_window_arrangement_callout( ordinary_message_hwnd, FALSE );
+            ok( !ret, "unregistered arrangement callout through the wrong window\n" );
+            ok( GetLastError() == ERROR_ACCESS_DENIED,
+                "wrong-window arrangement unregister returned error %lu\n", GetLastError() );
+        }
+
+        ret = shell_register_hot_key( arrangement_hwnd, 0xf060, MOD_SHIFT, VK_F22, NULL );
+        ok( ret, "failed to register arrangement callout hotkey, error %lu\n", GetLastError() );
+
+        SetLastError( 0x13579bdf );
+        ret = register_window_arrangement_callout( arrangement_hwnd, FALSE );
+        ok( ret, "failed to unregister arrangement callout, error %lu\n", GetLastError() );
+        ok( GetLastError() == 0x13579bdf,
+            "arrangement callout unregister changed last error to %lu\n", GetLastError() );
+        ret = UnregisterHotKey( arrangement_hwnd, 0xf060 );
+        ok( !ret, "arrangement callout unregister left its hotkey registered\n" );
+
+        SetLastError( 0x13579bdf );
+        ret = register_window_arrangement_callout( arrangement_hwnd, FALSE );
+        ok( ret, "repeated arrangement callout unregister failed, error %lu\n", GetLastError() );
+        ok( GetLastError() == 0x13579bdf,
+            "repeated arrangement unregister changed last error to %lu\n", GetLastError() );
+    }
+    if (arrangement_hwnd) DestroyWindow( arrangement_hwnd );
+    if (ordinary_message_hwnd) DestroyWindow( ordinary_message_hwnd );
 
     band_hwnd = create_window_in_band( 0, L"static", NULL, WS_POPUP, 0, 0, 32, 32,
                                        NULL, NULL, NULL, NULL, 12 );

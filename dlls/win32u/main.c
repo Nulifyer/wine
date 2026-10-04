@@ -471,6 +471,11 @@ NTSTATUS SYSCALL_API NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport( void *d
     SYSCALL_FUNC( NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport );
 }
 
+BOOL SYSCALL_API NtUserRegisterWindowArrangementCallout( HWND hwnd, BOOL enable )
+{
+    SYSCALL_FUNC( NtUserRegisterWindowArrangementCallout );
+}
+
 NTSTATUS SYSCALL_API NtGdiDdDDIQueryResourceInfo( D3DKMT_QUERYRESOURCEINFO *desc )
 {
     SYSCALL_FUNC( NtGdiDdDDIQueryResourceInfo );

@@ -246,6 +246,7 @@ DECL_HANDLER(remove_clipboard_listener);
 DECL_HANDLER(create_token);
 DECL_HANDLER(open_token);
 DECL_HANDLER(set_desktop_shell_windows);
+DECL_HANDLER(set_window_arrangement_callout);
 DECL_HANDLER(register_logon_process);
 DECL_HANDLER(set_winstation_bsdr_window);
 DECL_HANDLER(adjust_token_privileges);
@@ -688,6 +689,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_create_token,
     (req_handler)req_open_token,
     (req_handler)req_set_desktop_shell_windows,
+    (req_handler)req_set_window_arrangement_callout,
     (req_handler)req_register_logon_process,
     (req_handler)req_set_winstation_bsdr_window,
     (req_handler)req_adjust_token_privileges,
@@ -2323,6 +2325,12 @@ C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_taskman_window) =
 C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_shell_change_notify_window) == 24 );
 C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, success) == 28 );
 C_ASSERT( sizeof(struct set_desktop_shell_windows_reply) == 32 );
+C_ASSERT( offsetof(struct set_window_arrangement_callout_request, window) == 12 );
+C_ASSERT( offsetof(struct set_window_arrangement_callout_request, enable) == 16 );
+C_ASSERT( sizeof(struct set_window_arrangement_callout_request) == 24 );
+C_ASSERT( offsetof(struct set_window_arrangement_callout_reply, old_window) == 8 );
+C_ASSERT( offsetof(struct set_window_arrangement_callout_reply, success) == 12 );
+C_ASSERT( sizeof(struct set_window_arrangement_callout_reply) == 16 );
 C_ASSERT( offsetof(struct register_logon_process_request, pid) == 12 );
 C_ASSERT( offsetof(struct register_logon_process_request, secure) == 16 );
 C_ASSERT( sizeof(struct register_logon_process_request) == 24 );

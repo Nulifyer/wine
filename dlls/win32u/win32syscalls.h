@@ -1287,7 +1287,7 @@
     SYSCALL_ENTRY( 0x1503, NtUserRegisterTouchPadCapable, 4 ) \
     SYSCALL_ENTRY( 0x1504, NtUserRegisterUserApiHook, 16 ) \
     SYSCALL_ENTRY( 0x1505, NtUserRegisterUserHungAppHandlers, 0 ) \
-    SYSCALL_ENTRY( 0x1506, NtUserRegisterWindowArrangementCallout, 0 ) \
+    SYSCALL_ENTRY( 0x1506, NtUserRegisterWindowArrangementCallout, 8 ) \
     SYSCALL_ENTRY( 0x1507, NtUserRegisterWindowMessage, 4 ) \
     SYSCALL_ENTRY( 0x1508, NtUserReleaseCapture, 0 ) \
     SYSCALL_ENTRY( 0x1509, NtUserReleaseDC, 8 ) \
@@ -2829,7 +2829,7 @@
     SYSCALL_ENTRY( 0x1503, NtUserRegisterTouchPadCapable, 8 ) \
     SYSCALL_ENTRY( 0x1504, NtUserRegisterUserApiHook, 32 ) \
     SYSCALL_ENTRY( 0x1505, NtUserRegisterUserHungAppHandlers, 0 ) \
-    SYSCALL_ENTRY( 0x1506, NtUserRegisterWindowArrangementCallout, 0 ) \
+    SYSCALL_ENTRY( 0x1506, NtUserRegisterWindowArrangementCallout, 16 ) \
     SYSCALL_ENTRY( 0x1507, NtUserRegisterWindowMessage, 8 ) \
     SYSCALL_ENTRY( 0x1508, NtUserReleaseCapture, 0 ) \
     SYSCALL_ENTRY( 0x1509, NtUserReleaseDC, 16 ) \
@@ -3865,7 +3865,6 @@
     SYSCALL_STUB( NtUserRegisterTasklist ) \
     SYSCALL_STUB( NtUserRegisterTouchHitTestingWindow ) \
     SYSCALL_STUB( NtUserRegisterUserHungAppHandlers ) \
-    SYSCALL_STUB( NtUserRegisterWindowArrangementCallout ) \
     SYSCALL_STUB( NtUserReleaseDwmHitTestWaiters ) \
     SYSCALL_STUB( NtUserRemoteConsoleShadowStop ) \
     SYSCALL_STUB( NtUserRemoteReconnect ) \

@@ -2708,6 +2708,8 @@ void free_window_handle( struct window *win )
     if (win == win->desktop->shell_listview) win->desktop->shell_listview = NULL;
     if (win == win->desktop->progman_window) win->desktop->progman_window = NULL;
     if (win == win->desktop->taskman_window) win->desktop->taskman_window = NULL;
+    if (win == win->desktop->arrangement_callout_window)
+        win->desktop->arrangement_callout_window = NULL;
     if (win == win->desktop->winstation->bsdr_window)
     {
         win->desktop->winstation->bsdr_window = NULL;
@@ -4431,6 +4433,57 @@ DECL_HANDLER(set_desktop_shell_windows)
     desktop->shell_listview = new_shell_listview;
     desktop->progman_window = new_progman_window;
     desktop->taskman_window = new_taskman_window;
+
+done:
+    release_object( desktop );
+}
+
+/* Register the desktop-scoped shell window-arrangement callout. */
+DECL_HANDLER(set_window_arrangement_callout)
+{
+    struct desktop *desktop;
+    struct window *window;
+
+    if (!(desktop = get_desktop_obj( current->process, current->desktop, 0 ))) return;
+
+    reply->old_window = desktop->arrangement_callout_window ?
+                        desktop->arrangement_callout_window->handle : 0;
+    reply->success = 0;
+
+    if (!(window = get_window( req->window ))) goto done;
+    if (!window->thread || window->thread != current || window->desktop != desktop ||
+        !desktop->shell_window || !desktop->shell_window->thread ||
+        desktop->shell_window->thread->process != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto done;
+    }
+
+    if (req->enable)
+    {
+        if (desktop->arrangement_callout_window) goto done;
+        if (window->parent != desktop->msg_window)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            goto done;
+        }
+        desktop->arrangement_callout_window = window;
+    }
+    else
+    {
+        if (!desktop->arrangement_callout_window)
+        {
+            reply->success = 1;
+            goto done;
+        }
+        if (desktop->arrangement_callout_window != window)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto done;
+        }
+        desktop->arrangement_callout_window = NULL;
+    }
+    reply->success = 1;
 
 done:
     release_object( desktop );

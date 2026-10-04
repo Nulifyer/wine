@@ -2797,6 +2797,18 @@ static void dump_set_desktop_shell_windows_reply( const struct set_desktop_shell
     fprintf( stderr, ", success=%d", req->success );
 }
 
+static void dump_set_window_arrangement_callout_request( const struct set_window_arrangement_callout_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
+    fprintf( stderr, ", enable=%d", req->enable );
+}
+
+static void dump_set_window_arrangement_callout_reply( const struct set_window_arrangement_callout_reply *req )
+{
+    fprintf( stderr, " old_window=%08x", req->old_window );
+    fprintf( stderr, ", success=%d", req->success );
+}
+
 static void dump_register_logon_process_request( const struct register_logon_process_request *req )
 {
     fprintf( stderr, " pid=%04x", req->pid );
@@ -5072,6 +5084,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_token_request,
     (dump_func)dump_open_token_request,
     (dump_func)dump_set_desktop_shell_windows_request,
+    (dump_func)dump_set_window_arrangement_callout_request,
     (dump_func)dump_register_logon_process_request,
     (dump_func)dump_set_winstation_bsdr_window_request,
     (dump_func)dump_adjust_token_privileges_request,
@@ -5514,6 +5527,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_token_reply,
     (dump_func)dump_open_token_reply,
     (dump_func)dump_set_desktop_shell_windows_reply,
+    (dump_func)dump_set_window_arrangement_callout_reply,
     NULL,
     (dump_func)dump_set_winstation_bsdr_window_reply,
     (dump_func)dump_adjust_token_privileges_reply,
@@ -5956,6 +5970,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "create_token",
     "open_token",
     "set_desktop_shell_windows",
+    "set_window_arrangement_callout",
     "register_logon_process",
     "set_winstation_bsdr_window",
     "adjust_token_privileges",

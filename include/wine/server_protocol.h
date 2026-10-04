@@ -5181,6 +5181,21 @@ struct set_desktop_shell_windows_reply
 #define SET_DESKTOP_SHELL_CHANGE_NOTIFY_WINDOW 0x08
 
 
+struct set_window_arrangement_callout_request
+{
+    struct request_header __header;
+    user_handle_t  window;
+    int            enable;
+    char __pad_20[4];
+};
+struct set_window_arrangement_callout_reply
+{
+    struct reply_header __header;
+    user_handle_t  old_window;
+    int            success;
+};
+
+
 struct register_logon_process_request
 {
     struct request_header __header;
@@ -8476,6 +8491,7 @@ enum request
     REQ_create_token,
     REQ_open_token,
     REQ_set_desktop_shell_windows,
+    REQ_set_window_arrangement_callout,
     REQ_register_logon_process,
     REQ_set_winstation_bsdr_window,
     REQ_adjust_token_privileges,
@@ -8921,6 +8937,7 @@ union generic_request
     struct create_token_request create_token_request;
     struct open_token_request open_token_request;
     struct set_desktop_shell_windows_request set_desktop_shell_windows_request;
+    struct set_window_arrangement_callout_request set_window_arrangement_callout_request;
     struct register_logon_process_request register_logon_process_request;
     struct set_winstation_bsdr_window_request set_winstation_bsdr_window_request;
     struct adjust_token_privileges_request adjust_token_privileges_request;
@@ -9364,6 +9381,7 @@ union generic_reply
     struct create_token_reply create_token_reply;
     struct open_token_reply open_token_reply;
     struct set_desktop_shell_windows_reply set_desktop_shell_windows_reply;
+    struct set_window_arrangement_callout_reply set_window_arrangement_callout_reply;
     struct register_logon_process_reply register_logon_process_reply;
     struct set_winstation_bsdr_window_reply set_winstation_bsdr_window_reply;
     struct adjust_token_privileges_reply adjust_token_privileges_reply;
@@ -9565,6 +9583,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1079
+#define SERVER_PROTOCOL_VERSION 1080
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

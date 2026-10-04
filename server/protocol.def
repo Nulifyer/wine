@@ -3710,6 +3710,15 @@ enum caret_state
 #define SET_DESKTOP_TASKMAN_WINDOW  0x04
 #define SET_DESKTOP_SHELL_CHANGE_NOTIFY_WINDOW 0x08
 
+/* Register the desktop-scoped shell window-arrangement callout. */
+@REQ(set_window_arrangement_callout)
+    user_handle_t  window;              /* message-only callout window */
+    int            enable;              /* register or unregister */
+@REPLY
+    user_handle_t  old_window;          /* currently registered window */
+    int            success;             /* whether the requested change succeeded */
+@END
+
 /* Register the logon UI process for the current window station */
 @REQ(register_logon_process)
     process_id_t   pid;                 /* id of the logon UI process */

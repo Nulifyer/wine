@@ -303,6 +303,14 @@ NTSTATUS WINAPI wow64_NtUserRegisterLogonProcess( UINT *args )
     return NtUserRegisterLogonProcess( process_id, secure );
 }
 
+NTSTATUS WINAPI wow64_NtUserRegisterWindowArrangementCallout( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    BOOL enable = get_ulong( &args );
+
+    return NtUserRegisterWindowArrangementCallout( hwnd, enable );
+}
+
 NTSTATUS WINAPI wow64_NtUserRegisterSessionPort( UINT *args )
 {
     return NtUserRegisterSessionPort( get_handle( &args ) );

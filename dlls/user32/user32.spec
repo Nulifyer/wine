@@ -80,7 +80,7 @@
 2561 stdcall -noname EnableMouseInPointerForThread() NtUserEnableMouseInPointerForThread
 
 2563 stub -noname ClearForeground  # NtUserClearForeground
-2564 stub -noname RegisterWindowArrangementCallout  # NtUserRegisterWindowArrangementCallout
+2564 stdcall -noname RegisterWindowArrangementCallout(long long) NtUserRegisterWindowArrangementCallout
 2565 stdcall -noname IsCurrentProcessGdiScaledX()
 2566 stub @
 2567 stub -noname EnableShellWindowManagementBehavior  # NtUserEnableShellWindowManagementBehavior
