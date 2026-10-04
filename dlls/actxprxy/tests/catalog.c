@@ -27,11 +27,14 @@ static const IID settings_flow_controller_iid =
     {0x87324ffd, 0xbd0a, 0x4de8, {0x84, 0x0a, 0xb6, 0x0e, 0x34, 0x5a, 0x33, 0x6f}};
 static const IID multitasking_view_service_provider_iid =
     {0x90adbab9, 0xcdb8, 0x43dd, {0x8d, 0xaa, 0xba, 0x11, 0x80, 0xbe, 0x52, 0x15}};
+static const IID tablet_mode_view_manager_iid =
+    {0x373e56cf, 0x0a1b, 0x4b4a, {0xa1, 0xa4, 0xa4, 0x6b, 0x25, 0xff, 0xd7, 0xe3}};
 
 static HRESULT WINAPI marker_QueryInterface(IUnknown *iface, REFIID iid, void **out)
 {
     if (IsEqualIID(iid, &IID_IUnknown) || IsEqualIID(iid, &settings_flow_controller_iid) ||
-            IsEqualIID(iid, &multitasking_view_service_provider_iid))
+            IsEqualIID(iid, &multitasking_view_service_provider_iid) ||
+            IsEqualIID(iid, &tablet_mode_view_manager_iid))
     {
         *out = iface;
         IUnknown_AddRef(iface);
@@ -109,6 +112,7 @@ static void test_private_interfaces(void)
     test_proxy(factory, &settings_flow_controller_iid, "ISettingsFlowController");
     test_proxy(factory, &multitasking_view_service_provider_iid,
             "IMultitaskingViewServiceProvider");
+    test_proxy(factory, &tablet_mode_view_manager_iid, "ITabletModeViewManager");
 
     hr = register_server();
     ok(hr == S_OK, "DllRegisterServer returned %#lx.\n", hr);
@@ -125,6 +129,11 @@ static void test_private_interfaces(void)
         ok(hr == S_OK, "IMultitaskingViewServiceProvider CoGetPSClsid returned %#lx.\n", hr);
         ok(IsEqualCLSID(&clsid, &actxprxy_factory_clsid),
                 "IMultitaskingViewServiceProvider has unexpected factory %s.\n",
+                wine_dbgstr_guid(&clsid));
+        hr = CoGetPSClsid(&tablet_mode_view_manager_iid, &clsid);
+        ok(hr == S_OK, "ITabletModeViewManager CoGetPSClsid returned %#lx.\n", hr);
+        ok(IsEqualCLSID(&clsid, &actxprxy_factory_clsid),
+                "ITabletModeViewManager has unexpected factory %s.\n",
                 wine_dbgstr_guid(&clsid));
         CoUninitialize();
     }

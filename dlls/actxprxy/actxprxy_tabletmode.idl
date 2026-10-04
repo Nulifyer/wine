@@ -1,0 +1,22 @@
+/* Proxy for TwinUI's tablet-mode view manager marker. */
+
+#pragma makedep proxy
+#pragma makedep register
+#pragma makedep ident
+
+import "objidl.idl";
+
+[
+    object,
+    uuid(373e56cf-0a1b-4b4a-a1a4-a46b25ffd7e3),
+    pointer_default(unique)
+]
+interface ITabletModeViewManager : IUnknown
+{
+}
+
+[
+    threading(both),
+    uuid(b8da6310-e19b-11d0-933c-00a0c90dcaa9)
+]
+coclass PSFactoryBuffer { interface IPSFactoryBuffer; }
