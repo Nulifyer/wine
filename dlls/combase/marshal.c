@@ -85,6 +85,7 @@ struct proxy_manager
     OID oid;                  /* object ID (RO) */
     struct list interfaces;   /* imported interfaces (CS cs) */
     LONG refs;                /* proxy reference count (LOCK); 0 if about to be removed from list */
+    LONG identity_cache_ref;  /* free-threaded identity cache reference (LOCK) */
     CRITICAL_SECTION cs;      /* thread safety for this object and children */
     ULONG sorflags;           /* STDOBJREF flags (RO) */
     IRemUnknown *remunk;      /* proxy to IRemUnknown used for lifecycle management (CS cs) */
@@ -2395,6 +2396,13 @@ static HRESULT proxy_manager_get_remunknown(struct proxy_manager * This, IRemUnk
     if (This->sorflags & SORFP_NOLIFETIMEMGMT)
         return S_FALSE;
 
+    /* Do not re-enter COM to release remote references while the proxy's
+     * owning apartment is already being torn down. Its current-apartment
+     * pointer remains installed until teardown completes, but may no longer
+     * be safely referenced or used to unmarshal IRemUnknown. */
+    if (!This->parent || This->parent->being_destroyed)
+        return S_FALSE;
+
     if (!(apt = apartment_get_current_or_mta()))
         return CO_E_NOTINITIALIZED;
 
@@ -2550,11 +2558,25 @@ static BOOL find_proxy_manager(struct apartment * apt, OXID oxid, OID oid, struc
 
 HRESULT apartment_disconnectproxies(struct apartment *apt)
 {
-    struct proxy_manager *proxy;
+    struct proxy_manager *proxy, *next;
+
+    /* Disconnecting or destroying one proxy can release another manager used
+     * for IRemUnknown.  Hold every manager across the teardown so those nested
+     * releases cannot invalidate the apartment list while it is being walked. */
+    LIST_FOR_EACH_ENTRY(proxy, &apt->proxies, struct proxy_manager, entry)
+        IMultiQI_AddRef(&proxy->IMultiQI_iface);
 
     LIST_FOR_EACH_ENTRY(proxy, &apt->proxies, struct proxy_manager, entry)
-    {
         proxy_manager_disconnect(proxy);
+
+    LIST_FOR_EACH_ENTRY_SAFE(proxy, next, &apt->proxies, struct proxy_manager, entry)
+    {
+        /* Windows retains a free-threaded proxy identity after its last
+         * external release.  Drop that cache reference when the owning
+         * neutral apartment is retired. */
+        if (InterlockedExchange(&proxy->identity_cache_ref, 0))
+            IMultiQI_Release(&proxy->IMultiQI_iface);
+        IMultiQI_Release(&proxy->IMultiQI_iface);
     }
 
     return S_OK;
@@ -2725,7 +2747,16 @@ HRESULT unmarshal_object(const STDOBJREF *stdobjref, struct apartment *apt, MSHC
         }
 
         if (hr == S_OK)
+        {
+            /* Free-threaded proxy identities are shared by every caller in
+             * the process. Keep the identity and its interface tables alive
+             * until neutral-apartment teardown so a later unmarshal or an
+             * internal weak identity can reacquire the same proxy. */
+            if ((proxy_manager->sorflags & SORFP_FREETHREADED) &&
+                !InterlockedCompareExchange(&proxy_manager->identity_cache_ref, 1, 0))
+                IMultiQI_AddRef(&proxy_manager->IMultiQI_iface);
             *object = ifproxy->iface;
+        }
     }
 
     /* release our reference to the proxy manager - the client/apartment

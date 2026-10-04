@@ -219,6 +219,7 @@ static void test_registered(BOOL agile)
     STARTUPINFOA startup = {sizeof(startup)};
     struct worker_data data = {0};
     IPersist *proxy = NULL, *failed;
+    IPersist *released_proxy;
     IUnknown *identity = NULL, *activation_identity = NULL;
     IActivationFactory *activation_proxy = NULL;
     CLSID clsid;
@@ -290,6 +291,28 @@ static void test_registered(BOOL agile)
         ok(shared->calls == (agile ? 2 : 1), "factory execution count %ld\n", shared->calls);
         trace("winrt-record agile=%u sta=%#lx mta=%#lx calls=%ld identity=%u\n", agile,
                 hr, data.hr, shared->calls, identity == activation_identity);
+    }
+    if (agile)
+    {
+        released_proxy = proxy;
+        if (activation_identity) IUnknown_Release(activation_identity);
+        activation_identity = NULL;
+        if (identity) IUnknown_Release(identity);
+        identity = NULL;
+        if (activation_proxy) IActivationFactory_Release(activation_proxy);
+        activation_proxy = NULL;
+        IPersist_Release(proxy);
+        proxy = NULL;
+
+        hr = RoGetActivationFactory(classids[0], &IID_IPersist, (void **)&proxy);
+        ok(hr == S_OK && proxy, "factory reactivation %#lx/%p\n", hr, proxy);
+        ok(proxy == released_proxy, "free-threaded proxy identity changed %p/%p\n",
+                released_proxy, proxy);
+        if (proxy)
+        {
+            hr = IPersist_GetClassID(proxy, &clsid);
+            ok(hr == S_OK && IsEqualGUID(&clsid, &IID_IPersist), "reactivated method %#lx\n", hr);
+        }
     }
     failed = (void *)0xdeadbeef;
     hr = RoGetActivationFactory(classids[0], &IID_IStream, (void **)&failed);
