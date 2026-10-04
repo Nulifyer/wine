@@ -1,0 +1,22 @@
+/* Proxy for TwinUI's Settings Flow controller marker. */
+
+#pragma makedep proxy
+#pragma makedep register
+#pragma makedep ident
+
+import "objidl.idl";
+
+[
+    object,
+    uuid(87324ffd-bd0a-4de8-840a-b60e345a336f),
+    pointer_default(unique)
+]
+interface ISettingsFlowController : IUnknown
+{
+}
+
+[
+    threading(both),
+    uuid(b8da6310-e19b-11d0-933c-00a0c90dcaa9)
+]
+coclass PSFactoryBuffer { interface IPSFactoryBuffer; }

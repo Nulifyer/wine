@@ -13,6 +13,7 @@ SOURCES = \
 	actxprxy_servprov.idl \
 	actxprxy_shldisp.idl \
 	actxprxy_shobjidl.idl \
+	actxprxy_settingsflow.idl \
 	actxprxy_urlhist.idl \
 	actxprxy_winrt_shell.idl \
 	actxprxy_winrt_xaml.idl \
