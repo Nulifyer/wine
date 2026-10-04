@@ -296,7 +296,7 @@
     SYSCALL_ENTRY( 0x1124, NtGdiDdDDIMarkDeviceAsError, 0 ) \
     SYSCALL_ENTRY( 0x1125, NtGdiDdDDINetDispGetNextChunkInfo, 0 ) \
     SYSCALL_ENTRY( 0x1126, NtGdiDdDDINetDispQueryMiracastDisplayDeviceStatus, 0 ) \
-    SYSCALL_ENTRY( 0x1127, NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport, 0 ) \
+    SYSCALL_ENTRY( 0x1127, NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport, 4 ) \
     SYSCALL_ENTRY( 0x1128, NtGdiDdDDINetDispStartMiracastDisplayDevice, 0 ) \
     SYSCALL_ENTRY( 0x1129, NtGdiDdDDINetDispStopMiracastDisplayDevice, 0 ) \
     SYSCALL_ENTRY( 0x112a, NtGdiDdDDIOfferAllocations, 0 ) \
@@ -1838,7 +1838,7 @@
     SYSCALL_ENTRY( 0x1124, NtGdiDdDDIMarkDeviceAsError, 0 ) \
     SYSCALL_ENTRY( 0x1125, NtGdiDdDDINetDispGetNextChunkInfo, 0 ) \
     SYSCALL_ENTRY( 0x1126, NtGdiDdDDINetDispQueryMiracastDisplayDeviceStatus, 0 ) \
-    SYSCALL_ENTRY( 0x1127, NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport, 0 ) \
+    SYSCALL_ENTRY( 0x1127, NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport, 8 ) \
     SYSCALL_ENTRY( 0x1128, NtGdiDdDDINetDispStartMiracastDisplayDevice, 0 ) \
     SYSCALL_ENTRY( 0x1129, NtGdiDdDDINetDispStopMiracastDisplayDevice, 0 ) \
     SYSCALL_ENTRY( 0x112a, NtGdiDdDDIOfferAllocations, 0 ) \
@@ -3287,7 +3287,6 @@
     SYSCALL_STUB( NtGdiDdDDIMarkDeviceAsError ) \
     SYSCALL_STUB( NtGdiDdDDINetDispGetNextChunkInfo ) \
     SYSCALL_STUB( NtGdiDdDDINetDispQueryMiracastDisplayDeviceStatus ) \
-    SYSCALL_STUB( NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport ) \
     SYSCALL_STUB( NtGdiDdDDINetDispStartMiracastDisplayDevice ) \
     SYSCALL_STUB( NtGdiDdDDINetDispStopMiracastDisplayDevice ) \
     SYSCALL_STUB( NtGdiDdDDIOfferAllocations ) \

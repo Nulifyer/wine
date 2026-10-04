@@ -239,6 +239,21 @@ static const char *debugstr_ok( const char *cond )
 #define ok_nt( e, r )       ok_ex( r, ==, e, NTSTATUS, "%#lx" )
 #define ok_vk( e, r )       ok_ex( r, ==, e, VkResult, "%d" )
 
+static void test_D3DKMTNetDispQueryMiracastDisplayDeviceSupport(void)
+{
+    NTSTATUS (WINAPI *query_support)(void *);
+    HMODULE gdi32 = GetModuleHandleW( L"gdi32.dll" );
+
+    query_support = (void *)GetProcAddress( gdi32, "D3DKMTNetDispQueryMiracastDisplayDeviceSupport" );
+    if (!query_support)
+    {
+        win_skip( "D3DKMTNetDispQueryMiracastDisplayDeviceSupport is unavailable.\n" );
+        return;
+    }
+
+    ok_nt( STATUS_NOT_SUPPORTED, query_support( NULL ) );
+}
+
 static BOOL is_d3dkmt_handle( HANDLE handle )
 {
     return (ULONG_PTR)handle & 0xc0000000;
@@ -7431,6 +7446,7 @@ START_TEST( d3dkmt )
     test_D3DKMTOpenAdapterFromGdiDisplayName();
     test_D3DKMTOpenAdapterFromHdc();
     test_D3DKMTIsFeatureEnabled();
+    test_D3DKMTNetDispQueryMiracastDisplayDeviceSupport();
     test_D3DKMTEnumAdapters2();
     test_D3DKMTDisplayManager();
     test_D3DKMTEnumAdapters3();

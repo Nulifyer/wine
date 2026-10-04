@@ -466,6 +466,11 @@ NTSTATUS SYSCALL_API NtGdiDdDDIGetYieldPercentage( void *desc )
     SYSCALL_FUNC( NtGdiDdDDIGetYieldPercentage );
 }
 
+NTSTATUS SYSCALL_API NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport( void *desc )
+{
+    SYSCALL_FUNC( NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport );
+}
+
 NTSTATUS SYSCALL_API NtGdiDdDDIQueryResourceInfo( D3DKMT_QUERYRESOURCEINFO *desc )
 {
     SYSCALL_FUNC( NtGdiDdDDIQueryResourceInfo );

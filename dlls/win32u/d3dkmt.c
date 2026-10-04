@@ -862,6 +862,15 @@ NTSTATUS WINAPI NtGdiDdDDIGetYieldPercentage( void *desc )
 }
 
 /******************************************************************************
+ *           NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport( void *desc )
+{
+    TRACE( "desc %p\n", desc );
+    return STATUS_NOT_SUPPORTED;
+}
+
+/******************************************************************************
  *           NtGdiDdDDIQueryVideoMemoryInfo    (win32u.@)
  */
 NTSTATUS WINAPI NtGdiDdDDIQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc )

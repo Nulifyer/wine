@@ -130,6 +130,7 @@
 @ stdcall D3DKMTGetMemoryBudgetTarget(ptr) win32u.NtGdiDdDDIGetMemoryBudgetTarget
 @ stdcall D3DKMTGetYieldPercentage(ptr) win32u.NtGdiDdDDIGetYieldPercentage
 @ stdcall D3DKMTIsFeatureEnabled(ptr) win32u.NtDxgkIsFeatureEnabled
+@ stdcall D3DKMTNetDispQueryMiracastDisplayDeviceSupport(ptr) win32u.NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport
 @ stdcall D3DKMTOpenAdapterFromDeviceName(ptr) win32u.NtGdiDdDDIOpenAdapterFromDeviceName
 @ stdcall D3DKMTOpenAdapterFromGdiDisplayName(ptr)
 @ stdcall D3DKMTOpenAdapterFromHdc(ptr) win32u.NtGdiDdDDIOpenAdapterFromHdc

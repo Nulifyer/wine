@@ -281,6 +281,11 @@ NTSTATUS WINAPI wow64_NtGdiDdDDIDispMgrSourceOperation( UINT *args )
     return NtGdiDdDDIDispMgrSourceOperation( get_ptr( &args ) );
 }
 
+NTSTATUS WINAPI wow64_NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport( UINT *args )
+{
+    return NtGdiDdDDINetDispQueryMiracastDisplayDeviceSupport( get_ptr( &args ) );
+}
+
 NTSTATUS WINAPI wow64_NtGdiDdDDIDispMgrTargetOperation( UINT *args )
 {
     const struct d3dkmt_disp_mgr_target_operation32 *desc32 = get_ptr( &args );
