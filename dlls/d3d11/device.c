@@ -6646,6 +6646,9 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_internal_CreateCompositionBuffer(I
         return HRESULT_FROM_NT(status);
     }
     *(UINT *)(binding_info + 0x00) = 2; /* composition swapchain */
+    /* CSM_BUFFER_ATTRIBUTES alpha mode; A8 buffers carry premultiplied masks. */
+    if (format == DXGI_FORMAT_A8_UNORM)
+        *(UINT *)(binding_info + 0x10) = DXGI_ALPHA_MODE_PREMULTIPLIED;
     *(UINT *)(binding_info + 0x54) = 1;
     *(UINT *)(binding_info + 0xa0) = 2; /* DX handle realization */
     *(UINT *)(binding_info + 0xa4) = 1;

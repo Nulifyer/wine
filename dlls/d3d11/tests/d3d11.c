@@ -2990,6 +2990,8 @@ static void test_native_d2d_device_contracts(void)
                         "Got composition binding type %u.\n", *(UINT *)(binding_info + 0x00));
                 ok(*(UINT *)(binding_info + 0x08) == 1,
                         "Got composition binding count %u.\n", *(UINT *)(binding_info + 0x08));
+                ok(*(UINT *)(binding_info + 0x10) == DXGI_ALPHA_MODE_PREMULTIPLIED,
+                        "Got composition alpha mode %u.\n", *(UINT *)(binding_info + 0x10));
                 ok(*(UINT *)(binding_info + 0x54) == 1,
                         "Got composition binding flag %u.\n", *(UINT *)(binding_info + 0x54));
                 ok(*(UINT *)(binding_info + 0xa0) == 2,
