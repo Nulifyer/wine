@@ -59,6 +59,7 @@
 #define WNF_RM_QUIET_MODE 0x41c6033fa3bc1875ULL
 #define WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE 0x41c6033fa3bc2075ULL
 #define WNF_HAM_SYSTEM_STATE_CHANGED 0x418b0f25a3bc0875ULL
+#define WNF_IMSN_ACRYLIC_POLICY 0x0f950324a3bc4035ULL
 #define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
 #define WNF_SHEL_OOBE_USER_LOGON_COMPLETE 0x0d83063ea3bc2475ULL
 #define WNF_DEP_OOBE_STATE 0x41960b29a3bc0c75ULL
@@ -127,6 +128,7 @@ static const struct well_known_state well_known_states[] =
     { WNF_RM_QUIET_MODE, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
     { WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
     { WNF_HAM_SYSTEM_STATE_CHANGED, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
+    { WNF_IMSN_ACRYLIC_POLICY, sizeof(unsigned int), 0, 0, WNF_WRITER_DACL },
     { WNF_RPCF_FWMAN_RUNNING, sizeof(unsigned int), 0, 0, WNF_WRITER_RPC_SERVICE },
     { WNF_SHEL_OOBE_USER_LOGON_COMPLETE, sizeof(unsigned int), 0, 0, WNF_WRITER_DACL },
     { WNF_DEP_OOBE_STATE, sizeof(unsigned int), 0, 0, WNF_WRITER_DACL },
@@ -264,6 +266,60 @@ static struct security_descriptor *create_shell_window_activated_sd(void)
                     descriptor.sd.group_len + descriptor.sd.dacl_len );
 }
 
+/* The source notification registry grants the interactive shell read/write
+ * access and retains the package/capability readers used by immersive shell
+ * components.  The local symbol describes its observed Acrylic publisher;
+ * no public Windows symbol name is available in the matching PDB. */
+static struct security_descriptor *create_imsn_acrylic_policy_sd(void)
+{
+    static const struct sid interactive_sid =
+        { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_INTERACTIVE_RID } };
+    static const struct sid local_service_sid =
+        { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_LOCAL_SERVICE_RID } };
+    static const struct sid all_app_packages_sid =
+        { SID_REVISION, 2, SECURITY_APP_PACKAGE_AUTHORITY,
+          { SECURITY_APP_PACKAGE_BASE_RID, SECURITY_BUILTIN_PACKAGE_ANY_PACKAGE } };
+    static const struct sid capability_read_write_1 =
+        { SID_REVISION, 10, SECURITY_APP_PACKAGE_AUTHORITY,
+          {3,1024,2165721414u,884371012u,2773947476u,2437641138u,
+           4209659587u,972658821u,4033014341u,190168586u} };
+    static const struct sid capability_read_write_2 =
+        { SID_REVISION, 10, SECURITY_APP_PACKAGE_AUTHORITY,
+          {3,1024,2152139330u,3124897132u,671935159u,3762809077u,
+           3273429135u,2233686478u,1435376800u,2420532691u} };
+    static const struct sid capability_read =
+        { SID_REVISION, 10, SECURITY_APP_PACKAGE_AUTHORITY,
+          {3,1024,1502825166u,1963708345u,2616377461u,2562897074u,
+           4192028372u,3968301570u,1997628692u,1435953622u} };
+    struct
+    {
+        struct security_descriptor sd;
+        unsigned char owner[12], group[12];
+        struct acl acl;
+        unsigned char aces[20 + 20 + 24 + 56 + 56 + 56];
+    } descriptor = {0};
+    struct ace *ace = ace_first( &descriptor.acl );
+
+    ace = ace_next( set_ace( ace, &interactive_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 3 ) );
+    ace = ace_next( set_ace( ace, &local_service_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 1 ) );
+    ace = ace_next( set_ace( ace, &all_app_packages_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 1 ) );
+    ace = ace_next( set_ace( ace, &capability_read_write_1, ACCESS_ALLOWED_ACE_TYPE, 0,
+                             GENERIC_READ | GENERIC_WRITE ) );
+    ace = ace_next( set_ace( ace, &capability_read_write_2, ACCESS_ALLOWED_ACE_TYPE, 0,
+                             GENERIC_READ | GENERIC_WRITE ) );
+    ace = ace_next( set_ace( ace, &capability_read, ACCESS_ALLOWED_ACE_TYPE, 0, 1 ) );
+    descriptor.sd.owner_len = descriptor.sd.group_len = sid_len( &local_system_sid );
+    memcpy( descriptor.owner, &local_system_sid, descriptor.sd.owner_len );
+    memcpy( descriptor.group, &local_system_sid, descriptor.sd.group_len );
+    descriptor.sd.control = SE_DACL_PRESENT;
+    descriptor.sd.dacl_len = (char *)ace - (char *)&descriptor.acl;
+    descriptor.acl.revision = ACL_REVISION;
+    descriptor.acl.size = descriptor.sd.dacl_len;
+    descriptor.acl.count = 6;
+    return memdup( &descriptor, sizeof(descriptor.sd) + descriptor.sd.owner_len +
+                    descriptor.sd.group_len + descriptor.sd.dacl_len );
+}
+
 static struct wnf_state *create_well_known_state( const struct well_known_state *definition,
                                                   unsigned int session )
 {
@@ -295,6 +351,10 @@ static struct wnf_state *create_well_known_state( const struct well_known_state 
     else if (state->name == WNF_SHEL_WINDOW_ACTIVATED)
     {
         if (!(state->obj.sd = create_shell_window_activated_sd())) { release_object( state ); return NULL; }
+    }
+    else if (state->name == WNF_IMSN_ACRYLIC_POLICY)
+    {
+        if (!(state->obj.sd = create_imsn_acrylic_policy_sd())) { release_object( state ); return NULL; }
     }
     list_add_tail( &states, &state->entry );
     return state;

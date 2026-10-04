@@ -49,6 +49,7 @@
 #define WNF_RM_QUIET_MODE 0x41c6033fa3bc1875ULL
 #define WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE 0x41c6033fa3bc2075ULL
 #define WNF_HAM_SYSTEM_STATE_CHANGED 0x418b0f25a3bc0875ULL
+#define WNF_IMSN_ACRYLIC_POLICY 0x0f950324a3bc4035ULL
 #define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
 #define WNF_SHEL_LOCKSCREEN_ACTIVE 0x0d83063ea3bc5835ULL
 #define WNF_SHEL_WINDOW_ACTIVATED 0x0d83063ea3bfb035ULL
@@ -519,6 +520,7 @@ START_TEST(wnf)
             WNF_RM_QUIET_MODE,
             WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE,
             WNF_HAM_SYSTEM_STATE_CHANGED,
+            WNF_IMSN_ACRYLIC_POLICY,
             WNF_RPCF_FWMAN_RUNNING,
             WNF_SHEL_LOCKSCREEN_ACTIVE,
             WNF_SHEL_WINDOW_ACTIVATED,
@@ -655,6 +657,29 @@ START_TEST(wnf)
         ok( stamp == 1, "expected stamp 1, got %lu\n", stamp );
         ok( size == sizeof(queried), "expected %Iu bytes, got %lu\n", sizeof(queried), size );
         ok( !queried, "expected value 0, got %#lx\n", queried );
+
+        status = pRtlPublishWnfStateData( name, NULL, &((ULONGLONG){0}), sizeof(ULONGLONG), NULL );
+        ok( status == STATUS_INVALID_PARAMETER,
+            "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+
+        status = pNtDeleteWnfStateData( &name, NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+    }
+
+    {
+        ULONG value = 1, queried = 0xdeadbeef;
+        ULONGLONG name = WNF_IMSN_ACRYLIC_POLICY;
+
+        status = pRtlPublishWnfStateData( name, NULL, &value, sizeof(value), NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+
+        stamp = 0xdeadbeef;
+        size = sizeof(queried);
+        status = pNtQueryWnfStateData( &name, NULL, NULL, &stamp, &queried, &size );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+        ok( stamp == 1, "expected stamp 1, got %lu\n", stamp );
+        ok( size == sizeof(queried), "expected %Iu bytes, got %lu\n", sizeof(queried), size );
+        ok( queried == value, "expected value %#lx, got %#lx\n", value, queried );
 
         status = pRtlPublishWnfStateData( name, NULL, &((ULONGLONG){0}), sizeof(ULONGLONG), NULL );
         ok( status == STATUS_INVALID_PARAMETER,
