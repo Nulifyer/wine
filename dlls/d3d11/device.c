@@ -73,6 +73,8 @@ struct d3d11_composition_buffer_state
     HANDLE surface;
     HANDLE mapping;
     struct linuxnt_composition_mapping *mapping_view;
+    /* Shared metadata is producer-controlled. Never reuse it after validation. */
+    struct linuxnt_composition_mapping mapping_layout;
     SIZE_T mapping_size;
     ID3D11Texture2D *staging;
     LONG imported_generation;
@@ -179,19 +181,19 @@ static BOOL composition_format_layout(DXGI_FORMAT format, UINT width, UINT heigh
 }
 
 static HRESULT composition_mapping_snapshot(const struct linuxnt_composition_mapping *mapping,
-        SIZE_T mapping_size, BYTE **snapshot, D3D11_SUBRESOURCE_DATA *data,
-        LONG *snapshot_generation)
+        SIZE_T mapping_size, const struct linuxnt_composition_mapping *layout,
+        BYTE **snapshot, D3D11_SUBRESOURCE_DATA *data, LONG *snapshot_generation)
 {
     SIZE_T snapshot_size = 0, offset;
     LONG generation, completed_generation;
     unsigned int attempt, i;
     BYTE *copy;
 
-    for (i = 0; i < mapping->subresource_count; ++i)
+    for (i = 0; i < layout->subresource_count; ++i)
     {
-        const struct linuxnt_composition_subresource *subresource = &mapping->subresources[i];
+        const struct linuxnt_composition_subresource *subresource = &layout->subresources[i];
 
-        if (subresource->offset < mapping->header_size ||
+        if (subresource->offset < layout->header_size ||
             subresource->offset > mapping_size ||
             subresource->data_size > mapping_size - subresource->offset ||
             snapshot_size > SIZE_MAX - subresource->data_size)
@@ -210,9 +212,9 @@ static HRESULT composition_mapping_snapshot(const struct linuxnt_composition_map
             continue;
         }
         offset = 0;
-        for (i = 0; i < mapping->subresource_count; ++i)
+        for (i = 0; i < layout->subresource_count; ++i)
         {
-            const struct linuxnt_composition_subresource *subresource = &mapping->subresources[i];
+            const struct linuxnt_composition_subresource *subresource = &layout->subresources[i];
 
             memcpy(copy + offset, (const BYTE *)mapping + subresource->offset,
                     subresource->data_size);
@@ -279,6 +281,7 @@ static HRESULT composition_mapping_create(const D3D11_TEXTURE2D_DESC *desc,
     }
     state->mapping_size = size;
     memcpy(state->mapping_view, &layout, sizeof(layout));
+    state->mapping_layout = layout;
     return S_OK;
 }
 
@@ -287,6 +290,7 @@ static HRESULT composition_mapping_publish(struct d3d11_composition_buffer_state
 {
     ID3D11DeviceContext4 *context = &state->device->immediate_context.ID3D11DeviceContext4_iface;
     struct linuxnt_composition_mapping *mapping = state->mapping_view;
+    const struct linuxnt_composition_mapping *layout = &state->mapping_layout;
     D3D11_MAPPED_SUBRESOURCE mapped[LINUXNT_COMPOSITION_MAX_SUBRESOURCES];
     unsigned int i, row;
     BYTE *dst;
@@ -295,7 +299,7 @@ static HRESULT composition_mapping_publish(struct d3d11_composition_buffer_state
     if (!state->producer || !mapping || !state->staging) return E_INVALIDARG;
     ID3D11DeviceContext4_CopyResource(context, (ID3D11Resource *)state->staging,
             (ID3D11Resource *)texture);
-    for (i = 0; i < mapping->subresource_count; ++i)
+    for (i = 0; i < layout->subresource_count; ++i)
     {
         if (FAILED(hr = ID3D11DeviceContext4_Map(context, (ID3D11Resource *)state->staging,
                 i, D3D11_MAP_READ, 0, &mapped[i])))
@@ -307,9 +311,9 @@ static HRESULT composition_mapping_publish(struct d3d11_composition_buffer_state
     }
     InterlockedIncrement(&mapping->generation);
     MemoryBarrier();
-    for (i = 0; i < mapping->subresource_count; ++i)
+    for (i = 0; i < layout->subresource_count; ++i)
     {
-        const struct linuxnt_composition_subresource *subresource = &mapping->subresources[i];
+        const struct linuxnt_composition_subresource *subresource = &layout->subresources[i];
 
         dst = (BYTE *)mapping + subresource->offset;
         for (row = 0; row < subresource->row_count; ++row)
@@ -318,7 +322,7 @@ static HRESULT composition_mapping_publish(struct d3d11_composition_buffer_state
     }
     MemoryBarrier();
     InterlockedIncrement(&mapping->generation);
-    for (i = 0; i < mapping->subresource_count; ++i)
+    for (i = 0; i < layout->subresource_count; ++i)
         ID3D11DeviceContext4_Unmap(context, (ID3D11Resource *)state->staging, i);
     return S_OK;
 }
@@ -328,6 +332,7 @@ static void composition_mapping_sync_import(ID3D11DeviceContext4 *context,
 {
     struct d3d11_composition_buffer_state *state;
     struct linuxnt_composition_mapping *mapping;
+    const struct linuxnt_composition_mapping *layout;
     D3D11_SUBRESOURCE_DATA data[LINUXNT_COMPOSITION_MAX_SUBRESOURCES] = {{0}};
     BYTE *snapshot = NULL;
     IUnknown *unknown = NULL;
@@ -339,6 +344,7 @@ static void composition_mapping_sync_import(ID3D11DeviceContext4 *context,
             &size, &unknown)) || !unknown) return;
     state = composition_state_from_IUnknown(unknown);
     mapping = state->mapping_view;
+    layout = &state->mapping_layout;
     if (state->producer || !mapping)
     {
         IUnknown_Release(unknown);
@@ -352,13 +358,13 @@ static void composition_mapping_sync_import(ID3D11DeviceContext4 *context,
         return;
     }
 
-    if (FAILED(composition_mapping_snapshot(mapping, state->mapping_size, &snapshot, data,
+    if (FAILED(composition_mapping_snapshot(mapping, state->mapping_size, layout, &snapshot, data,
             &snapshot_generation)))
     {
         IUnknown_Release(unknown);
         return;
     }
-    for (i = 0; i < mapping->subresource_count; ++i)
+    for (i = 0; i < layout->subresource_count; ++i)
         ID3D11DeviceContext4_UpdateSubresource(context, resource, i, NULL, data[i].pSysMem,
                 data[i].SysMemPitch, data[i].SysMemSlicePitch);
     free(snapshot);
@@ -370,6 +376,7 @@ static HRESULT composition_mapping_open(struct d3d_device *device, HANDLE handle
 {
     struct d3d11_composition_buffer_state *state = NULL;
     struct linuxnt_composition_mapping *mapping;
+    struct linuxnt_composition_mapping layout;
     D3D11_SUBRESOURCE_DATA data[LINUXNT_COMPOSITION_MAX_SUBRESOURCES] = {{0}};
     MEMORY_BASIC_INFORMATION memory_info;
     ID3D11Texture2D *texture = NULL;
@@ -382,32 +389,33 @@ static HRESULT composition_mapping_open(struct d3d_device *device, HANDLE handle
     *out = NULL;
     if (!(mapping = MapViewOfFile(handle, FILE_MAP_READ, 0, 0, 0))) return E_INVALIDARG;
     if (!VirtualQuery(mapping, &memory_info, sizeof(memory_info)) ||
-        memory_info.RegionSize < sizeof(*mapping) ||
-        mapping->magic != LINUXNT_COMPOSITION_MAPPING_MAGIC ||
-        mapping->version != LINUXNT_COMPOSITION_MAPPING_VERSION ||
-        mapping->header_size != sizeof(*mapping) ||
-        !mapping->subresource_count ||
-        mapping->subresource_count > LINUXNT_COMPOSITION_MAX_SUBRESOURCES ||
-        mapping->subresource_count != mapping->desc.ArraySize ||
-        !mapping->desc.Width || !mapping->desc.Height || mapping->desc.MipLevels != 1 ||
-        mapping->desc.SampleDesc.Count != 1 || mapping->desc.SampleDesc.Quality ||
-        mapping->desc.Usage != D3D11_USAGE_DEFAULT || mapping->desc.CPUAccessFlags ||
-        mapping->desc.MiscFlags) goto done;
+        memory_info.RegionSize < sizeof(*mapping)) goto done;
+    memcpy(&layout, mapping, sizeof(layout));
+    if (layout.magic != LINUXNT_COMPOSITION_MAPPING_MAGIC ||
+        layout.version != LINUXNT_COMPOSITION_MAPPING_VERSION ||
+        layout.header_size != sizeof(layout) ||
+        !layout.subresource_count ||
+        layout.subresource_count > LINUXNT_COMPOSITION_MAX_SUBRESOURCES ||
+        layout.subresource_count != layout.desc.ArraySize ||
+        !layout.desc.Width || !layout.desc.Height || layout.desc.MipLevels != 1 ||
+        layout.desc.SampleDesc.Count != 1 || layout.desc.SampleDesc.Quality ||
+        layout.desc.Usage != D3D11_USAGE_DEFAULT || layout.desc.CPUAccessFlags ||
+        layout.desc.MiscFlags) goto done;
 
-    for (i = 0; i < mapping->subresource_count; ++i)
+    for (i = 0; i < layout.subresource_count; ++i)
     {
-        const struct linuxnt_composition_subresource *subresource = &mapping->subresources[i];
+        const struct linuxnt_composition_subresource *subresource = &layout.subresources[i];
 
-        if (!composition_format_layout(mapping->desc.Format, mapping->desc.Width,
-                mapping->desc.Height, &row_pitch, &row_count) ||
+        if (!composition_format_layout(layout.desc.Format, layout.desc.Width,
+                layout.desc.Height, &row_pitch, &row_count) ||
             subresource->row_pitch != row_pitch || subresource->row_count != row_count ||
             row_count > UINT_MAX / row_pitch || subresource->data_size != row_pitch * row_count)
             goto done;
     }
-    if (FAILED(hr = composition_mapping_snapshot(mapping, memory_info.RegionSize,
+    if (FAILED(hr = composition_mapping_snapshot(mapping, memory_info.RegionSize, &layout,
             &snapshot, data, &snapshot_generation))) goto done;
     if (FAILED(hr = ID3D11Device5_CreateTexture2D(&device->ID3D11Device5_iface,
-            &mapping->desc, data, &texture))) goto done;
+            &layout.desc, data, &texture))) goto done;
     if (!(state = calloc(1, sizeof(*state))))
     {
         hr = E_OUTOFMEMORY;
@@ -417,6 +425,7 @@ static HRESULT composition_mapping_open(struct d3d_device *device, HANDLE handle
     state->refcount = 1;
     state->device = device;
     state->mapping_view = mapping;
+    state->mapping_layout = layout;
     state->mapping_size = memory_info.RegionSize;
     state->imported_generation = snapshot_generation;
     if (FAILED(hr = ID3D11Texture2D_SetPrivateDataInterface(texture,

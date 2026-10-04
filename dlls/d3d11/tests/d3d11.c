@@ -44,6 +44,10 @@
 
 #define SWAPCHAIN_FLAG_SHADER_INPUT             0x1
 
+#define TEST_COMPOSITION_MAPPING_MAGIC           0x4c4e5443
+#define TEST_COMPOSITION_MAPPING_VERSION         1
+#define TEST_COMPOSITION_MAX_SUBRESOURCES        2
+
 static bool damavand;
 static unsigned int use_adapter_idx;
 static BOOL enable_debug_layer;
@@ -118,6 +122,25 @@ struct dxgi_device_xaml_vtbl
 struct dxgi_device_xaml
 {
     const struct dxgi_device_xaml_vtbl *lpVtbl;
+};
+
+struct test_composition_subresource
+{
+    UINT offset;
+    UINT row_pitch;
+    UINT row_count;
+    UINT data_size;
+};
+
+struct test_composition_mapping
+{
+    UINT magic;
+    UINT version;
+    UINT header_size;
+    volatile LONG generation;
+    D3D11_TEXTURE2D_DESC desc;
+    UINT subresource_count;
+    struct test_composition_subresource subresources[TEST_COMPOSITION_MAX_SUBRESOURCES];
 };
 
 static struct test_entry
@@ -2564,6 +2587,111 @@ done:
     if (dxgi_device) IDXGIDevice2_Release(dxgi_device);
     if (resource) IDXGIResource_Release(resource);
     if (texture) ID3D11Texture2D_Release(texture);
+    ID3D11Device_Release(device);
+}
+
+static void test_composition_mapping_metadata_snapshot(void)
+{
+    const UINT data_size = 4 * 4 * 4;
+    struct test_composition_mapping layout = {0}, *mapping_view;
+    ID3D11Texture2D *texture = NULL, *staging = NULL;
+    ID3D11DeviceContext *context = NULL;
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    ID3D11Device *device;
+    HANDLE mapping;
+    HRESULT hr;
+
+    if (strcmp(winetest_platform, "wine"))
+    {
+        win_skip("LinuxNT composition mappings are Wine-private.\n");
+        return;
+    }
+    if (!(device = create_device(NULL)))
+    {
+        skip("Failed to create device.\n");
+        return;
+    }
+
+    layout.magic = TEST_COMPOSITION_MAPPING_MAGIC;
+    layout.version = TEST_COMPOSITION_MAPPING_VERSION;
+    layout.header_size = sizeof(layout);
+    layout.desc.Width = 4;
+    layout.desc.Height = 4;
+    layout.desc.MipLevels = 1;
+    layout.desc.ArraySize = 1;
+    layout.desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    layout.desc.SampleDesc.Count = 1;
+    layout.desc.Usage = D3D11_USAGE_DEFAULT;
+    layout.desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    layout.subresource_count = 1;
+    layout.subresources[0].offset = sizeof(layout);
+    layout.subresources[0].row_pitch = 4 * 4;
+    layout.subresources[0].row_count = 4;
+    layout.subresources[0].data_size = data_size;
+
+    mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+            0, sizeof(layout) + data_size, NULL);
+    ok(!!mapping, "Failed to create composition mapping, error %lu.\n", GetLastError());
+    if (!mapping) goto done;
+    mapping_view = MapViewOfFile(mapping, FILE_MAP_READ | FILE_MAP_WRITE,
+            0, 0, sizeof(layout) + data_size);
+    ok(!!mapping_view, "Failed to map composition data, error %lu.\n", GetLastError());
+    if (!mapping_view) goto done;
+    memcpy(mapping_view, &layout, sizeof(layout));
+    memset((BYTE *)mapping_view + sizeof(layout), 0x11, data_size);
+
+    hr = ID3D11Device_OpenSharedResource(device, mapping, &IID_ID3D11Texture2D,
+            (void **)&texture);
+    ok(hr == S_OK, "Failed to open composition mapping, hr %#lx.\n", hr);
+    if (FAILED(hr)) goto unmap;
+
+    layout.desc.Usage = D3D11_USAGE_STAGING;
+    layout.desc.BindFlags = 0;
+    layout.desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    hr = ID3D11Device_CreateTexture2D(device, &layout.desc, NULL, &staging);
+    ok(hr == S_OK, "Failed to create staging texture, hr %#lx.\n", hr);
+    if (FAILED(hr)) goto unmap;
+    ID3D11Device_GetImmediateContext(device, &context);
+
+    ID3D11DeviceContext_CopyResource(context, (ID3D11Resource *)staging,
+            (ID3D11Resource *)texture);
+    hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)staging,
+            0, D3D11_MAP_READ, 0, &mapped);
+    ok(hr == S_OK, "Failed to map initial composition snapshot, hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ok(*(BYTE *)mapped.pData == 0x11, "Got initial composition value %#x.\n",
+                *(BYTE *)mapped.pData);
+        ID3D11DeviceContext_Unmap(context, (ID3D11Resource *)staging, 0);
+    }
+
+    InterlockedIncrement(&mapping_view->generation);
+    mapping_view->subresource_count = UINT_MAX;
+    mapping_view->subresources[0].offset = UINT_MAX;
+    mapping_view->subresources[0].data_size = UINT_MAX;
+    memset((BYTE *)mapping_view + sizeof(layout), 0x44, data_size);
+    MemoryBarrier();
+    InterlockedIncrement(&mapping_view->generation);
+
+    ID3D11DeviceContext_CopyResource(context, (ID3D11Resource *)staging,
+            (ID3D11Resource *)texture);
+    hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)staging,
+            0, D3D11_MAP_READ, 0, &mapped);
+    ok(hr == S_OK, "Failed to map updated composition snapshot, hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ok(*(BYTE *)mapped.pData == 0x44, "Got updated composition value %#x.\n",
+                *(BYTE *)mapped.pData);
+        ID3D11DeviceContext_Unmap(context, (ID3D11Resource *)staging, 0);
+    }
+
+unmap:
+    UnmapViewOfFile(mapping_view);
+done:
+    if (context) ID3D11DeviceContext_Release(context);
+    if (staging) ID3D11Texture2D_Release(staging);
+    if (texture) ID3D11Texture2D_Release(texture);
+    if (mapping) CloseHandle(mapping);
     ID3D11Device_Release(device);
 }
 
@@ -38843,6 +38971,7 @@ START_TEST(d3d11)
     queue_test(test_create_device);
     queue_for_each_feature_level(test_device_interfaces);
     queue_test(test_offer_reclaim_resources);
+    queue_test(test_composition_mapping_metadata_snapshot);
     queue_test(test_native_d2d_device_contracts);
     queue_test(test_native_xaml_device_contract);
     queue_test(test_fence);
