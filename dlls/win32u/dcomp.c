@@ -6073,6 +6073,63 @@ NTSTATUS WINAPI NtOpenCompositionSurfaceDirtyRegion( HANDLE surface, const UINT6
     return status;
 }
 
+NTSTATUS WINAPI NtOpenCompositionSurfaceRealizationInfo( HANDLE surface, const UINT64 *binding_id,
+                                                          UINT *count, void *realization_info )
+{
+    BYTE buffer_info[0x520], info[0x28];
+    UINT64 requested, current = 0;
+    HANDLE realization = NULL;
+    UINT capacity;
+    NTSTATUS status;
+
+    TRACE( "surface %p, binding_id %p, count %p, realization_info %p\n",
+           surface, binding_id, count, realization_info );
+
+    if (!binding_id || !count || !realization_info) return STATUS_INVALID_PARAMETER;
+    __TRY
+    {
+        requested = *binding_id;
+        capacity = *count;
+    }
+    __EXCEPT
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+
+    status = get_dcomp_surface_state( surface, &current, NULL, NULL,
+                                      buffer_info, &realization, NULL );
+    if (status) return status;
+    if (requested != current)
+    {
+        if (realization) NtClose( realization );
+        return STATUS_NOT_FOUND;
+    }
+    if (!realization)
+        return STATUS_UNSUCCESSFUL;
+    if (!capacity)
+    {
+        NtClose( realization );
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    memcpy( info, buffer_info + 0xa0, sizeof(info) );
+    *(UINT *)(info + 0x04) = 0; /* realization index */
+    memcpy( info + 0x08, &realization, sizeof(realization) );
+    __TRY
+    {
+        memcpy( realization_info, info, sizeof(info) );
+        *count = 1;
+    }
+    __EXCEPT
+    {
+        NtClose( realization );
+        status = STATUS_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    return status;
+}
+
 NTSTATUS WINAPI NtQueryCompositionSurfaceBinding( HANDLE surface, const UINT64 *binding_id,
                                                    void *buffer_info )
 {
@@ -6105,6 +6162,11 @@ NTSTATUS WINAPI NtQueryCompositionSurfaceBinding( HANDLE surface, const UINT64 *
         if (realization) NtClose( realization );
         return STATUS_INVALID_PARAMETER;
     }
+    if (*(UINT *)info == 2)
+    {
+        *(UINT *)(info + 0x08) = *(UINT *)(info + 0xa4);
+        memset( info + 0xa8, 0, 0x10 );
+    }
     __TRY
     {
         memcpy( buffer_info, info, sizeof(info) );
@@ -6115,6 +6177,7 @@ NTSTATUS WINAPI NtQueryCompositionSurfaceBinding( HANDLE surface, const UINT64 *
         status = STATUS_INVALID_PARAMETER;
     }
     __ENDTRY
+    if (!status && *(UINT *)info == 2 && realization) NtClose( realization );
     return status;
 }
 

@@ -734,7 +734,7 @@
 @ stub -syscall NtModerncoreUnregisterNavigationWindowHandle
 @ stub -syscall NtNotifyPresentToCompositionSurface
 @ stdcall -syscall NtOpenCompositionSurfaceDirtyRegion(long ptr ptr ptr)
-@ stub -syscall NtOpenCompositionSurfaceRealizationInfo
+@ stdcall -syscall NtOpenCompositionSurfaceRealizationInfo(long ptr ptr ptr)
 @ stub -syscall NtOpenCompositionSurfaceSectionInfo
 @ stub -syscall NtOpenCompositionSurfaceSwapChainHandleInfo
 @ stub -syscall NtQueryCompositionInputIsImplicit

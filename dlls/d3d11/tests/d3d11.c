@@ -2584,6 +2584,7 @@ static void test_native_d2d_device_contracts(void)
     ID3D11RenderTargetView *composition_rtv = NULL;
     D3D11_MAPPED_SUBRESOURCE mapped;
     BYTE binding_info[0x520];
+    BYTE realization_info[0x28];
     BYTE surface_update[0x178];
     BYTE dirty_region[0xa4];
     const FLOAT clear_color[4] = {0.5f, 0.5f, 0.5f, 0.5f};
@@ -2605,6 +2606,7 @@ static void test_native_d2d_device_contracts(void)
     void *token_view = NULL;
     UINT64 frame_id = 0;
     UINT frame_update_count;
+    UINT realization_count;
     BOOL frame_has_more;
     LUID composition_luid;
     RECT rect, returned_rect;
@@ -2856,10 +2858,36 @@ static void test_native_d2d_device_contracts(void)
             ok(status == STATUS_SUCCESS, "Got composition binding status %#lx.\n", status);
             if (!status)
             {
-                shared_handle = *(HANDLE *)(binding_info + 0xa8);
-                ok(!memcmp(binding_info + 0xb0, &adapter_desc.AdapterLuid,
+                ok(*(UINT *)(binding_info + 0x00) == 2,
+                        "Got composition binding type %u.\n", *(UINT *)(binding_info + 0x00));
+                ok(*(UINT *)(binding_info + 0x08) == 1,
+                        "Got composition binding count %u.\n", *(UINT *)(binding_info + 0x08));
+                ok(*(UINT *)(binding_info + 0x54) == 1,
+                        "Got composition binding flag %u.\n", *(UINT *)(binding_info + 0x54));
+                ok(*(UINT *)(binding_info + 0xa0) == 2,
+                        "Got composition realization type %u.\n", *(UINT *)(binding_info + 0xa0));
+                ok(*(UINT *)(binding_info + 0xa4) == 1,
+                        "Got composition realization count %u.\n", *(UINT *)(binding_info + 0xa4));
+                ok(!*(HANDLE *)(binding_info + 0xa8),
+                        "Got composition binding handle %p.\n", *(HANDLE *)(binding_info + 0xa8));
+                ok(!memcmp(binding_info + 0xb0, &(LUID){0}, sizeof(LUID)),
+                        "Got a nonzero composition binding LUID.\n");
+
+                memset(realization_info, 0xcc, sizeof(realization_info));
+                realization_count = 1;
+                status = NtOpenCompositionSurfaceRealizationInfo(composition_surface,
+                        &composition_binding, &realization_count, realization_info);
+                ok(status == STATUS_SUCCESS, "Got realization-info status %#lx.\n", status);
+                ok(realization_count == 1, "Got realization-info count %u.\n",
+                        realization_count);
+                ok(*(UINT *)(realization_info + 0x00) == 2,
+                        "Got realization-info type %u.\n", *(UINT *)(realization_info + 0x00));
+                ok(!*(UINT *)(realization_info + 0x04),
+                        "Got realization-info index %u.\n", *(UINT *)(realization_info + 0x04));
+                ok(!memcmp(realization_info + 0x10, &adapter_desc.AdapterLuid,
                         sizeof(adapter_desc.AdapterLuid)),
-                        "Got an unexpected composition adapter LUID.\n");
+                        "Got an unexpected realization-info adapter LUID.\n");
+                shared_handle = *(HANDLE *)(realization_info + 0x08);
             }
             if (token_view)
             {
@@ -2898,7 +2926,7 @@ static void test_native_d2d_device_contracts(void)
             ok(!!shared_handle, "Got null composition realization handle.\n");
             memset(dirty_region, 0xcc, sizeof(dirty_region));
             status = NtOpenCompositionSurfaceDirtyRegion(composition_surface,
-                    &composition_binding, binding_info + 0xa0, dirty_region);
+                    &composition_binding, realization_info, dirty_region);
             ok(status == STATUS_SUCCESS, "Got post-query dirty-region status %#lx.\n", status);
             ok(!*(UINT *)(dirty_region + 0xa0), "Got post-query dirty-region count %u.\n",
                     *(UINT *)(dirty_region + 0xa0));
@@ -2954,7 +2982,7 @@ static void test_native_d2d_device_contracts(void)
             ok(hr == S_OK, "Got second composition present hr %#lx.\n", hr);
             memset(dirty_region, 0xcc, sizeof(dirty_region));
             status = NtOpenCompositionSurfaceDirtyRegion(composition_surface,
-                    &composition_binding, binding_info + 0xa0, dirty_region);
+                    &composition_binding, realization_info, dirty_region);
             ok(status == STATUS_SUCCESS, "Got presented dirty-region status %#lx.\n", status);
             ok(*(UINT *)(dirty_region + 0xa0) == 1, "Got presented dirty-region count %u.\n",
                     *(UINT *)(dirty_region + 0xa0));
@@ -2962,7 +2990,7 @@ static void test_native_d2d_device_contracts(void)
                     wine_dbgstr_rect((RECT *)dirty_region));
             memset(dirty_region, 0xcc, sizeof(dirty_region));
             status = NtOpenCompositionSurfaceDirtyRegion(composition_surface,
-                    &composition_binding, binding_info + 0xa0, dirty_region);
+                    &composition_binding, realization_info, dirty_region);
             ok(status == STATUS_SUCCESS, "Got reset dirty-region status %#lx.\n", status);
             ok(!*(UINT *)(dirty_region + 0xa0), "Got reset dirty-region count %u.\n",
                     *(UINT *)(dirty_region + 0xa0));

@@ -930,6 +930,10 @@ W32KAPI NTSTATUS WINAPI NtOpenCompositionSurfaceDirtyRegion( HANDLE surface,
                                                               const UINT64 *binding_id,
                                                               const void *realization_info,
                                                               void *region );
+W32KAPI NTSTATUS WINAPI NtOpenCompositionSurfaceRealizationInfo( HANDLE surface,
+                                                                  const UINT64 *binding_id,
+                                                                  UINT *count,
+                                                                  void *realization_info );
 W32KAPI NTSTATUS WINAPI NtQueryCompositionSurfaceRenderingRealization( HANDLE surface,
                                                                         void *update );
 W32KAPI NTSTATUS WINAPI NtTokenManagerCreateCompositionTokenHandle(

@@ -6636,11 +6636,10 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_internal_CreateCompositionBuffer(I
         ID3D11Texture2D_Release(texture);
         return HRESULT_FROM_NT(status);
     }
-    *(UINT *)(binding_info + 0x00) = 1; /* single composition buffer */
+    *(UINT *)(binding_info + 0x00) = 2; /* composition swapchain */
     *(UINT *)(binding_info + 0x54) = 1;
-    *(UINT *)(binding_info + 0x98) = stereo ? 3 : 2;
-    *(UINT *)(binding_info + 0x9c) = 1;
     *(UINT *)(binding_info + 0xa0) = 2; /* DX handle realization */
+    *(UINT *)(binding_info + 0xa4) = 1;
     *(HANDLE *)(binding_info + 0xa8) = state->mapping;
     *(LUID *)(binding_info + 0xb0) = adapter_desc.AdapterLuid;
     if ((status = NtBindCompositionSurface(surface, TRUE, 0, FALSE, binding_info, &binding_id)))

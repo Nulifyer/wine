@@ -736,7 +736,7 @@
     SYSCALL_ENTRY( 0x12dc, NtModerncoreUnregisterNavigationWindowHandle, 0 ) \
     SYSCALL_ENTRY( 0x12dd, NtNotifyPresentToCompositionSurface, 0 ) \
     SYSCALL_ENTRY( 0x12de, NtOpenCompositionSurfaceDirtyRegion, 16 ) \
-    SYSCALL_ENTRY( 0x12df, NtOpenCompositionSurfaceRealizationInfo, 0 ) \
+    SYSCALL_ENTRY( 0x12df, NtOpenCompositionSurfaceRealizationInfo, 16 ) \
     SYSCALL_ENTRY( 0x12e0, NtOpenCompositionSurfaceSectionInfo, 0 ) \
     SYSCALL_ENTRY( 0x12e1, NtOpenCompositionSurfaceSwapChainHandleInfo, 0 ) \
     SYSCALL_ENTRY( 0x12e2, NtQueryCompositionInputIsImplicit, 0 ) \
@@ -2278,7 +2278,7 @@
     SYSCALL_ENTRY( 0x12dc, NtModerncoreUnregisterNavigationWindowHandle, 0 ) \
     SYSCALL_ENTRY( 0x12dd, NtNotifyPresentToCompositionSurface, 0 ) \
     SYSCALL_ENTRY( 0x12de, NtOpenCompositionSurfaceDirtyRegion, 32 ) \
-    SYSCALL_ENTRY( 0x12df, NtOpenCompositionSurfaceRealizationInfo, 0 ) \
+    SYSCALL_ENTRY( 0x12df, NtOpenCompositionSurfaceRealizationInfo, 32 ) \
     SYSCALL_ENTRY( 0x12e0, NtOpenCompositionSurfaceSectionInfo, 0 ) \
     SYSCALL_ENTRY( 0x12e1, NtOpenCompositionSurfaceSwapChainHandleInfo, 0 ) \
     SYSCALL_ENTRY( 0x12e2, NtQueryCompositionInputIsImplicit, 0 ) \
@@ -3556,7 +3556,6 @@
     SYSCALL_STUB( NtModerncoreSetNavigationServiceSid ) \
     SYSCALL_STUB( NtModerncoreUnregisterNavigationWindowHandle ) \
     SYSCALL_STUB( NtNotifyPresentToCompositionSurface ) \
-    SYSCALL_STUB( NtOpenCompositionSurfaceRealizationInfo ) \
     SYSCALL_STUB( NtOpenCompositionSurfaceSectionInfo ) \
     SYSCALL_STUB( NtOpenCompositionSurfaceSwapChainHandleInfo ) \
     SYSCALL_STUB( NtQueryCompositionInputIsImplicit ) \

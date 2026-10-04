@@ -2284,7 +2284,7 @@ DECL_HANDLER(set_dcomp_surface_bound)
         if (req->bound)
         {
             memcpy( &type, info, sizeof(type) );
-            if (type == 1)
+            if (type == 1 || type == 2)
             {
                 memcpy( &handle, info + 0xa8, sizeof(handle) );
                 if (handle && !(realization = get_handle_obj( current->process, handle,
@@ -2377,7 +2377,8 @@ DECL_HANDLER(get_dcomp_surface_state)
         realization = alloc_handle_no_access_check( current->process, surface->realization,
                                                      SECTION_QUERY | SECTION_MAP_READ, 0 );
         if (!realization) goto done;
-        memcpy( info + 0xa8, &realization, sizeof(realization) );
+        if (*(unsigned int *)info == 1)
+            memcpy( info + 0xa8, &realization, sizeof(realization) );
     }
     reply->binding_id = surface->binding_id;
     reply->ink_cookie = surface->ink_cookie;
