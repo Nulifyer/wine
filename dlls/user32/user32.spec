@@ -51,7 +51,7 @@
 2532 stub -noname SetDisplayMapping  # NtUserSetDisplayMapping
 2533 stub -noname CanBrokerForceForeground  # NtUserCanBrokerForceForeground
 2534 stdcall -noname InternalClipCursor(long long)
-2535 stub @
+2535 stdcall -noname DeferredDesktopRotation() NtUserDeferredDesktopRotation
 2536 stdcall -noname SetWindowServicesDestroyCallback(ptr ptr)
 2537 stub -noname SendEventMessage  # NtUserSendEventMessage
 2538 stdcall -noname LayoutCompleted(long) NtUserLayoutCompleted

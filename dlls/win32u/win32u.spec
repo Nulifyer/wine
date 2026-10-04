@@ -884,7 +884,7 @@
 @ stub -syscall NtUserDefSetText
 @ stub -syscall NtUserDeferWindowDpiChanges
 @ stdcall -syscall NtUserDeferWindowPosAndBand(long long long long long long long long long long)
-@ stub -syscall NtUserDeferredDesktopRotation
+@ stdcall -syscall NtUserDeferredDesktopRotation()
 @ stub -syscall NtUserDelegateCapturePointers
 @ stdcall -syscall NtUserDelegateInput(long ptr ptr long long)
 @ stdcall -syscall NtUserDeleteMenu(long long long)

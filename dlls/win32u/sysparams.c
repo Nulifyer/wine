@@ -4766,6 +4766,17 @@ LONG WINAPI NtUserChangeDisplaySettings( UNICODE_STRING *devname, DEVMODEW *devm
     return ret;
 }
 
+/***********************************************************************
+ *           NtUserDeferredDesktopRotation    (win32u.@)
+ */
+void WINAPI NtUserDeferredDesktopRotation(void)
+{
+    /* Windows uses this call to commit a rotation that USER deferred for the
+     * current GUI thread. Wine applies display settings synchronously and has
+     * no pending per-thread rotation transaction to commit. */
+    TRACE( "no pending rotation\n" );
+}
+
 static BOOL source_enum_display_settings( const struct source *source, UINT index, DEVMODEW *devmode, UINT flags )
 {
     DEVMODEW current_mode = {.dmSize = sizeof(DEVMODEW)};

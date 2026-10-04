@@ -1359,6 +1359,11 @@ LONG SYSCALL_API NtUserChangeDisplaySettings( UNICODE_STRING *devname, DEVMODEW 
     SYSCALL_FUNC( NtUserChangeDisplaySettings );
 }
 
+void SYSCALL_API NtUserDeferredDesktopRotation(void)
+{
+    SYSCALL_FUNC( NtUserDeferredDesktopRotation );
+}
+
 DWORD SYSCALL_API NtUserCheckMenuItem( HMENU handle, UINT id, UINT flags )
 {
     SYSCALL_FUNC( NtUserCheckMenuItem );

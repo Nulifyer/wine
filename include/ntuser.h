@@ -1032,6 +1032,7 @@ W32KAPI BOOL    WINAPI NtUserDestroyDCompositionHwndTarget( HWND hwnd, UINT type
 W32KAPI BOOL    WINAPI NtUserDestroyInputContext( HIMC handle );
 W32KAPI BOOL    WINAPI NtUserDestroyMenu( HMENU menu );
 W32KAPI BOOL    WINAPI NtUserDestroyWindow( HWND hwnd );
+W32KAPI void    WINAPI NtUserDeferredDesktopRotation( void );
 W32KAPI BOOL    WINAPI NtUserQueryActivationObject( const LUID *luid,
                                                     struct activation_object_data *data );
 W32KAPI BOOL    WINAPI NtUserDisableThreadIme( DWORD thread_id );

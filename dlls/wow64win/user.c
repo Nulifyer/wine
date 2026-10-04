@@ -31,6 +31,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wow);
 
+NTSTATUS WINAPI wow64_NtUserDeferredDesktopRotation( UINT *args )
+{
+    NtUserDeferredDesktopRotation();
+    return 0;
+}
+
 NTSTATUS WINAPI wow64_NtUserDrainThreadCoreMessagingCompletions( UINT *args )
 {
     return NtUserDrainThreadCoreMessagingCompletions();

@@ -3650,7 +3650,6 @@
     SYSCALL_STUB( NtUserDdeInitialize ) \
     SYSCALL_STUB( NtUserDefSetText ) \
     SYSCALL_STUB( NtUserDeferWindowDpiChanges ) \
-    SYSCALL_STUB( NtUserDeferredDesktopRotation ) \
     SYSCALL_STUB( NtUserDelegateCapturePointers ) \
     SYSCALL_STUB( NtUserDeleteWindowGroup ) \
     SYSCALL_STUB( NtUserDeregisterShellHookWindow ) \

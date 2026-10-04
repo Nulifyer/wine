@@ -279,6 +279,38 @@ static void test_NtUserCloseWindowStation(void)
 }
 
 typedef BOOL (WINAPI *layout_completed_proc)( HWND hwnd );
+typedef void (WINAPI *deferred_desktop_rotation_proc)( void );
+
+static void test_NtUserDeferredDesktopRotation(void)
+{
+    HMODULE user32 = GetModuleHandleA( "user32.dll" );
+    deferred_desktop_rotation_proc deferred_rotation;
+    HWND hwnd;
+
+    ok( !GetProcAddress( user32, "DeferredDesktopRotation" ),
+        "DeferredDesktopRotation unexpectedly has a named export\n" );
+    deferred_rotation = (deferred_desktop_rotation_proc)GetProcAddress( user32, (const char *)2535 );
+    ok( !!deferred_rotation, "DeferredDesktopRotation ordinal is missing\n" );
+
+    SetLastError( 0xdeadbeef );
+    NtUserDeferredDesktopRotation();
+    ok( GetLastError() == 0xdeadbeef, "direct call changed last error to %lu\n", GetLastError() );
+
+    if (!deferred_rotation) return;
+    SetLastError( 0xdeadbeef );
+    deferred_rotation();
+    ok( GetLastError() == 0xdeadbeef, "ordinal call changed last error to %lu\n", GetLastError() );
+
+    hwnd = CreateWindowA( "static", "deferred-rotation", WS_OVERLAPPEDWINDOW,
+                          0, 0, 100, 100, NULL, NULL, NULL, NULL );
+    ok( !!hwnd, "failed to create window, error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    deferred_rotation();
+    deferred_rotation();
+    ok( GetLastError() == 0xdeadbeef, "repeated window calls changed last error to %lu\n",
+        GetLastError() );
+    DestroyWindow( hwnd );
+}
 
 static void test_NtUserLayoutCompleted_child( const char *arg )
 {
@@ -3439,6 +3471,7 @@ START_TEST(win32u)
     test_wndproc_hook();
 
     test_NtUserCloseWindowStation();
+    test_NtUserDeferredDesktopRotation();
     test_NtUserLayoutCompleted( argv );
     test_NtUserRemoteConnect();
     test_NtUserCitSetInfo();
