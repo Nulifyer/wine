@@ -67,6 +67,9 @@
 #define WNF_SHEL_WINDOW_ACTIVATED 0x0d83063ea3bfb035ULL
 #define WNF_THME_THEME_CHANGED 0x048b0639a3bc0875ULL
 #define WNF_TMCN_ISTABLETMODE 0x0f850339a3bc0835ULL
+/* No public symbol was found for this build-specific state.  Matching TwinUI
+ * publishes its current device-posture Boolean to this exact name. */
+#define WNF_TMCN_DEVICE_POSTURE 0x0f850339a3bc1035ULL
 #define WNF_UMGR_SIHOST_READY 0x13810338a3bc0835ULL
 #define WNF_UMGR_USER_LOGIN 0x13810338a3bc1075ULL
 #define WNF_UMGR_USER_LOGOUT 0x13810338a3bc1875ULL
@@ -136,6 +139,7 @@ static const struct well_known_state well_known_states[] =
     { WNF_SHEL_WINDOW_ACTIVATED, sizeof(unsigned int), 0, 0, WNF_WRITER_DACL },
     { WNF_THME_THEME_CHANGED },
     { WNF_TMCN_ISTABLETMODE, sizeof(unsigned int) },
+    { WNF_TMCN_DEVICE_POSTURE, sizeof(unsigned int), 0, 0, WNF_WRITER_DACL },
     { WNF_UMGR_SIHOST_READY, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
     { WNF_UMGR_USER_LOGIN, 16, 0, 0, WNF_WRITER_SYSTEM },
     { WNF_UMGR_USER_LOGOUT, 16, 0, 0, WNF_WRITER_SYSTEM },
@@ -320,6 +324,48 @@ static struct security_descriptor *create_imsn_acrylic_policy_sd(void)
                     descriptor.sd.group_len + descriptor.sd.dacl_len );
 }
 
+/* The source notification registry grants the interactive shell read/write
+ * access to this device-posture state.  LocalService, All App Packages and
+ * the LPAC app-experience capability retain read access. */
+static struct security_descriptor *create_tmcn_device_posture_sd(void)
+{
+    static const struct sid interactive_sid =
+        { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_INTERACTIVE_RID } };
+    static const struct sid local_service_sid =
+        { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_LOCAL_SERVICE_RID } };
+    static const struct sid all_app_packages_sid =
+        { SID_REVISION, 2, SECURITY_APP_PACKAGE_AUTHORITY,
+          { SECURITY_APP_PACKAGE_BASE_RID, SECURITY_BUILTIN_PACKAGE_ANY_PACKAGE } };
+    static const struct sid app_experience_capability_sid =
+        { SID_REVISION, 10, SECURITY_APP_PACKAGE_AUTHORITY,
+          {3,1024,1502825166u,1963708345u,2616377461u,2562897074u,
+           4192028372u,3968301570u,1997628692u,1435953622u} };
+    struct
+    {
+        struct security_descriptor sd;
+        unsigned char owner[12], group[12];
+        struct acl acl;
+        unsigned char aces[20 + 20 + 24 + 56];
+    } descriptor = {0};
+    struct ace *ace = ace_first( &descriptor.acl );
+
+    ace = ace_next( set_ace( ace, &interactive_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 3 ) );
+    ace = ace_next( set_ace( ace, &local_service_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 1 ) );
+    ace = ace_next( set_ace( ace, &all_app_packages_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 1 ) );
+    ace = ace_next( set_ace( ace, &app_experience_capability_sid,
+                             ACCESS_ALLOWED_ACE_TYPE, 0, 1 ) );
+    descriptor.sd.owner_len = descriptor.sd.group_len = sid_len( &local_system_sid );
+    memcpy( descriptor.owner, &local_system_sid, descriptor.sd.owner_len );
+    memcpy( descriptor.group, &local_system_sid, descriptor.sd.group_len );
+    descriptor.sd.control = SE_DACL_PRESENT;
+    descriptor.sd.dacl_len = (char *)ace - (char *)&descriptor.acl;
+    descriptor.acl.revision = ACL_REVISION;
+    descriptor.acl.size = descriptor.sd.dacl_len;
+    descriptor.acl.count = 4;
+    return memdup( &descriptor, sizeof(descriptor.sd) + descriptor.sd.owner_len +
+                    descriptor.sd.group_len + descriptor.sd.dacl_len );
+}
+
 static struct wnf_state *create_well_known_state( const struct well_known_state *definition,
                                                   unsigned int session )
 {
@@ -355,6 +401,10 @@ static struct wnf_state *create_well_known_state( const struct well_known_state 
     else if (state->name == WNF_IMSN_ACRYLIC_POLICY)
     {
         if (!(state->obj.sd = create_imsn_acrylic_policy_sd())) { release_object( state ); return NULL; }
+    }
+    else if (state->name == WNF_TMCN_DEVICE_POSTURE)
+    {
+        if (!(state->obj.sd = create_tmcn_device_posture_sd())) { release_object( state ); return NULL; }
     }
     list_add_tail( &states, &state->entry );
     return state;

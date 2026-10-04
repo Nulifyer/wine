@@ -55,6 +55,7 @@
 #define WNF_SHEL_WINDOW_ACTIVATED 0x0d83063ea3bfb035ULL
 #define WNF_THME_THEME_CHANGED 0x048b0639a3bc0875ULL
 #define WNF_TMCN_ISTABLETMODE 0x0f850339a3bc0835ULL
+#define WNF_TMCN_DEVICE_POSTURE 0x0f850339a3bc1035ULL
 #define WNF_UMGR_SIHOST_READY 0x13810338a3bc0835ULL
 #define WNF_UMGR_USER_LOGIN 0x13810338a3bc1075ULL
 #define WNF_UMGR_USER_LOGOUT 0x13810338a3bc1875ULL
@@ -526,6 +527,7 @@ START_TEST(wnf)
             WNF_SHEL_WINDOW_ACTIVATED,
             WNF_THME_THEME_CHANGED,
             WNF_TMCN_ISTABLETMODE,
+            WNF_TMCN_DEVICE_POSTURE,
             WNF_UMGR_SIHOST_READY,
             WNF_UMGR_USER_LOGIN,
             WNF_UMGR_USER_LOGOUT,
@@ -684,6 +686,49 @@ START_TEST(wnf)
         status = pRtlPublishWnfStateData( name, NULL, &((ULONGLONG){0}), sizeof(ULONGLONG), NULL );
         ok( status == STATUS_INVALID_PARAMETER,
             "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+
+        status = pNtDeleteWnfStateData( &name, NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+    }
+
+    {
+        BYTE value = 0, queried = 0xcc;
+        ULONGLONG name = WNF_TMCN_DEVICE_POSTURE;
+
+        status = pRtlPublishWnfStateData( name, NULL, &value, sizeof(value), NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+
+        stamp = 0xdeadbeef;
+        size = sizeof(queried);
+        status = pNtQueryWnfStateData( &name, NULL, NULL, &stamp, &queried, &size );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+        ok( stamp == 1, "expected stamp 1, got %lu\n", stamp );
+        ok( size == sizeof(queried), "expected %Iu bytes, got %lu\n", sizeof(queried), size );
+        ok( queried == value, "expected value %#x, got %#x\n", value, queried );
+
+        value = 1;
+        status = pRtlPublishWnfStateData( name, NULL, &value, sizeof(value), NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+
+        stamp = 0xdeadbeef;
+        size = sizeof(queried);
+        status = pNtQueryWnfStateData( &name, NULL, NULL, &stamp, &queried, &size );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+        ok( stamp == 2, "expected stamp 2, got %lu\n", stamp );
+        ok( size == sizeof(queried), "expected %Iu bytes, got %lu\n", sizeof(queried), size );
+        ok( queried == value, "expected value %#x, got %#x\n", value, queried );
+
+        status = pRtlPublishWnfStateData( name, NULL, &((BYTE[5]){1}), 5, NULL );
+        ok( status == STATUS_INVALID_PARAMETER,
+            "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+
+        stamp = 0xdeadbeef;
+        size = sizeof(queried);
+        status = pNtQueryWnfStateData( &name, NULL, NULL, &stamp, &queried, &size );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+        ok( stamp == 2, "expected unchanged stamp 2, got %lu\n", stamp );
+        ok( size == sizeof(queried), "expected %Iu bytes, got %lu\n", sizeof(queried), size );
+        ok( queried == value, "expected unchanged value %#x, got %#x\n", value, queried );
 
         status = pNtDeleteWnfStateData( &name, NULL );
         ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
