@@ -67,6 +67,19 @@ void __cdecl WilFailureNotifyWatchers( unsigned int reserved,
 }
 
 /***********************************************************************
+ *           LogStagedFeatureUsage   (kernelbase.@)
+ *
+ * Native KernelBase uses this private WIL entrypoint only to emit one of
+ * four staged-feature telemetry events. Feature state is owned elsewhere,
+ * so a compatibility runtime without that telemetry provider has no state
+ * transition to reproduce here.
+ */
+void WINAPI LogStagedFeatureUsage( UINT32 feature_id, UINT32 kind, BYTE reporting_kind )
+{
+    TRACE( "feature_id %u, kind %u, reporting_kind %u.\n", feature_id, kind, reporting_kind );
+}
+
+/***********************************************************************
  *           DllMain
  */
 BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )

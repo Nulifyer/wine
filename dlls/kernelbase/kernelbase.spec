@@ -1006,6 +1006,7 @@
 @ stdcall LockFile(long long long long long)
 @ stdcall LockFileEx(long long long long long ptr)
 @ stdcall LockResource(long)
+@ stdcall LogStagedFeatureUsage(long long long)
 @ stdcall MakeAbsoluteSD(ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stub MakeAbsoluteSD2
 @ stdcall MakeSelfRelativeSD(ptr ptr ptr)
