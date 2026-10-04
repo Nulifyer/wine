@@ -871,6 +871,26 @@ static HRESULT std_unmarshal_interface(MSHCTX dest_context, void *dest_context_d
     {
         if ((stubmgr = get_stub_manager(stub_apt, obj.std.oid)))
         {
+            /* A free-threaded object can be called directly from every
+             * apartment in its process.  If its OBJREF comes back to that
+             * process, preserve the original identity instead of wrapping it
+             * in a proxy owned by the neutral apartment. */
+            if (obj.std.flags & SORFP_FREETHREADED)
+            {
+                TRACE("Unmarshalling free-threaded object marshalled in this process for iid %s, "
+                      "returning original object %p\n", debugstr_guid(riid), stubmgr->object);
+
+                hres = IUnknown_QueryInterface(stubmgr->object, riid, ppv);
+
+                if (!stub_manager_is_table_marshaled(stubmgr, &obj.std.ipid))
+                    stub_manager_ext_release(stubmgr, obj.std.cPublicRefs,
+                            obj.std.flags & SORFP_TABLEWEAK, FALSE);
+
+                stub_manager_int_release(stubmgr);
+                apartment_release(stub_apt);
+                apartment_release(apt);
+                return hres;
+            }
             if (!stub_manager_notify_unmarshal(stubmgr, &obj.std.ipid))
                 hres = CO_E_OBJNOTCONNECTED;
             if (SUCCEEDED(hres) && !dest_context_known)

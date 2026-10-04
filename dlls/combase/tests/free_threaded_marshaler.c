@@ -142,6 +142,47 @@ static void test_custom_unmarshal(void)
     CoUninitialize();
 }
 
+static void test_local_standard_unmarshal_identity(void)
+{
+    static const LARGE_INTEGER zero;
+    struct test_object object = {{&test_object_vtbl}, 1, NULL};
+    IUnknown *unmarshaled = NULL;
+    IStream *stream = NULL;
+    HRESULT hr;
+
+    hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    ok(hr == S_OK, "CoInitializeEx returned %#lx.\n", hr);
+    if (FAILED(hr)) return;
+
+    hr = CoCreateFreeThreadedMarshaler(&object.IUnknown_iface, &object.marshaler);
+    ok(hr == S_OK, "CoCreateFreeThreadedMarshaler returned %#lx.\n", hr);
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    ok(hr == S_OK, "CreateStreamOnHGlobal returned %#lx.\n", hr);
+    if (SUCCEEDED(hr) && object.marshaler)
+    {
+        hr = CoMarshalInterface(stream, &IID_IUnknown, &object.IUnknown_iface,
+                MSHCTX_LOCAL, NULL, MSHLFLAGS_NORMAL);
+        ok(hr == S_OK, "CoMarshalInterface returned %#lx.\n", hr);
+
+        if (SUCCEEDED(hr))
+        {
+            hr = IStream_Seek(stream, zero, STREAM_SEEK_SET, NULL);
+            ok(hr == S_OK, "IStream_Seek returned %#lx.\n", hr);
+            hr = CoUnmarshalInterface(stream, &IID_IUnknown, (void **)&unmarshaled);
+            ok(hr == S_OK, "CoUnmarshalInterface returned %#lx.\n", hr);
+            ok(unmarshaled == &object.IUnknown_iface, "got object %p, expected %p.\n",
+                    unmarshaled, &object.IUnknown_iface);
+            if (unmarshaled) IUnknown_Release(unmarshaled);
+        }
+    }
+
+    if (stream) IStream_Release(stream);
+    if (object.marshaler) IUnknown_Release(object.marshaler);
+    ok(object.refcount == 1, "object refcount is %ld.\n", object.refcount);
+    CoUninitialize();
+}
+
 static void test_std_marshal_ex(void)
 {
     struct test_object object = {{&test_object_vtbl}, 1, NULL};
@@ -186,5 +227,6 @@ START_TEST(free_threaded_marshaler)
 {
     test_direct_class_object();
     test_custom_unmarshal();
+    test_local_standard_unmarshal_identity();
     test_std_marshal_ex();
 }
