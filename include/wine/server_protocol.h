@@ -3208,6 +3208,8 @@ struct send_message_request
 struct send_message_reply
 {
     struct reply_header __header;
+    int             preserve_last_error;
+    char __pad_12[4];
 };
 
 struct post_quit_message_request
@@ -5179,6 +5181,22 @@ struct set_desktop_shell_windows_reply
 #define SET_DESKTOP_PROGMAN_WINDOW  0x02
 #define SET_DESKTOP_TASKMAN_WINDOW  0x04
 #define SET_DESKTOP_SHELL_CHANGE_NOTIFY_WINDOW 0x08
+
+
+struct set_window_message_capability_request
+{
+    struct request_header __header;
+    user_handle_t  window;
+    unsigned int   message;
+    int            action;
+    /* VARARG(sid,sid); */
+};
+struct set_window_message_capability_reply
+{
+    struct reply_header __header;
+    int            success;
+    char __pad_12[4];
+};
 
 
 struct set_window_arrangement_callout_request
@@ -8491,6 +8509,7 @@ enum request
     REQ_create_token,
     REQ_open_token,
     REQ_set_desktop_shell_windows,
+    REQ_set_window_message_capability,
     REQ_set_window_arrangement_callout,
     REQ_register_logon_process,
     REQ_set_winstation_bsdr_window,
@@ -8937,6 +8956,7 @@ union generic_request
     struct create_token_request create_token_request;
     struct open_token_request open_token_request;
     struct set_desktop_shell_windows_request set_desktop_shell_windows_request;
+    struct set_window_message_capability_request set_window_message_capability_request;
     struct set_window_arrangement_callout_request set_window_arrangement_callout_request;
     struct register_logon_process_request register_logon_process_request;
     struct set_winstation_bsdr_window_request set_winstation_bsdr_window_request;
@@ -9381,6 +9401,7 @@ union generic_reply
     struct create_token_reply create_token_reply;
     struct open_token_reply open_token_reply;
     struct set_desktop_shell_windows_reply set_desktop_shell_windows_reply;
+    struct set_window_message_capability_reply set_window_message_capability_reply;
     struct set_window_arrangement_callout_reply set_window_arrangement_callout_reply;
     struct register_logon_process_reply register_logon_process_reply;
     struct set_winstation_bsdr_window_reply set_winstation_bsdr_window_reply;
@@ -9583,6 +9604,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1080
+#define SERVER_PROTOCOL_VERSION 1082
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

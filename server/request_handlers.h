@@ -246,6 +246,7 @@ DECL_HANDLER(remove_clipboard_listener);
 DECL_HANDLER(create_token);
 DECL_HANDLER(open_token);
 DECL_HANDLER(set_desktop_shell_windows);
+DECL_HANDLER(set_window_message_capability);
 DECL_HANDLER(set_window_arrangement_callout);
 DECL_HANDLER(register_logon_process);
 DECL_HANDLER(set_winstation_bsdr_window);
@@ -689,6 +690,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_create_token,
     (req_handler)req_open_token,
     (req_handler)req_set_desktop_shell_windows,
+    (req_handler)req_set_window_message_capability,
     (req_handler)req_set_window_arrangement_callout,
     (req_handler)req_register_logon_process,
     (req_handler)req_set_winstation_bsdr_window,
@@ -1647,6 +1649,8 @@ C_ASSERT( offsetof(struct send_message_request, wparam) == 32 );
 C_ASSERT( offsetof(struct send_message_request, lparam) == 40 );
 C_ASSERT( offsetof(struct send_message_request, timeout) == 48 );
 C_ASSERT( sizeof(struct send_message_request) == 56 );
+C_ASSERT( offsetof(struct send_message_reply, preserve_last_error) == 8 );
+C_ASSERT( sizeof(struct send_message_reply) == 16 );
 C_ASSERT( offsetof(struct post_quit_message_request, exit_code) == 12 );
 C_ASSERT( sizeof(struct post_quit_message_request) == 16 );
 C_ASSERT( offsetof(struct send_hardware_message_request, win) == 12 );
@@ -2325,6 +2329,12 @@ C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_taskman_window) =
 C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, old_shell_change_notify_window) == 24 );
 C_ASSERT( offsetof(struct set_desktop_shell_windows_reply, success) == 28 );
 C_ASSERT( sizeof(struct set_desktop_shell_windows_reply) == 32 );
+C_ASSERT( offsetof(struct set_window_message_capability_request, window) == 12 );
+C_ASSERT( offsetof(struct set_window_message_capability_request, message) == 16 );
+C_ASSERT( offsetof(struct set_window_message_capability_request, action) == 20 );
+C_ASSERT( sizeof(struct set_window_message_capability_request) == 24 );
+C_ASSERT( offsetof(struct set_window_message_capability_reply, success) == 8 );
+C_ASSERT( sizeof(struct set_window_message_capability_reply) == 16 );
 C_ASSERT( offsetof(struct set_window_arrangement_callout_request, window) == 12 );
 C_ASSERT( offsetof(struct set_window_arrangement_callout_request, enable) == 16 );
 C_ASSERT( sizeof(struct set_window_arrangement_callout_request) == 24 );

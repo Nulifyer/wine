@@ -3739,6 +3739,7 @@ static BOOL put_message_in_queue( const struct send_message_info *info, size_t *
     struct packed_message data;
     union message_data msg_data;
     unsigned int res;
+    BOOL preserve_last_error = FALSE;
     int i;
     timeout_t timeout = TIMEOUT_INFINITE;
 
@@ -3803,12 +3804,13 @@ static BOOL put_message_in_queue( const struct send_message_info *info, size_t *
         if (info->flags & SMTO_ABORTIFHUNG) req->flags |= SEND_MSG_ABORT_IF_HUNG;
         for (i = 0; i < data.count; i++) wine_server_add_data( req, data.data[i], data.size[i] );
         res = wine_server_call( req );
+        preserve_last_error = reply->preserve_last_error;
     }
     SERVER_END_REQ;
 
 done:
     if (res == STATUS_INVALID_PARAMETER) res = STATUS_NO_LDT;
-    if (res) RtlSetLastWin32Error( RtlNtStatusToDosError(res) );
+    if (res && !preserve_last_error) RtlSetLastWin32Error( RtlNtStatusToDosError(res) );
     return !res;
 }
 

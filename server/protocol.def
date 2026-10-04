@@ -2461,6 +2461,8 @@ struct process_info
     lparam_t        lparam;    /* parameters */
     timeout_t       timeout;   /* timeout for reply */
     VARARG(data,message_data); /* message data for sent messages */
+@REPLY
+    int             preserve_last_error; /* denial does not publish a Win32 error */
 @END
 
 @REQ(post_quit_message)
@@ -3709,6 +3711,16 @@ enum caret_state
 #define SET_DESKTOP_PROGMAN_WINDOW  0x02
 #define SET_DESKTOP_TASKMAN_WINDOW  0x04
 #define SET_DESKTOP_SHELL_CHANGE_NOTIFY_WINDOW 0x08
+
+/* Add or remove a SID from a window message capability descriptor. */
+@REQ(set_window_message_capability)
+    user_handle_t  window;              /* target window owned by the caller */
+    unsigned int   message;             /* message protected by the descriptor */
+    int            action;              /* zero adds, nonzero removes */
+    VARARG(sid,sid);                    /* captured capability SID */
+@REPLY
+    int            success;             /* whether the descriptor changed */
+@END
 
 /* Register the desktop-scoped shell window-arrangement callout. */
 @REQ(set_window_arrangement_callout)

@@ -218,6 +218,8 @@ extern int is_window_visible( user_handle_t window );
 extern int is_window_transparent( user_handle_t window );
 extern int make_window_active( user_handle_t window );
 extern struct thread *get_window_thread( user_handle_t handle );
+extern int check_window_message_access( user_handle_t window, unsigned int message,
+                                        struct thread *sender, struct thread *receiver );
 extern int ensure_dwm_window_context( user_handle_t window );
 extern void add_dwm_window_target( user_handle_t window, unsigned int type );
 extern void sync_dwm_window_target( user_handle_t window, unsigned int type );

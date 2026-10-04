@@ -9,6 +9,9 @@
  */
 
 #include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -16,6 +19,218 @@
 #include "winuser.h"
 
 #include "wine/test.h"
+
+#define CAPABILITY_MESSAGE 0x02cd
+#define CAPABILITY_RESULT  0x13572468
+
+typedef BOOL (WINAPI *set_window_message_capability_fn)(HWND, UINT, PSID, ULONG);
+
+static unsigned int capability_message_count;
+
+static LRESULT CALLBACK capability_window_proc( HWND hwnd, UINT message, WPARAM wparam,
+                                                LPARAM lparam )
+{
+    if (message == CAPABILITY_MESSAGE)
+    {
+        capability_message_count++;
+        return CAPABILITY_RESULT;
+    }
+    return DefWindowProcW( hwnd, message, wparam, lparam );
+}
+
+static void capability_sender_child( char **argv )
+{
+    union
+    {
+        SID sid;
+        BYTE bytes[SECURITY_MAX_SID_SIZE];
+    } world;
+    set_window_message_capability_fn set_capability;
+    ULONG_PTR result = 0xfeedface;
+    DWORD size = sizeof(world.bytes);
+    HWND hwnd = NULL;
+    BOOL expected, ret;
+
+    sscanf( argv[3], "%p", &hwnd );
+    expected = atoi( argv[4] );
+    set_capability = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ),
+                                             "SetWindowMessageCapability" );
+    ok( !!set_capability, "SetWindowMessageCapability is unavailable\n" );
+    if (!set_capability) return;
+
+    if (atoi( argv[5] ))
+    {
+        ret = CreateWellKnownSid( WinWorldSid, NULL, world.bytes, &size );
+        ok( ret, "failed to create World SID, error %lu\n", GetLastError() );
+        if (ret)
+        {
+            SetLastError( 0x12345678 );
+            ret = set_capability( hwnd, CAPABILITY_MESSAGE, world.bytes, 0 );
+            ok( !ret, "registered a capability on a foreign-process window\n" );
+            ok( GetLastError() == ERROR_ACCESS_DENIED,
+                "foreign-process registration returned error %lu\n", GetLastError() );
+        }
+    }
+
+    SetLastError( 0x12345678 );
+    ret = SendMessageTimeoutW( hwnd, CAPABILITY_MESSAGE, 0x1234, 0x5678,
+                               SMTO_ABORTIFHUNG, 2000, &result );
+    ok( !!ret == expected, "message delivery returned %d, expected %d, error %lu\n",
+        ret, expected, GetLastError() );
+    ok( GetLastError() == 0x12345678, "message delivery changed last error to %lu\n",
+        GetLastError() );
+    if (expected)
+        ok( result == CAPABILITY_RESULT, "message returned %#Ix, expected %#x\n",
+            result, CAPABILITY_RESULT );
+    else
+        ok( !result, "rejected message returned %#Ix\n", result );
+}
+
+static BOOL run_capability_sender( char **argv, HWND hwnd, BOOL expected,
+                                   BOOL check_registration )
+{
+    STARTUPINFOA startup = { .cb = sizeof(startup) };
+    PROCESS_INFORMATION process = {0};
+    char command[MAX_PATH * 3];
+    DWORD wait;
+    MSG message;
+    BOOL ret;
+
+    sprintf( command, "\"%s\" %s capability-child %p %u %u", argv[0], argv[1], hwnd,
+             expected, check_registration );
+    ret = CreateProcessA( NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &process );
+    ok( ret, "failed to create capability sender, error %lu\n", GetLastError() );
+    if (!ret) return FALSE;
+
+    for (;;)
+    {
+        wait = MsgWaitForMultipleObjects( 1, &process.hProcess, FALSE, 10000, QS_ALLINPUT );
+        if (wait == WAIT_OBJECT_0) break;
+        if (wait != WAIT_OBJECT_0 + 1)
+        {
+            ok( 0, "capability sender wait returned %#lx\n", wait );
+            TerminateProcess( process.hProcess, 1 );
+            break;
+        }
+        while (PeekMessageW( &message, NULL, 0, 0, PM_REMOVE ))
+        {
+            TranslateMessage( &message );
+            DispatchMessageW( &message );
+        }
+    }
+    wait_child_process( &process );
+    CloseHandle( process.hThread );
+    CloseHandle( process.hProcess );
+    return wait == WAIT_OBJECT_0;
+}
+
+static void test_window_message_capability( char **argv )
+{
+    union
+    {
+        SID sid;
+        BYTE bytes[SECURITY_MAX_SID_SIZE];
+    } world;
+    set_window_message_capability_fn set_capability;
+    WNDCLASSW cls = {0};
+    DWORD size = sizeof(world.bytes);
+    HWND hwnd, stale;
+    BOOL ret;
+
+    set_capability = (void *)GetProcAddress( GetModuleHandleA( "user32.dll" ),
+                                             "SetWindowMessageCapability" );
+    if (!set_capability)
+    {
+        win_skip( "SetWindowMessageCapability is unavailable\n" );
+        return;
+    }
+
+    ret = CreateWellKnownSid( WinWorldSid, NULL, world.bytes, &size );
+    ok( ret, "failed to create World SID, error %lu\n", GetLastError() );
+    if (!ret) return;
+
+    SetLastError( 0x12345678 );
+    ret = set_capability( NULL, CAPABILITY_MESSAGE, world.bytes, 0 );
+    ok( !ret, "registered a capability on a null window\n" );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
+        "null-window registration returned error %lu\n", GetLastError() );
+
+    cls.lpfnWndProc = capability_window_proc;
+    cls.hInstance = GetModuleHandleW( NULL );
+    cls.lpszClassName = L"WineWindowMessageCapabilityTest";
+    ret = RegisterClassW( &cls );
+    ok( ret, "failed to register capability window class, error %lu\n", GetLastError() );
+    if (!ret) return;
+    hwnd = CreateWindowExW( 0, cls.lpszClassName, L"capability", WS_OVERLAPPED,
+                            0, 0, 16, 16, NULL, NULL, cls.hInstance, NULL );
+    ok( !!hwnd, "failed to create capability window, error %lu\n", GetLastError() );
+    if (!hwnd) goto done;
+
+    SetLastError( 0x12345678 );
+    ret = set_capability( hwnd, CAPABILITY_MESSAGE, NULL, 0 );
+    ok( !ret, "registered a null SID\n" );
+    ok( GetLastError() == 0x12345678, "null SID changed last error to %lu\n", GetLastError() );
+    SetLastError( 0x12345678 );
+    ret = set_capability( hwnd, CAPABILITY_MESSAGE, (PSID)(UINT_PTR)0xdeadbeef, 0 );
+    ok( !ret, "registered an invalid SID pointer\n" );
+    ok( GetLastError() == 0x12345678, "invalid SID changed last error to %lu\n", GetLastError() );
+
+    SetLastError( 0x12345678 );
+    ret = set_capability( hwnd, CAPABILITY_MESSAGE + 1, world.bytes, ~0u );
+    ok( !ret, "removed an absent capability\n" );
+    ok( GetLastError() == 0x12345678,
+        "absent capability removal changed last error to %lu\n", GetLastError() );
+
+    SetLastError( 0x12345678 );
+    ret = set_capability( hwnd, CAPABILITY_MESSAGE + 1, world.bytes, 0 );
+    ok( ret, "failed to add a capability, error %lu\n", GetLastError() );
+    ret = set_capability( hwnd, CAPABILITY_MESSAGE + 1, world.bytes, 0 );
+    ok( ret, "failed to add a duplicate capability, error %lu\n", GetLastError() );
+    ret = set_capability( hwnd, CAPABILITY_MESSAGE + 1, world.bytes, 1 );
+    ok( ret, "failed to remove the first capability, error %lu\n", GetLastError() );
+    ret = set_capability( hwnd, CAPABILITY_MESSAGE + 1, world.bytes, 2 );
+    ok( ret, "failed to remove the duplicate capability with action 2, error %lu\n",
+        GetLastError() );
+    SetLastError( 0x12345678 );
+    ret = set_capability( hwnd, CAPABILITY_MESSAGE + 1, world.bytes, ~0u );
+    ok( !ret, "removed a capability after both entries were removed\n" );
+    ok( GetLastError() == 0x12345678,
+        "final capability removal changed last error to %lu\n", GetLastError() );
+
+    capability_message_count = 0;
+    if (!run_capability_sender( argv, hwnd, FALSE, TRUE )) goto destroy;
+    ok( !capability_message_count, "received %u rejected capability messages\n",
+        capability_message_count );
+
+    SetLastError( 0x12345678 );
+    ret = set_capability( hwnd, CAPABILITY_MESSAGE, world.bytes, 0 );
+    ok( ret, "failed to grant the World SID, error %lu\n", GetLastError() );
+    ok( GetLastError() == 0x12345678, "capability grant changed last error to %lu\n",
+        GetLastError() );
+    if (!run_capability_sender( argv, hwnd, TRUE, FALSE )) goto destroy;
+    ok( capability_message_count == 1, "received %u granted capability messages\n",
+        capability_message_count );
+
+    SetLastError( 0x12345678 );
+    ret = set_capability( hwnd, CAPABILITY_MESSAGE, world.bytes, 1 );
+    ok( ret, "failed to remove the World SID, error %lu\n", GetLastError() );
+    ok( GetLastError() == 0x12345678, "capability removal changed last error to %lu\n",
+        GetLastError() );
+    if (!run_capability_sender( argv, hwnd, TRUE, FALSE )) goto destroy;
+    ok( capability_message_count == 2,
+        "owner descriptor did not retain same-user access, count %u\n", capability_message_count );
+
+destroy:
+    stale = hwnd;
+    DestroyWindow( hwnd );
+    SetLastError( 0x12345678 );
+    ret = set_capability( stale, CAPABILITY_MESSAGE, world.bytes, 0 );
+    ok( !ret, "registered a capability on a stale window\n" );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
+        "stale-window registration returned error %lu\n", GetLastError() );
+done:
+    UnregisterClassW( cls.lpszClassName, cls.hInstance );
+}
 
 static DWORD WINAPI shell_change_notify_thread( void *arg )
 {
@@ -286,8 +501,19 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
 
 START_TEST(shell)
 {
+    char **argv;
+    int argc;
     HDESK desktop;
     HANDLE thread;
+
+    argc = winetest_get_mainargs( &argv );
+    if (argc == 6 && !strcmp( argv[2], "capability-child" ))
+    {
+        capability_sender_child( argv );
+        return;
+    }
+
+    test_window_message_capability( argv );
 
     desktop = CreateDesktopA( "shell_notify_test", NULL, NULL, 0, GENERIC_ALL, NULL );
     ok( !!desktop, "failed to create test desktop, error %lu\n", GetLastError() );

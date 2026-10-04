@@ -43,6 +43,7 @@
 #include "thread.h"
 #include "process.h"
 #include "request.h"
+#include "security.h"
 #include "user.h"
 
 #define QS_DRIVER       0x80000000
@@ -3320,6 +3321,9 @@ DECL_HANDLER(send_message)
     struct msg_queue *send_queue = get_current_queue();
     struct msg_queue *recv_queue = NULL;
     struct thread *thread = NULL;
+    int access;
+
+    reply->preserve_last_error = 0;
 
     if (!(thread = get_thread_from_id( req->id ))) return;
 
@@ -3332,6 +3336,12 @@ DECL_HANDLER(send_message)
     if (!(recv_queue = thread->queue))
     {
         set_error( STATUS_INVALID_PARAMETER );
+        release_object( thread );
+        return;
+    }
+    if ((access = check_window_message_access( req->win, req->msg, current, thread )) <= 0)
+    {
+        if (access < 0) reply->preserve_last_error = 1;
         release_object( thread );
         return;
     }

@@ -784,11 +784,52 @@ DWORD get_window_thread( HWND hwnd, DWORD *process )
  */
 BOOL WINAPI NtUserSetWindowMessageCapability( HWND hwnd, UINT message, PSID sid, ULONG action )
 {
-    /* Wine does not enforce SID-based window-message capabilities. Reject
-     * the operation without claiming to register or remove a permission. */
-    FIXME( "unsupported window-message capability %p %x %p %lu\n", hwnd, message, sid, action );
-    RtlSetLastWin32Error( ERROR_NOT_SUPPORTED );
-    return FALSE;
+    union
+    {
+        SID sid;
+        BYTE bytes[SECURITY_MAX_SID_SIZE];
+    } captured;
+    const SID *input_sid = sid;
+    ULONG sid_size = 0;
+    BOOL ret = FALSE;
+
+    if (!is_window( hwnd ))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+    if (!is_current_process_window( hwnd ))
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+
+    __TRY
+    {
+        if (input_sid && input_sid->Revision == SID_REVISION &&
+            input_sid->SubAuthorityCount <= SID_MAX_SUB_AUTHORITIES)
+        {
+            sid_size = offsetof( SID, SubAuthority[input_sid->SubAuthorityCount] );
+            memcpy( captured.bytes, input_sid, sid_size );
+        }
+    }
+    __EXCEPT
+    {
+        sid_size = 0;
+    }
+    __ENDTRY
+    if (!sid_size) return FALSE;
+
+    SERVER_START_REQ( set_window_message_capability )
+    {
+        req->window = wine_server_user_handle( hwnd );
+        req->message = message;
+        req->action = action;
+        wine_server_add_data( req, captured.bytes, sid_size );
+        if (!wine_server_call_err( req )) ret = reply->success;
+    }
+    SERVER_END_REQ;
+    return ret;
 }
 
 static const WCHAR window_band_prop[] =

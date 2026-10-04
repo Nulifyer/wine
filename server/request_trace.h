@@ -1482,6 +1482,11 @@ static void dump_send_message_request( const struct send_message_request *req )
     dump_varargs_message_data( ", data=", cur_size );
 }
 
+static void dump_send_message_reply( const struct send_message_reply *req )
+{
+    fprintf( stderr, " preserve_last_error=%d", req->preserve_last_error );
+}
+
 static void dump_post_quit_message_request( const struct post_quit_message_request *req )
 {
     fprintf( stderr, " exit_code=%d", req->exit_code );
@@ -2795,6 +2800,19 @@ static void dump_set_desktop_shell_windows_reply( const struct set_desktop_shell
     fprintf( stderr, ", old_taskman_window=%08x", req->old_taskman_window );
     fprintf( stderr, ", old_shell_change_notify_window=%08x", req->old_shell_change_notify_window );
     fprintf( stderr, ", success=%d", req->success );
+}
+
+static void dump_set_window_message_capability_request( const struct set_window_message_capability_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
+    fprintf( stderr, ", message=%08x", req->message );
+    fprintf( stderr, ", action=%d", req->action );
+    dump_varargs_sid( ", sid=", cur_size );
+}
+
+static void dump_set_window_message_capability_reply( const struct set_window_message_capability_reply *req )
+{
+    fprintf( stderr, " success=%d", req->success );
 }
 
 static void dump_set_window_arrangement_callout_request( const struct set_window_arrangement_callout_request *req )
@@ -5084,6 +5102,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_token_request,
     (dump_func)dump_open_token_request,
     (dump_func)dump_set_desktop_shell_windows_request,
+    (dump_func)dump_set_window_message_capability_request,
     (dump_func)dump_set_window_arrangement_callout_request,
     (dump_func)dump_register_logon_process_request,
     (dump_func)dump_set_winstation_bsdr_window_request,
@@ -5410,7 +5429,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_queue_mask_reply,
     (dump_func)dump_get_queue_status_reply,
     (dump_func)dump_get_process_idle_event_reply,
-    NULL,
+    (dump_func)dump_send_message_reply,
     NULL,
     (dump_func)dump_send_hardware_message_reply,
     (dump_func)dump_get_message_reply,
@@ -5527,6 +5546,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_token_reply,
     (dump_func)dump_open_token_reply,
     (dump_func)dump_set_desktop_shell_windows_reply,
+    (dump_func)dump_set_window_message_capability_reply,
     (dump_func)dump_set_window_arrangement_callout_reply,
     NULL,
     (dump_func)dump_set_winstation_bsdr_window_reply,
@@ -5970,6 +5990,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "create_token",
     "open_token",
     "set_desktop_shell_windows",
+    "set_window_message_capability",
     "set_window_arrangement_callout",
     "register_logon_process",
     "set_winstation_bsdr_window",
@@ -6184,6 +6205,7 @@ static const struct
     { "ACCESS_VIOLATION",            STATUS_ACCESS_VIOLATION },
     { "ADDRESS_ALREADY_ASSOCIATED",  STATUS_ADDRESS_ALREADY_ASSOCIATED },
     { "ALERTED",                     STATUS_ALERTED },
+    { "ALLOTTED_SPACE_EXCEEDED",     STATUS_ALLOTTED_SPACE_EXCEEDED },
     { "ALREADY_REGISTERED",          STATUS_ALREADY_REGISTERED },
     { "BAD_DEVICE_TYPE",             STATUS_BAD_DEVICE_TYPE },
     { "BAD_IMPERSONATION_LEVEL",     STATUS_BAD_IMPERSONATION_LEVEL },

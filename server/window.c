@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <stdarg.h>
 
 #include "ntstatus.h"
@@ -54,6 +55,21 @@ enum property_type
     PROP_TYPE_FREE,   /* free entry */
     PROP_TYPE_STRING, /* atom that was originally a string */
     PROP_TYPE_ATOM    /* plain atom */
+};
+
+struct window_message_capability_sid
+{
+    struct list entry;
+    struct sid sid;
+};
+
+struct window_message_capability
+{
+    struct list entry;
+    struct list sids;
+    unsigned int message;
+    struct security_descriptor *base_sd;
+    struct security_descriptor *sd;
 };
 
 
@@ -116,6 +132,7 @@ struct window
     int              prop_inuse;      /* number of in-use window properties */
     int              prop_alloc;      /* number of allocated window properties */
     struct property *properties;      /* window properties array */
+    struct list      message_capabilities; /* per-message SID descriptors */
     window_shm_t    *shared;          /* window in session shared memory */
 };
 
@@ -296,6 +313,7 @@ static void window_dump( struct object *obj, int verbose )
 static void window_destroy( struct object *obj )
 {
     struct window *win = (struct window *)obj;
+    struct window_message_capability *capability, *capability_next;
     unsigned int i;
 
     assert( !win->handle );
@@ -315,6 +333,23 @@ static void window_destroy( struct object *obj )
     detach_logical_surface( win );
     free( win->text );
 
+    LIST_FOR_EACH_ENTRY_SAFE( capability, capability_next, &win->message_capabilities,
+                              struct window_message_capability, entry )
+    {
+        struct window_message_capability_sid *sid, *sid_next;
+
+        LIST_FOR_EACH_ENTRY_SAFE( sid, sid_next, &capability->sids,
+                                  struct window_message_capability_sid, entry )
+        {
+            list_remove( &sid->entry );
+            free( sid );
+        }
+        list_remove( &capability->entry );
+        free( capability->base_sd );
+        free( capability->sd );
+        free( capability );
+    }
+
     if (win->shared) free_shared_object( win->shared );
 }
 
@@ -324,6 +359,163 @@ static inline struct window *get_window( user_handle_t handle )
     struct window *ret = get_user_object( handle, NTUSER_OBJ_WINDOW );
     if (!ret) set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
     return ret;
+}
+
+static struct window_message_capability *find_window_message_capability( struct window *win,
+                                                                         unsigned int message )
+{
+    struct window_message_capability *capability;
+
+    LIST_FOR_EACH_ENTRY( capability, &win->message_capabilities,
+                         struct window_message_capability, entry )
+        if (capability->message == message) return capability;
+    return NULL;
+}
+
+static struct security_descriptor *create_window_message_capability_base_sd( struct token *token )
+{
+    const struct sid *owner = token_get_owner( token );
+    const struct sid *group = token_get_primary_group( token );
+    const struct acl *dacl = token_get_default_dacl( token );
+    struct security_descriptor descriptor = {0};
+    struct security_descriptor *ret;
+    char *ptr;
+
+    descriptor.control = SE_DACL_PRESENT;
+    descriptor.owner_len = sid_len( owner );
+    descriptor.group_len = sid_len( group );
+    descriptor.dacl_len = dacl ? dacl->size : sizeof(struct acl);
+    if (!(ret = mem_alloc( sizeof(descriptor) + descriptor.owner_len + descriptor.group_len +
+                           descriptor.dacl_len ))) return NULL;
+    ptr = mem_append( ret, &descriptor, sizeof(descriptor) );
+    ptr = mem_append( ptr, owner, descriptor.owner_len );
+    ptr = mem_append( ptr, group, descriptor.group_len );
+    if (dacl)
+        mem_append( ptr, dacl, descriptor.dacl_len );
+    else
+    {
+        struct acl empty = {ACL_REVISION, 0, sizeof(empty), 0};
+        mem_append( ptr, &empty, sizeof(empty) );
+    }
+    return ret;
+}
+
+static int rebuild_window_message_capability_sd( struct window_message_capability *capability )
+{
+    struct window_message_capability_sid *entry;
+    const struct security_descriptor *base = capability->base_sd;
+    const struct acl *base_dacl;
+    struct security_descriptor *descriptor;
+    struct acl *dacl;
+    struct ace *ace;
+    size_t base_size, extra = 0;
+    int present;
+
+    LIST_FOR_EACH_ENTRY( entry, &capability->sids,
+                         struct window_message_capability_sid, entry )
+        extra += sizeof(struct ace) + sid_len( &entry->sid );
+    base_dacl = sd_get_dacl( base, &present );
+    assert( present && base_dacl );
+    if (extra > USHRT_MAX - base_dacl->size)
+    {
+        set_error( STATUS_ALLOTTED_SPACE_EXCEEDED );
+        return 0;
+    }
+    base_size = sizeof(*base) + base->owner_len + base->group_len + base->sacl_len + base->dacl_len;
+    if (!(descriptor = mem_alloc( base_size + extra ))) return 0;
+    memcpy( descriptor, base, base_size );
+    dacl = (struct acl *)((char *)(descriptor + 1) + descriptor->owner_len +
+                          descriptor->group_len + descriptor->sacl_len);
+    ace = (struct ace *)((char *)dacl + base_dacl->size);
+    LIST_FOR_EACH_ENTRY( entry, &capability->sids,
+                         struct window_message_capability_sid, entry )
+    {
+        ace = ace_next( set_ace( ace, &entry->sid, ACCESS_ALLOWED_ACE_TYPE, 0, 0x10001 ) );
+        dacl->count++;
+    }
+    dacl->size = base_dacl->size + extra;
+    descriptor->dacl_len = dacl->size;
+    free( capability->sd );
+    capability->sd = descriptor;
+    return 1;
+}
+
+static int is_message_always_allowed_across_integrity( unsigned int message )
+{
+    switch (message)
+    {
+    case WM_NULL:
+    case WM_MOVE:
+    case WM_SIZE:
+    case WM_GETTEXT:
+    case WM_GETTEXTLENGTH:
+    case WM_GETHOTKEY:
+    case WM_GETICON:
+    case 0x0305:
+    case 0x0308:
+    case 0x0309:
+    case 0x030a:
+    case 0x030b:
+    case 0x030c:
+    case 0x030d:
+    case 0x030e:
+    case 0x0313:
+    case 0x031a:
+    case 0x031b:
+    case 0x031f:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static unsigned int token_integrity_level( struct token *token )
+{
+    const struct sid *sid = token_get_integrity_sid( token );
+
+    if (!sid || !sid->sub_count) return SECURITY_MANDATORY_HIGH_RID;
+    return sid->sub_auth[sid->sub_count - 1];
+}
+
+/* Enforce the cross-process message seam owned by the server. Windows uses a
+ * per-message security descriptor as a fallback after ordinary UIPI rejects
+ * delivery; message 0x02cd always takes this capability path. */
+int check_window_message_access( user_handle_t handle, unsigned int message,
+                                 struct thread *sender, struct thread *receiver )
+{
+    static const struct generic_map capability_map = {0x10001, 0x10001, 0x10001, 0x10001};
+    struct window_message_capability *capability;
+    struct token *token;
+    struct window *win = NULL;
+
+    if (sender->process == receiver->process) return 1;
+
+    if (handle)
+    {
+        if (!(win = get_window( handle ))) return 0;
+        if (win->thread != receiver)
+        {
+            set_error( STATUS_INVALID_HANDLE );
+            return 0;
+        }
+    }
+
+    if (message != 0x02cd)
+    {
+        if (is_message_always_allowed_across_integrity( message )) return 1;
+        if (token_integrity_level( thread_get_impersonation_token( sender ) ) >=
+            token_integrity_level( receiver->process->token )) return 1;
+    }
+
+    if (!win || !(capability = find_window_message_capability( win, message ))) goto denied;
+
+    token = thread_get_impersonation_token( sender );
+    if (token_check_security_descriptor_access( token, capability->sd, 0x10001,
+                                                &capability_map )) return 1;
+
+denied:
+    set_error( STATUS_ACCESS_DENIED );
+    return message == 0x02cd ? -1 : 0;
 }
 
 static void clear_window_input_delegation( struct window *win, unsigned int option )
@@ -956,6 +1148,7 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->window_rect = win->visible_rect = win->surface_rect = win->client_rect = empty_rect;
     list_init( &win->children );
     list_init( &win->unlinked );
+    list_init( &win->message_capabilities );
 
     if (!(win->shared = alloc_shared_object( offsetof(window_shm_t, extra[extra_size]) ))) goto failed;
     SHARED_WRITE_BEGIN( win->shared, window_shm_t )
@@ -4436,6 +4629,91 @@ DECL_HANDLER(set_desktop_shell_windows)
 
 done:
     release_object( desktop );
+}
+
+/* Add or remove one SID ACE from a window's message capability descriptor. */
+DECL_HANDLER(set_window_message_capability)
+{
+    const struct sid *request_sid = get_req_data();
+    struct window_message_capability_sid *sid;
+    struct window_message_capability *capability;
+    struct window *window;
+    int new_capability = 0;
+    data_size_t size = get_req_data_size();
+
+    reply->success = 0;
+    if (size < offsetof( struct sid, sub_auth[0] ) ||
+        request_sid->revision != SID_REVISION ||
+        request_sid->sub_count > SID_MAX_SUB_AUTHORITIES ||
+        size != sid_len( request_sid ))
+    {
+        set_error( STATUS_INVALID_SID );
+        return;
+    }
+    if (!(window = get_window( req->window ))) return;
+    if (!window->thread || window->thread->process != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+
+    capability = find_window_message_capability( window, req->message );
+    if (req->action)
+    {
+        if (!capability) return;
+        LIST_FOR_EACH_ENTRY( sid, &capability->sids,
+                             struct window_message_capability_sid, entry )
+        {
+            if (!equal_sid( &sid->sid, request_sid )) continue;
+            list_remove( &sid->entry );
+            if (!rebuild_window_message_capability_sd( capability ))
+            {
+                list_add_tail( &capability->sids, &sid->entry );
+                return;
+            }
+            free( sid );
+            reply->success = 1;
+            return;
+        }
+        return;
+    }
+
+    if (!capability)
+    {
+        if (!(capability = mem_alloc( sizeof(*capability) ))) return;
+        memset( capability, 0, sizeof(*capability) );
+        capability->message = req->message;
+        list_init( &capability->sids );
+        if (!(capability->base_sd = create_window_message_capability_base_sd(
+                  current->process->token )))
+        {
+            free( capability );
+            return;
+        }
+        new_capability = 1;
+    }
+    if (!(sid = mem_alloc( sizeof(*sid) ))) goto failed;
+    memset( sid, 0, sizeof(*sid) );
+    copy_sid( &sid->sid, request_sid );
+    list_add_tail( &capability->sids, &sid->entry );
+    if (!rebuild_window_message_capability_sd( capability ))
+    {
+        list_remove( &sid->entry );
+        free( sid );
+        goto failed;
+    }
+    if (new_capability)
+        list_add_tail( &window->message_capabilities, &capability->entry );
+    reply->success = 1;
+    return;
+
+failed:
+    if (new_capability)
+    {
+        free( capability->base_sd );
+        free( capability->sd );
+        free( capability );
+    }
 }
 
 /* Register the desktop-scoped shell window-arrangement callout. */
