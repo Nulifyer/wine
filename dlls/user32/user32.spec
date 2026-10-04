@@ -83,7 +83,7 @@
 2564 stdcall -noname RegisterWindowArrangementCallout(long long) NtUserRegisterWindowArrangementCallout
 2565 stdcall -noname IsCurrentProcessGdiScaledX()
 2566 stub @
-2567 stub -noname EnableShellWindowManagementBehavior  # NtUserEnableShellWindowManagementBehavior
+2567 stdcall -noname EnableShellWindowManagementBehavior(long long) NtUserEnableShellWindowManagementBehavior
 2568 stub -noname SetModernAppWindow  # NtUserSetModernAppWindow
 2569 stub -noname GetModernAppWindow  # NtUserGetModernAppWindow
 2570 stub @

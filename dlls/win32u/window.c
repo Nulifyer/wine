@@ -7232,6 +7232,32 @@ BOOL WINAPI NtUserRegisterWindowArrangementCallout( HWND hwnd, BOOL enable )
 }
 
 /*******************************************************************
+ *           NtUserEnableShellWindowManagementBehavior (win32u.@)
+ */
+BOOL WINAPI NtUserEnableShellWindowManagementBehavior( UINT mask, UINT value )
+{
+    if (!get_user_thread_info()->client_info->iam_access)
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+    if (value & 0x8ffff800)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    SERVER_START_REQ(set_shell_window_management_behavior)
+    {
+        req->mask = mask;
+        req->value = value;
+        if (wine_server_call_err( req )) return FALSE;
+    }
+    SERVER_END_REQ;
+    return TRUE;
+}
+
+/*******************************************************************
  *           NtUserQueryWindow (win32u.@)
  */
 HANDLE WINAPI NtUserQueryWindow( HWND hwnd, WINDOWINFOCLASS cls )

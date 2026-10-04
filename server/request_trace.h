@@ -2827,6 +2827,12 @@ static void dump_set_window_arrangement_callout_reply( const struct set_window_a
     fprintf( stderr, ", success=%d", req->success );
 }
 
+static void dump_set_shell_window_management_behavior_request( const struct set_shell_window_management_behavior_request *req )
+{
+    fprintf( stderr, " mask=%08x", req->mask );
+    fprintf( stderr, ", value=%08x", req->value );
+}
+
 static void dump_register_logon_process_request( const struct register_logon_process_request *req )
 {
     fprintf( stderr, " pid=%04x", req->pid );
@@ -5104,6 +5110,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_desktop_shell_windows_request,
     (dump_func)dump_set_window_message_capability_request,
     (dump_func)dump_set_window_arrangement_callout_request,
+    (dump_func)dump_set_shell_window_management_behavior_request,
     (dump_func)dump_register_logon_process_request,
     (dump_func)dump_set_winstation_bsdr_window_request,
     (dump_func)dump_adjust_token_privileges_request,
@@ -5549,6 +5556,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_window_message_capability_reply,
     (dump_func)dump_set_window_arrangement_callout_reply,
     NULL,
+    NULL,
     (dump_func)dump_set_winstation_bsdr_window_reply,
     (dump_func)dump_adjust_token_privileges_reply,
     (dump_func)dump_get_token_privileges_reply,
@@ -5992,6 +6000,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_desktop_shell_windows",
     "set_window_message_capability",
     "set_window_arrangement_callout",
+    "set_shell_window_management_behavior",
     "register_logon_process",
     "set_winstation_bsdr_window",
     "adjust_token_privileges",
@@ -6242,6 +6251,7 @@ static const struct
     { "ERROR_INVALID_HANDLE",        0xc0010000 | ERROR_INVALID_HANDLE },
     { "ERROR_INVALID_INDEX",         0xc0010000 | ERROR_INVALID_INDEX },
     { "ERROR_INVALID_PARAMETER",     0xc0010000 | ERROR_INVALID_PARAMETER },
+    { "ERROR_INVALID_STATE",         0xc0010000 | ERROR_INVALID_STATE },
     { "ERROR_INVALID_WINDOW_HANDLE", 0xc0010000 | ERROR_INVALID_WINDOW_HANDLE },
     { "ERROR_NO_MORE_USER_HANDLES",  0xc0010000 | ERROR_NO_MORE_USER_HANDLES },
     { "ERROR_WINDOW_OF_OTHER_THREAD", 0xc0010000 | ERROR_WINDOW_OF_OTHER_THREAD },

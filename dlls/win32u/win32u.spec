@@ -945,7 +945,7 @@
 @ stub -syscall NtUserEnableResizeLayoutSynchronization
 @ stdcall -syscall NtUserEnableScrollBar(long long long)
 @ stub -syscall NtUserEnableSessionForMMCSS
-@ stub -syscall NtUserEnableShellWindowManagementBehavior
+@ stdcall -syscall NtUserEnableShellWindowManagementBehavior(long long)
 @ stub -syscall NtUserEnableSoftwareCursorForScreenCapture
 @ stub -syscall NtUserEnableTouchPad
 @ stdcall -syscall NtUserEnableWindow(long long)

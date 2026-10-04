@@ -5214,6 +5214,19 @@ struct set_window_arrangement_callout_reply
 };
 
 
+struct set_shell_window_management_behavior_request
+{
+    struct request_header __header;
+    unsigned int mask;
+    unsigned int value;
+    char __pad_20[4];
+};
+struct set_shell_window_management_behavior_reply
+{
+    struct reply_header __header;
+};
+
+
 struct register_logon_process_request
 {
     struct request_header __header;
@@ -8511,6 +8524,7 @@ enum request
     REQ_set_desktop_shell_windows,
     REQ_set_window_message_capability,
     REQ_set_window_arrangement_callout,
+    REQ_set_shell_window_management_behavior,
     REQ_register_logon_process,
     REQ_set_winstation_bsdr_window,
     REQ_adjust_token_privileges,
@@ -8958,6 +8972,7 @@ union generic_request
     struct set_desktop_shell_windows_request set_desktop_shell_windows_request;
     struct set_window_message_capability_request set_window_message_capability_request;
     struct set_window_arrangement_callout_request set_window_arrangement_callout_request;
+    struct set_shell_window_management_behavior_request set_shell_window_management_behavior_request;
     struct register_logon_process_request register_logon_process_request;
     struct set_winstation_bsdr_window_request set_winstation_bsdr_window_request;
     struct adjust_token_privileges_request adjust_token_privileges_request;
@@ -9403,6 +9418,7 @@ union generic_reply
     struct set_desktop_shell_windows_reply set_desktop_shell_windows_reply;
     struct set_window_message_capability_reply set_window_message_capability_reply;
     struct set_window_arrangement_callout_reply set_window_arrangement_callout_reply;
+    struct set_shell_window_management_behavior_reply set_shell_window_management_behavior_reply;
     struct register_logon_process_reply register_logon_process_reply;
     struct set_winstation_bsdr_window_reply set_winstation_bsdr_window_reply;
     struct adjust_token_privileges_reply adjust_token_privileges_reply;
@@ -9604,6 +9620,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1082
+#define SERVER_PROTOCOL_VERSION 1083
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

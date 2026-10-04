@@ -248,6 +248,7 @@ DECL_HANDLER(open_token);
 DECL_HANDLER(set_desktop_shell_windows);
 DECL_HANDLER(set_window_message_capability);
 DECL_HANDLER(set_window_arrangement_callout);
+DECL_HANDLER(set_shell_window_management_behavior);
 DECL_HANDLER(register_logon_process);
 DECL_HANDLER(set_winstation_bsdr_window);
 DECL_HANDLER(adjust_token_privileges);
@@ -692,6 +693,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_desktop_shell_windows,
     (req_handler)req_set_window_message_capability,
     (req_handler)req_set_window_arrangement_callout,
+    (req_handler)req_set_shell_window_management_behavior,
     (req_handler)req_register_logon_process,
     (req_handler)req_set_winstation_bsdr_window,
     (req_handler)req_adjust_token_privileges,
@@ -2341,6 +2343,9 @@ C_ASSERT( sizeof(struct set_window_arrangement_callout_request) == 24 );
 C_ASSERT( offsetof(struct set_window_arrangement_callout_reply, old_window) == 8 );
 C_ASSERT( offsetof(struct set_window_arrangement_callout_reply, success) == 12 );
 C_ASSERT( sizeof(struct set_window_arrangement_callout_reply) == 16 );
+C_ASSERT( offsetof(struct set_shell_window_management_behavior_request, mask) == 12 );
+C_ASSERT( offsetof(struct set_shell_window_management_behavior_request, value) == 16 );
+C_ASSERT( sizeof(struct set_shell_window_management_behavior_request) == 24 );
 C_ASSERT( offsetof(struct register_logon_process_request, pid) == 12 );
 C_ASSERT( offsetof(struct register_logon_process_request, secure) == 16 );
 C_ASSERT( sizeof(struct register_logon_process_request) == 24 );

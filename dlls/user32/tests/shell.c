@@ -246,6 +246,7 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     BOOL (WINAPI *set_shell_window)(HWND);
     BOOL (WINAPI *set_active_process_for_monitor)(DWORD, HMONITOR);
     BOOL (WINAPI *register_window_arrangement_callout)(HWND, BOOL);
+    BOOL (WINAPI *enable_shell_window_management_behavior)(UINT, UINT);
     BOOL (WINAPI *shell_register_hot_key)(HWND, INT, UINT, UINT, HWND);
     ULONGLONG key, second_key;
     DWORD band;
@@ -267,6 +268,7 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     set_shell_window = (void *)GetProcAddress( user32, "SetShellWindow" );
     set_active_process_for_monitor = (void *)GetProcAddress( user32, (const char *)2513 );
     register_window_arrangement_callout = (void *)GetProcAddress( user32, (const char *)2564 );
+    enable_shell_window_management_behavior = (void *)GetProcAddress( user32, (const char *)2567 );
     shell_register_hot_key = (void *)GetProcAddress( user32, (const char *)2671 );
     ok( !!create_window_in_band, "CreateWindowInBand is unavailable\n" );
     ok( !!get_shell_change_notify_window, "GetShellChangeNotifyWindow is unavailable\n" );
@@ -278,12 +280,26 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     ok( !!set_active_process_for_monitor, "SetActiveProcessForMonitor is unavailable\n" );
     ok( !!register_window_arrangement_callout,
         "RegisterWindowArrangementCallout is unavailable\n" );
+    ok( !!enable_shell_window_management_behavior,
+        "EnableShellWindowManagementBehavior is unavailable\n" );
     ok( !!shell_register_hot_key, "ShellRegisterHotKey is unavailable\n" );
     if (!create_window_in_band || !get_shell_change_notify_window || !get_window_band ||
         !acquire_iam_key || !enable_iam_access || !set_shell_change_notify_window ||
         !set_shell_window || !set_active_process_for_monitor ||
-        !register_window_arrangement_callout || !shell_register_hot_key)
+        !register_window_arrangement_callout || !enable_shell_window_management_behavior ||
+        !shell_register_hot_key)
         return 0;
+
+    SetLastError( 0x13579bdf );
+    ret = enable_shell_window_management_behavior( 0, 0 );
+    ok( !ret, "enabled zero shell-window behavior without IAM access\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED,
+        "zero behavior without IAM returned error %lu\n", GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = enable_shell_window_management_behavior( 0x800, 0x800 );
+    ok( !ret, "enabled invalid shell-window behavior without IAM access\n" );
+    ok( GetLastError() == ERROR_ACCESS_DENIED,
+        "invalid behavior without IAM returned error %lu\n", GetLastError() );
 
     SetLastError( 0x13579bdf );
     ret = register_window_arrangement_callout( NULL, FALSE );
@@ -387,6 +403,22 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     ret = enable_iam_access( key, TRUE );
     ok( ret, "failed to enable IAM access, error %lu\n", GetLastError() );
 
+    SetLastError( 0x13579bdf );
+    ret = enable_shell_window_management_behavior( 0, 0 );
+    ok( ret, "failed to retain zero behavior without a callout, error %lu\n", GetLastError() );
+    ok( GetLastError() == 0x13579bdf,
+        "zero behavior without a callout changed last error to %lu\n", GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = enable_shell_window_management_behavior( 1, 1 );
+    ok( !ret, "enabled nonzero behavior without a callout\n" );
+    ok( GetLastError() == ERROR_INVALID_STATE,
+        "nonzero behavior without a callout returned error %lu\n", GetLastError() );
+    SetLastError( 0x13579bdf );
+    ret = enable_shell_window_management_behavior( 0x800, 0x800 );
+    ok( !ret, "enabled a reserved shell-window behavior bit\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER,
+        "reserved behavior bit returned error %lu\n", GetLastError() );
+
     dpi_context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_UNAWARE );
     ok( !!dpi_context, "failed to select DPI-unaware context, error %lu\n", GetLastError() );
     ordinary_message_hwnd = CreateWindowExA( 0, "static", "DPI-unaware message window", WS_POPUP,
@@ -419,6 +451,26 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
             "arrangement callout registration changed last error to %lu\n", GetLastError() );
 
         SetLastError( 0x13579bdf );
+        ret = enable_shell_window_management_behavior( 1, 1 );
+        ok( ret, "failed to enable shell-window behavior bit 0, error %lu\n", GetLastError() );
+        ok( GetLastError() == 0x13579bdf,
+            "behavior bit 0 changed last error to %lu\n", GetLastError() );
+        SetLastError( 0x13579bdf );
+        ret = enable_shell_window_management_behavior( 2, 2 );
+        ok( ret, "failed to merge shell-window behavior bit 1, error %lu\n", GetLastError() );
+        ok( GetLastError() == 0x13579bdf,
+            "behavior bit 1 changed last error to %lu\n", GetLastError() );
+        ret = enable_shell_window_management_behavior( 1, 0 );
+        ok( ret, "failed to clear shell-window behavior bit 0, error %lu\n", GetLastError() );
+        ret = enable_shell_window_management_behavior( 1, 4 );
+        ok( ret, "unmasked behavior value unexpectedly failed, error %lu\n", GetLastError() );
+        SetLastError( 0x13579bdf );
+        ret = enable_shell_window_management_behavior( 0x800, 0x800 );
+        ok( !ret, "enabled a reserved behavior bit while registered\n" );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER,
+            "registered reserved behavior bit returned error %lu\n", GetLastError() );
+
+        SetLastError( 0x13579bdf );
         ret = register_window_arrangement_callout( arrangement_hwnd, TRUE );
         ok( !ret, "duplicate arrangement callout registration succeeded\n" );
         ok( GetLastError() == ERROR_ALREADY_REGISTERED,
@@ -441,6 +493,16 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
         ok( ret, "failed to unregister arrangement callout, error %lu\n", GetLastError() );
         ok( GetLastError() == 0x13579bdf,
             "arrangement callout unregister changed last error to %lu\n", GetLastError() );
+        SetLastError( 0x13579bdf );
+        ret = enable_shell_window_management_behavior( 0, 0 );
+        ok( ret, "unregister did not clear shell-window behavior, error %lu\n", GetLastError() );
+        ok( GetLastError() == 0x13579bdf,
+            "post-unregister behavior query changed last error to %lu\n", GetLastError() );
+        SetLastError( 0x13579bdf );
+        ret = enable_shell_window_management_behavior( 1, 1 );
+        ok( !ret, "enabled behavior after unregister\n" );
+        ok( GetLastError() == ERROR_INVALID_STATE,
+            "behavior after unregister returned error %lu\n", GetLastError() );
         ret = UnregisterHotKey( arrangement_hwnd, 0xf060 );
         ok( !ret, "arrangement callout unregister left its hotkey registered\n" );
 
@@ -449,6 +511,21 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
         ok( ret, "repeated arrangement callout unregister failed, error %lu\n", GetLastError() );
         ok( GetLastError() == 0x13579bdf,
             "repeated arrangement unregister changed last error to %lu\n", GetLastError() );
+
+        ret = register_window_arrangement_callout( arrangement_hwnd, TRUE );
+        ok( ret, "failed to re-register arrangement callout, error %lu\n", GetLastError() );
+        ret = enable_shell_window_management_behavior( 4, 4 );
+        ok( ret, "failed to enable behavior before destroying callout, error %lu\n",
+            GetLastError() );
+        ret = DestroyWindow( arrangement_hwnd );
+        ok( ret, "failed to destroy arrangement callout, error %lu\n", GetLastError() );
+        arrangement_hwnd = NULL;
+        SetLastError( 0x13579bdf );
+        ret = enable_shell_window_management_behavior( 0, 0 );
+        ok( ret, "callout destruction did not clear shell-window behavior, error %lu\n",
+            GetLastError() );
+        ok( GetLastError() == 0x13579bdf,
+            "post-destroy behavior query changed last error to %lu\n", GetLastError() );
     }
     if (arrangement_hwnd) DestroyWindow( arrangement_hwnd );
     if (ordinary_message_hwnd) DestroyWindow( ordinary_message_hwnd );

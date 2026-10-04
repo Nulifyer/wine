@@ -3731,6 +3731,12 @@ enum caret_state
     int            success;             /* whether the requested change succeeded */
 @END
 
+/* Merge process-wide shell window-management behavior flags. */
+@REQ(set_shell_window_management_behavior)
+    unsigned int mask;                  /* flags selected for replacement */
+    unsigned int value;                 /* replacement flag values */
+@END
+
 /* Register the logon UI process for the current window station */
 @REQ(register_logon_process)
     process_id_t   pid;                 /* id of the logon UI process */

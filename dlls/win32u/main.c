@@ -476,6 +476,11 @@ BOOL SYSCALL_API NtUserRegisterWindowArrangementCallout( HWND hwnd, BOOL enable 
     SYSCALL_FUNC( NtUserRegisterWindowArrangementCallout );
 }
 
+BOOL SYSCALL_API NtUserEnableShellWindowManagementBehavior( UINT mask, UINT value )
+{
+    SYSCALL_FUNC( NtUserEnableShellWindowManagementBehavior );
+}
+
 NTSTATUS SYSCALL_API NtGdiDdDDIQueryResourceInfo( D3DKMT_QUERYRESOURCEINFO *desc )
 {
     SYSCALL_FUNC( NtGdiDdDDIQueryResourceInfo );

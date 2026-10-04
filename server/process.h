@@ -70,6 +70,7 @@ struct process
     unsigned int         protection;      /* host-admitted process protection, zero for ordinary creation */
     unsigned int         ui_context;      /* USER process context */
     unsigned int         ui_context_flags;/* USER process context flags */
+    unsigned int         shell_window_management_behavior; /* process-wide shell management flags */
     int                  critical;        /* break-on-termination policy */
     int                  disable_boost;   /* disable priority boost */
     unsigned int         handle_checking_mode; /* process handle checking policy */

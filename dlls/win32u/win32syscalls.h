@@ -947,7 +947,7 @@
     SYSCALL_ENTRY( 0x13af, NtUserEnableResizeLayoutSynchronization, 0 ) \
     SYSCALL_ENTRY( 0x13b0, NtUserEnableScrollBar, 12 ) \
     SYSCALL_ENTRY( 0x13b1, NtUserEnableSessionForMMCSS, 0 ) \
-    SYSCALL_ENTRY( 0x13b2, NtUserEnableShellWindowManagementBehavior, 0 ) \
+    SYSCALL_ENTRY( 0x13b2, NtUserEnableShellWindowManagementBehavior, 8 ) \
     SYSCALL_ENTRY( 0x13b3, NtUserEnableSoftwareCursorForScreenCapture, 0 ) \
     SYSCALL_ENTRY( 0x13b4, NtUserEnableTouchPad, 0 ) \
     SYSCALL_ENTRY( 0x13b5, NtUserEnableWindow, 8 ) \
@@ -2489,7 +2489,7 @@
     SYSCALL_ENTRY( 0x13af, NtUserEnableResizeLayoutSynchronization, 0 ) \
     SYSCALL_ENTRY( 0x13b0, NtUserEnableScrollBar, 24 ) \
     SYSCALL_ENTRY( 0x13b1, NtUserEnableSessionForMMCSS, 0 ) \
-    SYSCALL_ENTRY( 0x13b2, NtUserEnableShellWindowManagementBehavior, 0 ) \
+    SYSCALL_ENTRY( 0x13b2, NtUserEnableShellWindowManagementBehavior, 16 ) \
     SYSCALL_ENTRY( 0x13b3, NtUserEnableSoftwareCursorForScreenCapture, 0 ) \
     SYSCALL_ENTRY( 0x13b4, NtUserEnableTouchPad, 0 ) \
     SYSCALL_ENTRY( 0x13b5, NtUserEnableWindow, 16 ) \
@@ -3680,7 +3680,6 @@
     SYSCALL_STUB( NtUserEnablePerMonitorMenuScaling ) \
     SYSCALL_STUB( NtUserEnableResizeLayoutSynchronization ) \
     SYSCALL_STUB( NtUserEnableSessionForMMCSS ) \
-    SYSCALL_STUB( NtUserEnableShellWindowManagementBehavior ) \
     SYSCALL_STUB( NtUserEnableSoftwareCursorForScreenCapture ) \
     SYSCALL_STUB( NtUserEnableTouchPad ) \
     SYSCALL_STUB( NtUserEnableWindowGDIScaledDpiMessage ) \

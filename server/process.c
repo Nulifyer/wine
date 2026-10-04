@@ -640,6 +640,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->protection      = 0;
     process->ui_context      = 0;
     process->ui_context_flags = 0;
+    process->shell_window_management_behavior = 0;
     process->suspend         = 0;
     process->is_system       = 0;
     process->debug_children  = 1;

@@ -2902,7 +2902,10 @@ void free_window_handle( struct window *win )
     if (win == win->desktop->progman_window) win->desktop->progman_window = NULL;
     if (win == win->desktop->taskman_window) win->desktop->taskman_window = NULL;
     if (win == win->desktop->arrangement_callout_window)
+    {
+        if (win->thread) win->thread->process->shell_window_management_behavior = 0;
         win->desktop->arrangement_callout_window = NULL;
+    }
     if (win == win->desktop->winstation->bsdr_window)
     {
         win->desktop->winstation->bsdr_window = NULL;
@@ -4759,11 +4762,35 @@ DECL_HANDLER(set_window_arrangement_callout)
             set_error( STATUS_ACCESS_DENIED );
             goto done;
         }
+        current->process->shell_window_management_behavior = 0;
         desktop->arrangement_callout_window = NULL;
     }
     reply->success = 1;
 
 done:
+    release_object( desktop );
+}
+
+/* Merge process-wide shell window-management flags while its callout is registered. */
+DECL_HANDLER(set_shell_window_management_behavior)
+{
+    struct desktop *desktop;
+    unsigned int behavior;
+
+    if (!(desktop = get_desktop_obj( current->process, current->desktop, 0 ))) return;
+
+    behavior = (current->process->shell_window_management_behavior & ~req->mask) |
+               (req->value & req->mask);
+    if (behavior &&
+        (!desktop->arrangement_callout_window ||
+         !desktop->arrangement_callout_window->thread ||
+         desktop->arrangement_callout_window->thread->process != current->process))
+    {
+        current->process->shell_window_management_behavior = 0;
+        set_win32_error( ERROR_INVALID_STATE );
+    }
+    else current->process->shell_window_management_behavior = behavior;
+
     release_object( desktop );
 }
 

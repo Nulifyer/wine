@@ -1055,6 +1055,7 @@ W32KAPI BOOL     WINAPI NtUserDwmKernelShutdown(void);
 W32KAPI NTSTATUS WINAPI NtUserCitSetInfo( UINT flags, const void *info );
 W32KAPI BOOL    WINAPI NtUserEmptyClipboard(void);
 W32KAPI BOOL    WINAPI NtUserEnableIAMAccess( const ULONGLONG *key, BOOL enable );
+W32KAPI BOOL    WINAPI NtUserEnableShellWindowManagementBehavior( UINT mask, UINT value );
 W32KAPI BOOL    WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointer( BOOL );
 W32KAPI BOOL    WINAPI NtUserEnableMouseInPointerForThread(void);
