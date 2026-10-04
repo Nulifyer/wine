@@ -191,7 +191,8 @@
 2686 stub InternalStartMoveSize  # NtUserInternalStartMoveSize
 2687 stub RaiseLowerShellWindow  # NtUserRaiseLowerShellWindow
 # 2688 stub RegisterPrecisionTouchpadThread
-2689 stub RegisterPrecisionTouchpadWindow  # NtUserRegisterPrecisionTouchpadWindow
+2689 stdcall RegisterTouchpadCapableWindow(long long) NtUserRegisterTouchpadCapableWindow
+@ stdcall RegisterPrecisionTouchpadWindow(long long) NtUserRegisterTouchpadCapableWindow
 # 2690 stub CreateSyntheticPointerDevice2
 # 2691 stub GetPointerTouchpadInfo
 # 2692 stub GetPointerTouchpadInfoHistory

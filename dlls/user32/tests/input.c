@@ -6977,6 +6977,103 @@ static void test_GetHimetricScaleFactorFromPixelLocation(void)
     }
 }
 
+typedef BOOL (WINAPI *RegisterTouchpadCapableWindowFn)(HWND, BOOL);
+
+struct touchpad_window_thread_params
+{
+    HANDLE ready;
+    HANDLE release;
+    HWND hwnd;
+};
+
+static DWORD WINAPI touchpad_window_thread(void *arg)
+{
+    struct touchpad_window_thread_params *params = arg;
+
+    params->hwnd = CreateWindowW(L"static", NULL, WS_POPUP, 0, 0, 32, 32,
+                                 NULL, NULL, NULL, NULL);
+    SetEvent(params->ready);
+    WaitForSingleObject(params->release, INFINITE);
+    if (params->hwnd) DestroyWindow(params->hwnd);
+    return 0;
+}
+
+static void test_RegisterTouchpadCapableWindow(void)
+{
+    RegisterTouchpadCapableWindowFn named, ordinal;
+    struct touchpad_window_thread_params params;
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    HANDLE thread;
+    DWORD ret;
+    HWND hwnd;
+
+    named = (RegisterTouchpadCapableWindowFn)GetProcAddress(user32,
+                                                            "RegisterTouchpadCapableWindow");
+    ordinal = (RegisterTouchpadCapableWindowFn)GetProcAddress(user32, (const char *)2689);
+    if (!named || !ordinal)
+    {
+        win_skip("RegisterTouchpadCapableWindow is unavailable.\n");
+        return;
+    }
+    ok(named == ordinal, "Expected named and ordinal exports to match, got %p and %p.\n",
+       named, ordinal);
+
+    SetLastError(0xdeadbeef);
+    ret = ordinal(NULL, TRUE);
+    ok(!ret, "Expected a null window to fail.\n");
+    ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "Got error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = ordinal((HWND)(ULONG_PTR)0x1234, TRUE);
+    ok(!ret, "Expected an invalid window to fail.\n");
+    ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "Got error %lu.\n", GetLastError());
+
+    hwnd = CreateWindowW(L"static", NULL, WS_POPUP, 0, 0, 32, 32,
+                         NULL, NULL, NULL, NULL);
+    ok(!!hwnd, "CreateWindowW failed, error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = ordinal(hwnd, TRUE);
+    ok(ret, "Enable failed, error %lu.\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "Got error %lu.\n", GetLastError());
+    ret = ordinal(hwnd, TRUE);
+    ok(ret, "Repeated enable failed, error %lu.\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "Got error %lu.\n", GetLastError());
+    ret = ordinal(hwnd, FALSE);
+    ok(ret, "Disable failed, error %lu.\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "Got error %lu.\n", GetLastError());
+    ret = ordinal(hwnd, FALSE);
+    ok(ret, "Repeated disable failed, error %lu.\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "Got error %lu.\n", GetLastError());
+    ret = ordinal(hwnd, 2);
+    ok(ret, "Noncanonical enable failed, error %lu.\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "Got error %lu.\n", GetLastError());
+    ordinal(hwnd, FALSE);
+
+    params.ready = CreateEventW(NULL, TRUE, FALSE, NULL);
+    params.release = CreateEventW(NULL, TRUE, FALSE, NULL);
+    params.hwnd = NULL;
+    thread = CreateThread(NULL, 0, touchpad_window_thread, &params, 0, NULL);
+    ok(!!params.ready && !!params.release && !!thread, "Failed to create thread resources.\n");
+    WaitForSingleObject(params.ready, INFINITE);
+    ok(!!params.hwnd, "Worker failed to create its window.\n");
+    SetLastError(0xdeadbeef);
+    ret = ordinal(params.hwnd, TRUE);
+    ok(!ret, "Expected a foreign-thread window to fail.\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Got error %lu.\n", GetLastError());
+    SetEvent(params.release);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+    CloseHandle(params.ready);
+    CloseHandle(params.release);
+
+    DestroyWindow(hwnd);
+    SetLastError(0xdeadbeef);
+    ret = ordinal(hwnd, TRUE);
+    ok(!ret, "Expected a destroyed window to fail.\n");
+    ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "Got error %lu.\n", GetLastError());
+}
+
 START_TEST(input)
 {
     char **argv;
@@ -7027,6 +7124,7 @@ START_TEST(input)
     test_DelegateInput();
     test_RegisterNaturalInputHandler();
     test_GetHimetricScaleFactorFromPixelLocation();
+    test_RegisterTouchpadCapableWindow();
 
     if(pGetMouseMovePointsEx)
         test_GetMouseMovePointsEx( argv );

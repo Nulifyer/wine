@@ -164,6 +164,7 @@ DECL_HANDLER(init_window_info);
 DECL_HANDLER(set_window_info);
 DECL_HANDLER(set_window_fnid);
 DECL_HANDLER(set_core_window);
+DECL_HANDLER(set_window_touchpad_capability);
 DECL_HANDLER(set_window_destroying);
 DECL_HANDLER(get_window_composition_attribute);
 DECL_HANDLER(set_window_composition_attribute);
@@ -609,6 +610,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_window_info,
     (req_handler)req_set_window_fnid,
     (req_handler)req_set_core_window,
+    (req_handler)req_set_window_touchpad_capability,
     (req_handler)req_set_window_destroying,
     (req_handler)req_get_window_composition_attribute,
     (req_handler)req_set_window_composition_attribute,
@@ -1857,6 +1859,9 @@ C_ASSERT( sizeof(struct set_window_fnid_request) == 24 );
 C_ASSERT( offsetof(struct set_core_window_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_core_window_request, enabled) == 16 );
 C_ASSERT( sizeof(struct set_core_window_request) == 24 );
+C_ASSERT( offsetof(struct set_window_touchpad_capability_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_window_touchpad_capability_request, enabled) == 16 );
+C_ASSERT( sizeof(struct set_window_touchpad_capability_request) == 24 );
 C_ASSERT( offsetof(struct set_window_destroying_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_window_destroying_request, destroying) == 16 );
 C_ASSERT( sizeof(struct set_window_destroying_request) == 24 );

@@ -1272,7 +1272,7 @@
 @ stdcall -syscall NtUserRegisterManipulationThread(ptr)
 @ stub -syscall NtUserRegisterPointerDeviceNotifications
 @ stub -syscall NtUserRegisterPointerInputTarget
-@ stub -syscall NtUserRegisterPrecisionTouchpadWindow
+@ stdcall -syscall NtUserRegisterTouchpadCapableWindow(long long)
 @ stdcall -syscall NtUserRegisterRawInputDevices(ptr long long)
 @ stub -syscall NtUserRegisterServicesProcess
 @ stdcall -syscall NtUserRegisterSessionPort(long)

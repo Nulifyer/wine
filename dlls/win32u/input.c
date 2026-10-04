@@ -3559,6 +3559,23 @@ BOOL WINAPI NtUserRegisterTouchPadCapable( BOOL capable )
 }
 
 /**********************************************************************
+ *       NtUserRegisterTouchpadCapableWindow    (win32u.@)
+ */
+BOOL WINAPI NtUserRegisterTouchpadCapableWindow( HWND hwnd, BOOL enable )
+{
+    BOOL ret;
+
+    SERVER_START_REQ( set_window_touchpad_capability )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        req->enabled = !!enable;
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/**********************************************************************
  *       NtUserScheduleDispatchNotification    (win32u.@)
  */
 INT WINAPI NtUserScheduleDispatchNotification( HWND hwnd )

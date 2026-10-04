@@ -1274,17 +1274,17 @@
     SYSCALL_ENTRY( 0x14f6, NtUserRegisterManipulationThread, 4 ) \
     SYSCALL_ENTRY( 0x14f7, NtUserRegisterPointerDeviceNotifications, 0 ) \
     SYSCALL_ENTRY( 0x14f8, NtUserRegisterPointerInputTarget, 0 ) \
-    SYSCALL_ENTRY( 0x14f9, NtUserRegisterPrecisionTouchpadWindow, 0 ) \
-    SYSCALL_ENTRY( 0x14fa, NtUserRegisterRawInputDevices, 12 ) \
-    SYSCALL_ENTRY( 0x14fb, NtUserRegisterServicesProcess, 0 ) \
-    SYSCALL_ENTRY( 0x14fc, NtUserRegisterSessionPort, 4 ) \
-    SYSCALL_ENTRY( 0x14fd, NtUserRegisterShellHookWindow, 0 ) \
-    SYSCALL_ENTRY( 0x14fe, NtUserRegisterShellPTPListener, 0 ) \
-    SYSCALL_ENTRY( 0x14ff, NtUserRegisterSiblingFrostWindow, 0 ) \
-    SYSCALL_ENTRY( 0x1500, NtUserRegisterSystemThread, 0 ) \
-    SYSCALL_ENTRY( 0x1501, NtUserRegisterTasklist, 0 ) \
-    SYSCALL_ENTRY( 0x1502, NtUserRegisterTouchHitTestingWindow, 0 ) \
-    SYSCALL_ENTRY( 0x1503, NtUserRegisterTouchPadCapable, 4 ) \
+    SYSCALL_ENTRY( 0x14f9, NtUserRegisterRawInputDevices, 12 ) \
+    SYSCALL_ENTRY( 0x14fa, NtUserRegisterServicesProcess, 0 ) \
+    SYSCALL_ENTRY( 0x14fb, NtUserRegisterSessionPort, 4 ) \
+    SYSCALL_ENTRY( 0x14fc, NtUserRegisterShellHookWindow, 0 ) \
+    SYSCALL_ENTRY( 0x14fd, NtUserRegisterShellPTPListener, 0 ) \
+    SYSCALL_ENTRY( 0x14fe, NtUserRegisterSiblingFrostWindow, 0 ) \
+    SYSCALL_ENTRY( 0x14ff, NtUserRegisterSystemThread, 0 ) \
+    SYSCALL_ENTRY( 0x1500, NtUserRegisterTasklist, 0 ) \
+    SYSCALL_ENTRY( 0x1501, NtUserRegisterTouchHitTestingWindow, 0 ) \
+    SYSCALL_ENTRY( 0x1502, NtUserRegisterTouchPadCapable, 4 ) \
+    SYSCALL_ENTRY( 0x1503, NtUserRegisterTouchpadCapableWindow, 8 ) \
     SYSCALL_ENTRY( 0x1504, NtUserRegisterUserApiHook, 16 ) \
     SYSCALL_ENTRY( 0x1505, NtUserRegisterUserHungAppHandlers, 0 ) \
     SYSCALL_ENTRY( 0x1506, NtUserRegisterWindowArrangementCallout, 8 ) \
@@ -2816,17 +2816,17 @@
     SYSCALL_ENTRY( 0x14f6, NtUserRegisterManipulationThread, 8 ) \
     SYSCALL_ENTRY( 0x14f7, NtUserRegisterPointerDeviceNotifications, 0 ) \
     SYSCALL_ENTRY( 0x14f8, NtUserRegisterPointerInputTarget, 0 ) \
-    SYSCALL_ENTRY( 0x14f9, NtUserRegisterPrecisionTouchpadWindow, 0 ) \
-    SYSCALL_ENTRY( 0x14fa, NtUserRegisterRawInputDevices, 24 ) \
-    SYSCALL_ENTRY( 0x14fb, NtUserRegisterServicesProcess, 0 ) \
-    SYSCALL_ENTRY( 0x14fc, NtUserRegisterSessionPort, 8 ) \
-    SYSCALL_ENTRY( 0x14fd, NtUserRegisterShellHookWindow, 0 ) \
-    SYSCALL_ENTRY( 0x14fe, NtUserRegisterShellPTPListener, 0 ) \
-    SYSCALL_ENTRY( 0x14ff, NtUserRegisterSiblingFrostWindow, 0 ) \
-    SYSCALL_ENTRY( 0x1500, NtUserRegisterSystemThread, 0 ) \
-    SYSCALL_ENTRY( 0x1501, NtUserRegisterTasklist, 0 ) \
-    SYSCALL_ENTRY( 0x1502, NtUserRegisterTouchHitTestingWindow, 0 ) \
-    SYSCALL_ENTRY( 0x1503, NtUserRegisterTouchPadCapable, 8 ) \
+    SYSCALL_ENTRY( 0x14f9, NtUserRegisterRawInputDevices, 24 ) \
+    SYSCALL_ENTRY( 0x14fa, NtUserRegisterServicesProcess, 0 ) \
+    SYSCALL_ENTRY( 0x14fb, NtUserRegisterSessionPort, 8 ) \
+    SYSCALL_ENTRY( 0x14fc, NtUserRegisterShellHookWindow, 0 ) \
+    SYSCALL_ENTRY( 0x14fd, NtUserRegisterShellPTPListener, 0 ) \
+    SYSCALL_ENTRY( 0x14fe, NtUserRegisterSiblingFrostWindow, 0 ) \
+    SYSCALL_ENTRY( 0x14ff, NtUserRegisterSystemThread, 0 ) \
+    SYSCALL_ENTRY( 0x1500, NtUserRegisterTasklist, 0 ) \
+    SYSCALL_ENTRY( 0x1501, NtUserRegisterTouchHitTestingWindow, 0 ) \
+    SYSCALL_ENTRY( 0x1502, NtUserRegisterTouchPadCapable, 8 ) \
+    SYSCALL_ENTRY( 0x1503, NtUserRegisterTouchpadCapableWindow, 16 ) \
     SYSCALL_ENTRY( 0x1504, NtUserRegisterUserApiHook, 32 ) \
     SYSCALL_ENTRY( 0x1505, NtUserRegisterUserHungAppHandlers, 0 ) \
     SYSCALL_ENTRY( 0x1506, NtUserRegisterWindowArrangementCallout, 16 ) \
@@ -3855,7 +3855,6 @@
     SYSCALL_STUB( NtUserRegisterLPK ) \
     SYSCALL_STUB( NtUserRegisterPointerDeviceNotifications ) \
     SYSCALL_STUB( NtUserRegisterPointerInputTarget ) \
-    SYSCALL_STUB( NtUserRegisterPrecisionTouchpadWindow ) \
     SYSCALL_STUB( NtUserRegisterServicesProcess ) \
     SYSCALL_STUB( NtUserRegisterShellHookWindow ) \
     SYSCALL_STUB( NtUserRegisterShellPTPListener ) \

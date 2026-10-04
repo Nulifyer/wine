@@ -3801,6 +3801,20 @@ struct set_core_window_reply
 
 
 
+struct set_window_touchpad_capability_request
+{
+    struct request_header __header;
+    user_handle_t  handle;
+    int            enabled;
+    char __pad_20[4];
+};
+struct set_window_touchpad_capability_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct set_window_destroying_request
 {
     struct request_header __header;
@@ -8440,6 +8454,7 @@ enum request
     REQ_set_window_info,
     REQ_set_window_fnid,
     REQ_set_core_window,
+    REQ_set_window_touchpad_capability,
     REQ_set_window_destroying,
     REQ_get_window_composition_attribute,
     REQ_set_window_composition_attribute,
@@ -8888,6 +8903,7 @@ union generic_request
     struct set_window_info_request set_window_info_request;
     struct set_window_fnid_request set_window_fnid_request;
     struct set_core_window_request set_core_window_request;
+    struct set_window_touchpad_capability_request set_window_touchpad_capability_request;
     struct set_window_destroying_request set_window_destroying_request;
     struct get_window_composition_attribute_request get_window_composition_attribute_request;
     struct set_window_composition_attribute_request set_window_composition_attribute_request;
@@ -9334,6 +9350,7 @@ union generic_reply
     struct set_window_info_reply set_window_info_reply;
     struct set_window_fnid_reply set_window_fnid_reply;
     struct set_core_window_reply set_core_window_reply;
+    struct set_window_touchpad_capability_reply set_window_touchpad_capability_reply;
     struct set_window_destroying_reply set_window_destroying_reply;
     struct get_window_composition_attribute_reply get_window_composition_attribute_reply;
     struct set_window_composition_attribute_reply set_window_composition_attribute_reply;
@@ -9620,6 +9637,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1083
+#define SERVER_PROTOCOL_VERSION 1084
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

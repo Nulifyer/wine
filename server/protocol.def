@@ -2839,6 +2839,13 @@ enum message_type
 @END
 
 
+/* Set whether a window receives precision-touchpad pointer messages */
+@REQ(set_window_touchpad_capability)
+    user_handle_t  handle;        /* handle to the window */
+    int            enabled;       /* touchpad-capable state */
+@END
+
+
 /* Set the window-destruction state */
 @REQ(set_window_destroying)
     user_handle_t  handle;        /* handle to the window */

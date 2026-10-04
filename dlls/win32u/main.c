@@ -2342,6 +2342,11 @@ BOOL SYSCALL_API NtUserRegisterTouchPadCapable( BOOL capable )
     SYSCALL_FUNC( NtUserRegisterTouchPadCapable );
 }
 
+BOOL SYSCALL_API NtUserRegisterTouchpadCapableWindow( HWND hwnd, BOOL enable )
+{
+    SYSCALL_FUNC( NtUserRegisterTouchpadCapableWindow );
+}
+
 ATOM SYSCALL_API NtUserRegisterWindowMessage( UNICODE_STRING *name )
 {
     SYSCALL_FUNC( NtUserRegisterWindowMessage );

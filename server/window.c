@@ -100,6 +100,7 @@ struct window
     unsigned int     is_orphan : 1;   /* is window orphaned */
     unsigned int     set_foreground : 1;/* has window been foreground once */
     unsigned int     is_core_window : 1;/* explicitly marked as a core-window root */
+    unsigned int     touchpad_capable : 1;/* receives precision-touchpad pointer messages */
     struct thread   *input_delegate; /* thread receiving selected input for this window */
     unsigned int     input_delegation_flags; /* QS_* classes delegated by the window */
     unsigned int     dwm_context_id;  /* DWM composition generation containing this HWND */
@@ -3223,6 +3224,21 @@ DECL_HANDLER(set_core_window)
 
     win->is_core_window = !!req->enabled;
     set_window_subtree_core_status( win, req->enabled );
+}
+
+
+/* set whether a window receives precision-touchpad pointer messages */
+DECL_HANDLER(set_window_touchpad_capability)
+{
+    struct window *win;
+
+    if (!(win = get_window( req->handle ))) return;
+    if (win->thread != current)
+    {
+        set_win32_error( ERROR_INVALID_PARAMETER );
+        return;
+    }
+    win->touchpad_capable = !!req->enabled;
 }
 
 
