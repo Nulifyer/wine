@@ -7204,7 +7204,7 @@ BOOL WINAPI NtUserRegisterWindowArrangementCallout( HWND hwnd, BOOL enable )
     }
     if (enable &&
         (NtUserGetAncestor( hwnd, GA_PARENT ) != get_hwnd_message_parent() ||
-         HandleToUlong( NtUserGetProp( hwnd, window_band_prop ) ) != 3))
+         !NTUSER_DPI_CONTEXT_IS_MONITOR_AWARE( get_window_dpi_awareness_context( hwnd ) )))
     {
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;

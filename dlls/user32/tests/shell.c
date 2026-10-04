@@ -249,6 +249,7 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     BOOL (WINAPI *shell_register_hot_key)(HWND, INT, UINT, UINT, HWND);
     ULONGLONG key, second_key;
     DWORD band;
+    DPI_AWARENESS_CONTEXT dpi_context;
     HMONITOR monitor;
     HWND band_hwnd, hwnd;
     HWND arrangement_hwnd, ordinary_message_hwnd;
@@ -386,21 +387,27 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
     ret = enable_iam_access( key, TRUE );
     ok( ret, "failed to enable IAM access, error %lu\n", GetLastError() );
 
-    ordinary_message_hwnd = CreateWindowExA( 0, "static", "ordinary message window", WS_POPUP,
+    dpi_context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_UNAWARE );
+    ok( !!dpi_context, "failed to select DPI-unaware context, error %lu\n", GetLastError() );
+    ordinary_message_hwnd = CreateWindowExA( 0, "static", "DPI-unaware message window", WS_POPUP,
                                               0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL );
-    ok( !!ordinary_message_hwnd, "failed to create ordinary message window, error %lu\n",
+    ok( !!ordinary_message_hwnd, "failed to create DPI-unaware message window, error %lu\n",
         GetLastError() );
-    arrangement_hwnd = create_window_in_band( 0, L"static", L"arrangement callout", WS_POPUP,
-                                               0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL, 2 );
+    ok( !!SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ),
+        "failed to select per-monitor-v2 context, error %lu\n", GetLastError() );
+    arrangement_hwnd = CreateWindowExW( 0, L"static", L"arrangement callout", WS_POPUP,
+                                        0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL );
+    ok( !!SetThreadDpiAwarenessContext( dpi_context ),
+        "failed to restore DPI context, error %lu\n", GetLastError() );
     ok( !!arrangement_hwnd, "failed to create arrangement callout window, error %lu\n",
         GetLastError() );
     if (ordinary_message_hwnd)
     {
         SetLastError( 0x13579bdf );
         ret = register_window_arrangement_callout( ordinary_message_hwnd, TRUE );
-        ok( !ret, "registered a band-1 arrangement callout window\n" );
+        ok( !ret, "registered a DPI-unaware arrangement callout window\n" );
         ok( GetLastError() == ERROR_INVALID_PARAMETER,
-            "band-1 arrangement callout returned error %lu\n", GetLastError() );
+            "DPI-unaware arrangement callout returned error %lu\n", GetLastError() );
     }
 
     if (arrangement_hwnd)
