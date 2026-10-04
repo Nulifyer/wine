@@ -1,0 +1,22 @@
+/* Proxy for TwinUI's multitasking view service provider marker. */
+
+#pragma makedep proxy
+#pragma makedep register
+#pragma makedep ident
+
+import "objidl.idl";
+
+[
+    object,
+    uuid(90adbab9-cdb8-43dd-8daa-ba1180be5215),
+    pointer_default(unique)
+]
+interface IMultitaskingViewServiceProvider : IUnknown
+{
+}
+
+[
+    threading(both),
+    uuid(b8da6310-e19b-11d0-933c-00a0c90dcaa9)
+]
+coclass PSFactoryBuffer { interface IPSFactoryBuffer; }
