@@ -50,6 +50,7 @@
 #define WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE 0x41c6033fa3bc2075ULL
 #define WNF_HAM_SYSTEM_STATE_CHANGED 0x418b0f25a3bc0875ULL
 #define WNF_IMSN_ACRYLIC_POLICY 0x0f950324a3bc4035ULL
+#define WNF_MRT_SYSTEM_PRI_MERGE 0x41921c20a3bc2875ULL
 #define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
 #define WNF_SHEL_LOCKSCREEN_ACTIVE 0x0d83063ea3bc5835ULL
 #define WNF_SHEL_WINDOW_ACTIVATED 0x0d83063ea3bfb035ULL
@@ -522,6 +523,7 @@ START_TEST(wnf)
             WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE,
             WNF_HAM_SYSTEM_STATE_CHANGED,
             WNF_IMSN_ACRYLIC_POLICY,
+            WNF_MRT_SYSTEM_PRI_MERGE,
             WNF_RPCF_FWMAN_RUNNING,
             WNF_SHEL_LOCKSCREEN_ACTIVE,
             WNF_SHEL_WINDOW_ACTIVATED,
@@ -729,6 +731,73 @@ START_TEST(wnf)
         ok( stamp == 2, "expected unchanged stamp 2, got %lu\n", stamp );
         ok( size == sizeof(queried), "expected %Iu bytes, got %lu\n", sizeof(queried), size );
         ok( queried == value, "expected unchanged value %#x, got %#x\n", value, queried );
+
+        status = pNtDeleteWnfStateData( &name, NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+    }
+
+    {
+        BYTE value[512], queried[512], oversized[513];
+        SID_IDENTIFIER_AUTHORITY nt_authority = SECURITY_NT_AUTHORITY;
+        HANDLE process_token = NULL, impersonation = NULL, restricted = NULL;
+        SID_AND_ATTRIBUTES restriction;
+        ULONGLONG name = WNF_MRT_SYSTEM_PRI_MERGE;
+        BOOL ret;
+
+        restriction.Sid = NULL;
+        memset( value, 0x5a, sizeof(value) );
+        memset( queried, 0xcc, sizeof(queried) );
+        memset( oversized, 0x5a, sizeof(oversized) );
+        status = pRtlPublishWnfStateData( name, NULL, value, sizeof(value), NULL );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+
+        stamp = 0xdeadbeef;
+        size = sizeof(queried);
+        status = pNtQueryWnfStateData( &name, NULL, NULL, &stamp, queried, &size );
+        ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );
+        ok( stamp == 1, "expected stamp 1, got %lu\n", stamp );
+        ok( size == sizeof(queried), "expected %Iu bytes, got %lu\n", sizeof(queried), size );
+        ok( !memcmp( queried, value, sizeof(value) ), "unexpected queried data\n" );
+
+        status = pRtlPublishWnfStateData( name, NULL, oversized, sizeof(oversized), NULL );
+        ok( status == STATUS_INVALID_PARAMETER,
+            "expected STATUS_INVALID_PARAMETER, got %#lx\n", status );
+
+        ret = OpenProcessToken( GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY, &process_token );
+        ok( ret, "OpenProcessToken failed, error %lu\n", GetLastError() );
+        if (ret)
+        {
+            ret = DuplicateTokenEx( process_token, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation,
+                                    TokenImpersonation, &impersonation );
+            ok( ret, "DuplicateTokenEx failed, error %lu\n", GetLastError() );
+        }
+        ret = AllocateAndInitializeSid( &nt_authority, 1, 987654, 0, 0, 0, 0, 0, 0, 0,
+                                        &restriction.Sid );
+        ok( ret, "AllocateAndInitializeSid failed, error %lu\n", GetLastError() );
+        restriction.Attributes = 0;
+        if (impersonation && ret)
+        {
+            ret = CreateRestrictedToken( impersonation, 0, 0, NULL, 0, NULL, 1, &restriction,
+                                         &restricted );
+            ok( ret, "CreateRestrictedToken failed, error %lu\n", GetLastError() );
+            if (ret)
+            {
+                ret = SetThreadToken( NULL, restricted );
+                ok( ret, "SetThreadToken failed, error %lu\n", GetLastError() );
+                if (ret)
+                {
+                    status = pRtlPublishWnfStateData( name, NULL, NULL, 0, NULL );
+                    ok( status == STATUS_ACCESS_DENIED,
+                        "expected STATUS_ACCESS_DENIED, got %#lx\n", status );
+                    ret = RevertToSelf();
+                    ok( ret, "RevertToSelf failed, error %lu\n", GetLastError() );
+                }
+            }
+        }
+        if (restricted) CloseHandle( restricted );
+        if (restriction.Sid) FreeSid( restriction.Sid );
+        if (impersonation) CloseHandle( impersonation );
+        if (process_token) CloseHandle( process_token );
 
         status = pNtDeleteWnfStateData( &name, NULL );
         ok( status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", status );

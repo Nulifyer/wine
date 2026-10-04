@@ -60,6 +60,7 @@
 #define WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE 0x41c6033fa3bc2075ULL
 #define WNF_HAM_SYSTEM_STATE_CHANGED 0x418b0f25a3bc0875ULL
 #define WNF_IMSN_ACRYLIC_POLICY 0x0f950324a3bc4035ULL
+#define WNF_MRT_SYSTEM_PRI_MERGE 0x41921c20a3bc2875ULL
 #define WNF_RPCF_FWMAN_RUNNING 0x07851e3fa3bc0875ULL
 #define WNF_SHEL_OOBE_USER_LOGON_COMPLETE 0x0d83063ea3bc2475ULL
 #define WNF_DEP_OOBE_STATE 0x41960b29a3bc0c75ULL
@@ -132,6 +133,7 @@ static const struct well_known_state well_known_states[] =
     { WNF_RM_DEVELOPER_QUIET_MODE_ACTIVE, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
     { WNF_HAM_SYSTEM_STATE_CHANGED, sizeof(unsigned int), 0, 0, WNF_WRITER_SYSTEM },
     { WNF_IMSN_ACRYLIC_POLICY, sizeof(unsigned int), 0, 0, WNF_WRITER_DACL },
+    { WNF_MRT_SYSTEM_PRI_MERGE, 512, 0, 0, WNF_WRITER_DACL },
     { WNF_RPCF_FWMAN_RUNNING, sizeof(unsigned int), 0, 0, WNF_WRITER_RPC_SERVICE },
     { WNF_SHEL_OOBE_USER_LOGON_COMPLETE, sizeof(unsigned int), 0, 0, WNF_WRITER_DACL },
     { WNF_DEP_OOBE_STATE, sizeof(unsigned int), 0, 0, WNF_WRITER_DACL },
@@ -366,6 +368,82 @@ static struct security_descriptor *create_tmcn_device_posture_sd(void)
                     descriptor.sd.group_len + descriptor.sd.dacl_len );
 }
 
+static struct ace *set_callback_ace( struct ace *ace, const struct sid *sid,
+                                     unsigned int mask, const void *condition,
+                                     unsigned int condition_size )
+{
+    set_ace( ace, sid, ACCESS_ALLOWED_CALLBACK_ACE_TYPE, 0, mask );
+    memcpy( (char *)(ace + 1) + sid_len( sid ), condition, condition_size );
+    ace->size += condition_size;
+    return ace;
+}
+
+/* The source notification registry grants read/write access to authenticated
+ * users and LocalSystem. It retains three conditional grants for multi-session
+ * installations, plus the package and app-experience capability grants. Wine
+ * preserves those callback ACEs, although its token access checker currently
+ * treats their conditions conservatively as non-granting. */
+static struct security_descriptor *create_mrt_system_pri_merge_sd(void)
+{
+    static const unsigned char multi_session_condition[] =
+    {
+        0x61,0x72,0x74,0x78,0xf8,0x2e,0x00,0x00,0x00,0x57,0x00,0x49,0x00,0x4e,
+        0x00,0x3a,0x00,0x2f,0x00,0x2f,0x00,0x49,0x00,0x53,0x00,0x4d,0x00,0x55,
+        0x00,0x4c,0x00,0x54,0x00,0x49,0x00,0x53,0x00,0x45,0x00,0x53,0x00,0x53,
+        0x00,0x49,0x00,0x4f,0x00,0x4e,0x00,0x53,0x00,0x4b,0x00,0x55,0x00,0xa2,
+    };
+    static const struct sid multi_session_user_1 =
+        { SID_REVISION, 5, SECURITY_NT_AUTHORITY,
+          {21,2702878673u,795188819u,444038987u,1030} };
+    static const struct sid multi_session_user_2 =
+        { SID_REVISION, 5, SECURITY_NT_AUTHORITY,
+          {21,2702878673u,795188819u,444038987u,1317} };
+    static const struct sid multi_session_capability =
+        { SID_REVISION, 10, SECURITY_APP_PACKAGE_AUTHORITY,
+          {3,1024,2034345757u,2366417288u,1978395495u,338449883u,
+           4149174378u,2073426543u,324039589u,2688632710u} };
+    static const struct sid all_app_packages_sid =
+        { SID_REVISION, 2, SECURITY_APP_PACKAGE_AUTHORITY,
+          { SECURITY_APP_PACKAGE_BASE_RID, SECURITY_BUILTIN_PACKAGE_ANY_PACKAGE } };
+    static const struct sid app_experience_capability_sid =
+        { SID_REVISION, 10, SECURITY_APP_PACKAGE_AUTHORITY,
+          {3,1024,1502825166u,1963708345u,2616377461u,2562897074u,
+           4192028372u,3968301570u,1997628692u,1435953622u} };
+    struct
+    {
+        struct security_descriptor sd;
+        unsigned char owner[12], group[12];
+        struct acl acl;
+        unsigned char aces[20 + 20 + 92 + 92 + 112 + 24 + 56];
+    } descriptor = {0};
+    struct ace *ace = ace_first( &descriptor.acl );
+
+    ace = ace_next( set_ace( ace, &authenticated_users_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 3 ) );
+    ace = ace_next( set_ace( ace, &local_system_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 3 ) );
+    ace = ace_next( set_callback_ace( ace, &multi_session_user_1,
+                                      GENERIC_READ | GENERIC_WRITE,
+                                      multi_session_condition, sizeof(multi_session_condition) ) );
+    ace = ace_next( set_callback_ace( ace, &multi_session_user_2,
+                                      GENERIC_READ | GENERIC_WRITE,
+                                      multi_session_condition, sizeof(multi_session_condition) ) );
+    ace = ace_next( set_callback_ace( ace, &multi_session_capability,
+                                      GENERIC_READ | GENERIC_WRITE,
+                                      multi_session_condition, sizeof(multi_session_condition) ) );
+    ace = ace_next( set_ace( ace, &all_app_packages_sid, ACCESS_ALLOWED_ACE_TYPE, 0, 3 ) );
+    ace = ace_next( set_ace( ace, &app_experience_capability_sid,
+                             ACCESS_ALLOWED_ACE_TYPE, 0, 3 ) );
+    descriptor.sd.owner_len = descriptor.sd.group_len = sid_len( &local_system_sid );
+    memcpy( descriptor.owner, &local_system_sid, descriptor.sd.owner_len );
+    memcpy( descriptor.group, &local_system_sid, descriptor.sd.group_len );
+    descriptor.sd.control = SE_DACL_PRESENT;
+    descriptor.sd.dacl_len = (char *)ace - (char *)&descriptor.acl;
+    descriptor.acl.revision = ACL_REVISION;
+    descriptor.acl.size = descriptor.sd.dacl_len;
+    descriptor.acl.count = 7;
+    return memdup( &descriptor, sizeof(descriptor.sd) + descriptor.sd.owner_len +
+                    descriptor.sd.group_len + descriptor.sd.dacl_len );
+}
+
 static struct wnf_state *create_well_known_state( const struct well_known_state *definition,
                                                   unsigned int session )
 {
@@ -405,6 +483,10 @@ static struct wnf_state *create_well_known_state( const struct well_known_state 
     else if (state->name == WNF_TMCN_DEVICE_POSTURE)
     {
         if (!(state->obj.sd = create_tmcn_device_posture_sd())) { release_object( state ); return NULL; }
+    }
+    else if (state->name == WNF_MRT_SYSTEM_PRI_MERGE)
+    {
+        if (!(state->obj.sd = create_mrt_system_pri_merge_sd())) { release_object( state ); return NULL; }
     }
     list_add_tail( &states, &state->entry );
     return state;
