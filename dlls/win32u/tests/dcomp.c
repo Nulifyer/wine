@@ -3957,7 +3957,7 @@ static void test_visual_target_root_lifecycle(void)
         28, 0x40, 8, 0, 0, 0, 0x3f800000,
         24, 0x42, 8, 0, 0, 0x3f800000,
         16, 0x41, 8, 0,
-        24, 0x43, 8, 0x3f800000, 0x3f800000, 0x3f800000,
+        24, 0x43, 8, 0x3f2aaaab, 0x3f2aaaab, 0x3f800000,
         76, 0x44, 8,
             0x3f800000, 0, 0, 0,
             0, 0x3f800000, 0, 0,
@@ -3994,6 +3994,9 @@ static void test_visual_target_root_lifecycle(void)
             0, 0, 0x3f800000, 0,
             0x41200000, 0x41a00000, 0, 0x3f800000,
     };
+    static const UINT expected_transform_scale[] = {
+        24, 0x43, 8, 0x40000000, 0x40400000, 0x40800000,
+    };
     static const UINT expected_visual_clear[] = {12, 0x187, 3};
     static const UINT expected_clear[] = {
         12, 0x187, 1,
@@ -4012,7 +4015,7 @@ static void test_visual_target_root_lifecycle(void)
     struct dcomposition_connection_batch *record = NULL;
     HANDLE event, connection = NULL, target_handle = NULL;
     BYTE *buffer = NULL, state;
-    UINT channel = 0, system_channel = 0, size = 0x1000, batch, command[64];
+    UINT channel = 0, system_channel = 0, size = 0x1000, batch, command[72];
     UINT expected_begin[4] = {16, 0x26, 1, 0};
     UINT64 cookie = 0, shared;
     ULONG processed;
@@ -4139,22 +4142,24 @@ static void test_visual_target_root_lifecycle(void)
     command[8] = 2; command[9] = 7; command[10] = 0x7f; command[11] = 0;
     command[12] = 2; command[13] = 8; command[14] = 0x1e; command[15] = 0;
     command[16] = 2; command[17] = 9; command[18] = 0x59; command[19] = 0;
-    command[20] = 15; command[21] = 6; command[22] = 0; command[23] = 16;
-    command[24] = 0x3f800000; command[25] = 0x3f000000;
-    command[26] = 0x3e800000; command[27] = 0x3f800000;
-    command[28] = 11; command[29] = 7; command[30] = 0x15; command[31] = 0;
-    command[32] = 1; command[33] = 0;
-    command[34] = 15; command[35] = 7; command[36] = 0x11; command[37] = 16;
-    command[38] = 0x3f800000; command[39] = 0x40000000;
-    command[40] = 0x40400000; command[41] = 0x40800000;
-    command[42] = 16; command[43] = 3; command[44] = 4; command[45] = 8;
-    command[46] = 16; command[47] = 3; command[48] = 7; command[49] = 7;
-    command[50] = 16; command[51] = 5; command[52] = 0x34; command[53] = 6;
-    command[54] = 16; command[55] = 3; command[56] = 0x17; command[57] = 9;
-    memcpy( buffer, command, 232 );
-    status = NtDCompositionProcessChannelBatchBuffer( channel, 232, &processed, &released );
+    command[20] = 15; command[21] = 8; command[22] = 8; command[23] = 12;
+    command[24] = 0x3f2aaaab; command[25] = 0x3f2aaaab; command[26] = 0x3f800000;
+    command[27] = 15; command[28] = 6; command[29] = 0; command[30] = 16;
+    command[31] = 0x3f800000; command[32] = 0x3f000000;
+    command[33] = 0x3e800000; command[34] = 0x3f800000;
+    command[35] = 11; command[36] = 7; command[37] = 0x15; command[38] = 0;
+    command[39] = 1; command[40] = 0;
+    command[41] = 15; command[42] = 7; command[43] = 0x11; command[44] = 16;
+    command[45] = 0x3f800000; command[46] = 0x40000000;
+    command[47] = 0x40400000; command[48] = 0x40800000;
+    command[49] = 16; command[50] = 3; command[51] = 4; command[52] = 8;
+    command[53] = 16; command[54] = 3; command[55] = 7; command[56] = 7;
+    command[57] = 16; command[58] = 5; command[59] = 0x34; command[60] = 6;
+    command[61] = 16; command[62] = 3; command[63] = 0x17; command[64] = 9;
+    memcpy( buffer, command, 260 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 260, &processed, &released );
     ok( status == STATUS_SUCCESS, "got visual content process status %#lx\n", status );
-    ok( processed == 12, "got visual content process count %lu\n", processed );
+    ok( processed == 13, "got visual content process count %lu\n", processed );
     status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
     ok( status == STATUS_SUCCESS, "got visual content commit status %#lx\n", status );
     record = NULL;
@@ -4214,6 +4219,19 @@ static void test_visual_target_root_lifecycle(void)
     ok( status == STATUS_SUCCESS, "got interaction update batch status %#lx\n", status );
     check_dcomp_batch_payload( record, channel, expected_interaction_update,
                                sizeof(expected_interaction_update), "interaction update" );
+
+    command[0] = 15; command[1] = 8; command[2] = 8; command[3] = 12;
+    command[4] = 0x40000000; command[5] = 0x40400000; command[6] = 0x40800000;
+    memcpy( buffer, command, 28 );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, 28, &processed, &released );
+    ok( status == STATUS_SUCCESS, "got transform-scale process status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got transform-scale commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got transform-scale batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_transform_scale,
+                               sizeof(expected_transform_scale), "transform scale" );
 
     command[0] = 15; command[1] = 8; command[2] = 9; command[3] = 64;
     memset( command + 4, 0, 64 );

@@ -170,12 +170,14 @@ struct dcomp_resource_view
     BOOL visual_relative_offset_dirty;
     BOOL visual_relative_size_dirty;
     BOOL visual_size_dirty;
+    BOOL component_transform3d_scale_dirty;
     BOOL component_transform3d_matrix_dirty;
     float visual_offset[3];
     float visual_opacity;
     float visual_relative_offset[3];
     float visual_relative_size[2];
     float visual_size[2];
+    float component_transform3d_scale[3];
     float component_transform3d_matrix[16];
     LONG surface_brush_source_rect[4];
     LONG surface_brush_dirty_rect[4];
@@ -1004,6 +1006,9 @@ static void initialize_dcomp_resource_view( struct dcomp_resource_view *resource
     list_init( &resource->keyframe_secondary_value.entry );
     resource->visual = is_dcomp_visual_resource_type( type );
     resource->visual_opacity = 1.0f;
+    resource->component_transform3d_scale[0] = 1.0f;
+    resource->component_transform3d_scale[1] = 1.0f;
+    resource->component_transform3d_scale[2] = 1.0f;
     resource->component_transform3d_matrix[0] = 1.0f;
     resource->component_transform3d_matrix[5] = 1.0f;
     resource->component_transform3d_matrix[10] = 1.0f;
@@ -2140,8 +2145,14 @@ static NTSTATUS set_dcomp_visual_buffer_property( struct dcomp_resource_view *re
 static NTSTATUS set_dcomp_component_transform3d_buffer_property(
         struct dcomp_resource_view *resource, UINT property, const BYTE *data, UINT size )
 {
-    if (property != 9 || size != sizeof(resource->component_transform3d_matrix))
-        return STATUS_INVALID_PARAMETER;
+    if (property == 8 && size == sizeof(resource->component_transform3d_scale))
+    {
+        if (!memcmp( resource->component_transform3d_scale, data, size )) return STATUS_SUCCESS;
+        memcpy( resource->component_transform3d_scale, data, size );
+        resource->component_transform3d_scale_dirty = TRUE;
+        return STATUS_SUCCESS;
+    }
+    if (property != 9 || size != sizeof(resource->component_transform3d_matrix)) return STATUS_INVALID_PARAMETER;
     if (!memcmp( resource->component_transform3d_matrix, data, size )) return STATUS_SUCCESS;
     memcpy( resource->component_transform3d_matrix, data, size );
     resource->component_transform3d_matrix_dirty = TRUE;
@@ -4087,6 +4098,17 @@ static BYTE *emit_dcomp_component_transform3d_matrix(
     return cursor + sizeof(command);
 }
 
+static BYTE *emit_dcomp_component_transform3d_scale(
+        BYTE *cursor, const struct dcomp_resource_view *resource )
+{
+    UINT command[6] = {24, 0x43, resource->id};
+
+    memcpy( command + 3, resource->component_transform3d_scale,
+            sizeof(resource->component_transform3d_scale) );
+    memcpy( cursor, command, sizeof(command) );
+    return cursor + sizeof(command);
+}
+
 static BYTE *emit_dcomp_component_transform3d_defaults(
         BYTE *cursor, const struct dcomp_resource_view *resource )
 {
@@ -4107,9 +4129,7 @@ static BYTE *emit_dcomp_component_transform3d_defaults(
     memcpy( cursor, command, 24 ); cursor += 24;
     command[0] = 16; command[1] = 0x41; command[3] = 0;
     memcpy( cursor, command, 16 ); cursor += 16;
-    command[0] = 24; command[1] = 0x43;
-    command[3] = command[4] = command[5] = 0x3f800000;
-    memcpy( cursor, command, 24 ); cursor += 24;
+    cursor = emit_dcomp_component_transform3d_scale( cursor, resource );
     return emit_dcomp_component_transform3d_matrix( cursor, resource );
 }
 
@@ -4680,9 +4700,11 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             resource_size += dcomp_region_update_size( resource );
         if (!resource->released && resource->type == 0x1e && !resource->announced)
             resource_size += 236;
-        else if (!resource->released && resource->type == 0x1e &&
-                 resource->component_transform3d_matrix_dirty)
-            resource_size += 76;
+        else if (!resource->released && resource->type == 0x1e)
+        {
+            if (resource->component_transform3d_scale_dirty) resource_size += 24;
+            if (resource->component_transform3d_matrix_dirty) resource_size += 76;
+        }
         if (!resource->released && resource->type == 0x7c)
             resource_size += dcomp_property_set_update_size( resource );
         if (!resource->released && resource->type == 2)
@@ -4922,8 +4944,13 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
             cursor = emit_dcomp_region_update( cursor, resource );
         if (resource->type == 0x1e && !resource->announced)
             cursor = emit_dcomp_component_transform3d_defaults( cursor, resource );
-        else if (resource->type == 0x1e && resource->component_transform3d_matrix_dirty)
-            cursor = emit_dcomp_component_transform3d_matrix( cursor, resource );
+        else if (resource->type == 0x1e)
+        {
+            if (resource->component_transform3d_scale_dirty)
+                cursor = emit_dcomp_component_transform3d_scale( cursor, resource );
+            if (resource->component_transform3d_matrix_dirty)
+                cursor = emit_dcomp_component_transform3d_matrix( cursor, resource );
+        }
         if (resource->type == 0x7c)
             cursor = emit_dcomp_property_set_updates( cursor, resource );
         if (resource->type == 2)
@@ -5049,6 +5076,7 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view,
             resource->color_dirty = FALSE;
             resource->rectangle_dirty = 0;
             resource->region_rectangles_dirty = FALSE;
+            resource->component_transform3d_scale_dirty = FALSE;
             resource->component_transform3d_matrix_dirty = FALSE;
             resource->visual_interaction_dirty = FALSE;
             resource->visual_transform_dirty = FALSE;
