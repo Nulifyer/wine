@@ -2276,6 +2276,12 @@ static UINT dcomp_property_value_size( UINT type )
     }
 }
 
+static UINT dcomp_property_storage_size( UINT type )
+{
+    if (type == 0x11) return 1;
+    return dcomp_property_value_size( type );
+}
+
 static NTSTATUS set_dcomp_property_set_buffer_property( struct dcomp_resource_view *resource,
                                                          UINT property, const BYTE *data, UINT size )
 {
@@ -2303,7 +2309,7 @@ static NTSTATUS set_dcomp_property_set_buffer_property( struct dcomp_resource_vi
         value->type = type;
         value->size = value_size;
         value->added = TRUE;
-        resource->property_data_size += value_size;
+        resource->property_data_size += dcomp_property_storage_size( type );
     }
     else
     {

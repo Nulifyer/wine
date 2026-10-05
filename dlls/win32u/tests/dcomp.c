@@ -2601,6 +2601,8 @@ static void test_expression_graph(void)
             0, 0x3f800000, 0, 0,
             0, 0, 0x3f800000, 0,
             0, 0, 0, 0x3f800000,
+        32, 0x135, 1, 2, 68, 0x11, 1, 1,
+        32, 0x135, 1, 3, 69, 0x11, 1, 0,
         44, 0x11, 3, 0x7c, 1, 7, 0, 0, 0, 0, 0x109,
         16, 0x12, 3, 0,
         24, 0x89, 3, 1, 1, 1,
@@ -2623,6 +2625,8 @@ static void test_expression_graph(void)
         0, 0, 0x3f800000, 0,
         0, 0, 0, 0x3f800000,
     };
+    static const UINT boolean_property[] = {15, 1, 1, 16, 2, 68, 0x11, 1};
+    static const UINT second_boolean_property[] = {15, 1, 1, 16, 3, 69, 0x11, 0};
     static const UINT property_update[] = {15, 1, 2, 16, 0, 0, 0x12, 0x3f000000};
     static const UINT shared_reference[] = {16, 3, 0x0a, 2};
     static const UINT node_offset[] = {11, 3, 0x0b, 0, 0x100, 0};
@@ -2663,6 +2667,12 @@ static void test_expression_graph(void)
     status = process_dcomp_test_command( channel, buffer, matrix_property,
                                          sizeof(matrix_property) );
     ok( status == STATUS_SUCCESS, "got matrix property-set status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, boolean_property,
+                                         sizeof(boolean_property) );
+    ok( status == STATUS_SUCCESS, "got boolean property-set status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, second_boolean_property,
+                                         sizeof(second_boolean_property) );
+    ok( status == STATUS_SUCCESS, "got second boolean property-set status %#lx\n", status );
     status = process_dcomp_test_command( channel, buffer, shared_reference,
                                          sizeof(shared_reference) );
     ok( status == STATUS_SUCCESS, "got shared reference status %#lx\n", status );
