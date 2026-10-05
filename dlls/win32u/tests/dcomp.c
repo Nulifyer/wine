@@ -1242,6 +1242,86 @@ done:
     CloseHandle( event );
 }
 
+static void test_large_connection_batch(void)
+{
+    enum { resource_count = 5000, command_words = 4 };
+    struct dcomposition_connection_batch *record = NULL;
+    HANDLE event, connection = NULL;
+    BYTE *buffer = NULL, released = 0xcc, state = 0xcc;
+    UINT channel = 0, size = 0x20000, batch = 0xcccccccc;
+    UINT64 cookie = 0;
+    ULONG processed = 0;
+    NTSTATUS status;
+    UINT *command;
+    unsigned int i;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "failed to create large-batch event, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "got large-batch connection status %#lx\n", status );
+    status = NtDCompositionCreateChannel( &channel, &size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "got large-batch channel status %#lx\n", status );
+    if (status) goto done;
+    ok( size >= resource_count * command_words * sizeof(*command),
+        "got large-batch channel size %#x\n", size );
+
+    status = NtDCompositionSetChannelConnectionId( channel, 0, 1 );
+    ok( status == STATUS_SUCCESS, "got large-batch bind status %#lx\n", status );
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 5,
+        "got large-batch create record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+
+    command = (UINT *)buffer;
+    for (i = 0; i < resource_count; ++i)
+    {
+        command[i * command_words] = 2;
+        command[i * command_words + 1] = i + 1;
+        command[i * command_words + 2] = 13;
+        command[i * command_words + 3] = 0;
+    }
+    status = NtDCompositionProcessChannelBatchBuffer( channel,
+                                                       resource_count * command_words * sizeof(*command),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "got large-batch process status %#lx\n", status );
+    ok( processed == resource_count, "got large-batch process count %lu\n", processed );
+
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got large-batch commit status %#lx\n", status );
+    ok( !state, "got large-batch commit state %#x\n", state );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS && record && record->type == 7,
+        "got large-batch record status %#lx record %p type %u\n",
+        status, record, record ? record->type : 0 );
+    if (record && record->type == 7)
+    {
+        const UINT expected_size = resource_count * command_words * sizeof(UINT);
+        const UINT *payload = (const UINT *)record->u.batch.data;
+
+        ok( record->u.batch.size == expected_size,
+            "got large-batch payload size %#x\n", record->u.batch.size );
+        if (record->u.batch.size == expected_size)
+        {
+            const UINT *last = payload + (resource_count - 1) * command_words;
+
+            ok( payload[0] == 16 && payload[1] == 0x28 && payload[2] == 1 && payload[3] == 13,
+                "got large-batch first command %#x/%#x/%#x/%#x\n",
+                payload[0], payload[1], payload[2], payload[3] );
+            ok( last[0] == 16 && last[1] == 0x28 &&
+                last[2] == resource_count && last[3] == 13,
+                "got large-batch last command %#x/%#x/%#x/%#x\n",
+                last[0], last[1], last[2], last[3] );
+        }
+    }
+
+done:
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    CloseHandle( event );
+}
+
 static void test_referenced_resource_id_reuse(void)
 {
     static const UINT expected_recreate[] = {16, 0x28, 3, 0x16};
@@ -4511,7 +4591,7 @@ static void test_shared_resource_handle_lifecycle(void)
     static const UINT valid_types[] = {0x13, 0x82, 0xb8};
     static const UINT invalid_types[] = {0, 0x12, 0x14, 0x81, 0x83, 0xb7, 0xb9};
     BYTE *buffer = (BYTE *)0xdeadbeef;
-    HANDLE handles[ARRAY_SIZE(valid_types)] = {0}, event = NULL;
+    HANDLE handles[ARRAY_SIZE(valid_types)] = {0}, base_handle = NULL, event = NULL;
     UINT command[6], channel = 0xcccccccc, size = 0x1000, i;
     ULONG processed;
     BYTE released;
@@ -4558,6 +4638,29 @@ static void test_shared_resource_handle_lifecycle(void)
 
     command[0] = 3;
     command[1] = 4;
+    memcpy( command + 2, &handles[1], sizeof(handles[1]) );
+    command[4] = 0x82;
+    command[5] = 1;
+    memcpy( buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(command),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "type 0x82 mode 1 returned %#lx\n", status );
+    ok( processed == 1, "type 0x82 mode 1 processed %lu commands\n", processed );
+
+    ok( DuplicateHandle( GetCurrentProcess(), handles[1], GetCurrentProcess(), &base_handle,
+                         0, FALSE, DUPLICATE_SAME_ACCESS ),
+        "failed to duplicate type 0x82 handle, error %lu\n", GetLastError() );
+    command[1] = 5;
+    memcpy( command + 2, &base_handle, sizeof(base_handle) );
+    command[4] = 0x43;
+    command[5] = 0;
+    memcpy( buffer, command, sizeof(command) );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(command),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "type 0x82 base open returned %#lx\n", status );
+    ok( processed == 1, "type 0x82 base open processed %lu commands\n", processed );
+
+    command[1] = 6;
     memcpy( command + 2, &handles[2], sizeof(handles[2]) );
     command[4] = 0x82;
     command[5] = 0;
@@ -4568,7 +4671,7 @@ static void test_shared_resource_handle_lifecycle(void)
 
     event = CreateEventW( NULL, FALSE, FALSE, NULL );
     ok( !!event, "failed to create event, error %lu\n", GetLastError() );
-    command[1] = 4;
+    command[1] = 6;
     memcpy( command + 2, &event, sizeof(event) );
     command[4] = 0xb8;
     memcpy( buffer, command, sizeof(command) );
@@ -4576,18 +4679,17 @@ static void test_shared_resource_handle_lifecycle(void)
                                                        &processed, &released );
     ok( status == STATUS_OBJECT_TYPE_MISMATCH, "event handle returned %#lx\n", status );
 
-    for (i = 0; i < ARRAY_SIZE(valid_types); ++i)
+    for (i = 1; i <= 5; ++i)
     {
-        if (!handles[i]) continue;
         command[0] = 4;
-        command[1] = i + 1;
+        command[1] = i;
         memcpy( buffer, command, 8 );
         status = NtDCompositionProcessChannelBatchBuffer( channel, 8, &processed, &released );
-        ok( status == STATUS_SUCCESS, "type %#x release returned %#lx\n",
-            valid_types[i], status );
+        ok( status == STATUS_SUCCESS, "resource %u release returned %#lx\n", i, status );
     }
 
     if (event) CloseHandle( event );
+    if (base_handle) CloseHandle( base_handle );
     for (i = 0; i < ARRAY_SIZE(handles); ++i) if (handles[i]) CloseHandle( handles[i] );
     status = NtDCompositionDestroyChannel( channel );
     ok( status == STATUS_SUCCESS, "got channel destroy status %#lx\n", status );
@@ -6156,6 +6258,7 @@ START_TEST(dcomp)
     test_multi_source_shared_resource_duplication();
     test_hwnd_target_lifecycle();
     test_connection_queue();
+    test_large_connection_batch();
     test_referenced_resource_id_reuse();
     test_visual_target_root_lifecycle();
     test_shared_host_visual_lifecycle();

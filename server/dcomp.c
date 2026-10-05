@@ -43,7 +43,7 @@
 #define TOKEN_MANAGER_SURFACE_UPDATE_CAPACITY \
     (TOKEN_MANAGER_SECTION_SIZE / DCOMP_SURFACE_UPDATE_SIZE)
 #define DCOMP_CHANNEL_MAX_SIZE 0x1000000
-#define DCOMP_PROTOCOL_MAX_SIZE 0x10000
+#define DCOMP_PROTOCOL_MAX_SIZE DCOMP_CHANNEL_MAX_SIZE
 
 struct dcomp_connection
 {
@@ -2029,6 +2029,7 @@ DECL_HANDLER(get_dcomp_connection_batch)
             set_error( STATUS_NOT_FOUND );
         goto done;
     }
+    reply->value = record->value;
     if (record->size > get_reply_max_size())
     {
         set_error( STATUS_BUFFER_TOO_SMALL );
@@ -2037,7 +2038,6 @@ DECL_HANDLER(get_dcomp_connection_batch)
     if (record->size && !set_reply_data( record->data, record->size )) goto done;
     reply->type = record->type;
     reply->channel = record->channel;
-    reply->value = record->value;
     reply->connection = record->connection;
     reply->object = record->object;
     if (record->type == DCOMP_RECORD_BATCH)
@@ -2699,7 +2699,10 @@ DECL_HANDLER(open_dcomp_shared_resource)
     else if (obj->ops == &dcomp_shared_resource_ops)
     {
         resource = (struct dcomp_shared_resource *)obj;
-        if (resource->type != req->type ||
+        /* Windows reopens a type 0x82 system clip through its 0x43 base type
+         * when duplicating the clip between compositor channels. */
+        if ((resource->type != req->type &&
+             (resource->type != 0x82 || req->type != 0x43)) ||
             resource->session_id != channel->owner->session_id)
             set_error( STATUS_INVALID_PARAMETER );
         else if (!req->resource)

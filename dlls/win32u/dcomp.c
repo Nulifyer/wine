@@ -332,7 +332,7 @@ struct dcomp_protocol_block_header
     UINT size;
 };
 
-#define DCOMP_PROTOCOL_MAX_SIZE 0x10000
+#define DCOMP_PROTOCOL_MAX_SIZE 0x1000000
 #define DCOMP_PROTOCOL_MAX_BLOCKS 4096
 
 static pthread_mutex_t dcomp_channel_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -2925,14 +2925,15 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
 
     while (length)
     {
-        UINT words[5] = {0};
+        UINT words[6] = {0};
 
         ++*processed;
         if (!dcomp_command_size( buffer, length, &command_size )) return STATUS_INVALID_PARAMETER;
         memcpy( &type, buffer, sizeof(type) );
         memcpy( words, buffer, min( command_size, sizeof(words) ) );
-        TRACE( "channel %#x command type %#x size %u args %#x %#x %#x %#x\n",
-               view->channel, type, command_size, words[1], words[2], words[3], words[4] );
+        TRACE( "channel %#x command type %#x size %u args %#x %#x %#x %#x %#x\n",
+               view->channel, type, command_size, words[1], words[2], words[3], words[4],
+               words[5] );
 
         if (!type)
         {
@@ -2978,7 +2979,8 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
             memcpy( &mode, buffer + 20, sizeof(mode) );
             if (!id || !handle || !resource_type) return STATUS_INVALID_PARAMETER;
             if (find_dcomp_resource_view( view, id )) return STATUS_ACCESS_DENIED;
-            if (resource_type != 0xb8 && mode) return STATUS_NOT_SUPPORTED;
+            if (mode && resource_type != 0xb8 &&
+                (resource_type != 0x82 || mode != 1)) return STATUS_NOT_SUPPORTED;
             reap_received_dcomp_resources( view );
             if (!(resource = calloc( 1, sizeof(*resource) ))) return STATUS_NO_MEMORY;
             if (!(wire_id = select_dcomp_wire_id( view, id )))
@@ -4732,7 +4734,12 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         if (!resource->released && resource->sprite_content_dirty) resource_size += 16;
         if (resource->released) resource_size += 12;
     }
-    if (resource_size > DCOMP_PROTOCOL_MAX_SIZE - *data_size) return STATUS_INVALID_PARAMETER;
+    if (resource_size > DCOMP_PROTOCOL_MAX_SIZE - *data_size)
+    {
+        TRACE( "channel %#x commit payload exceeds protocol max: resource %#x + application %#x > %#x\n",
+               view->channel, resource_size, *data_size, DCOMP_PROTOCOL_MAX_SIZE );
+        return STATUS_INVALID_PARAMETER;
+    }
     if (!resource_size) return STATUS_SUCCESS;
     if (!(new_data = malloc( resource_size + *data_size ))) return STATUS_NO_MEMORY;
 
@@ -4786,6 +4793,8 @@ static NTSTATUS build_dcomp_commit_payload( struct dcomp_channel_view *view,
         if ((status = get_dcomp_shared_section_update( view->channel, resource->client_id,
                                                         &section, &section_size )))
         {
+            TRACE( "channel %#x shared section update for resource %#x/%#x returned status %#x\n",
+                   view->channel, resource->client_id, resource->id, status );
             free( new_data );
             return status;
         }
@@ -6540,12 +6549,11 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
     struct dcomp_connection_batch_view *view;
     struct dcomposition_connection_batch *record, *records = NULL, **next = &records;
     BYTE *data;
-    data_size_t size = 0;
+    data_size_t capacity = 0x10000, required = 0, size = 0;
     UINT count = 0;
     UINT64 synchronization_id;
     BOOL more = FALSE;
     NTSTATUS status;
-    const data_size_t capacity = 0x10000;
 
     TRACE( "connection %p, batch_id %p, batch %p\n", connection, batch_id, batch );
 
@@ -6571,13 +6579,16 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
     }
     do
     {
+retry:
         record = NULL;
+        required = 0;
         SERVER_START_REQ( get_dcomp_connection_batch )
         {
             req->connection = wine_server_obj_handle( connection );
             req->synchronization_id = synchronization_id;
             wine_server_set_reply( req, data, capacity );
             status = wine_server_call( req );
+            if (status == STATUS_BUFFER_TOO_SMALL) required = reply->value;
             if (!status) more = reply->more;
             if (!status && reply->type)
             {
@@ -6612,6 +6623,19 @@ NTSTATUS WINAPI NtDCompositionGetConnectionBatch( HANDLE connection, UINT64 *bat
             }
         }
         SERVER_END_REQ;
+        if (required > capacity && required <= DCOMP_PROTOCOL_MAX_SIZE)
+        {
+            BYTE *new_data;
+
+            if (!(new_data = realloc( data, required )))
+            {
+                status = STATUS_NO_MEMORY;
+                break;
+            }
+            data = new_data;
+            capacity = required;
+            goto retry;
+        }
         if (record)
         {
             *next = record;
@@ -6774,7 +6798,10 @@ NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE 
     if (sync_object || resources || resource_count) return STATUS_NOT_SUPPORTED;
     if ((status = copy_dcomp_protocol_blocks( protocol_blocks, &protocol_data, &protocol_size,
                                                &protocol_block_sizes, &protocol_block_count )))
+    {
+        TRACE( "channel %#x protocol copy returned status %#x\n", channel, status );
         return status;
+    }
     trace_dcomp_protocol_commands( channel, protocol_data, protocol_size );
 
     pthread_mutex_lock( &dcomp_channel_lock );
@@ -6784,6 +6811,7 @@ NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE 
         pthread_mutex_unlock( &dcomp_channel_lock );
         free( protocol_block_sizes );
         free( protocol_data );
+        TRACE( "channel %#x lookup returned status %#x\n", channel, STATUS_ACCESS_DENIED );
         return STATUS_ACCESS_DENIED;
     }
     if ((status = translate_dcomp_protocol_blocks( view, protocol_data, protocol_size,
@@ -6793,6 +6821,7 @@ NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE 
         pthread_mutex_unlock( &dcomp_channel_lock );
         free( protocol_block_sizes );
         free( protocol_data );
+        TRACE( "channel %#x protocol translation returned status %#x\n", channel, status );
         return status;
     }
     free( protocol_block_sizes );
@@ -6800,6 +6829,7 @@ NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE 
     {
         pthread_mutex_unlock( &dcomp_channel_lock );
         free( protocol_data );
+        TRACE( "channel %#x payload build returned status %#x\n", channel, status );
         return status;
     }
 
@@ -6820,7 +6850,11 @@ NTSTATUS WINAPI NtDCompositionCommitChannel( UINT channel, UINT *batch_id, BYTE 
     SERVER_END_REQ;
     pthread_mutex_unlock( &dcomp_channel_lock );
     free( protocol_data );
-    if (status) return status;
+    if (status)
+    {
+        TRACE( "channel %#x server commit returned status %#x\n", channel, status );
+        return status;
+    }
 
     __TRY
     {
