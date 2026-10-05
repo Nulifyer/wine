@@ -5349,8 +5349,9 @@ static void test_dwm_session_message_delivery(void)
     BOOL saw_window_create = FALSE, saw_window_link = FALSE;
     HDESK lifecycle_desktop = NULL;
     HDESK logon_desktop = NULL;
-    HWND target_window = NULL, no_redirection_window = NULL, unlinked_anchor_window = NULL;
-    HANDLE target = NULL, dwm_target = NULL, no_redirection_target = NULL;
+    HWND target_window = NULL, child_target_window = NULL;
+    HWND no_redirection_window = NULL, unlinked_anchor_window = NULL;
+    HANDLE target = NULL, child_target = NULL, dwm_target = NULL, no_redirection_target = NULL;
     HANDLE port = NULL;
     UINT64 logical_surface_token = 0;
     DPI_AWARENESS_CONTEXT previous_dpi_context;
@@ -6172,6 +6173,67 @@ static void test_dwm_session_message_delivery(void)
 
     if (target_window)
     {
+        BOOL saw_context = FALSE, saw_link = FALSE, saw_region = FALSE, saw_target = FALSE;
+        BOOL saw_sprite = FALSE;
+
+        child_target_window = CreateWindowExA( 0, "static", "DWM child target",
+                                                WS_CHILD | WS_VISIBLE, 2, 3, 20, 18,
+                                                target_window, NULL, NULL, NULL );
+        ok( !!child_target_window, "child target window creation failed, error %lu\n",
+            GetLastError() );
+        registered = child_target_window && NtUserCreateDCompositionHwndTarget(
+                child_target_window, 0, &child_target );
+        ok( registered, "child target creation failed, status %#lx\n", RtlGetLastNtStatus() );
+        if (registered)
+        {
+            for (i = 0; i < 16 && !(saw_context && saw_link && saw_region && saw_target); ++i)
+            {
+                HWND message_window = NULL;
+
+                memset( &received, 0, sizeof(received) );
+                size = sizeof(received);
+                status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                    &size, NULL, &timeout );
+                if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+                ok( !status, "child target receive returned %#lx\n", status );
+                if (status) break;
+                memcpy( &message_window, received.data + 1, sizeof(message_window) );
+                if (message_window != child_target_window) continue;
+                if (received.data[0] == 0x40000011) saw_context = TRUE;
+                else if (received.data[0] == 0x40000012) saw_link = TRUE;
+                else if (received.data[0] == 0x40000096) saw_region = TRUE;
+                else if (received.data[0] == 0x40000045) saw_target = TRUE;
+                else if (received.data[0] == 0x40000002 || received.data[0] == 0x40000006)
+                    saw_sprite = TRUE;
+            }
+            ok( saw_context, "child DComp target has no window context\n" );
+            ok( saw_link, "child DComp target has no window link\n" );
+            ok( saw_region, "child DComp target has no visible region\n" );
+            ok( saw_target, "child DComp target was not delivered\n" );
+            ok( !saw_sprite, "child DComp target unexpectedly gained a redirection sprite\n" );
+            registered = NtUserDestroyDCompositionHwndTarget( child_target_window, 0 );
+            ok( registered, "child target destruction failed, status %#lx\n",
+                RtlGetLastNtStatus() );
+        }
+        if (child_target) CloseHandle( child_target );
+        child_target = NULL;
+        if (child_target_window) DestroyWindow( child_target_window );
+        child_target_window = NULL;
+        for (i = 0; i < 16; ++i)
+        {
+            memset( &received, 0, sizeof(received) );
+            size = sizeof(received);
+            status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                &size, NULL, &timeout );
+            if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+            ok( !status, "child target teardown drain returned %#lx\n", status );
+            if (status) break;
+        }
+        ok( i < 16, "child target teardown did not quiesce\n" );
+    }
+
+    if (target_window)
+    {
         HWND message_window = NULL;
         BOOL saw_sprite_destroy = FALSE, saw_destroy = FALSE;
 
@@ -6212,6 +6274,8 @@ static void test_dwm_session_message_delivery(void)
     }
 
 done:
+    if (child_target) CloseHandle( child_target );
+    if (child_target_window) DestroyWindow( child_target_window );
     if (dwm_target) CloseHandle( dwm_target );
     if (no_redirection_target) CloseHandle( no_redirection_target );
     if (target) CloseHandle( target );

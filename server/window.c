@@ -1586,7 +1586,7 @@ struct thread *get_window_thread( user_handle_t handle )
  * process. Native win32k creates every context before publishing any tree
  * links during compositor startup; the replay entry point below preserves
  * that ordering. */
-static unsigned int sync_dwm_window_context( struct window *win, int admit_no_redirection )
+static unsigned int sync_dwm_window_context( struct window *win, int admit_dcomp_target )
 {
     struct process *process = win->thread ? win->thread->process : NULL;
     unsigned int old_context_id = win->dwm_context_id;
@@ -1594,14 +1594,18 @@ static unsigned int sync_dwm_window_context( struct window *win, int admit_no_re
     unsigned int process_id = process ? process->id : 0;
     unsigned __int64 sequence = process ? process->start_time : 0;
 
-    if (!is_composition_window( win )) return 0;
+    /* DirectComposition can explicitly target a child HWND that would not
+     * otherwise own a redirected surface.  DWM still needs the target and
+     * its ancestor chain in the window tree, but those admitted child
+     * contexts do not gain a GDI redirection sprite. */
+    if (!is_composition_window( win ) && !admit_dcomp_target) return 0;
     /* A no-redirection HWND has no redirected bitmap, but it still needs a
      * DwmRedir context when DirectComposition explicitly targets it.  Keep
      * host-only presentation windows out until such a target admits them. */
     if ((win->ex_style & WS_EX_NOREDIRECTIONBITMAP) &&
-        !admit_no_redirection && !win->dwm_context_id)
+        !admit_dcomp_target && !win->dwm_context_id)
         return 0;
-    if (win->parent && !sync_dwm_window_context( win->parent, 0 )) return 0;
+    if (win->parent && !sync_dwm_window_context( win->parent, admit_dcomp_target )) return 0;
     win->dwm_context_id = notify_dwm_window_created( win->desktop, win->dwm_context_id,
                                                      win->handle, parent, win->style,
                                                      win->ex_style, &win->window_rect,
@@ -1636,12 +1640,12 @@ static unsigned int sync_dwm_window_context( struct window *win, int admit_no_re
     return win->dwm_context_id;
 }
 
-static int sync_dwm_window_link( struct window *win, int admit_no_redirection )
+static int sync_dwm_window_link( struct window *win, int admit_dcomp_target )
 {
     struct window *next;
     unsigned int insert_before;
 
-    if (!sync_dwm_window_context( win, admit_no_redirection )) return 0;
+    if (!sync_dwm_window_context( win, admit_dcomp_target )) return 0;
     if (!win->parent)
     {
         win->dwm_link_id = win->dwm_context_id;
@@ -1649,7 +1653,11 @@ static int sync_dwm_window_link( struct window *win, int admit_no_redirection )
     }
     if (!win->is_linked) return 1;
     if (win->dwm_link_id == win->dwm_context_id) return 1;
-    if (!sync_dwm_window_context( win->parent, 0 )) return 0;
+    if (admit_dcomp_target)
+    {
+        if (!sync_dwm_window_link( win->parent, TRUE )) return 0;
+    }
+    else if (!sync_dwm_window_context( win->parent, FALSE )) return 0;
     /* Native win32k publishes spwndNext here.  DWM can only use a sibling
      * that has already joined this composition generation as an insertion
      * anchor.  Replay walks the sibling list from bottom to top, but live
