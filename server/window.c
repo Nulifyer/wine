@@ -4056,7 +4056,7 @@ DECL_HANDLER(set_window_logical_surface)
     {
         if (!req->width || !req->height || !req->stride ||
             !(section = get_handle_obj( current->process, req->section,
-                                        SECTION_MAP_READ, NULL )))
+                                        SECTION_MAP_READ | SECTION_MAP_WRITE, NULL )))
         {
             if (!get_error()) set_error( STATUS_INVALID_PARAMETER );
             return;
@@ -4138,7 +4138,8 @@ DECL_HANDLER(reference_window_logical_surface)
     else set_error( STATUS_INVALID_PARAMETER );
 }
 
-/* duplicate the shared section and metadata into the genuine compositor */
+/* Native DWM maps GDI bitmap sections with PAGE_READWRITE.  Publication
+ * requires the producer to own both rights before the compositor gets them. */
 DECL_HANDLER(get_window_logical_surface)
 {
     struct logical_surface *surface = find_logical_surface( req->handle );
@@ -4154,7 +4155,7 @@ DECL_HANDLER(get_window_logical_surface)
         return;
     }
     if (!(reply->section = alloc_handle( current->process, surface->section,
-                                         SECTION_MAP_READ, 0 ))) return;
+                                         SECTION_MAP_READ | SECTION_MAP_WRITE, 0 ))) return;
     reply->width = surface->width;
     reply->height = surface->height;
     reply->stride = surface->stride;

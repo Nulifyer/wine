@@ -5347,6 +5347,12 @@ static void test_hlsurf_protocol(HWND window, HANDLE surface)
                                      0, 0, NULL, &view_size, ViewUnmap, 0, PAGE_READONLY );
         ok( !status, "surface section map returned %#lx\n", status );
         if (view) NtUnmapViewOfSection( GetCurrentProcess(), view );
+        view = NULL;
+        view_size = 0;
+        status = NtMapViewOfSection( surface_info.section, GetCurrentProcess(), &view,
+                                     0, 0, NULL, &view_size, ViewUnmap, 0, PAGE_READWRITE );
+        ok( !status, "native DWM surface write-map returned %#lx\n", status );
+        if (view) NtUnmapViewOfSection( GetCurrentProcess(), view );
         CloseHandle( surface_info.section );
     }
 
