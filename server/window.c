@@ -1033,6 +1033,11 @@ struct process *get_top_window_owner( struct desktop *desktop )
     return win->thread->process;
 }
 
+user_handle_t get_desktop_shell_window( struct desktop *desktop )
+{
+    return desktop->shell_window ? desktop->shell_window->handle : 0;
+}
+
 /* get the top window size of a given desktop */
 void get_virtual_screen_rect( struct desktop *desktop, struct rectangle *rect, int is_raw )
 {
@@ -1586,7 +1591,15 @@ struct thread *get_window_thread( user_handle_t handle )
  * process. Native win32k creates every context before publishing any tree
  * links during compositor startup; the replay entry point below preserves
  * that ordering. */
-static unsigned int sync_dwm_window_context( struct window *win, int admit_dcomp_target )
+enum dwm_window_admission
+{
+    DWM_WINDOW_NORMAL,
+    DWM_WINDOW_DCOMP_TARGET,
+    DWM_WINDOW_SHELL,
+};
+
+static unsigned int sync_dwm_window_context( struct window *win,
+                                             enum dwm_window_admission admission )
 {
     struct process *process = win->thread ? win->thread->process : NULL;
     unsigned int old_context_id = win->dwm_context_id;
@@ -1594,18 +1607,17 @@ static unsigned int sync_dwm_window_context( struct window *win, int admit_dcomp
     unsigned int process_id = process ? process->id : 0;
     unsigned __int64 sequence = process ? process->start_time : 0;
 
-    /* DirectComposition can explicitly target a child HWND that would not
-     * otherwise own a redirected surface.  DWM still needs the target and
-     * its ancestor chain in the window tree, but those admitted child
-     * contexts do not gain a GDI redirection sprite. */
-    if (!is_composition_window( win ) && !admit_dcomp_target) return 0;
-    /* A no-redirection HWND has no redirected bitmap, but it still needs a
-     * DwmRedir context when DirectComposition explicitly targets it.  Keep
-     * host-only presentation windows out until such a target admits them. */
+    /* DirectComposition targets and the registered shell HWND can require a
+     * DwmRedir context even when the window would not otherwise own a
+     * redirected surface.  Their ancestor chain must join the same tree. */
+    if (!is_composition_window( win ) && admission == DWM_WINDOW_NORMAL) return 0;
+    /* Ordinary no-redirection HWNDs remain host-only.  A DComp target gets a
+     * sprite for its visual root; the shell HWND needs only context and tree
+     * identity so uDWM can retire its solid desktop replacement. */
     if ((win->ex_style & WS_EX_NOREDIRECTIONBITMAP) &&
-        !admit_dcomp_target && !win->dwm_context_id)
+        admission == DWM_WINDOW_NORMAL && !win->dwm_context_id)
         return 0;
-    if (win->parent && !sync_dwm_window_context( win->parent, admit_dcomp_target )) return 0;
+    if (win->parent && !sync_dwm_window_context( win->parent, admission )) return 0;
     win->dwm_context_id = notify_dwm_window_created( win->desktop, win->dwm_context_id,
                                                      win->handle, parent, win->style,
                                                      win->ex_style, &win->window_rect,
@@ -1623,7 +1635,9 @@ static unsigned int sync_dwm_window_context( struct window *win, int admit_dcomp
         win->dwm_link_id = 0;
     }
     if (win->dwm_context_id && win->dwm_sprite_id != win->dwm_context_id &&
-        !is_desktop_window( win ) && is_composition_window( win ))
+        !is_desktop_window( win ) && is_composition_window( win ) &&
+        (!(win->ex_style & WS_EX_NOREDIRECTIONBITMAP) ||
+         admission == DWM_WINDOW_DCOMP_TARGET))
     {
         if (!notify_dwm_window_sprite_created( win->desktop, win->dwm_context_id,
                                                win->handle, win->style, win->ex_style,
@@ -1640,12 +1654,12 @@ static unsigned int sync_dwm_window_context( struct window *win, int admit_dcomp
     return win->dwm_context_id;
 }
 
-static int sync_dwm_window_link( struct window *win, int admit_dcomp_target )
+static int sync_dwm_window_link( struct window *win, enum dwm_window_admission admission )
 {
     struct window *next;
     unsigned int insert_before;
 
-    if (!sync_dwm_window_context( win, admit_dcomp_target )) return 0;
+    if (!sync_dwm_window_context( win, admission )) return 0;
     if (!win->parent)
     {
         win->dwm_link_id = win->dwm_context_id;
@@ -1653,11 +1667,11 @@ static int sync_dwm_window_link( struct window *win, int admit_dcomp_target )
     }
     if (!win->is_linked) return 1;
     if (win->dwm_link_id == win->dwm_context_id) return 1;
-    if (admit_dcomp_target)
+    if (admission != DWM_WINDOW_NORMAL)
     {
-        if (!sync_dwm_window_link( win->parent, TRUE )) return 0;
+        if (!sync_dwm_window_link( win->parent, admission )) return 0;
     }
-    else if (!sync_dwm_window_context( win->parent, FALSE )) return 0;
+    else if (!sync_dwm_window_context( win->parent, DWM_WINDOW_NORMAL )) return 0;
     /* Native win32k publishes spwndNext here.  DWM can only use a sibling
      * that has already joined this composition generation as an insertion
      * anchor.  Replay walks the sibling list from bottom to top, but live
@@ -1679,14 +1693,16 @@ int ensure_dwm_window_context( user_handle_t handle )
 {
     struct window *win = get_user_object( handle, NTUSER_OBJ_WINDOW );
 
-    return win && sync_dwm_window_link( win, 1 );
+    return win && sync_dwm_window_link( win, DWM_WINDOW_DCOMP_TARGET );
 }
 
 static void replay_dwm_window_create_tree( struct window *win )
 {
     struct window *child;
+    enum dwm_window_admission admission = win == win->desktop->shell_window ?
+                                          DWM_WINDOW_SHELL : DWM_WINDOW_NORMAL;
 
-    sync_dwm_window_context( win, 0 );
+    sync_dwm_window_context( win, admission );
     LIST_FOR_EACH_ENTRY_REV( child, &win->children, struct window, entry )
         replay_dwm_window_create_tree( child );
     LIST_FOR_EACH_ENTRY_REV( child, &win->unlinked, struct window, entry )
@@ -1696,8 +1712,10 @@ static void replay_dwm_window_create_tree( struct window *win )
 static void replay_dwm_window_link_tree( struct window *win )
 {
     struct window *child;
+    enum dwm_window_admission admission = win == win->desktop->shell_window ?
+                                          DWM_WINDOW_SHELL : DWM_WINDOW_NORMAL;
 
-    sync_dwm_window_link( win, 0 );
+    sync_dwm_window_link( win, admission );
     LIST_FOR_EACH_ENTRY_REV( child, &win->children, struct window, entry )
         replay_dwm_window_link_tree( child );
 }
@@ -2906,7 +2924,11 @@ void free_window_handle( struct window *win )
     }
 
     /* reset global window pointers, if the corresponding window is destroyed */
-    if (win == win->desktop->shell_window) win->desktop->shell_window = NULL;
+    if (win == win->desktop->shell_window)
+    {
+        win->desktop->shell_window = NULL;
+        notify_dwm_shell_window_changed( win->desktop, 0 );
+    }
     if (win == win->desktop->shell_listview) win->desktop->shell_listview = NULL;
     if (win == win->desktop->progman_window) win->desktop->progman_window = NULL;
     if (win == win->desktop->taskman_window) win->desktop->taskman_window = NULL;
@@ -3939,7 +3961,7 @@ DECL_HANDLER(set_window_pos)
     old_client = win->client_rect;
     set_window_pos( win, previous, flags, &window_rect, &client_rect,
                     &visible_rect, &surface_rect, &valid_rect );
-    sync_dwm_window_link( win, 0 );
+    sync_dwm_window_link( win, DWM_WINDOW_NORMAL );
     sync_dwm_visible_regions( win->desktop );
     if ((win->style & old_style & WS_VISIBLE) && (memcmp( &old_client, &win->client_rect, sizeof(old_client) )
         || memcmp( &old_window, &win->window_rect, sizeof(old_window) )))
@@ -4610,10 +4632,12 @@ DECL_HANDLER(set_desktop_shell_windows)
 {
     struct desktop *desktop;
     struct window *new_shell_window, *new_shell_listview, *new_progman_window, *new_taskman_window;
+    struct window *old_shell_window;
 
     if (!(desktop = get_desktop_obj( current->process, current->desktop, 0 ))) return;
 
     new_shell_window   = desktop->shell_window;
+    old_shell_window   = desktop->shell_window;
     new_shell_listview = desktop->shell_listview;
     new_progman_window = desktop->progman_window;
     new_taskman_window = desktop->taskman_window;
@@ -4653,6 +4677,13 @@ DECL_HANDLER(set_desktop_shell_windows)
     desktop->shell_listview = new_shell_listview;
     desktop->progman_window = new_progman_window;
     desktop->taskman_window = new_taskman_window;
+    if (new_shell_window != old_shell_window)
+    {
+        if (new_shell_window)
+            sync_dwm_window_link( new_shell_window, DWM_WINDOW_SHELL );
+        notify_dwm_shell_window_changed( desktop,
+                                         new_shell_window ? new_shell_window->handle : 0 );
+    }
 
 done:
     release_object( desktop );

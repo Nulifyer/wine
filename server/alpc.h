@@ -23,6 +23,7 @@ extern int set_coremsg_input_port_ready( struct process *process, int enabled );
 extern void cleanup_process_coremsg_connections( struct process *process );
 extern void notify_dwm_desktop_created( struct desktop *desktop );
 extern void notify_dwm_desktop_destroyed( struct desktop *desktop );
+extern void notify_dwm_shell_window_changed( struct desktop *desktop, unsigned int window );
 extern unsigned int notify_dwm_window_created( struct desktop *desktop, unsigned int generation,
                                                 unsigned int window, unsigned int parent,
                                                 unsigned int style, unsigned int ex_style,

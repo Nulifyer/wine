@@ -1088,6 +1088,24 @@ void notify_dwm_desktop_destroyed( struct desktop *desktop )
 
 static int queue_dwm_window_message( struct alpc_port *port, const void *data,
                                      data_size_t size, const char *name,
+                                     unsigned int window );
+
+void notify_dwm_shell_window_changed( struct desktop *desktop, unsigned int window )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 desktop_id, value = window;
+    unsigned char data[20] = {0};
+
+    if (!port || !desktop->shared) return;
+    desktop_id = get_shared_object_locator( desktop->shared ).id;
+    put_u32( data, 0x4000000d );
+    memcpy( data + 4, &value, sizeof(value) );
+    memcpy( data + 12, &desktop_id, sizeof(desktop_id) );
+    queue_dwm_window_message( port, data, sizeof(data), "shell-change", window );
+}
+
+static int queue_dwm_window_message( struct alpc_port *port, const void *data,
+                                     data_size_t size, const char *name,
                                      unsigned int window )
 {
     struct alpc_message *message;
@@ -3023,6 +3041,11 @@ DECL_HANDLER(start_dwm_kernel)
         LIST_FOR_EACH_ENTRY( desktop, &port->composited_winstation->desktops, struct desktop, entry )
             queue_dwm_desktop_message( port, 0x4000000e, desktop );
         replay_dwm_window_contexts( port->composited_winstation );
+        LIST_FOR_EACH_ENTRY( desktop, &port->composited_winstation->desktops, struct desktop, entry )
+        {
+            user_handle_t shell_window = get_desktop_shell_window( desktop );
+            if (shell_window) notify_dwm_shell_window_changed( desktop, shell_window );
+        }
         set_winstation_composited( port->composited_winstation, 1 );
     }
     if (initializing)

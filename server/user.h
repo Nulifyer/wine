@@ -251,6 +251,7 @@ extern client_ptr_t get_class_client_ptr( struct window_class *class );
 
 extern struct winstation *get_visible_winstation(void);
 extern struct desktop *get_input_desktop( struct winstation *winstation );
+extern user_handle_t get_desktop_shell_window( struct desktop *desktop );
 extern int set_input_desktop( struct winstation *winstation, struct desktop *new_desktop );
 extern void set_winstation_composited( struct winstation *winstation, int composited );
 extern struct desktop *get_desktop_obj( struct process *process, obj_handle_t handle, unsigned int access );

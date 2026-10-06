@@ -65,6 +65,17 @@ struct dwm_session_message
     DWORD data[64];
 };
 
+struct dwm_shell_thread_context
+{
+    HDESK desktop;
+    HANDLE ready;
+    HANDLE release;
+    HWND window;
+    BOOL desktop_selected;
+    BOOL shell_registered;
+    DWORD error;
+};
+
 struct coremsg_registrar_context
 {
     unsigned char guid[16];
@@ -132,6 +143,27 @@ static void init_alpc_attributes( ALPC_PORT_ATTRIBUTES *attributes )
 static void put_u32( unsigned char *data, DWORD value )
 {
     memcpy( data, &value, sizeof(value) );
+}
+
+static DWORD WINAPI dwm_shell_thread( void *arg )
+{
+    struct dwm_shell_thread_context *context = arg;
+
+    context->desktop_selected = SetThreadDesktop( context->desktop );
+    if (context->desktop_selected)
+    {
+        context->window = CreateWindowExA( WS_EX_NOREDIRECTIONBITMAP, "static",
+                                            "DWM shell window", WS_POPUP | WS_VISIBLE,
+                                            0, 0, 64, 64, NULL, NULL, NULL, NULL );
+        if (context->window)
+            context->shell_registered = NtUserSetShellWindowEx( context->window,
+                                                                  context->window );
+    }
+    context->error = GetLastError();
+    SetEvent( context->ready );
+    WaitForSingleObject( context->release, 5000 );
+    if (context->window) DestroyWindow( context->window );
+    return 0;
 }
 
 static DWORD WINAPI coremsg_registrar_client( void *arg )
@@ -5448,6 +5480,7 @@ static void test_dwm_session_message_delivery(void)
     UINT64 input_id, repeated_id, default_id, logon_id = 0, desktop_id, lifecycle_id = 0;
     BOOL saw_input = FALSE, saw_default = FALSE, saw_logon = FALSE, saw_startup_begin = FALSE;
     BOOL saw_window_create = FALSE, saw_window_link = FALSE;
+    struct dwm_shell_thread_context shell_context = {0};
     HDESK lifecycle_desktop = NULL;
     HDESK logon_desktop = NULL;
     HWND target_window = NULL, child_target_window = NULL;
@@ -5781,6 +5814,125 @@ static void test_dwm_session_message_delivery(void)
         if (!status) memcpy( &lifecycle_id, received.data + 1, sizeof(lifecycle_id) );
         ok( lifecycle_id != 0, "desktop create ID is zero\n" );
 
+        shell_context.desktop = lifecycle_desktop;
+        shell_context.ready = CreateEventW( NULL, TRUE, FALSE, NULL );
+        shell_context.release = CreateEventW( NULL, TRUE, FALSE, NULL );
+        ok( !!shell_context.ready && !!shell_context.release,
+            "shell thread event creation failed, error %lu\n", GetLastError() );
+        if (shell_context.ready && shell_context.release)
+        {
+            BOOL saw_context = FALSE, saw_link = FALSE, saw_visibility = FALSE;
+            BOOL saw_shell_change = FALSE, saw_sprite = FALSE;
+            UINT64 shell_window = 0, shell_desktop = 0;
+            HANDLE thread;
+
+            thread = CreateThread( NULL, 0, dwm_shell_thread, &shell_context, 0, NULL );
+            ok( !!thread, "shell thread creation failed, error %lu\n", GetLastError() );
+            if (thread)
+            {
+                ok( WaitForSingleObject( shell_context.ready, 5000 ) == WAIT_OBJECT_0,
+                    "shell thread did not publish its window\n" );
+                ok( shell_context.desktop_selected,
+                    "shell thread failed to select its desktop, error %lu\n",
+                    shell_context.error );
+                ok( !!shell_context.window, "shell window creation failed, error %lu\n",
+                    shell_context.error );
+                ok( shell_context.shell_registered,
+                    "shell window registration failed, error %lu\n", shell_context.error );
+
+                for (i = 0; i < 512; ++i)
+                {
+                    HWND message_window = NULL;
+
+                    memset( &received, 0, sizeof(received) );
+                    size = sizeof(received);
+                    status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL,
+                                                        &received.header, &size, NULL,
+                                                        &timeout );
+                    if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+                    ok( !status, "shell window receive returned %#lx\n", status );
+                    if (status) break;
+                    if (received.data[0] == 0x4000000d)
+                    {
+                        ok( received.header.DataLength == 20,
+                            "got shell change length %#x\n", received.header.DataLength );
+                        memcpy( &shell_window, received.data + 1, sizeof(shell_window) );
+                        memcpy( &shell_desktop, received.data + 3, sizeof(shell_desktop) );
+                        if (shell_window == (UINT64)(UINT_PTR)shell_context.window)
+                        {
+                            ok( shell_desktop == lifecycle_id,
+                                "got shell desktop %#I64x, expected %#I64x\n",
+                                shell_desktop, lifecycle_id );
+                            saw_shell_change = TRUE;
+                        }
+                        continue;
+                    }
+                    memcpy( &message_window, received.data + 1, sizeof(message_window) );
+                    if (message_window != shell_context.window) continue;
+                    if (received.data[0] == 0x40000011) saw_context = TRUE;
+                    else if (received.data[0] == 0x40000012) saw_link = TRUE;
+                    else if (received.data[0] == 0x40000007) saw_visibility = TRUE;
+                    else if (received.data[0] == 0x40000002 ||
+                             received.data[0] == 0x40000006) saw_sprite = TRUE;
+                }
+                ok( i < 512, "shell window message drain did not quiesce\n" );
+                ok( saw_context, "no-redirection shell has no DWM window context\n" );
+                ok( saw_link, "no-redirection shell has no DWM window link\n" );
+                ok( saw_visibility, "visible shell has no DWM visibility record\n" );
+                ok( saw_shell_change, "DWM did not receive the registered shell window\n" );
+                ok( !saw_sprite, "no-redirection shell unexpectedly gained a sprite\n" );
+
+                SetEvent( shell_context.release );
+                ok( WaitForSingleObject( thread, 5000 ) == WAIT_OBJECT_0,
+                    "shell thread did not destroy its window\n" );
+                CloseHandle( thread );
+
+                saw_shell_change = FALSE;
+                for (i = 0; i < 512; ++i)
+                {
+                    memset( &received, 0, sizeof(received) );
+                    size = sizeof(received);
+                    status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL,
+                                                        &received.header, &size, NULL,
+                                                        &timeout );
+                    if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+                    ok( !status, "shell teardown receive returned %#lx\n", status );
+                    if (status) break;
+                    if (received.data[0] != 0x4000000d) continue;
+                    memcpy( &shell_window, received.data + 1, sizeof(shell_window) );
+                    memcpy( &shell_desktop, received.data + 3, sizeof(shell_desktop) );
+                    if (!shell_window && shell_desktop == lifecycle_id)
+                        saw_shell_change = TRUE;
+                }
+                ok( i < 512, "shell teardown message drain did not quiesce\n" );
+                ok( saw_shell_change, "DWM did not receive shell window removal\n" );
+            }
+        }
+        if (shell_context.release) SetEvent( shell_context.release );
+        if (shell_context.ready) CloseHandle( shell_context.ready );
+        if (shell_context.release) CloseHandle( shell_context.release );
+
+        CloseDesktop( lifecycle_desktop );
+        lifecycle_desktop = NULL;
+    }
+
+    /* Selecting a desktop on a process thread keeps the process desktop
+     * reference alive through teardown.  Use a never-selected desktop for
+     * the independent create/free lifetime contract. */
+    lifecycle_desktop = CreateDesktopW( L"LinuxNTDwmFree", NULL, NULL, 0,
+                                        DESKTOP_ALL_ACCESS, NULL );
+    ok( !!lifecycle_desktop, "disposable CreateDesktopW failed, error %lu\n", GetLastError() );
+    if (lifecycle_desktop)
+    {
+        memset( &received, 0, sizeof(received) );
+        size = sizeof(received);
+        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                            &size, NULL, &timeout );
+        ok( !status, "disposable desktop create receive returned %#lx\n", status );
+        ok( !status && received.data[0] == 0x4000000e,
+            "got disposable desktop create command %#lx\n", received.data[0] );
+        if (!status) memcpy( &lifecycle_id, received.data + 1, sizeof(lifecycle_id) );
+
         CloseDesktop( lifecycle_desktop );
         lifecycle_desktop = NULL;
         memset( &received, 0, sizeof(received) );
@@ -5790,11 +5942,13 @@ static void test_dwm_session_message_delivery(void)
         ok( !status, "desktop free receive returned %#lx\n", status );
         ok( !status && received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
             "got desktop free type %#x\n", received.header.Type );
-        ok( !status && received.header.DataLength == 12, "got desktop free length %#x\n", received.header.DataLength );
-        ok( !status && received.data[0] == 0x40000010, "got desktop free command %#lx\n", received.data[0] );
+        ok( !status && received.header.DataLength == 12,
+            "got desktop free length %#x\n", received.header.DataLength );
+        ok( !status && received.data[0] == 0x40000010,
+            "got desktop free command %#lx\n", received.data[0] );
         if (!status) memcpy( &desktop_id, received.data + 1, sizeof(desktop_id) );
-        ok( !status && desktop_id == lifecycle_id, "desktop free ID %#I64x, expected %#I64x\n",
-            desktop_id, lifecycle_id );
+        ok( !status && desktop_id == lifecycle_id,
+            "desktop free ID %#I64x, expected %#I64x\n", desktop_id, lifecycle_id );
     }
 
     /* Keep a no-redirection sibling outside DWM tracking.  A later live link
