@@ -5748,6 +5748,9 @@ static void test_dwm_session_message_delivery(void)
         else if (received.data[0] == 0x40000005)
             ok( received.header.DataLength == 20, "got sprite order length %#x\n",
                 received.header.DataLength );
+        else if (received.data[0] == 0x40000015)
+            ok( received.header.DataLength == 64, "got window rectangles length %#x\n",
+                received.header.DataLength );
         else ok( 0, "got unexpected startup command %#lx\n", received.data[0] );
     }
     ok( saw_input, "DWM startup did not replay input desktop %#I64x\n", input_id );
@@ -6687,7 +6690,7 @@ static void test_dwm_session_message_delivery(void)
     if (target_window)
     {
         BOOL saw_context = FALSE, saw_link = FALSE, saw_region = FALSE, saw_target = FALSE;
-        BOOL saw_sprite = FALSE;
+        BOOL saw_sprite = FALSE, saw_rects = FALSE;
 
         child_target_window = CreateWindowExA( 0, "static", "DWM child target",
                                                 WS_CHILD | WS_VISIBLE, 2, 3, 20, 18,
@@ -6699,7 +6702,7 @@ static void test_dwm_session_message_delivery(void)
         ok( registered, "child target creation failed, status %#lx\n", RtlGetLastNtStatus() );
         if (registered)
         {
-            for (i = 0; i < 16 && !(saw_context && saw_link && saw_region && saw_target); ++i)
+            for (i = 0; i < 32 && !(saw_context && saw_link && saw_region && saw_target && saw_rects); ++i)
             {
                 HWND message_window = NULL;
 
@@ -6716,14 +6719,74 @@ static void test_dwm_session_message_delivery(void)
                 else if (received.data[0] == 0x40000012) saw_link = TRUE;
                 else if (received.data[0] == 0x40000096) saw_region = TRUE;
                 else if (received.data[0] == 0x40000045) saw_target = TRUE;
-                else if (received.data[0] == 0x40000002 || received.data[0] == 0x40000006)
+                else if (received.data[0] == 0x40000015)
+                {
+                    RECT rect;
+
+                    ok( saw_link, "initial child rectangles preceded its tree link\n" );
+                    ok( !saw_target, "initial child rectangles followed target delivery\n" );
+                    ok( received.header.DataLength == 64, "got child rectangles length %#x\n",
+                        received.header.DataLength );
+                    memcpy( &rect, received.data + 3, sizeof(rect) );
+                    ok( rect.left == 2 && rect.top == 3 && rect.right == 22 && rect.bottom == 21,
+                        "got initial child window %s\n", wine_dbgstr_rect(&rect) );
+                    ok( !memcmp( received.data + 3, received.data + 7, sizeof(rect) ) &&
+                        !memcmp( received.data + 3, received.data + 11, sizeof(rect) ) &&
+                        !received.data[15], "got inconsistent borderless child rectangles\n" );
+                    saw_rects = TRUE;
+                }
+                else if (received.data[0] == 0x40000002 || received.data[0] == 0x40000004 ||
+                         received.data[0] == 0x40000006)
                     saw_sprite = TRUE;
             }
             ok( saw_context, "child DComp target has no window context\n" );
             ok( saw_link, "child DComp target has no window link\n" );
             ok( saw_region, "child DComp target has no visible region\n" );
             ok( saw_target, "child DComp target was not delivered\n" );
+            ok( saw_rects, "child DComp target has no initial rectangle update\n" );
             ok( !saw_sprite, "child DComp target unexpectedly gained a redirection sprite\n" );
+            for (i = 0; i < 3; ++i)
+            {
+                BOOL saw_move = FALSE, saw_child_sprite = FALSE;
+                int x = i ? 7 : 2, y = i ? 9 : 3;
+                int width = i ? 32 : 25, height = i ? 24 : 22;
+
+                ok( SetWindowPos( child_target_window, NULL, x, y, width, height,
+                                  SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW ),
+                    "child move %u failed, error %lu\n", i, GetLastError() );
+                for (j = 0; j < 512; ++j)
+                {
+                    HWND message_window = NULL;
+                    RECT rect;
+
+                    memset( &received, 0, sizeof(received) );
+                    size = sizeof(received);
+                    status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                        &size, NULL, &timeout );
+                    if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+                    ok( !status, "moved child receive returned %#lx\n", status );
+                    if (status) break;
+                    memcpy( &message_window, received.data + 1, sizeof(message_window) );
+                    if (message_window != child_target_window) continue;
+                    if (received.data[0] == 0x40000015)
+                    {
+                        ok( received.header.DataLength == 64, "got moved child rectangles length %#x\n",
+                            received.header.DataLength );
+                        memcpy( &rect, received.data + 3, sizeof(rect) );
+                        ok( rect.left == x && rect.top == y && rect.right == x + width &&
+                            rect.bottom == y + height, "move %u window %s\n", i, wine_dbgstr_rect(&rect) );
+                        ok( !memcmp( received.data + 3, received.data + 7, sizeof(rect) ) &&
+                            !memcmp( received.data + 3, received.data + 11, sizeof(rect) ) &&
+                            !received.data[15], "move %u inconsistent borderless rectangles\n", i );
+                        saw_move = TRUE;
+                    }
+                    else if (received.data[0] == 0x40000004 || received.data[0] == 0x40000006)
+                        saw_child_sprite = TRUE;
+                }
+                ok( j < 512, "child move %u did not quiesce\n", i );
+                ok( saw_move == (i < 2), "child move %u rectangle notification %u\n", i, saw_move );
+                ok( !saw_child_sprite, "child move %u fabricated a sprite update\n", i );
+            }
             registered = NtUserDestroyDCompositionHwndTarget( child_target_window, 0 );
             ok( registered, "child target destruction failed, status %#lx\n",
                 RtlGetLastNtStatus() );

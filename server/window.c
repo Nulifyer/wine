@@ -1634,6 +1634,14 @@ static int publish_dwm_window_link( struct window *win )
     return 1;
 }
 
+static void sync_dwm_window_rects( struct window *win )
+{
+    if (!win->dwm_context_id || win->dwm_link_id != win->dwm_context_id ||
+        win->dwm_sprite_id == win->dwm_context_id || is_desktop_window( win )) return;
+    notify_dwm_window_rects_changed( win->desktop, win->dwm_context_id, win->handle,
+                                    &win->window_rect, &win->client_rect );
+}
+
 static unsigned int sync_dwm_window_context( struct window *win,
                                              enum dwm_window_admission admission )
 {
@@ -1709,6 +1717,7 @@ static int sync_dwm_window_link( struct window *win, enum dwm_window_admission a
     }
     else if (!sync_dwm_window_context( win->parent, DWM_WINDOW_NORMAL )) return 0;
     if (!publish_dwm_window_link( win )) return 0;
+    sync_dwm_window_rects( win );
     sync_dwm_sprite_order( win );
     return 1;
 }
@@ -2725,6 +2734,9 @@ static void set_window_pos( struct window *win, struct window *previous,
         notify_dwm_window_visibility_changed( win->desktop, win->dwm_context_id,
                                               win->handle, !!(win->style & WS_VISIBLE) );
     if (zorder_changed) sync_dwm_window_order( win );
+    if (memcmp( &old_window_rect, &win->window_rect, sizeof(old_window_rect) ) ||
+        memcmp( &old_client_rect, &win->client_rect, sizeof(old_client_rect) ))
+        sync_dwm_window_rects( win );
     if (win->dwm_sprite_id == win->dwm_context_id &&
         (memcmp( &old_window_rect, &win->window_rect, sizeof(old_window_rect) ) ||
          memcmp( &old_client_rect, &win->client_rect, sizeof(old_client_rect) ) ||

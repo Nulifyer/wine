@@ -1173,6 +1173,24 @@ void notify_dwm_window_sprite_order( struct desktop *desktop, unsigned int gener
     queue_dwm_window_message( port, data, sizeof(data), "sprite-order", window );
 }
 
+void notify_dwm_window_rects_changed( struct desktop *desktop, unsigned int generation,
+                                      unsigned int window, const struct rectangle *window_rect,
+                                      const struct rectangle *client_rect )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 value = window;
+    unsigned char data[64] = {0};
+
+    if (!port || generation != port->composition_id) return;
+    put_u32( data, 0x40000015 );
+    memcpy( data + 4, &value, sizeof(value) );
+    memcpy( data + 12, window_rect, sizeof(*window_rect) );
+    memcpy( data + 28, client_rect, sizeof(*client_rect) );
+    /* Borderless contexts have no content insets or resize-border width. */
+    memcpy( data + 44, window_rect, sizeof(*window_rect) );
+    queue_dwm_window_message( port, data, sizeof(data), "rects", window );
+}
+
 int notify_dwm_window_linked( struct desktop *desktop, unsigned int generation,
                               unsigned int window, unsigned int parent,
                               unsigned int previous, unsigned int band )
