@@ -4207,10 +4207,11 @@ DECL_HANDLER(signal_window_logical_surface)
     surface->event = event;
 }
 
-/* publish changed pixels and wake DWM if it registered an event */
+/* publish changed pixels through the sprite protocol and any registered event */
 DECL_HANDLER(dirty_window_logical_surface)
 {
     struct window *win = get_window( req->handle );
+    struct logical_surface *surface;
 
     if (!win) return;
     if (!win->thread || win->thread->process != current->process)
@@ -4223,8 +4224,12 @@ DECL_HANDLER(dirty_window_logical_surface)
         set_error( STATUS_INVALID_HANDLE );
         return;
     }
-    win->logical_surface->dirty = 1;
-    if (win->logical_surface->event) set_event( win->logical_surface->event );
+    surface = win->logical_surface;
+    surface->dirty = 1;
+    if (surface->event) set_event( surface->event );
+    if (win->dwm_sprite_id == surface->generation)
+        notify_dwm_window_sprite_dirty( surface->desktop, surface->generation,
+                                        win->handle, 1, surface->update_id );
 }
 
 

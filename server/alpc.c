@@ -1312,6 +1312,22 @@ void notify_dwm_window_sprite_updated( struct desktop *desktop, unsigned int gen
                  window_rect->bottom, !!(style & WS_VISIBLE) );
 }
 
+void notify_dwm_window_sprite_dirty( struct desktop *desktop, unsigned int generation,
+                                     unsigned int window, unsigned int flags,
+                                     unsigned __int64 update_id )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 sprite = window;
+    unsigned char data[24] = {0};
+
+    if (!port || generation != port->composition_id) return;
+    put_u32( data, 0x40000004 );
+    put_u32( data + 4, flags );
+    memcpy( data + 8, &sprite, sizeof(sprite) );
+    memcpy( data + 16, &update_id, sizeof(update_id) );
+    queue_dwm_window_message( port, data, sizeof(data), "sprite-dirty", window );
+}
+
 void notify_dwm_window_sprite_destroyed( struct desktop *desktop, unsigned int generation,
                                          unsigned int window )
 {

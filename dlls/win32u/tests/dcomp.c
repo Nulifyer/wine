@@ -5902,6 +5902,7 @@ static void test_dwm_session_message_delivery(void)
                     "shell thread did not repaint its window\n" );
                 {
                     BOOL saw_sprite_create = FALSE, saw_surface_update = FALSE;
+                    BOOL saw_surface_dirty = FALSE;
 
                     for (i = 0; i < 512; ++i)
                     {
@@ -5915,6 +5916,24 @@ static void test_dwm_session_message_delivery(void)
                         if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
                         ok( !status, "painted shell receive returned %#lx\n", status );
                         if (status) break;
+                        if (received.data[0] == 0x40000004)
+                        {
+                            HWND sprite = NULL;
+                            UINT64 update_id = 0;
+
+                            ok( received.header.DataLength == 24,
+                                "got shell dirty length %#x\n", received.header.DataLength );
+                            memcpy( &sprite, received.data + 2, sizeof(sprite) );
+                            memcpy( &update_id, received.data + 4, sizeof(update_id) );
+                            if (sprite != shell_context.window) continue;
+                            ok( saw_surface_update,
+                                "shell dirty notification preceded its surface update\n" );
+                            ok( received.data[1] == 1,
+                                "got shell dirty flags %#lx\n", received.data[1] );
+                            ok( !!update_id, "shell dirty update ID is zero\n" );
+                            saw_surface_dirty = TRUE;
+                            continue;
+                        }
                         memcpy( &message_window, received.data + 1, sizeof(message_window) );
                         if (message_window != shell_context.window) continue;
                         if (received.data[0] == 0x40000002)
@@ -5944,6 +5963,8 @@ static void test_dwm_session_message_delivery(void)
                         "painted no-redirection shell has no DWM sprite\n" );
                     ok( saw_surface_update,
                         "painted no-redirection shell has no logical surface\n" );
+                    ok( saw_surface_dirty,
+                        "painted no-redirection shell has no dirty notification\n" );
                 }
 
                 SetEvent( shell_context.release );
