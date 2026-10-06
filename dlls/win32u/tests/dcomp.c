@@ -69,6 +69,8 @@ struct dwm_shell_thread_context
 {
     HDESK desktop;
     HANDLE ready;
+    HANDLE repaint;
+    HANDLE repainted;
     HANDLE release;
     HWND window;
     BOOL desktop_selected;
@@ -148,6 +150,7 @@ static void put_u32( unsigned char *data, DWORD value )
 static DWORD WINAPI dwm_shell_thread( void *arg )
 {
     struct dwm_shell_thread_context *context = arg;
+    HANDLE events[2];
 
     context->desktop_selected = SetThreadDesktop( context->desktop );
     if (context->desktop_selected)
@@ -161,7 +164,15 @@ static DWORD WINAPI dwm_shell_thread( void *arg )
     }
     context->error = GetLastError();
     SetEvent( context->ready );
-    WaitForSingleObject( context->release, 5000 );
+    events[0] = context->repaint;
+    events[1] = context->release;
+    if (WaitForMultipleObjects( ARRAY_SIZE(events), events, FALSE, 5000 ) == WAIT_OBJECT_0)
+    {
+        RedrawWindow( context->window, NULL, NULL,
+                      RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW );
+        SetEvent( context->repainted );
+        WaitForSingleObject( context->release, 5000 );
+    }
     if (context->window) DestroyWindow( context->window );
     return 0;
 }
@@ -5816,10 +5827,14 @@ static void test_dwm_session_message_delivery(void)
 
         shell_context.desktop = lifecycle_desktop;
         shell_context.ready = CreateEventW( NULL, TRUE, FALSE, NULL );
+        shell_context.repaint = CreateEventW( NULL, TRUE, FALSE, NULL );
+        shell_context.repainted = CreateEventW( NULL, TRUE, FALSE, NULL );
         shell_context.release = CreateEventW( NULL, TRUE, FALSE, NULL );
-        ok( !!shell_context.ready && !!shell_context.release,
+        ok( !!shell_context.ready && !!shell_context.repaint &&
+            !!shell_context.repainted && !!shell_context.release,
             "shell thread event creation failed, error %lu\n", GetLastError() );
-        if (shell_context.ready && shell_context.release)
+        if (shell_context.ready && shell_context.repaint &&
+            shell_context.repainted && shell_context.release)
         {
             BOOL saw_context = FALSE, saw_link = FALSE, saw_visibility = FALSE;
             BOOL saw_shell_change = FALSE, saw_sprite = FALSE;
@@ -5882,6 +5897,55 @@ static void test_dwm_session_message_delivery(void)
                 ok( saw_shell_change, "DWM did not receive the registered shell window\n" );
                 ok( !saw_sprite, "no-redirection shell unexpectedly gained a sprite\n" );
 
+                SetEvent( shell_context.repaint );
+                ok( WaitForSingleObject( shell_context.repainted, 5000 ) == WAIT_OBJECT_0,
+                    "shell thread did not repaint its window\n" );
+                {
+                    BOOL saw_sprite_create = FALSE, saw_surface_update = FALSE;
+
+                    for (i = 0; i < 512; ++i)
+                    {
+                        HWND message_window = NULL;
+
+                        memset( &received, 0, sizeof(received) );
+                        size = sizeof(received);
+                        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL,
+                                                            &received.header, &size, NULL,
+                                                            &timeout );
+                        if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+                        ok( !status, "painted shell receive returned %#lx\n", status );
+                        if (status) break;
+                        memcpy( &message_window, received.data + 1, sizeof(message_window) );
+                        if (message_window != shell_context.window) continue;
+                        if (received.data[0] == 0x40000002)
+                        {
+                            ok( received.header.DataLength == 180,
+                                "got shell sprite create length %#x\n",
+                                received.header.DataLength );
+                            saw_sprite_create = TRUE;
+                        }
+                        else if (received.data[0] == 0x40000006)
+                        {
+                            UINT64 logical_surface = 0;
+
+                            ok( saw_sprite_create,
+                                "shell surface update preceded its sprite creation\n" );
+                            ok( received.header.DataLength == 196,
+                                "got shell sprite update length %#x\n",
+                                received.header.DataLength );
+                            memcpy( &logical_surface, received.data + 42,
+                                    sizeof(logical_surface) );
+                            if (logical_surface && received.data[45] && received.data[46])
+                                saw_surface_update = TRUE;
+                        }
+                    }
+                    ok( i < 512, "painted shell message drain did not quiesce\n" );
+                    ok( saw_sprite_create,
+                        "painted no-redirection shell has no DWM sprite\n" );
+                    ok( saw_surface_update,
+                        "painted no-redirection shell has no logical surface\n" );
+                }
+
                 SetEvent( shell_context.release );
                 ok( WaitForSingleObject( thread, 5000 ) == WAIT_OBJECT_0,
                     "shell thread did not destroy its window\n" );
@@ -5910,6 +5974,8 @@ static void test_dwm_session_message_delivery(void)
         }
         if (shell_context.release) SetEvent( shell_context.release );
         if (shell_context.ready) CloseHandle( shell_context.ready );
+        if (shell_context.repaint) CloseHandle( shell_context.repaint );
+        if (shell_context.repainted) CloseHandle( shell_context.repainted );
         if (shell_context.release) CloseHandle( shell_context.release );
 
         CloseDesktop( lifecycle_desktop );

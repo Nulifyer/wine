@@ -1612,8 +1612,9 @@ static unsigned int sync_dwm_window_context( struct window *win,
      * redirected surface.  Their ancestor chain must join the same tree. */
     if (!is_composition_window( win ) && admission == DWM_WINDOW_NORMAL) return 0;
     /* Ordinary no-redirection HWNDs remain host-only.  A DComp target gets a
-     * sprite for its visual root; the shell HWND needs only context and tree
-     * identity so uDWM can retire its solid desktop replacement. */
+     * sprite for its visual root.  The shell HWND joins the tree immediately,
+     * but only gains a sprite when Wine has an independently-lived GDI
+     * surface to publish. */
     if ((win->ex_style & WS_EX_NOREDIRECTIONBITMAP) &&
         admission == DWM_WINDOW_NORMAL && !win->dwm_context_id)
         return 0;
@@ -1637,7 +1638,8 @@ static unsigned int sync_dwm_window_context( struct window *win,
     if (win->dwm_context_id && win->dwm_sprite_id != win->dwm_context_id &&
         !is_desktop_window( win ) && is_composition_window( win ) &&
         (!(win->ex_style & WS_EX_NOREDIRECTIONBITMAP) ||
-         admission == DWM_WINDOW_DCOMP_TARGET))
+         admission == DWM_WINDOW_DCOMP_TARGET ||
+         (admission == DWM_WINDOW_SHELL && win->logical_surface)))
     {
         if (!notify_dwm_window_sprite_created( win->desktop, win->dwm_context_id,
                                                win->handle, win->style, win->ex_style,
@@ -4037,6 +4039,7 @@ DECL_HANDLER(set_window_logical_surface)
     struct object *section = NULL;
     struct logical_surface *surface = NULL;
     struct window *win = get_window( req->handle );
+    int shell_sprite_created = 0;
 
     if (!win) return;
     if (!win->thread || win->thread->process != current->process)
@@ -4089,7 +4092,18 @@ DECL_HANDLER(set_window_logical_surface)
     else if (!req->serial || req->serial == win->logical_surface_serial)
         detach_logical_surface( win );
 
-    if (win->dwm_sprite_id == win->dwm_context_id)
+    /* The registered shell is admitted without fabricating an empty
+     * redirection sprite.  Once its host GDI surface exists, publish that
+     * surface through DwmRedir so uDWM observes HasGDISurface and can retire
+     * its solid desktop replacement. */
+    if (win->logical_surface && win == win->desktop->shell_window &&
+        win->dwm_context_id && win->dwm_sprite_id != win->dwm_context_id)
+    {
+        sync_dwm_window_link( win, DWM_WINDOW_SHELL );
+        shell_sprite_created = win->dwm_sprite_id == win->dwm_context_id;
+    }
+
+    if (!shell_sprite_created && win->dwm_sprite_id == win->dwm_context_id)
         notify_dwm_window_sprite_updated( win->desktop, win->dwm_sprite_id,
                                           win->handle, win->style, win->ex_style,
                                           win->set_foreground, &win->window_rect,
