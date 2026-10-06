@@ -52,7 +52,7 @@
     SYSCALL_ENTRY( 0x1030, NtDCompositionReleaseAllResources, 8 ) \
     SYSCALL_ENTRY( 0x1031, NtDCompositionRemoveCrossDeviceVisualChild, 0 ) \
     SYSCALL_ENTRY( 0x1032, NtDCompositionRetireFrame, 0 ) \
-    SYSCALL_ENTRY( 0x1033, NtDCompositionSetBlurredWallpaperSurface, 0 ) \
+    SYSCALL_ENTRY( 0x1033, NtDCompositionSetBlurredWallpaperSurface, 8 ) \
     SYSCALL_ENTRY( 0x1034, NtDCompositionSetChannelCommitCompletionEvent, 12 ) \
     SYSCALL_ENTRY( 0x1035, NtDCompositionSetChannelConnectionId, 12 ) \
     SYSCALL_ENTRY( 0x1036, NtDCompositionSetChildRootVisual, 0 ) \
@@ -1594,7 +1594,7 @@
     SYSCALL_ENTRY( 0x1030, NtDCompositionReleaseAllResources, 16 ) \
     SYSCALL_ENTRY( 0x1031, NtDCompositionRemoveCrossDeviceVisualChild, 0 ) \
     SYSCALL_ENTRY( 0x1032, NtDCompositionRetireFrame, 0 ) \
-    SYSCALL_ENTRY( 0x1033, NtDCompositionSetBlurredWallpaperSurface, 0 ) \
+    SYSCALL_ENTRY( 0x1033, NtDCompositionSetBlurredWallpaperSurface, 16 ) \
     SYSCALL_ENTRY( 0x1034, NtDCompositionSetChannelCommitCompletionEvent, 24 ) \
     SYSCALL_ENTRY( 0x1035, NtDCompositionSetChannelConnectionId, 24 ) \
     SYSCALL_ENTRY( 0x1036, NtDCompositionSetChildRootVisual, 0 ) \
@@ -3114,7 +3114,6 @@
     SYSCALL_STUB( NtDCompositionRegisterVirtualDesktopVisual ) \
     SYSCALL_STUB( NtDCompositionRemoveCrossDeviceVisualChild ) \
     SYSCALL_STUB( NtDCompositionRetireFrame ) \
-    SYSCALL_STUB( NtDCompositionSetBlurredWallpaperSurface ) \
     SYSCALL_STUB( NtDCompositionSetChildRootVisual ) \
     SYSCALL_STUB( NtDCompositionSetDebugCounter ) \
     SYSCALL_STUB( NtDCompositionSetMaterialProperty ) \

@@ -37,6 +37,45 @@ static const GUID IID_IExtensionCatalog =
     {0x07cee0d8, 0xd555, 0x4d61, {0x9c, 0x37, 0x01, 0xc1, 0x94, 0xb0, 0xf2, 0x08}};
 static const GUID IID_IIterator_IExtensionRegistration =
     {0xb4d4a79e, 0xfe15, 0x5272, {0x99, 0x88, 0x61, 0x7a, 0x34, 0xd8, 0x30, 0x0b}};
+static const GUID IID_ICompositionHandleStatics =
+    {0x011681b7, 0x9ece, 0x462e, {0x89, 0xf5, 0xbe, 0x22, 0x15, 0x21, 0x9a, 0xbb}};
+static const GUID IID_ICompositionHandleWrapperFactory =
+    {0x1f5cee95, 0xa9e9, 0x464e, {0xbe, 0x2f, 0x57, 0xbb, 0xb1, 0x31, 0xe7, 0xec}};
+static const GUID IID_ICompositionHandle =
+    {0xcfde6f9a, 0x4afe, 0x45b3, {0x81, 0xb5, 0x20, 0xd1, 0x3c, 0xd8, 0xa8, 0x1a}};
+static const GUID IID_IUnwrapCompositionHandle =
+    {0xbe4059cd, 0xd6d0, 0x40d9, {0x99, 0x9d, 0x60, 0xc7, 0xa6, 0x34, 0x0d, 0xcc}};
+
+typedef struct ICompositionHandleWrapperFactory ICompositionHandleWrapperFactory;
+typedef struct ICompositionHandleWrapperFactoryVtbl
+{
+    BEGIN_INTERFACE
+    HRESULT (WINAPI *QueryInterface)(ICompositionHandleWrapperFactory *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(ICompositionHandleWrapperFactory *);
+    ULONG (WINAPI *Release)(ICompositionHandleWrapperFactory *);
+    HRESULT (WINAPI *GetIids)(ICompositionHandleWrapperFactory *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(ICompositionHandleWrapperFactory *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(ICompositionHandleWrapperFactory *, TrustLevel *);
+    HRESULT (WINAPI *CreateAndAttachHandle)(ICompositionHandleWrapperFactory *, HANDLE *, REFIID, void **);
+    HRESULT (WINAPI *CreateWithDuplicatedHandle)(ICompositionHandleWrapperFactory *, HANDLE, REFIID, void **);
+    END_INTERFACE
+} ICompositionHandleWrapperFactoryVtbl;
+struct ICompositionHandleWrapperFactory { const ICompositionHandleWrapperFactoryVtbl *lpVtbl; };
+
+typedef struct IUnwrapCompositionHandle IUnwrapCompositionHandle;
+typedef struct IUnwrapCompositionHandleVtbl
+{
+    BEGIN_INTERFACE
+    HRESULT (WINAPI *QueryInterface)(IUnwrapCompositionHandle *, REFIID, void **);
+    ULONG (WINAPI *AddRef)(IUnwrapCompositionHandle *);
+    ULONG (WINAPI *Release)(IUnwrapCompositionHandle *);
+    HRESULT (WINAPI *GetIids)(IUnwrapCompositionHandle *, ULONG *, IID **);
+    HRESULT (WINAPI *GetRuntimeClassName)(IUnwrapCompositionHandle *, HSTRING *);
+    HRESULT (WINAPI *GetTrustLevel)(IUnwrapCompositionHandle *, TrustLevel *);
+    HRESULT (WINAPI *CopyTo)(IUnwrapCompositionHandle *, HANDLE *);
+    END_INTERFACE
+} IUnwrapCompositionHandleVtbl;
+struct IUnwrapCompositionHandle { const IUnwrapCompositionHandleVtbl *lpVtbl; };
 
 typedef struct IExtensionCatalog IExtensionCatalog;
 typedef struct IExtensionCatalogVtbl
@@ -2051,6 +2090,95 @@ done:
     WindowsDeleteString(runtime_name);
 }
 
+static void test_composition_handle(void)
+{
+    static const WCHAR class_name[] = L"Windows.Foundation.Handles.Internal.CompositionHandle";
+    PFNGETACTIVATIONFACTORY get_factory;
+    ICompositionHandleWrapperFactory *wrapper_factory = NULL;
+    IUnwrapCompositionHandle *unwrap = NULL;
+    IActivationFactory *factory = NULL;
+    IInspectable *statics = NULL, *composition = NULL;
+    HANDLE handle, original, duplicate = NULL;
+    HSTRING classid = NULL;
+    DWORD flags;
+    HRESULT hr;
+
+    get_factory = (void *)GetProcAddress(GetModuleHandleW(L"combase.dll"), "DllGetActivationFactory");
+    ok(!!get_factory, "DllGetActivationFactory is unavailable.\n");
+    if (!get_factory) return;
+
+    hr = WindowsCreateString(class_name, ARRAY_SIZE(class_name) - 1, &classid);
+    ok(hr == S_OK, "WindowsCreateString returned %#lx.\n", hr);
+    hr = get_factory(classid, &factory);
+    ok(hr == S_OK, "DllGetActivationFactory returned %#lx.\n", hr);
+    ok(!!factory, "Expected composition handle activation factory.\n");
+    if (!factory) goto done;
+
+    hr = IActivationFactory_QueryInterface(factory, &IID_ICompositionHandleStatics, (void **)&statics);
+    ok(hr == S_OK, "Composition handle statics QueryInterface returned %#lx.\n", hr);
+    hr = IActivationFactory_QueryInterface(factory, &IID_ICompositionHandleWrapperFactory,
+                                           (void **)&wrapper_factory);
+    ok(hr == S_OK, "Composition handle wrapper factory QueryInterface returned %#lx.\n", hr);
+    if (!wrapper_factory) goto done;
+
+    handle = CreateEventW(NULL, TRUE, FALSE, NULL);
+    ok(!!handle, "CreateEventW failed, error %lu.\n", GetLastError());
+    original = handle;
+    hr = wrapper_factory->lpVtbl->CreateAndAttachHandle(wrapper_factory, &handle,
+                                                       &IID_ICompositionHandle, (void **)&composition);
+    ok(hr == S_OK, "CreateAndAttachHandle returned %#lx.\n", hr);
+    ok(!handle, "CreateAndAttachHandle did not consume handle %p.\n", handle);
+    ok(!!composition, "CreateAndAttachHandle returned no object.\n");
+    if (!composition) goto done;
+
+    hr = IInspectable_QueryInterface(composition, &IID_IUnwrapCompositionHandle, (void **)&unwrap);
+    ok(hr == S_OK, "IUnwrapCompositionHandle QueryInterface returned %#lx.\n", hr);
+    if (unwrap)
+    {
+        hr = unwrap->lpVtbl->CopyTo(unwrap, &duplicate);
+        ok(hr == S_OK, "IUnwrapCompositionHandle::CopyTo returned %#lx.\n", hr);
+        ok(!!duplicate && duplicate != original, "Expected duplicated handle, got %p from %p.\n",
+           duplicate, original);
+        if (duplicate)
+        {
+            ok(SetEvent(duplicate), "SetEvent failed, error %lu.\n", GetLastError());
+            ok(WaitForSingleObject(duplicate, 0) == WAIT_OBJECT_0,
+               "Duplicated event was not signaled.\n");
+            CloseHandle(duplicate);
+            duplicate = NULL;
+        }
+    }
+    if (unwrap)
+    {
+        unwrap->lpVtbl->Release(unwrap);
+        unwrap = NULL;
+    }
+    IInspectable_Release(composition);
+    composition = NULL;
+    SetLastError(0xdeadbeef);
+    ok(!GetHandleInformation(original, &flags) && GetLastError() == ERROR_INVALID_HANDLE,
+       "Transferred handle %p remained open, error %lu.\n", original, GetLastError());
+
+    handle = CreateEventW(NULL, TRUE, FALSE, NULL);
+    ok(!!handle, "CreateEventW failed, error %lu.\n", GetLastError());
+    original = handle;
+    hr = wrapper_factory->lpVtbl->CreateAndAttachHandle(wrapper_factory, &handle,
+                                                       &IID_IClassFactory, (void **)&composition);
+    ok(hr == E_NOINTERFACE, "Unsupported CreateAndAttachHandle IID returned %#lx.\n", hr);
+    ok(handle == original, "Failed CreateAndAttachHandle consumed handle %p as %p.\n", original, handle);
+    ok(!composition, "Failed CreateAndAttachHandle returned object %p.\n", composition);
+    CloseHandle(handle);
+
+done:
+    if (duplicate) CloseHandle(duplicate);
+    if (unwrap) unwrap->lpVtbl->Release(unwrap);
+    if (composition) IInspectable_Release(composition);
+    if (wrapper_factory) wrapper_factory->lpVtbl->Release(wrapper_factory);
+    if (statics) IInspectable_Release(statics);
+    if (factory) IActivationFactory_Release(factory);
+    WindowsDeleteString(classid);
+}
+
 START_TEST(roapi)
 {
     char **argv;
@@ -2078,6 +2206,7 @@ START_TEST(roapi)
     test_error_reporting();
     test_language_exception_error_info();
     test_extension_catalog();
+    test_composition_handle();
 
     SetLastError(0xdeadbeef);
     ret = DeleteFileW(L"wine.combase.test.dll");

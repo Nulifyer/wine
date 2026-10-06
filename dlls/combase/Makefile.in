@@ -7,6 +7,7 @@ DELAYIMPORTS = oleaut32 shlwapi xmllite
 SOURCES = \
 	apartment.c \
 	combase.c \
+	composition_handle.c \
 	dcom.idl \
 	errorinfo.c \
 	extensioncatalog.c \

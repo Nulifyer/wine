@@ -1260,6 +1260,12 @@ int notify_dwm_window_sprite_created( struct desktop *desktop, unsigned int gene
         return 0;
     if (!queue_dwm_window_message( port, update, sizeof(update), "sprite-update", window ))
         return 0;
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server dwm-window-sprite-data window=%08x "
+                 "surface=%08x size=%ux%u rect=%d,%d-%d,%d visible=%u\n",
+                 window, logical_surface, surface_width, surface_height,
+                 window_rect->left, window_rect->top, window_rect->right,
+                 window_rect->bottom, !!(style & WS_VISIBLE) );
     return 1;
 }
 
@@ -1280,6 +1286,12 @@ void notify_dwm_window_sprite_updated( struct desktop *desktop, unsigned int gen
                              window_rect, client_rect, logical_surface,
                              surface_width, surface_height );
     queue_dwm_window_message( port, data, sizeof(data), "sprite-update", window );
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: server dwm-window-sprite-data window=%08x "
+                 "surface=%08x size=%ux%u rect=%d,%d-%d,%d visible=%u\n",
+                 window, logical_surface, surface_width, surface_height,
+                 window_rect->left, window_rect->top, window_rect->right,
+                 window_rect->bottom, !!(style & WS_VISIBLE) );
 }
 
 void notify_dwm_window_sprite_destroyed( struct desktop *desktop, unsigned int generation,
@@ -1431,6 +1443,33 @@ void notify_dwm_window_target_destroyed( unsigned int session_id, unsigned int w
 
     if (port && port->kernel_session_phase == DWM_SESSION_PORT_READY)
         queue_dwm_window_target_message( port, 0x40000046, window, type, 0 );
+}
+
+int notify_dwm_blurred_wallpaper_surface( unsigned int session_id, struct object *surface,
+                                          const struct rectangle *rect )
+{
+    struct alpc_port *port = find_dwm_session_port( session_id );
+    unsigned char data[28] = {0};
+    obj_handle_t handle = 0;
+    unsigned __int64 value = 0;
+
+    /* The native syscall is asynchronous and succeeds when DWM is absent. */
+    if (!port || port->kernel_session_phase != DWM_SESSION_PORT_READY) return 1;
+    if (surface)
+    {
+        if (!(handle = alloc_handle_no_access_check( port->thread->process, surface, 0, 0 )))
+            return 0;
+        value = handle;
+    }
+    put_u32( data, 0x40000058 );
+    memcpy( data + 4, &value, sizeof(value) );
+    memcpy( data + 12, rect, sizeof(*rect) );
+    if (!queue_dwm_window_message( port, data, sizeof(data), "blurred-wallpaper", 0 ))
+    {
+        if (handle) close_handle( port->thread->process, handle );
+        return 0;
+    }
+    return 1;
 }
 
 static void unlink_pending( struct alpc_port *client )

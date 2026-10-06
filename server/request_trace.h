@@ -1241,6 +1241,7 @@ static void dump_unload_registry_request( const struct unload_registry_request *
 {
     fprintf( stderr, " parent=%04x", req->parent );
     fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, ", flags=%08x", req->flags );
     dump_varargs_unicode_str( ", name=", cur_size );
 }
 
@@ -4607,6 +4608,15 @@ static void dump_destroy_dcomp_window_target_request( const struct destroy_dcomp
     fprintf( stderr, ", type=%08x", req->type );
 }
 
+static void dump_set_dcomp_blurred_wallpaper_surface_request( const struct set_dcomp_blurred_wallpaper_surface_request *req )
+{
+    fprintf( stderr, " surface=%04x", req->surface );
+    fprintf( stderr, ", left=%d", req->left );
+    fprintf( stderr, ", top=%d", req->top );
+    fprintf( stderr, ", right=%d", req->right );
+    fprintf( stderr, ", bottom=%d", req->bottom );
+}
+
 static void dump_set_dcomp_channel_completion_event_request( const struct set_dcomp_channel_completion_event_request *req )
 {
     fprintf( stderr, " channel=%08x", req->channel );
@@ -5289,6 +5299,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_present_dcomp_token_request,
     (dump_func)dump_create_dcomp_window_target_request,
     (dump_func)dump_destroy_dcomp_window_target_request,
+    (dump_func)dump_set_dcomp_blurred_wallpaper_surface_request,
     (dump_func)dump_set_dcomp_channel_completion_event_request,
     (dump_func)dump_get_dwm_desktop_id_request,
     (dump_func)dump_check_process_session_request,
@@ -5736,6 +5747,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_create_dcomp_window_target_reply,
     NULL,
     NULL,
+    NULL,
     (dump_func)dump_get_dwm_desktop_id_reply,
     NULL,
     (dump_func)dump_create_d3d11_fence_reply,
@@ -6181,6 +6193,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "present_dcomp_token",
     "create_dcomp_window_target",
     "destroy_dcomp_window_target",
+    "set_dcomp_blurred_wallpaper_surface",
     "set_dcomp_channel_completion_event",
     "get_dwm_desktop_id",
     "check_process_session",

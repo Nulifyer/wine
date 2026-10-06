@@ -1196,7 +1196,7 @@
 @ stdcall PowerSetRequest(long long)
 @ stdcall -import PrefetchVirtualMemory(ptr ptr ptr long)
 @ stdcall PrepareTape(ptr long long)
-@ stub PrivCopyFileExW
+@ stdcall -import PrivCopyFileExW(wstr wstr ptr ptr ptr long)
 @ stub PrivMoveFileIdentityW
 @ stdcall -i386 -private PrivateFreeLibrary(long) krnl386.exe16.PrivateFreeLibrary
 @ stdcall -i386 -private PrivateLoadLibrary(str) krnl386.exe16.PrivateLoadLibrary

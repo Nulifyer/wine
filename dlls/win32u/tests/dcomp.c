@@ -465,7 +465,6 @@ static void test_frame_statistics(void)
     struct dcomposition_capability_info capabilities;
     LARGE_INTEGER before, after, frequency;
     NTSTATUS status;
-    UINT i;
 
     memset( &statistics, 0xcc, sizeof(statistics) );
     memset( &capabilities, 0xcc, sizeof(capabilities) );
@@ -497,8 +496,12 @@ static void test_frame_statistics(void)
         "next frame %s does not follow current time %s\n",
         wine_dbgstr_longlong(statistics.next_estimated_frame_time.QuadPart),
         wine_dbgstr_longlong(statistics.current_time.QuadPart) );
-    for (i = 0; i < ARRAY_SIZE(capabilities.values); ++i)
-        ok( !capabilities.values[i], "capability %u is %#x\n", i, capabilities.values[i] );
+    ok( !capabilities.values[0], "capability 0 is %#x\n", capabilities.values[0] );
+    ok( !capabilities.values[1], "capability 1 is %#x\n", capabilities.values[1] );
+    ok( !capabilities.values[2], "WARP capability is %#x\n", capabilities.values[2] );
+    ok( capabilities.values[3] == 1, "effects-supported capability is %#x\n",
+        capabilities.values[3] );
+    ok( !capabilities.values[4], "capability 4 is %#x\n", capabilities.values[4] );
 
     Sleep( 30 );
     memset( &second, 0xcc, sizeof(second) );
@@ -5331,6 +5334,104 @@ static void test_hlsurf_destroyed_window_lifetime(HANDLE surface)
     ok( ret, "destroyed-window surface close failed, error %lu\n", GetLastError() );
 }
 
+static void test_blurred_wallpaper_surface_delivery( HANDLE port, LARGE_INTEGER *timeout )
+{
+    struct dwm_session_message received = {0};
+    RECT rect = {-32, -16, 1280, 800}, received_rect = {0};
+    HANDLE event = NULL, connection = NULL, surface = NULL, wrong_type = NULL, dwm_surface = NULL;
+    UINT channel = 0, channel_size = 0x1000;
+    UINT create[] = {2, 1, 0xbe, 1};
+    UINT publish[] = {9, 1, 0, 0};
+    BYTE *buffer = NULL, released;
+    ULONG processed;
+    NTSTATUS status;
+    SIZE_T size;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!event, "wallpaper connection event creation failed, error %lu\n", GetLastError() );
+    if (!event) return;
+    status = NtDCompositionCreateConnection( TRUE, event, &connection );
+    ok( status == STATUS_SUCCESS, "wallpaper connection creation returned %#lx\n", status );
+    if (status) goto done;
+    status = NtDCompositionCreateChannel( &channel, &channel_size, (void **)&buffer, 0 );
+    ok( status == STATUS_SUCCESS, "wallpaper channel creation returned %#lx\n", status );
+    if (status) goto done;
+
+    memcpy( buffer, create, sizeof(create) );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(create),
+                                                       &processed, &released );
+    ok( status == STATUS_SUCCESS, "wallpaper surface creation returned %#lx\n", status );
+    memcpy( buffer, publish, sizeof(publish) );
+    status = NtDCompositionProcessChannelBatchBuffer( channel, sizeof(publish),
+                                                       &processed, &released );
+    memcpy( &surface, buffer + 8, sizeof(surface) );
+    ok( status == STATUS_SUCCESS && !!surface,
+        "wallpaper surface publish returned %#lx, handle %p\n", status, surface );
+    if (status || !surface) goto done;
+
+    status = NtDCompositionSetBlurredWallpaperSurface( surface, NULL );
+    ok( status == STATUS_INVALID_PARAMETER,
+        "wallpaper surface without rectangle returned %#lx\n", status );
+
+    status = NtDCompositionCreateSharedResourceHandle( 0xb8, &wrong_type );
+    ok( status == STATUS_SUCCESS, "wrong-type wallpaper handle returned %#lx\n", status );
+    if (!status)
+    {
+        status = NtDCompositionSetBlurredWallpaperSurface( wrong_type, &rect );
+        ok( status == STATUS_INVALID_PARAMETER,
+            "wrong-type wallpaper surface returned %#lx\n", status );
+    }
+
+    status = NtDCompositionSetBlurredWallpaperSurface( surface, &rect );
+    ok( status == STATUS_SUCCESS, "wallpaper surface set returned %#lx\n", status );
+    memset( &received, 0, sizeof(received) );
+    size = sizeof(received);
+    status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                        &size, NULL, timeout );
+    ok( status == STATUS_SUCCESS, "wallpaper surface receive returned %#lx\n", status );
+    ok( !status && received.header.Type == (ALPC_MESSAGE_TYPE_DATAGRAM | 0x8000),
+        "got wallpaper surface type %#x\n", received.header.Type );
+    ok( !status && received.header.DataLength == 28,
+        "got wallpaper surface length %#x\n", received.header.DataLength );
+    ok( !status && received.data[0] == 0x40000058,
+        "got wallpaper surface command %#lx\n", received.data[0] );
+    if (!status)
+    {
+        memcpy( &dwm_surface, received.data + 1, sizeof(dwm_surface) );
+        memcpy( &received_rect, received.data + 3, sizeof(received_rect) );
+    }
+    ok( !!dwm_surface && dwm_surface != surface,
+        "got DWM wallpaper handle %p, source %p\n", dwm_surface, surface );
+    ok( EqualRect( &received_rect, &rect ), "got wallpaper rectangle %s, expected %s\n",
+        wine_dbgstr_rect( &received_rect ), wine_dbgstr_rect( &rect ) );
+    if (dwm_surface) CloseHandle( dwm_surface );
+
+    status = NtDCompositionSetBlurredWallpaperSurface( NULL, NULL );
+    ok( status == STATUS_SUCCESS, "wallpaper surface clear returned %#lx\n", status );
+    memset( &received, 0, sizeof(received) );
+    size = sizeof(received);
+    status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                        &size, NULL, timeout );
+    ok( status == STATUS_SUCCESS, "wallpaper surface clear receive returned %#lx\n", status );
+    ok( !status && received.header.DataLength == 28 &&
+        received.data[0] == 0x40000058 && !received.data[1] && !received.data[2],
+        "got wallpaper surface clear length %#x payload %#lx/%#lx/%#lx\n",
+        received.header.DataLength, received.data[0], received.data[1], received.data[2] );
+    if (!status)
+    {
+        memcpy( &received_rect, received.data + 3, sizeof(received_rect) );
+        ok( IsRectEmpty( &received_rect ), "got nonempty clear rectangle %s\n",
+            wine_dbgstr_rect( &received_rect ) );
+    }
+
+done:
+    if (wrong_type) CloseHandle( wrong_type );
+    if (surface) CloseHandle( surface );
+    if (channel) NtDCompositionDestroyChannel( channel );
+    if (connection) NtDCompositionDestroyConnection( connection );
+    if (event) CloseHandle( event );
+}
+
 static void test_dwm_session_message_delivery(void)
 {
     BOOL (WINAPI *pCheckProcessSession)(DWORD);
@@ -6272,6 +6373,8 @@ static void test_dwm_session_message_delivery(void)
         ok( saw_destroy, "target window destroy was not delivered\n" );
         target_window = NULL;
     }
+
+    test_blurred_wallpaper_surface_delivery( port, &timeout );
 
 done:
     if (child_target) CloseHandle( child_target );

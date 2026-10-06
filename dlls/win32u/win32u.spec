@@ -50,7 +50,7 @@
 @ stdcall -syscall NtDCompositionReleaseAllResources(long ptr)
 @ stub -syscall NtDCompositionRemoveCrossDeviceVisualChild
 @ stub -syscall NtDCompositionRetireFrame
-@ stub -syscall NtDCompositionSetBlurredWallpaperSurface
+@ stdcall -syscall NtDCompositionSetBlurredWallpaperSurface(long ptr)
 @ stdcall -syscall NtDCompositionSetChannelCommitCompletionEvent(long long long)
 @ stdcall -syscall NtDCompositionSetChannelConnectionId(long long long)
 @ stub -syscall NtDCompositionSetChildRootVisual

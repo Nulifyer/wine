@@ -2253,6 +2253,7 @@ struct process_info
 @REQ(unload_registry)
     obj_handle_t parent;       /* handle to the parent key */
     unsigned int attributes;   /* object attributes */
+    unsigned int flags;        /* unload flags */
     VARARG(name,unicode_str);  /* key name */
 @END
 
@@ -5291,6 +5292,15 @@ struct alpc_message_info
 @REQ(destroy_dcomp_window_target)
     user_handle_t window;         /* same-process target window */
     unsigned int type;            /* _HwndTargetType, zero through two */
+@END
+
+/* Publish the session's blurred-wallpaper composition surface to DWM. */
+@REQ(set_dcomp_blurred_wallpaper_surface)
+    obj_handle_t surface;         /* type-0xbe shared visual surface, or zero */
+    int left;                     /* virtual-screen rectangle */
+    int top;
+    int right;
+    int bottom;
 @END
 
 /* Retain the event signaled when one channel batch is consumed. */

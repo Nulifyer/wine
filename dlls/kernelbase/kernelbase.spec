@@ -1226,7 +1226,7 @@
 # @ stub PoolPerAppKeyStateInternal
 @ stdcall PostQueuedCompletionStatus(long long ptr ptr)
 @ stdcall PrefetchVirtualMemory(ptr ptr ptr long)
-@ stub PrivCopyFileExW
+@ stdcall PrivCopyFileExW(wstr wstr ptr ptr ptr long)
 @ stdcall PrivilegeCheck(ptr ptr ptr)
 @ stdcall PrivilegedServiceAuditAlarmW(wstr wstr long ptr long)
 @ stdcall ProcessIdToSessionId(long ptr)

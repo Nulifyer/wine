@@ -108,6 +108,7 @@ static VOID      (WINAPI  *pRtlMoveMemory)(LPVOID,LPCVOID,SIZE_T);
 static VOID      (WINAPI  *pRtlFillMemory)(LPVOID,SIZE_T,BYTE);
 static VOID      (WINAPI  *pRtlFillMemoryUlong)(LPVOID,SIZE_T,ULONG);
 static VOID      (WINAPI  *pRtlZeroMemory)(LPVOID,SIZE_T);
+static VOID      (WINAPI  *pRtlFlushHeaps)(void);
 #ifdef __i386__
 static USHORT    (FASTCALL *pRtlUshortByteSwap)(USHORT source);
 static ULONG     (FASTCALL *pRtlUlongByteSwap)(ULONG source);
@@ -210,6 +211,7 @@ static void InitFunctionPtrs(void)
 	pRtlFillMemory = (void *)GetProcAddress(hntdll, "RtlFillMemory");
 	pRtlFillMemoryUlong = (void *)GetProcAddress(hntdll, "RtlFillMemoryUlong");
 	pRtlZeroMemory = (void *)GetProcAddress(hntdll, "RtlZeroMemory");
+        pRtlFlushHeaps = (void *)GetProcAddress(hntdll, "RtlFlushHeaps");
 #ifdef __i386__
         pRtlUshortByteSwap = (void *)GetProcAddress(hntdll, "RtlUshortByteSwap");
         pRtlUlongByteSwap = (void *)GetProcAddress(hntdll, "RtlUlongByteSwap");
@@ -745,6 +747,28 @@ static void test_RtlComputeCrc32(void)
 
   crc = RtlComputeCrc32(crc, (const BYTE *)src, LEN);
   ok(crc == 0x40861dc2,"Expected 0x40861dc2, got %8lx\n", crc);
+}
+
+
+static void test_RtlFlushHeaps(void)
+{
+    static const char contents[] = "RtlFlushHeaps allocation";
+    char *buffer;
+
+    if (!pRtlFlushHeaps)
+    {
+        win_skip("RtlFlushHeaps is unavailable\n");
+        return;
+    }
+
+    buffer = RtlAllocateHeap(GetProcessHeap(), 0, sizeof(contents));
+    ok(!!buffer, "failed to allocate test buffer\n");
+    if (!buffer) return;
+
+    memcpy(buffer, contents, sizeof(contents));
+    pRtlFlushHeaps();
+    ok(!memcmp(buffer, contents, sizeof(contents)), "heap contents changed after flush\n");
+    ok(RtlFreeHeap(GetProcessHeap(), 0, buffer), "failed to free test buffer\n");
 }
 
 
@@ -6837,6 +6861,7 @@ START_TEST(rtl)
     test_RtlAreLongPathsEnabled();
     test_process_protection();
     test_RtlComputeCrc32();
+    test_RtlFlushHeaps();
     test_HandleTables();
     test_RtlAllocateAndInitializeSid();
     test_RtlDeleteTimer();

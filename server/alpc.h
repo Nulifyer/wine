@@ -66,5 +66,8 @@ extern int notify_dwm_window_target_created( unsigned int session_id, unsigned i
                                              unsigned int type, struct object *target );
 extern void notify_dwm_window_target_destroyed( unsigned int session_id, unsigned int window,
                                                 unsigned int type );
+extern int notify_dwm_blurred_wallpaper_surface( unsigned int session_id,
+                                                 struct object *surface,
+                                                 const struct rectangle *rect );
 
 #endif /* __WINE_SERVER_ALPC_H */

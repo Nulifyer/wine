@@ -169,6 +169,9 @@ static NTSTATUS (WINAPI * pNtNotifyChangeMultipleKeys)(HANDLE,ULONG,OBJECT_ATTRI
                                                        void*,IO_STATUS_BLOCK*,ULONG,BOOLEAN,void*,ULONG,BOOLEAN);
 static NTSTATUS (WINAPI * pNtWaitForSingleObject)(HANDLE,BOOLEAN,const LARGE_INTEGER*);
 static NTSTATUS (WINAPI * pNtLoadKeyEx)(const OBJECT_ATTRIBUTES*,OBJECT_ATTRIBUTES*,ULONG,HANDLE,HANDLE,ACCESS_MASK,HANDLE*,IO_STATUS_BLOCK*);
+static NTSTATUS (WINAPI * pNtLoadKey3)(const OBJECT_ATTRIBUTES*,OBJECT_ATTRIBUTES*,ULONG,const CM_EXTENDED_PARAMETER*,ULONG,ACCESS_MASK,HANDLE*,void*);
+static NTSTATUS (WINAPI * pNtUnloadKey)(OBJECT_ATTRIBUTES*);
+static NTSTATUS (WINAPI * pNtUnloadKey2)(OBJECT_ATTRIBUTES*,ULONG);
 
 static HMODULE hntdll = 0;
 static UNICODE_STRING winetestpath;
@@ -234,6 +237,9 @@ static BOOL InitFunctionPtrs(void)
     pNtQueryLicenseValue = (void *)GetProcAddress(hntdll, "NtQueryLicenseValue");
     pNtOpenKeyEx = (void *)GetProcAddress(hntdll, "NtOpenKeyEx");
     pNtNotifyChangeMultipleKeys = (void *)GetProcAddress(hntdll, "NtNotifyChangeMultipleKeys");
+    pNtLoadKey3 = (void *)GetProcAddress(hntdll, "NtLoadKey3");
+    pNtUnloadKey = (void *)GetProcAddress(hntdll, "NtUnloadKey");
+    pNtUnloadKey2 = (void *)GetProcAddress(hntdll, "NtUnloadKey2");
 
     return TRUE;
 }
@@ -2632,6 +2638,37 @@ static void test_NtRegLoadKeyEx(void)
     todo_wine ok(key != NULL, "key is null\n");
     if (key) pNtClose(key);
     RtlFreeUnicodeString(&key_pathW);
+
+    if (pNtLoadKey3 && pNtUnloadKey)
+    {
+        pRtlCreateUnicodeString(&key_pathW, L"\\Registry\\Machine\\WineTest3");
+        InitializeObjectAttributes(&key_attr, &key_pathW, OBJ_CASE_INSENSITIVE, NULL, NULL);
+        status = pNtLoadKey3(&key_attr, &file_attr, REG_LOAD_HIVE_OPEN_HANDLE, NULL, 0,
+                             KEY_READ, &key, NULL);
+        ok(status == STATUS_SUCCESS, "NtLoadKey3 returned %#lx\n", status);
+        ok(key != NULL, "NtLoadKey3 did not return the hive root handle\n");
+        if (key) pNtClose(key);
+        status = pNtUnloadKey(&key_attr);
+        ok(status == STATUS_SUCCESS, "NtUnloadKey returned %#lx\n", status);
+        RtlFreeUnicodeString(&key_pathW);
+    }
+
+    if (pNtLoadKey3 && pNtUnloadKey && pNtUnloadKey2)
+    {
+        pRtlCreateUnicodeString(&key_pathW, L"\\Registry\\Machine\\WineTest4");
+        InitializeObjectAttributes(&key_attr, &key_pathW, OBJ_CASE_INSENSITIVE, NULL, NULL);
+        status = pNtLoadKey3(&key_attr, &file_attr, REG_LOAD_HIVE_OPEN_HANDLE, NULL, 0,
+                             KEY_READ, &key, NULL);
+        ok(status == STATUS_SUCCESS, "NtLoadKey3 returned %#lx\n", status);
+        ok(key != NULL, "NtLoadKey3 did not return the hive root handle\n");
+        status = pNtUnloadKey(&key_attr);
+        ok(status == STATUS_CANNOT_DELETE, "NtUnloadKey returned %#lx\n", status);
+        status = pNtUnloadKey2(&key_attr, REG_FORCE_UNLOAD);
+        ok(status == STATUS_SUCCESS, "NtUnloadKey2 returned %#lx\n", status);
+        if (key) pNtClose(key);
+        key = NULL;
+        RtlFreeUnicodeString(&key_pathW);
+    }
 
     set_privileges(SE_RESTORE_NAME, FALSE);
     set_privileges(SE_BACKUP_NAME, FALSE);

@@ -2664,6 +2664,33 @@ DECL_HANDLER(destroy_dcomp_window_target)
     detach_dcomp_window_target( target, 1 );
 }
 
+DECL_HANDLER(set_dcomp_blurred_wallpaper_surface)
+{
+    struct rectangle rect = {req->left, req->top, req->right, req->bottom};
+    struct dcomp_shared_resource *surface = NULL;
+
+    if (req->surface)
+    {
+        if (!(surface = (struct dcomp_shared_resource *)get_handle_obj(
+                  current->process, req->surface, 0, &dcomp_shared_resource_ops )))
+            return;
+        if (surface->type != 0xbe)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            goto done;
+        }
+    }
+
+    /* Native win32k retains this state on the default DComp connection and
+     * emits an asynchronous DWM message.  Message-delivery failure is not
+     * returned to the caller. */
+    notify_dwm_blurred_wallpaper_surface( current->process->session_id,
+                                          surface ? &surface->obj : NULL, &rect );
+
+done:
+    if (surface) release_object( surface );
+}
+
 DECL_HANDLER(open_dcomp_shared_resource)
 {
     struct dcomp_shared_resource *resource;

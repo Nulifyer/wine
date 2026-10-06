@@ -772,6 +772,52 @@ NTSTATUS WINAPI NtLoadKey2( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *fi
 }
 
 /******************************************************************************
+ *              NtLoadKey3  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtLoadKey3( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *file, ULONG flags,
+                            const CM_EXTENDED_PARAMETER *params, ULONG count, ACCESS_MASK access,
+                            HANDLE *roothandle, void *reserved )
+{
+    HANDLE trustkey = 0, event = 0, token = 0;
+    BOOL trustkey_seen = FALSE, event_seen = FALSE, token_seen = FALSE;
+    ULONG i;
+
+    TRACE( "(%p,%p,0x%x,%p,%lu,0x%x,%p,%p)\n",
+           attr, file, flags, params, count, access, roothandle, reserved );
+
+    if (reserved) return STATUS_INVALID_PARAMETER_8;
+    if (count && !params) return STATUS_INVALID_PARAMETER_4;
+
+    for (i = 0; i < count; i++)
+    {
+        if (params[i].Reserved) return STATUS_INVALID_PARAMETER_4;
+        switch (params[i].Type)
+        {
+        case CmExtendedParameterTrustClassKey:
+            if (trustkey_seen) return STATUS_INVALID_PARAMETER_4;
+            trustkey_seen = TRUE;
+            trustkey = params[i].Handle;
+            break;
+        case CmExtendedParameterEvent:
+            if (event_seen) return STATUS_INVALID_PARAMETER_4;
+            event_seen = TRUE;
+            event = params[i].Handle;
+            break;
+        case CmExtendedParameterFileAccessToken:
+            if (token_seen) return STATUS_INVALID_PARAMETER_4;
+            token_seen = TRUE;
+            token = params[i].Handle;
+            break;
+        default:
+            return STATUS_INVALID_PARAMETER_4;
+        }
+    }
+
+    if (token) FIXME( "file access token %p not supported\n", token );
+    return NtLoadKeyEx( attr, file, flags, trustkey, event, access, roothandle, NULL );
+}
+
+/******************************************************************************
  *              NtLoadKeyEx  (NTDLL.@)
  */
 NTSTATUS WINAPI NtLoadKeyEx( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *file, ULONG flags, HANDLE trustkey,
@@ -792,8 +838,11 @@ NTSTATUS WINAPI NtLoadKeyEx( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *f
     if (trustkey) FIXME("trustkey parameter not supported\n");
     if (event) FIXME("event parameter not supported\n");
     if (access) FIXME("access parameter not supported\n");
-    if (roothandle) FIXME("roothandle is not filled\n");
+    if (roothandle) *roothandle = 0;
     if (iostatus) FIXME("iostatus is not filled\n");
+
+    if (roothandle && !(flags & (REG_APP_HIVE | REG_LOAD_HIVE_OPEN_HANDLE)))
+        return STATUS_INVALID_PARAMETER_7;
 
     if (!(ret = get_nt_and_unix_names( &new_attr, &nt_name, &unix_name, FILE_OPEN, FALSE )))
     {
@@ -819,17 +868,16 @@ NTSTATUS WINAPI NtLoadKeyEx( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *f
 
     NtClose( key );
     free( objattr );
+    if (!ret && roothandle && (flags & (REG_APP_HIVE | REG_LOAD_HIVE_OPEN_HANDLE)))
+        ret = NtOpenKey( roothandle, access, attr );
     return ret;
 }
 
-/******************************************************************************
- *              NtUnloadKey  (NTDLL.@)
- */
-NTSTATUS WINAPI NtUnloadKey( OBJECT_ATTRIBUTES *attr )
+static NTSTATUS unload_key( OBJECT_ATTRIBUTES *attr, ULONG flags )
 {
     unsigned int ret;
 
-    TRACE( "(%p)\n", attr );
+    TRACE( "(%p,0x%lx)\n", attr, flags );
 
     if (!attr || !attr->ObjectName) return STATUS_ACCESS_VIOLATION;
     if (attr->Length != sizeof(*attr)) return STATUS_INVALID_PARAMETER;
@@ -839,11 +887,28 @@ NTSTATUS WINAPI NtUnloadKey( OBJECT_ATTRIBUTES *attr )
     {
         req->parent     = wine_server_obj_handle( attr->RootDirectory );
         req->attributes = attr->Attributes;
+        req->flags      = flags;
         wine_server_add_data( req, attr->ObjectName->Buffer, attr->ObjectName->Length );
         ret = wine_server_call(req);
     }
     SERVER_END_REQ;
     return ret;
+}
+
+/******************************************************************************
+ *              NtUnloadKey  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtUnloadKey( OBJECT_ATTRIBUTES *attr )
+{
+    return unload_key( attr, 0 );
+}
+
+/******************************************************************************
+ *              NtUnloadKey2  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtUnloadKey2( OBJECT_ATTRIBUTES *attr, ULONG flags )
+{
+    return unload_key( attr, flags );
 }
 
 

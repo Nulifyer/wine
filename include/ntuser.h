@@ -804,6 +804,7 @@ typedef enum _USERTHREADSTATECLASS
 
 W32KAPI NTSTATUS WINAPI NtDCompositionCreateConnection( BOOL is_dwm, HANDLE event, HANDLE *connection );
 W32KAPI NTSTATUS WINAPI NtDCompositionCreateSharedResourceHandle( UINT type, HANDLE *handle );
+W32KAPI NTSTATUS WINAPI NtDCompositionSetBlurredWallpaperSurface( HANDLE surface, const RECT *rect );
 W32KAPI BOOL WINAPI NtKSTInitialize( HANDLE stop_event, HANDLE update_event );
 W32KAPI UINT WINAPI NtKSTWait(void);
 W32KAPI NTSTATUS WINAPI NtMITCoreMsgKOpenConnectionTo( UINT selector, const void *routing_info );

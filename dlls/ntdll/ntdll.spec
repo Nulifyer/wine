@@ -283,6 +283,7 @@
 @ stdcall -syscall NtLoadDriver(ptr)
 @ stdcall -syscall NtLoadKey2(ptr ptr long)
 @ stdcall -syscall NtLoadKey(ptr ptr)
+@ stdcall -syscall NtLoadKey3(ptr ptr long ptr long long ptr ptr)
 @ stdcall -syscall NtLoadKeyEx(ptr ptr long long long long ptr ptr)
 @ stdcall -syscall NtLockFile(long long ptr ptr ptr ptr ptr ptr long long)
 # @ stub NtLockProductActivationKeys
@@ -469,6 +470,7 @@
 # @ stub NtTranslateFilePath
 @ stdcall -syscall NtUnloadDriver(ptr)
 @ stdcall -syscall NtUnloadKey(ptr)
+@ stdcall -syscall NtUnloadKey2(ptr long)
 # @ stub NtUnloadKeyEx
 @ stdcall -syscall NtUnlockFile(long ptr ptr ptr ptr)
 @ stdcall -syscall NtUnlockVirtualMemory(long ptr ptr long)
@@ -765,6 +767,7 @@
 @ stdcall RtlFlsFree(long)
 @ stdcall RtlFlsGetValue(long ptr)
 @ stdcall RtlFlsSetValue(long ptr)
+@ stdcall RtlFlushHeaps()
 @ stub RtlFlushPropertySet
 # @ stub RtlFlushSecureMemoryCache
 @ stdcall RtlFormatCurrentUserKeyPath(ptr)
@@ -1462,6 +1465,7 @@
 @ stdcall -private ZwLoadDriver(ptr) NtLoadDriver
 @ stdcall -private ZwLoadKey2(ptr ptr long) NtLoadKey2
 @ stdcall -private ZwLoadKey(ptr ptr) NtLoadKey
+@ stdcall -private ZwLoadKey3(ptr ptr long ptr long long ptr ptr) NtLoadKey3
 @ stdcall -private ZwLoadKeyEx(ptr ptr long long long long ptr ptr) NtLoadKeyEx
 @ stdcall -private ZwLockFile(long long ptr ptr ptr ptr ptr ptr long long) NtLockFile
 # @ stub ZwLockProductActivationKeys
@@ -1644,6 +1648,7 @@
 # @ stub ZwTranslateFilePath
 @ stdcall -private ZwUnloadDriver(ptr) NtUnloadDriver
 @ stdcall -private ZwUnloadKey(ptr) NtUnloadKey
+@ stdcall -private ZwUnloadKey2(ptr long) NtUnloadKey2
 # @ stub ZwUnloadKeyEx
 @ stdcall -private ZwUnlockFile(long ptr ptr ptr ptr) NtUnlockFile
 @ stdcall -private ZwUnlockVirtualMemory(long ptr ptr long) NtUnlockVirtualMemory

@@ -641,6 +641,71 @@ BOOL WINAPI CopyFileExW( const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUT
 }
 
 
+#define PRIVCOPY_FILE_COPY_METADATA 0x0010
+#define PRIVCOPY_FILE_COPY_SACL     0x0020
+#define PRIVCOPY_FILE_COPY_OWNER    0x0040
+#define PRIVCOPY_FILE_DIRECTORY     0x0080
+#define PRIVCOPY_FILE_BACKUP        0x0100
+#define PRIVCOPY_FILE_REPLACE       0x0200
+#define PRIVCOPY_FILE_SKIP_DACL     0x0400
+#define PRIVCOPY_FILE_PUBLIC_MASK   0x000f
+#define PRIVCOPY_FILE_PRIVATE_MASK  0x07f0
+
+static BOOL copy_directory_metadata( const WCHAR *source, const WCHAR *dest )
+{
+    HANDLE source_handle, dest_handle;
+    FILE_BASIC_INFORMATION info;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+
+    source_handle = CreateFileW( source, FILE_READ_ATTRIBUTES,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                 NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL );
+    if (source_handle == INVALID_HANDLE_VALUE) return FALSE;
+
+    dest_handle = CreateFileW( dest, FILE_WRITE_ATTRIBUTES,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL );
+    if (dest_handle == INVALID_HANDLE_VALUE)
+    {
+        CloseHandle( source_handle );
+        return FALSE;
+    }
+
+    status = NtQueryInformationFile( source_handle, &io, &info, sizeof(info), FileBasicInformation );
+    if (!status)
+        status = NtSetInformationFile( dest_handle, &io, &info, sizeof(info), FileBasicInformation );
+
+    CloseHandle( dest_handle );
+    CloseHandle( source_handle );
+    if (status) return set_ntstatus( status );
+    SetLastError( ERROR_SUCCESS );
+    return TRUE;
+}
+
+
+/***********************************************************************
+ * PrivCopyFileExW   (kernelbase.@)
+ */
+BOOL WINAPI PrivCopyFileExW( const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUTINE progress,
+                             void *param, BOOL *cancel_ptr, DWORD flags )
+{
+    DWORD unsupported = flags & ~(PRIVCOPY_FILE_PUBLIC_MASK | PRIVCOPY_FILE_PRIVATE_MASK);
+
+    TRACE("%s -> %s, %#lx\n", debugstr_w(source), debugstr_w(dest), flags);
+
+    if (unsupported) FIXME("unsupported flags %#lx\n", unsupported);
+    if (flags & (PRIVCOPY_FILE_COPY_SACL | PRIVCOPY_FILE_COPY_OWNER | PRIVCOPY_FILE_BACKUP))
+        FIXME("security and backup flags %#lx are not supported\n", flags & PRIVCOPY_FILE_PRIVATE_MASK);
+
+    if (flags & PRIVCOPY_FILE_DIRECTORY)
+        return copy_directory_metadata( source, dest );
+
+    return CopyFileExW( source, dest, progress, param, cancel_ptr,
+                        flags & PRIVCOPY_FILE_PUBLIC_MASK );
+}
+
+
 /**************************************************************************
  *	CopyFileW   (kernelbase.@)
  */

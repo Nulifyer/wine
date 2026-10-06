@@ -2372,6 +2372,12 @@ DECL_HANDLER(unload_registry)
         return;
     }
 
+    if (req->flags & ~REG_FORCE_UNLOAD)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+
     if (req->parent)
     {
         if (!(parent = get_hkey_obj( req->parent, 0 ))) return;
@@ -2380,7 +2386,7 @@ DECL_HANDLER(unload_registry)
 
     if ((key = open_named_object( &params )))
     {
-        if (key->obj.handle_count)
+        if (key->obj.handle_count && !(req->flags & REG_FORCE_UNLOAD))
             set_error( STATUS_CANNOT_DELETE );
         else if (key->obj.is_permanent)
             set_error( STATUS_ACCESS_DENIED );

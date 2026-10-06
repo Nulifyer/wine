@@ -46,6 +46,7 @@ static BOOL (WINAPI *pGetFileInformationByHandleEx)(HANDLE, FILE_INFO_BY_HANDLE_
 static HANDLE (WINAPI *pOpenFileById)(HANDLE, LPFILE_ID_DESCRIPTOR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD);
 static BOOL (WINAPI *pSetFileValidData)(HANDLE, LONGLONG);
 static HRESULT (WINAPI *pCopyFile2)(PCWSTR,PCWSTR,COPYFILE2_EXTENDED_PARAMETERS*);
+static BOOL (WINAPI *pPrivCopyFileExW)(LPCWSTR,LPCWSTR,LPPROGRESS_ROUTINE,LPVOID,LPBOOL,DWORD);
 static HANDLE (WINAPI *pCreateFile2)(LPCWSTR, DWORD, DWORD, DWORD, CREATEFILE2_EXTENDED_PARAMETERS*);
 static DWORD (WINAPI *pGetFinalPathNameByHandleA)(HANDLE, LPSTR, DWORD, DWORD);
 static DWORD (WINAPI *pGetFinalPathNameByHandleW)(HANDLE, LPWSTR, DWORD, DWORD);
@@ -102,6 +103,7 @@ static void InitFunctionPointers(void)
     pOpenFileById = (void *) GetProcAddress(hkernel32, "OpenFileById");
     pSetFileValidData = (void *) GetProcAddress(hkernel32, "SetFileValidData");
     pCopyFile2 = (void *) GetProcAddress(hkernel32, "CopyFile2");
+    pPrivCopyFileExW = (void *) GetProcAddress(hkernel32, "PrivCopyFileExW");
     pCreateFile2 = (void *) GetProcAddress(hkernel32, "CreateFile2");
     pGetFinalPathNameByHandleA = (void *) GetProcAddress(hkernel32, "GetFinalPathNameByHandleA");
     pGetFinalPathNameByHandleW = (void *) GetProcAddress(hkernel32, "GetFinalPathNameByHandleW");
@@ -950,6 +952,90 @@ static void test_CopyFileW(void)
     ok(ret, "DeleteFileW: error %ld\n", GetLastError());
     ret = DeleteFileW(dest);
     ok(ret, "DeleteFileW: error %ld\n", GetLastError());
+}
+
+static void test_PrivCopyFileExW(void)
+{
+    static const char source_data[] = "source-content";
+    static const char dest_data[] = "destination-content";
+    WCHAR temp_path[MAX_PATH], root[MAX_PATH], source[MAX_PATH], dest[MAX_PATH];
+    FILETIME source_time, dest_time;
+    HANDLE file;
+    DWORD written, read, ret;
+    char buffer[sizeof(source_data)];
+    BOOL success;
+
+    if (!pPrivCopyFileExW)
+    {
+        win_skip("PrivCopyFileExW is not available\n");
+        return;
+    }
+
+    ret = GetTempPathW( ARRAY_SIZE(temp_path), temp_path );
+    ok(ret && ret < ARRAY_SIZE(temp_path), "GetTempPathW failed, error %lu\n", GetLastError());
+    ret = GetTempFileNameW( temp_path, L"pcf", 0, root );
+    ok(ret, "GetTempFileNameW failed, error %lu\n", GetLastError());
+    DeleteFileW( root );
+    success = CreateDirectoryW( root, NULL );
+    ok(success, "CreateDirectoryW failed, error %lu\n", GetLastError());
+
+    swprintf( source, ARRAY_SIZE(source), L"%s\\source", root );
+    swprintf( dest, ARRAY_SIZE(dest), L"%s\\destination", root );
+    file = CreateFileW( source, GENERIC_WRITE | FILE_WRITE_ATTRIBUTES, 0, NULL, CREATE_ALWAYS, 0, NULL );
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileW failed, error %lu\n", GetLastError());
+    success = WriteFile( file, source_data, sizeof(source_data), &written, NULL );
+    ok(success && written == sizeof(source_data), "WriteFile failed, error %lu\n", GetLastError());
+    GetSystemTimeAsFileTime( &source_time );
+    source_time.dwLowDateTime -= 600000000;
+    success = SetFileTime( file, NULL, NULL, &source_time );
+    ok(success, "SetFileTime failed, error %lu\n", GetLastError());
+    CloseHandle( file );
+    SetFileAttributesW( source, FILE_ATTRIBUTE_READONLY );
+
+    file = CreateFileW( dest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL );
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileW failed, error %lu\n", GetLastError());
+    WriteFile( file, dest_data, sizeof(dest_data), &written, NULL );
+    CloseHandle( file );
+
+    success = pPrivCopyFileExW( source, dest, NULL, NULL, NULL, 0x0610 );
+    ok(success, "PrivCopyFileExW file copy failed, error %lu\n", GetLastError());
+    file = CreateFileW( dest, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL );
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileW failed, error %lu\n", GetLastError());
+    success = ReadFile( file, buffer, sizeof(buffer), &read, NULL );
+    ok(success && read == sizeof(source_data), "ReadFile failed, error %lu\n", GetLastError());
+    ok(!memcmp(buffer, source_data, sizeof(source_data)), "unexpected destination contents\n");
+    success = GetFileTime( file, NULL, NULL, &dest_time );
+    ok(success, "GetFileTime failed, error %lu\n", GetLastError());
+    ok(!CompareFileTime(&source_time, &dest_time), "destination time was not copied\n");
+    CloseHandle( file );
+    ok(GetFileAttributesW(dest) & FILE_ATTRIBUTE_READONLY, "destination is not read-only\n");
+    SetFileAttributesW( source, FILE_ATTRIBUTE_NORMAL );
+    SetFileAttributesW( dest, FILE_ATTRIBUTE_NORMAL );
+    DeleteFileW( source );
+    DeleteFileW( dest );
+
+    success = CreateDirectoryW( source, NULL );
+    ok(success, "CreateDirectoryW failed, error %lu\n", GetLastError());
+    success = CreateDirectoryW( dest, NULL );
+    ok(success, "CreateDirectoryW failed, error %lu\n", GetLastError());
+    file = CreateFileW( source, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL );
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileW failed, error %lu\n", GetLastError());
+    success = SetFileTime( file, NULL, NULL, &source_time );
+    ok(success, "SetFileTime failed, error %lu\n", GetLastError());
+    CloseHandle( file );
+    success = pPrivCopyFileExW( source, dest, NULL, NULL, NULL, 0x0690 );
+    ok(success, "PrivCopyFileExW directory metadata copy failed, error %lu\n", GetLastError());
+    file = CreateFileW( dest, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL );
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileW failed, error %lu\n", GetLastError());
+    success = GetFileTime( file, NULL, NULL, &dest_time );
+    ok(success, "GetFileTime failed, error %lu\n", GetLastError());
+    ok(!CompareFileTime(&source_time, &dest_time), "destination directory time was not copied\n");
+    CloseHandle( file );
+    RemoveDirectoryW( source );
+    RemoveDirectoryW( dest );
+    RemoveDirectoryW( root );
 }
 
 static void test_CopyFile2(void)
@@ -7065,6 +7151,7 @@ START_TEST(file)
     test_GetTempFileNameA();
     test_CopyFileA();
     test_CopyFileW();
+    test_PrivCopyFileExW();
     test_CopyFile2();
     test_CopyFileEx();
     test_CreateFile();

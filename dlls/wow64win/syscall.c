@@ -136,6 +136,14 @@ NTSTATUS WINAPI wow64_NtDCompositionCreateSharedResourceHandle( UINT *args )
     return status;
 }
 
+NTSTATUS WINAPI wow64_NtDCompositionSetBlurredWallpaperSurface( UINT *args )
+{
+    HANDLE surface = get_handle( &args );
+    const RECT *rect = get_ptr( &args );
+
+    return NtDCompositionSetBlurredWallpaperSurface( surface, rect );
+}
+
 NTSTATUS WINAPI wow64_NtDCompositionDestroyConnection( UINT *args )
 {
     return NtDCompositionDestroyConnection( get_handle( &args ) );

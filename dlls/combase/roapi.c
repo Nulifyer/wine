@@ -85,6 +85,7 @@ static inline struct activation_factory_entry *impl_from_activation_factory_prov
 
 HRESULT package_get_class_path(const WCHAR *classid, WCHAR **path);
 BOOL WINAPI QuirkIsEnabled(void *quirk);
+HRESULT composition_handle_get_factory(HSTRING classid, IActivationFactory **factory);
 HRESULT extension_catalog_get_factory(HSTRING classid, IActivationFactory **factory);
 
 /***********************************************************************
@@ -1838,7 +1839,12 @@ void WINAPI CleanupTlsOleState(void *unknown)
  */
 HRESULT WINAPI DllGetActivationFactory(HSTRING classid, IActivationFactory **factory)
 {
+    HRESULT hr;
+
     TRACE("(%s, %p)\n", debugstr_hstring(classid), factory);
+
+    hr = composition_handle_get_factory(classid, factory);
+    if (hr != REGDB_E_CLASSNOTREG) return hr;
     return extension_catalog_get_factory(classid, factory);
 }
 

@@ -2288,6 +2288,22 @@ ULONG WINAPI RtlCompactHeap( HANDLE handle, ULONG flags )
 
 
 /***********************************************************************
+ *           RtlFlushHeaps   (NTDLL.@)
+ *
+ * Flush allocation caches for all heaps in the current process.
+ *
+ * Wine's heap implementation does not maintain the backend and low
+ * fragmentation heap caches flushed by Windows, so there is no allocator
+ * state to discard here. Keep this distinct from RtlCompactHeap: Windows
+ * flushes caches without promising to compact every heap.
+ */
+void WINAPI RtlFlushHeaps(void)
+{
+    TRACE( "\n" );
+}
+
+
+/***********************************************************************
  *           RtlLockHeap   (NTDLL.@)
  *
  * Lock a Heap.

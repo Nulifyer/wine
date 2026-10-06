@@ -215,6 +215,52 @@ NTSTATUS WINAPI wow64_NtLoadKeyEx( UINT *args )
     return status;
 }
 
+/**********************************************************************
+ *           wow64_NtLoadKey3
+ */
+NTSTATUS WINAPI wow64_NtLoadKey3( UINT *args )
+{
+    OBJECT_ATTRIBUTES32 *attr32 = get_ptr( &args );
+    OBJECT_ATTRIBUTES32 *file32 = get_ptr( &args );
+    ULONG flags = get_ulong( &args );
+    CM_EXTENDED_PARAMETER32 *params32 = get_ptr( &args );
+    ULONG count = get_ulong( &args );
+    ACCESS_MASK desired_access = get_ulong( &args );
+    ULONG *rootkey_ptr = get_ptr( &args );
+    void *reserved = get_ptr( &args );
+    CM_EXTENDED_PARAMETER *params = NULL;
+    struct object_attr64 attr, file;
+    HANDLE rootkey = 0;
+    NTSTATUS status;
+    ULONG i;
+
+    if (count && params32)
+    {
+        params = Wow64AllocateTemp( count * sizeof(*params) );
+        for (i = 0; i < count; i++)
+        {
+            params[i].Type = params32[i].Type;
+            params[i].Reserved = params32[i].Reserved;
+            params[i].ULong64 = params32[i].ULong64;
+            switch (params[i].Type)
+            {
+            case CmExtendedParameterTrustClassKey:
+            case CmExtendedParameterEvent:
+            case CmExtendedParameterFileAccessToken:
+                params[i].Handle = ULongToHandle( params32[i].Handle );
+                break;
+            default:
+                break;
+            }
+        }
+    }
+
+    status = NtLoadKey3( objattr_32to64( &attr, attr32 ), objattr_32to64( &file, file32 ), flags,
+                         params, count, desired_access, rootkey_ptr ? &rootkey : NULL, reserved );
+    if (rootkey_ptr) put_handle( rootkey_ptr, rootkey );
+    return status;
+}
+
 
 /**********************************************************************
  *           wow64_NtNotifyChangeKey
@@ -502,4 +548,18 @@ NTSTATUS WINAPI wow64_NtUnloadKey( UINT *args )
     struct object_attr64 attr;
 
     return NtUnloadKey( objattr_32to64( &attr, attr32 ));
+}
+
+
+/**********************************************************************
+ *           wow64_NtUnloadKey2
+ */
+NTSTATUS WINAPI wow64_NtUnloadKey2( UINT *args )
+{
+    OBJECT_ATTRIBUTES32 *attr32 = get_ptr( &args );
+    ULONG flags = get_ulong( &args );
+
+    struct object_attr64 attr;
+
+    return NtUnloadKey2( objattr_32to64( &attr, attr32 ), flags );
 }

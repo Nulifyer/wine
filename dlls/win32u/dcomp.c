@@ -5329,6 +5329,44 @@ NTSTATUS WINAPI NtDCompositionCreateSharedResourceHandle( UINT type, HANDLE *han
     return create_dcomp_shared_resource( type, handle );
 }
 
+NTSTATUS WINAPI NtDCompositionSetBlurredWallpaperSurface( HANDLE surface, const RECT *user_rect )
+{
+    RECT rect = {0};
+    NTSTATUS status = STATUS_SUCCESS;
+
+    TRACE( "surface %p, rect %s\n", surface, wine_dbgstr_rect( user_rect ) );
+
+    if (!user_rect)
+    {
+        if (surface) return STATUS_INVALID_PARAMETER;
+    }
+    else
+    {
+        __TRY
+        {
+            rect = *user_rect;
+        }
+        __EXCEPT
+        {
+            status = STATUS_INVALID_PARAMETER;
+        }
+        __ENDTRY
+        if (status) return status;
+    }
+
+    SERVER_START_REQ( set_dcomp_blurred_wallpaper_surface )
+    {
+        req->surface = wine_server_obj_handle( surface );
+        req->left = rect.left;
+        req->top = rect.top;
+        req->right = rect.right;
+        req->bottom = rect.bottom;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 NTSTATUS WINAPI NtDCompositionDestroyConnection( HANDLE connection )
 {
     struct dcomp_connection_batch_view *view;
@@ -6897,9 +6935,16 @@ NTSTATUS WINAPI NtDCompositionGetFrameStatistics( struct dcomposition_frame_stat
     statistics->time_frequency = frequency;
     statistics->next_estimated_frame_time.QuadPart = next_frame;
 
-    /* These fields describe compositor/device capabilities rather than clock state.
-     * Leave unsupported capabilities disabled until their backing paths exist. */
-    if (capabilities) memset( capabilities, 0, sizeof(*capabilities) );
+    if (capabilities)
+    {
+        memset( capabilities, 0, sizeof(*capabilities) );
+
+        /* Native DComp consumes values[2] as its WARP flag and values[3] as
+         * CompositionCapabilities::AreEffectsSupported().  The DComp path
+         * implemented here is not the Windows WARP rasterizer, and supports
+         * the effect/surface path used by native desktop wallpaper. */
+        capabilities->values[3] = 1;
+    }
 
     return STATUS_SUCCESS;
 }

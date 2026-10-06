@@ -744,6 +744,24 @@ typedef struct DECLSPEC_ALIGN(8)
     };
 } MEM_EXTENDED_PARAMETER32;
 
+typedef struct DECLSPEC_ALIGN(8)
+{
+    struct
+    {
+        DWORD64 Type : CM_EXTENDED_PARAMETER_TYPE_BITS;
+        DWORD64 Reserved : 64 - CM_EXTENDED_PARAMETER_TYPE_BITS;
+    };
+    union
+    {
+        DWORD64 ULong64;
+        ULONG   Pointer;
+        ULONG   Size;
+        ULONG   Handle;
+        ULONG   ULong;
+        ULONG   AccessMask;
+    };
+} CM_EXTENDED_PARAMETER32;
+
 typedef struct
 {
     ULONG Token;

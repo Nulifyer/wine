@@ -1954,6 +1954,11 @@ static struct window_surface *create_surface( HWND hwnd, Window window, const XV
 
 static BOOL enable_direct_drawing( struct x11drv_win_data *data, BOOL layered )
 {
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: x11-window-surface hwnd=%p layered=%u embedded=%u "
+                 "whole=%lx root=%lx client=%lx client-side=%u\n",
+                 data->hwnd, layered, data->embedded, data->whole_window,
+                 root_window, data->client_window, client_side_graphics );
     if (layered) return FALSE;
     if (data->embedded) return TRUE; /* draw directly to the window */
     if (data->whole_window == root_window) return TRUE; /* draw directly to the window */

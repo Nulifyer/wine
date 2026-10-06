@@ -23,6 +23,7 @@
 #include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d11);
+WINE_DECLARE_DEBUG_CHANNEL(d3d11comp);
 
 #define D3D11_DIRECTORY_TRAVERSE      0x0002
 #define D3D11_DIRECTORY_CREATE_OBJECT 0x0004
@@ -236,6 +237,23 @@ static HRESULT composition_mapping_snapshot(const struct linuxnt_composition_map
     return DXGI_ERROR_WAS_STILL_DRAWING;
 }
 
+static BOOL composition_snapshot_has_nonzero_data(const BYTE *snapshot,
+        const struct linuxnt_composition_mapping *layout)
+{
+    SIZE_T offset = 0;
+    unsigned int i;
+
+    for (i = 0; i < layout->subresource_count; ++i)
+    {
+        SIZE_T j;
+
+        for (j = 0; j < layout->subresources[i].data_size; ++j)
+            if (snapshot[offset + j]) return TRUE;
+        offset += layout->subresources[i].data_size;
+    }
+    return FALSE;
+}
+
 static HRESULT composition_mapping_create(const D3D11_TEXTURE2D_DESC *desc,
         struct d3d11_composition_buffer_state *state)
 {
@@ -282,6 +300,9 @@ static HRESULT composition_mapping_create(const D3D11_TEXTURE2D_DESC *desc,
     state->mapping_size = size;
     memcpy(state->mapping_view, &layout, sizeof(layout));
     state->mapping_layout = layout;
+    TRACE_(d3d11comp)("create mapping %p size %Iu texture %ux%u format %s array %u\n",
+            state->mapping, size, desc->Width, desc->Height, debug_dxgi_format(desc->Format),
+            desc->ArraySize);
     return S_OK;
 }
 
@@ -324,6 +345,9 @@ static HRESULT composition_mapping_publish(struct d3d11_composition_buffer_state
     InterlockedIncrement(&mapping->generation);
     for (i = 0; i < layout->subresource_count; ++i)
         ID3D11DeviceContext4_Unmap(context, (ID3D11Resource *)state->staging, i);
+    TRACE_(d3d11comp)("publish mapping %p generation %ld texture %ux%u format %s\n",
+            state->mapping, mapping->generation, layout->desc.Width, layout->desc.Height,
+            debug_dxgi_format(layout->desc.Format));
     return S_OK;
 }
 
@@ -367,6 +391,10 @@ static void composition_mapping_sync_import(ID3D11DeviceContext4 *context,
     for (i = 0; i < layout->subresource_count; ++i)
         ID3D11DeviceContext4_UpdateSubresource(context, resource, i, NULL, data[i].pSysMem,
                 data[i].SysMemPitch, data[i].SysMemSlicePitch);
+    TRACE_(d3d11comp)("sync mapping %p generation %ld nonzero %u texture %ux%u format %s\n",
+            state->mapping, snapshot_generation,
+            composition_snapshot_has_nonzero_data(snapshot, layout), layout->desc.Width,
+            layout->desc.Height, debug_dxgi_format(layout->desc.Format));
     free(snapshot);
     state->imported_generation = snapshot_generation;
     IUnknown_Release(unknown);
@@ -414,6 +442,10 @@ static HRESULT composition_mapping_open(struct d3d_device *device, HANDLE handle
     }
     if (FAILED(hr = composition_mapping_snapshot(mapping, memory_info.RegionSize, &layout,
             &snapshot, data, &snapshot_generation))) goto done;
+    TRACE_(d3d11comp)("open mapping %p generation %ld nonzero %u texture %ux%u format %s array %u\n",
+            handle, snapshot_generation, composition_snapshot_has_nonzero_data(snapshot, &layout),
+            layout.desc.Width, layout.desc.Height, debug_dxgi_format(layout.desc.Format),
+            layout.desc.ArraySize);
     if (FAILED(hr = ID3D11Device5_CreateTexture2D(&device->ID3D11Device5_iface,
             &layout.desc, data, &texture))) goto done;
     if (!(state = calloc(1, sizeof(*state))))

@@ -2851,8 +2851,8 @@ struct unload_registry_request
     struct request_header __header;
     obj_handle_t parent;
     unsigned int attributes;
+    unsigned int flags;
     /* VARARG(name,unicode_str); */
-    char __pad_20[4];
 };
 struct unload_registry_reply
 {
@@ -7887,6 +7887,21 @@ struct destroy_dcomp_window_target_reply
 };
 
 
+struct set_dcomp_blurred_wallpaper_surface_request
+{
+    struct request_header __header;
+    obj_handle_t surface;
+    int left;
+    int top;
+    int right;
+    int bottom;
+};
+struct set_dcomp_blurred_wallpaper_surface_reply
+{
+    struct reply_header __header;
+};
+
+
 struct set_dcomp_channel_completion_event_request
 {
     struct request_header __header;
@@ -8711,6 +8726,7 @@ enum request
     REQ_present_dcomp_token,
     REQ_create_dcomp_window_target,
     REQ_destroy_dcomp_window_target,
+    REQ_set_dcomp_blurred_wallpaper_surface,
     REQ_set_dcomp_channel_completion_event,
     REQ_get_dwm_desktop_id,
     REQ_check_process_session,
@@ -9160,6 +9176,7 @@ union generic_request
     struct present_dcomp_token_request present_dcomp_token_request;
     struct create_dcomp_window_target_request create_dcomp_window_target_request;
     struct destroy_dcomp_window_target_request destroy_dcomp_window_target_request;
+    struct set_dcomp_blurred_wallpaper_surface_request set_dcomp_blurred_wallpaper_surface_request;
     struct set_dcomp_channel_completion_event_request set_dcomp_channel_completion_event_request;
     struct get_dwm_desktop_id_request get_dwm_desktop_id_request;
     struct check_process_session_request check_process_session_request;
@@ -9607,6 +9624,7 @@ union generic_reply
     struct present_dcomp_token_reply present_dcomp_token_reply;
     struct create_dcomp_window_target_reply create_dcomp_window_target_reply;
     struct destroy_dcomp_window_target_reply destroy_dcomp_window_target_reply;
+    struct set_dcomp_blurred_wallpaper_surface_reply set_dcomp_blurred_wallpaper_surface_reply;
     struct set_dcomp_channel_completion_event_reply set_dcomp_channel_completion_event_reply;
     struct get_dwm_desktop_id_reply get_dwm_desktop_id_reply;
     struct check_process_session_reply check_process_session_reply;
@@ -9637,6 +9655,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1084
+#define SERVER_PROTOCOL_VERSION 1086
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
