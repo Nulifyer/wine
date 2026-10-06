@@ -1157,6 +1157,22 @@ unsigned int notify_dwm_window_created( struct desktop *desktop, unsigned int ge
     return port->composition_id;
 }
 
+void notify_dwm_window_sprite_order( struct desktop *desktop, unsigned int generation,
+                                      unsigned int window, unsigned int below )
+{
+    struct alpc_port *port = find_dwm_session_port_for_winstation( desktop->winstation );
+    unsigned __int64 value;
+    unsigned char data[20] = {0};
+
+    if (!port || generation != port->composition_id) return;
+    put_u32( data, 0x40000005 );
+    value = window;
+    memcpy( data + 4, &value, sizeof(value) );
+    value = below;
+    memcpy( data + 12, &value, sizeof(value) );
+    queue_dwm_window_message( port, data, sizeof(data), "sprite-order", window );
+}
+
 int notify_dwm_window_linked( struct desktop *desktop, unsigned int generation,
                               unsigned int window, unsigned int parent,
                               unsigned int previous, unsigned int band )

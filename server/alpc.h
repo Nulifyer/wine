@@ -48,6 +48,8 @@ extern void notify_dwm_window_sprite_updated( struct desktop *desktop, unsigned 
 extern void notify_dwm_window_sprite_dirty( struct desktop *desktop, unsigned int generation,
                                              unsigned int window, unsigned int flags,
                                              unsigned __int64 update_id );
+extern void notify_dwm_window_sprite_order( struct desktop *desktop, unsigned int generation,
+                                             unsigned int window, unsigned int below );
 extern void notify_dwm_window_sprite_destroyed( struct desktop *desktop,
                                                  unsigned int generation,
                                                  unsigned int window );

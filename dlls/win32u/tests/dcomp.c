@@ -5745,6 +5745,9 @@ static void test_dwm_session_message_delivery(void)
         else if (received.data[0] == 0x40000006)
             ok( received.header.DataLength == 196, "got sprite update length %#x\n",
                 received.header.DataLength );
+        else if (received.data[0] == 0x40000005)
+            ok( received.header.DataLength == 20, "got sprite order length %#x\n",
+                received.header.DataLength );
         else ok( 0, "got unexpected startup command %#lx\n", received.data[0] );
     }
     ok( saw_input, "DWM startup did not replay input desktop %#I64x\n", input_id );
@@ -5960,7 +5963,7 @@ static void test_dwm_session_message_delivery(void)
                     "shell thread did not repaint its window\n" );
                 {
                     BOOL saw_sprite_create = FALSE, saw_surface_update = FALSE;
-                    BOOL saw_surface_dirty = FALSE;
+                    BOOL saw_surface_dirty = FALSE, saw_sprite_order = FALSE;
 
                     for (i = 0; i < 512; ++i)
                     {
@@ -5974,6 +5977,20 @@ static void test_dwm_session_message_delivery(void)
                         if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
                         ok( !status, "painted shell receive returned %#lx\n", status );
                         if (status) break;
+                        if (received.data[0] == 0x40000005)
+                        {
+                            HWND sprite = NULL, below = NULL;
+
+                            memcpy( &sprite, received.data + 1, sizeof(sprite) );
+                            if (sprite != shell_context.window) continue;
+                            memcpy( &below, received.data + 3, sizeof(below) );
+                            ok( received.header.DataLength == 20,
+                                "got shell sprite-order length %#x\n", received.header.DataLength );
+                            ok( saw_surface_update, "shell order preceded its surface update\n" );
+                            ok( !below, "bottom shell has sprite anchor %p\n", below );
+                            saw_sprite_order = TRUE;
+                            continue;
+                        }
                         if (received.data[0] == 0x40000004)
                         {
                             HWND sprite = NULL;
@@ -6023,6 +6040,7 @@ static void test_dwm_session_message_delivery(void)
                         "painted no-redirection shell has no logical surface\n" );
                     ok( saw_surface_dirty,
                         "painted no-redirection shell has no dirty notification\n" );
+                    ok( saw_sprite_order, "late shell sprite has no ordering record\n" );
                 }
 
                 SetEvent( shell_context.release );
@@ -6151,7 +6169,7 @@ static void test_dwm_session_message_delivery(void)
         UINT64 message_desktop = 0, message_sequence = 0;
         DWORD message_style = 0, message_ex_style = 0, message_pid = 0;
         BOOL saw_sprite_create = FALSE, saw_sprite_update = FALSE;
-        BOOL saw_target_link = FALSE;
+        BOOL saw_target_link = FALSE, saw_sprite_order = FALSE;
 
         if (unlinked_anchor_window)
             ok( immediate_link_anchor == unlinked_anchor_window,
@@ -6274,6 +6292,27 @@ static void test_dwm_session_message_delivery(void)
                 saw_sprite_update = TRUE;
                 continue;
             }
+            if (received.data[0] == 0x40000005)
+            {
+                HWND below = NULL, sibling;
+                BOOL lower = FALSE;
+
+                if (message_window != target_window) continue;
+                memcpy( &below, received.data + 3, sizeof(below) );
+                ok( received.header.DataLength == 20, "got sprite-order length %#x\n",
+                    received.header.DataLength );
+                ok( saw_sprite_update, "sprite order preceded its surface update\n" );
+                /* A tracked context need not own a sprite.  Check direction
+                 * and the excluded host-only sibling here; exact anchors are
+                 * checked below with a controlled drawable sibling. */
+                for (sibling = GetWindow( target_window, GW_HWNDNEXT ); sibling;
+                     sibling = GetWindow( sibling, GW_HWNDNEXT ))
+                    if (sibling == below) lower = TRUE;
+                ok( !below || lower, "sprite anchor %p is not a lower sibling\n", below );
+                ok( below != unlinked_anchor_window, "sprite names host-only anchor %p\n", below );
+                saw_sprite_order = TRUE;
+                continue;
+            }
             if (received.data[0] == 0x40000016)
             {
                 ok( received.header.DataLength == 20, "got intervening style length %#x\n",
@@ -6311,6 +6350,80 @@ static void test_dwm_session_message_delivery(void)
         ok( saw_target_link, "target window link was not delivered\n" );
         ok( saw_sprite_create, "target sprite create was not delivered\n" );
         ok( saw_sprite_update, "target sprite update was not delivered\n" );
+        ok( saw_sprite_order, "target sprite order was not delivered\n" );
+
+        {
+            HWND order_anchor = CreateWindowExA( 0, "static", "DWM order anchor", WS_POPUP,
+                                                  0, 0, 32, 32, NULL, NULL, NULL, NULL );
+
+            ok( !!order_anchor, "order anchor creation failed, error %lu\n", GetLastError() );
+            if (order_anchor)
+            {
+                /* Drain anchor creation before observing only the requested move. */
+                for (j = 0; j < 512; ++j)
+                {
+                    size = sizeof(received);
+                    status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                        &size, NULL, &timeout );
+                    if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+                    ok( !status, "order anchor drain returned %#lx\n", status );
+                    if (status) break;
+                }
+                ok( j < 512, "order anchor drain did not quiesce\n" );
+                for (i = 0; i < 3; ++i)
+                {
+                    BOOL saw_unlink = FALSE, saw_link = FALSE, saw_order = FALSE;
+                    HWND expected_below = i ? order_anchor : NULL;
+
+                    ok( SetWindowPos( target_window, i ? HWND_TOP : HWND_BOTTOM, 0, 0, 0, 0,
+                                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW ),
+                        "window order move failed, error %lu\n", GetLastError() );
+                    for (j = 0; j < 512; ++j)
+                    {
+                        HWND moved = NULL, below = NULL;
+
+                        memset( &received, 0, sizeof(received) );
+                        size = sizeof(received);
+                        status = NtAlpcSendWaitReceivePort( port, 0, NULL, NULL, &received.header,
+                                                            &size, NULL, &timeout );
+                        if (status == STATUS_TIMEOUT || status == STATUS_UNSUCCESSFUL) break;
+                        ok( !status, "window order receive returned %#lx\n", status );
+                        if (status) break;
+                        memcpy( &moved, received.data + 1, sizeof(moved) );
+                        if (moved != target_window) continue;
+                        if (received.data[0] == 0x40000013)
+                        {
+                            ok( !saw_link && !saw_order, "unlink followed replacement order\n" );
+                            saw_unlink = TRUE;
+                        }
+                        else if (received.data[0] == 0x40000012)
+                        {
+                            memcpy( &below, received.data + 5, sizeof(below) );
+                            ok( saw_unlink, "replacement link preceded unlink\n" );
+                            ok( below == (expected_below ? expected_below : (HWND)1),
+                                "move %u link anchor %p differs from %p\n", i, below,
+                                expected_below ? expected_below : (HWND)1 );
+                            saw_link = TRUE;
+                        }
+                        else if (received.data[0] == 0x40000005)
+                        {
+                            memcpy( &below, received.data + 3, sizeof(below) );
+                            ok( received.header.DataLength == 20,
+                                "got moved sprite-order length %#x\n", received.header.DataLength );
+                            ok( saw_link, "moved sprite order preceded replacement link\n" );
+                            ok( below == expected_below, "move %u sprite anchor %p differs from %p\n",
+                                i, below, expected_below );
+                            saw_order = TRUE;
+                        }
+                    }
+                    ok( j < 512, "move %u did not quiesce\n", i );
+                    ok( saw_unlink == (i < 2), "move %u unlink %u\n", i, saw_unlink );
+                    ok( saw_link == (i < 2), "move %u link %u\n", i, saw_link );
+                    ok( saw_order == (i < 2), "move %u sprite order %u\n", i, saw_order );
+                }
+                DestroyWindow( order_anchor );
+            }
+        }
 
         for (i = 0; i < 3; ++i)
         {

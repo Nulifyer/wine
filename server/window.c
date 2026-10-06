@@ -1598,6 +1598,42 @@ enum dwm_window_admission
     DWM_WINDOW_SHELL,
 };
 
+/* Sprite order uses the nearest published drawable sibling below the window.
+ * A null anchor places the sprite at the bottom of its native ordering list. */
+static void sync_dwm_sprite_order( struct window *win )
+{
+    struct window *next;
+
+    if (!win->parent || !win->is_linked || !win->dwm_sprite_id ||
+        win->dwm_sprite_id != win->dwm_context_id || win->dwm_link_id != win->dwm_context_id) return;
+    next = get_next_window( win );
+    while (next && (next->dwm_sprite_id != win->dwm_context_id ||
+                    next->dwm_link_id != win->dwm_context_id))
+        next = get_next_window( next );
+    notify_dwm_window_sprite_order( win->desktop, win->dwm_context_id, win->handle,
+                                    next ? next->handle : 0 );
+}
+
+static int publish_dwm_window_link( struct window *win )
+{
+    struct window *next;
+    unsigned int insert_before;
+
+    /* Native win32k publishes spwndNext here.  Skip siblings that have not
+     * joined this composition generation, so DwmRedir can resolve the anchor. */
+    next = get_next_window( win );
+    while (next && next->dwm_link_id != win->dwm_context_id)
+        next = get_next_window( next );
+    insert_before = next ? next->handle : 1;
+    if (!notify_dwm_window_linked( win->desktop, win->dwm_context_id, win->handle,
+                                   win->parent->handle, insert_before, 1 )) return 0;
+    win->dwm_link_id = win->dwm_context_id;
+    if (win->style & WS_VISIBLE)
+        notify_dwm_window_visibility_changed( win->desktop, win->dwm_context_id,
+                                              win->handle, 1 );
+    return 1;
+}
+
 static unsigned int sync_dwm_window_context( struct window *win,
                                              enum dwm_window_admission admission )
 {
@@ -1650,6 +1686,7 @@ static unsigned int sync_dwm_window_context( struct window *win,
                                                win->logical_surface ? win->logical_surface->height : 0 ))
             return 0;
         win->dwm_sprite_id = win->dwm_context_id;
+        sync_dwm_sprite_order( win );
         win->dwm_vis_rgn_mask |= 1;
         sync_dwm_visible_region( win, 2 );
     }
@@ -1658,9 +1695,6 @@ static unsigned int sync_dwm_window_context( struct window *win,
 
 static int sync_dwm_window_link( struct window *win, enum dwm_window_admission admission )
 {
-    struct window *next;
-    unsigned int insert_before;
-
     if (!sync_dwm_window_context( win, admission )) return 0;
     if (!win->parent)
     {
@@ -1674,22 +1708,23 @@ static int sync_dwm_window_link( struct window *win, enum dwm_window_admission a
         if (!sync_dwm_window_link( win->parent, admission )) return 0;
     }
     else if (!sync_dwm_window_context( win->parent, DWM_WINDOW_NORMAL )) return 0;
-    /* Native win32k publishes spwndNext here.  DWM can only use a sibling
-     * that has already joined this composition generation as an insertion
-     * anchor.  Replay walks the sibling list from bottom to top, but live
-     * publication can reach a window before its immediate next sibling. */
-    next = get_next_window( win );
-    while (next && next->dwm_link_id != win->dwm_context_id)
-        next = get_next_window( next );
-    insert_before = next ? next->handle : 1;
-    if (!notify_dwm_window_linked( win->desktop, win->dwm_context_id, win->handle,
-                                   win->parent->handle, insert_before, 1 )) return 0;
-    win->dwm_link_id = win->dwm_context_id;
-    if (win->style & WS_VISIBLE)
-        notify_dwm_window_visibility_changed( win->desktop, win->dwm_context_id,
-                                              win->handle, 1 );
+    if (!publish_dwm_window_link( win )) return 0;
+    sync_dwm_sprite_order( win );
     return 1;
 }
+
+static void sync_dwm_window_order( struct window *win )
+{
+    if (!win->parent || !win->is_linked || !win->dwm_context_id ||
+        win->dwm_link_id != win->dwm_context_id) return;
+    /* InsertChild appends a new parent reference.  Retire the old link first
+     * instead of inserting the same context into the native child array twice. */
+    notify_dwm_window_unlinked( win->desktop, win->dwm_link_id, win->handle,
+                                win->parent->handle );
+    win->dwm_link_id = 0;
+    if (publish_dwm_window_link( win )) sync_dwm_sprite_order( win );
+}
+
 
 int ensure_dwm_window_context( user_handle_t handle )
 {
@@ -2689,6 +2724,7 @@ static void set_window_pos( struct window *win, struct window *previous,
         ((old_style ^ win->style) & WS_VISIBLE))
         notify_dwm_window_visibility_changed( win->desktop, win->dwm_context_id,
                                               win->handle, !!(win->style & WS_VISIBLE) );
+    if (zorder_changed) sync_dwm_window_order( win );
     if (win->dwm_sprite_id == win->dwm_context_id &&
         (memcmp( &old_window_rect, &win->window_rect, sizeof(old_window_rect) ) ||
          memcmp( &old_client_rect, &win->client_rect, sizeof(old_client_rect) ) ||
@@ -4504,6 +4540,7 @@ void set_window_rect_visible( user_handle_t window, struct rectangle rect )
         {
             list_remove( &win->entry );
             list_add_before( &ptr->entry, &win->entry );
+            sync_dwm_window_order( win );
         }
         break;
     }
