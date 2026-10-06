@@ -211,6 +211,9 @@ struct dcomp_resource_view
     UINT gdi_sprite_pixel_format;
     BOOL gdi_sprite_dirty_from_accumulation;
     UINT64 gdi_sprite_surface;
+    BYTE *gdi_sprite_rectangles;
+    UINT gdi_sprite_rectangles_size;
+    LONG gdi_sprite_margins[4];
     UINT64 render_target_monitor;
     UINT64 render_target_adapter_luid;
     UINT render_target_display_id;
@@ -844,6 +847,7 @@ static void free_dcomp_resource_view( struct dcomp_resource_view *resource )
     free( resource->expression_sources );
     free( resource->expression_reference_info );
     free( resource->region_rectangles );
+    free( resource->gdi_sprite_rectangles );
     free( resource );
 }
 
@@ -1387,6 +1391,35 @@ static NTSTATUS set_dcomp_gdi_sprite_integer_property( struct dcomp_resource_vie
     }
     resource->gdi_sprite_properties |= bit;
     resource->gdi_sprite_dirty |= bit;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_dcomp_gdi_sprite_buffer_property( struct dcomp_resource_view *resource,
+                                                       UINT property, const BYTE *data, UINT size )
+{
+    BYTE *rectangles;
+
+    if (property == 0)
+    {
+        /* Each call adds dirty rectangles. Preserve all writes until commit. */
+        if ((size & 15) || size > DCOMP_PROTOCOL_MAX_SIZE - 16 - resource->gdi_sprite_rectangles_size)
+            return STATUS_INVALID_PARAMETER;
+        if (!size) return STATUS_SUCCESS;
+        if (!(rectangles = realloc( resource->gdi_sprite_rectangles,
+                                     resource->gdi_sprite_rectangles_size + size )))
+            return STATUS_NO_MEMORY;
+        memcpy( rectangles + resource->gdi_sprite_rectangles_size, data, size );
+        resource->gdi_sprite_rectangles = rectangles;
+        resource->gdi_sprite_rectangles_size += size;
+        resource->gdi_sprite_dirty |= 8;
+    }
+    else if (property == 4)
+    {
+        if (size != sizeof(resource->gdi_sprite_margins)) return STATUS_INVALID_PARAMETER;
+        memcpy( resource->gdi_sprite_margins, data, size );
+        resource->gdi_sprite_dirty |= 16;
+    }
+    else return STATUS_INVALID_PARAMETER;
     return STATUS_SUCCESS;
 }
 
@@ -3199,6 +3232,12 @@ static NTSTATUS process_dcomp_commands( struct dcomp_channel_view *view, BYTE *b
                                                                  buffer + 16, size );
                 if (status != STATUS_NOT_SUPPORTED && status) return status;
             }
+            else if (resource->type == 0x41)
+            {
+                if ((status = set_dcomp_gdi_sprite_buffer_property( resource, property,
+                                                                     buffer + 16, size )))
+                    return status;
+            }
             else if (resource->type == 0x60)
             {
                 if ((status = set_dcomp_legacy_target_buffer_property( resource, property,
@@ -3805,13 +3844,15 @@ static data_size_t dcomp_gdi_sprite_update_size( const struct dcomp_resource_vie
     if (resource->gdi_sprite_dirty & 1) size += 16;
     if (resource->gdi_sprite_dirty & 2) size += 16;
     if (resource->gdi_sprite_dirty & 4) size += 20;
+    if (resource->gdi_sprite_dirty & 8) size += 16 + resource->gdi_sprite_rectangles_size;
+    if (resource->gdi_sprite_dirty & 16) size += 28;
     return size;
 }
 
 static BYTE *emit_dcomp_gdi_sprite_updates( BYTE *cursor,
                                              const struct dcomp_resource_view *resource )
 {
-    UINT command[5];
+    UINT command[7];
 
     if (resource->gdi_sprite_dirty & 4)
     {
@@ -3840,6 +3881,27 @@ static BYTE *emit_dcomp_gdi_sprite_updates( BYTE *cursor,
         command[3] = resource->gdi_sprite_dirty_from_accumulation;
         memcpy( cursor, command, 16 );
         cursor += 16;
+    }
+    if (resource->gdi_sprite_dirty & 16)
+    {
+        command[0] = 28;
+        command[1] = 0x20d;
+        command[2] = resource->id;
+        memcpy( command + 3, resource->gdi_sprite_margins,
+                sizeof(resource->gdi_sprite_margins) );
+        memcpy( cursor, command, 28 );
+        cursor += 28;
+    }
+    if (resource->gdi_sprite_dirty & 8)
+    {
+        command[0] = 16 + resource->gdi_sprite_rectangles_size;
+        command[1] = 0x208;
+        command[2] = resource->id;
+        command[3] = resource->gdi_sprite_rectangles_size;
+        memcpy( cursor, command, 16 );
+        cursor += 16;
+        memcpy( cursor, resource->gdi_sprite_rectangles, resource->gdi_sprite_rectangles_size );
+        cursor += resource->gdi_sprite_rectangles_size;
     }
     return cursor;
 }
@@ -5075,6 +5137,9 @@ static void commit_dcomp_resource_views( struct dcomp_channel_view *view,
             resource->visual_size_dirty = FALSE;
             resource->window_node_dirty = 0;
             resource->gdi_sprite_dirty = 0;
+            free( resource->gdi_sprite_rectangles );
+            resource->gdi_sprite_rectangles = NULL;
+            resource->gdi_sprite_rectangles_size = 0;
             resource->render_target_create_dirty = FALSE;
             resource->render_target_desktop_tree_dirty = FALSE;
             resource->render_target_transform_dirty = FALSE;

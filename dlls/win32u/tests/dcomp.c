@@ -3577,6 +3577,19 @@ static void test_gdi_sprite_bitmap_protocol(void)
     };
     static const UINT bad_property[] = {11, 1, 4, 0, 1, 0};
     static const UINT bad_format[] = {11, 1, 1, 0, 0, 1};
+    static const UINT rectangles[] = {15, 1, 0, 16, 10, 20, 110, 220};
+    static const UINT more_rectangles[] = {15, 1, 0, 16, 300, 400, 500, 600};
+    static const UINT empty_rectangles[] = {15, 1, 0, 0};
+    static const UINT margins[] = {15, 1, 4, 16, 1, 2, 3, 4};
+    static const UINT expected_buffers[] =
+    {
+        28, 0x20d, 1, 1, 2, 3, 4,
+        48, 0x208, 1, 32, 10, 20, 110, 220, 300, 400, 500, 600,
+    };
+    static const UINT bad_rectangles[] = {15, 1, 0, 12, 10, 20, 110};
+    static const UINT bad_margins[] = {15, 1, 4, 12, 1, 2, 3};
+    static const UINT bad_buffer_property[] = {15, 1, 5, 16, 1, 2, 3, 4};
+    static const UINT expected_next_rectangles[] = {32, 0x208, 1, 16, 300, 400, 500, 600};
     static const UINT release[] = {4, 1};
     static const UINT expected_release[] = {12, 0x29, 1};
     struct dcomposition_connection_batch *record = NULL;
@@ -3624,6 +3637,45 @@ static void test_gdi_sprite_bitmap_protocol(void)
     ok( status == STATUS_SUCCESS, "got GDI-sprite update batch status %#lx\n", status );
     check_dcomp_batch_payload( record, channel, expected_update,
                                sizeof(expected_update), "GDI-sprite update" );
+
+    status = process_dcomp_test_command( channel, buffer, rectangles, sizeof(rectangles) );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite rectangles status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, more_rectangles, sizeof(more_rectangles) );
+    ok( status == STATUS_SUCCESS, "got additional GDI-sprite rectangles status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, empty_rectangles, sizeof(empty_rectangles) );
+    ok( status == STATUS_SUCCESS, "got empty GDI-sprite rectangles status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, margins, sizeof(margins) );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite margins status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_rectangles, sizeof(bad_rectangles) );
+    ok( status == STATUS_INVALID_PARAMETER, "got short GDI-sprite rectangles status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_margins, sizeof(bad_margins) );
+    ok( status == STATUS_INVALID_PARAMETER, "got short GDI-sprite margins status %#lx\n", status );
+    status = process_dcomp_test_command( channel, buffer, bad_buffer_property, sizeof(bad_buffer_property) );
+    ok( status == STATUS_INVALID_PARAMETER, "got unknown GDI-sprite buffer property status %#lx\n", status );
+    /* Reusing the channel buffer must not change the retained rectangle bytes. */
+    memset( buffer, 0xcc, sizeof(expected_buffers) );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite buffer commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got GDI-sprite buffer batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_buffers,
+                               sizeof(expected_buffers), "GDI-sprite buffers" );
+
+    /* A later commit contains only newly dirtied rectangles. */
+    status = process_dcomp_test_command( channel, buffer, more_rectangles, sizeof(more_rectangles) );
+    ok( status == STATUS_SUCCESS, "got next GDI-sprite rectangles status %#lx\n", status );
+    status = NtDCompositionCommitChannel( channel, &batch, &state, 0, NULL, NULL, NULL, 0 );
+    ok( status == STATUS_SUCCESS, "got next GDI-sprite commit status %#lx\n", status );
+    record = NULL;
+    status = NtDCompositionGetConnectionBatch( connection, &cookie, &record );
+    ok( status == STATUS_SUCCESS, "got next GDI-sprite batch status %#lx\n", status );
+    check_dcomp_batch_payload( record, channel, expected_next_rectangles,
+                               sizeof(expected_next_rectangles), "GDI-sprite next rectangles" );
+
+    /* Release retires pending updates along with their resource. */
+    status = process_dcomp_test_command( channel, buffer, rectangles, sizeof(rectangles) );
+    ok( status == STATUS_SUCCESS, "got retiring GDI-sprite rectangles status %#lx\n", status );
 
     status = process_dcomp_test_command( channel, buffer, release, sizeof(release) );
     ok( status == STATUS_SUCCESS, "got GDI-sprite release status %#lx\n", status );
