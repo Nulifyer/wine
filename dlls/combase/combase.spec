@@ -86,6 +86,17 @@
 @ stdcall RoFailFastWithErrorContextInternal2(long long ptr)
 @ stub RoFailFastWithErrorContextInternal
 @ stub UpdateProcessTracing
+239 stdcall CStdStubBuffer_AddRef(ptr) rpcrt4.CStdStubBuffer_AddRef
+240 stdcall CStdStubBuffer_Connect(ptr ptr) rpcrt4.CStdStubBuffer_Connect
+241 stdcall CStdStubBuffer_CountRefs(ptr) rpcrt4.CStdStubBuffer_CountRefs
+242 stdcall CStdStubBuffer_DebugServerQueryInterface(ptr ptr) rpcrt4.CStdStubBuffer_DebugServerQueryInterface
+243 stdcall CStdStubBuffer_DebugServerRelease(ptr ptr) rpcrt4.CStdStubBuffer_DebugServerRelease
+244 stdcall CStdStubBuffer_Disconnect(ptr) rpcrt4.CStdStubBuffer_Disconnect
+245 stdcall CStdStubBuffer_Invoke(ptr ptr ptr) rpcrt4.CStdStubBuffer_Invoke
+246 stdcall CStdStubBuffer_IsIIDSupported(ptr ptr) rpcrt4.CStdStubBuffer_IsIIDSupported
+247 stdcall CStdStubBuffer_QueryInterface(ptr ptr ptr) rpcrt4.CStdStubBuffer_QueryInterface
+532 stdcall NdrCStdStubBuffer2_Release(ptr ptr) rpcrt4.NdrCStdStubBuffer2_Release
+533 stdcall NdrCStdStubBuffer_Release(ptr ptr) rpcrt4.NdrCStdStubBuffer_Release
 @ stdcall CLIPFORMAT_UserFree(ptr ptr)
 @ stdcall CLIPFORMAT_UserMarshal(ptr ptr ptr)
 @ stdcall CLIPFORMAT_UserSize(ptr long ptr)

@@ -18,6 +18,7 @@
 #include "inspectable.h"
 #include "roapi.h"
 #include "winstring.h"
+#include "rpcproxy.h"
 
 #include "wine/test.h"
 
@@ -658,8 +659,107 @@ static void test_activation_factory_proxy(void)
     CoUninitialize();
 }
 
+static void test_standard_stub_buffer_exports(void)
+{
+    static const struct { const char *name; WORD ordinal; } exports[] =
+    {
+        {"CStdStubBuffer_AddRef", 239},
+        {"CStdStubBuffer_Connect", 240},
+        {"CStdStubBuffer_CountRefs", 241},
+        {"CStdStubBuffer_DebugServerQueryInterface", 242},
+        {"CStdStubBuffer_DebugServerRelease", 243},
+        {"CStdStubBuffer_Disconnect", 244},
+        {"CStdStubBuffer_Invoke", 245},
+        {"CStdStubBuffer_IsIIDSupported", 246},
+        {"CStdStubBuffer_QueryInterface", 247},
+        {"NdrCStdStubBuffer2_Release", 532},
+        {"NdrCStdStubBuffer_Release", 533},
+    };
+    ULONG (WINAPI *addref)(IRpcStubBuffer *);
+    HRESULT (WINAPI *connect)(IRpcStubBuffer *, IUnknown *);
+    ULONG (WINAPI *count_refs)(IRpcStubBuffer *);
+    void (WINAPI *disconnect)(IRpcStubBuffer *);
+    IRpcStubBuffer *(WINAPI *support)(IRpcStubBuffer *, REFIID);
+    HRESULT (WINAPI *query_interface)(IRpcStubBuffer *, REFIID, void **);
+    ULONG (WINAPI *release)(IRpcStubBuffer *, IPSFactoryBuffer *);
+    CInterfaceStubVtbl vtbl = {{0}};
+    CStdStubBuffer stub = {0};
+    IRpcStubBuffer *iface = (IRpcStubBuffer *)&stub, *result;
+    HMODULE module = LoadLibraryW(L"combase.dll");
+    FARPROC address;
+    BOOL complete = TRUE;
+    HRESULT hr;
+    ULONG refs;
+    unsigned int i;
+
+    ok(!!module, "COMBASE did not load.\n");
+    if (!module) return;
+    for (i = 0; i < ARRAY_SIZE(exports); ++i)
+    {
+        address = GetProcAddress(module, exports[i].name);
+        ok(!!address, "%s is missing.\n", exports[i].name);
+        ok(address == GetProcAddress(module, MAKEINTRESOURCEA(exports[i].ordinal)),
+                "%s ordinal %u differs from named export.\n", exports[i].name, exports[i].ordinal);
+        if (!address) complete = FALSE;
+    }
+    if (!complete) goto done;
+
+    addref = (void *)GetProcAddress(module, "CStdStubBuffer_AddRef");
+    connect = (void *)GetProcAddress(module, "CStdStubBuffer_Connect");
+    count_refs = (void *)GetProcAddress(module, "CStdStubBuffer_CountRefs");
+    disconnect = (void *)GetProcAddress(module, "CStdStubBuffer_Disconnect");
+    support = (void *)GetProcAddress(module, "CStdStubBuffer_IsIIDSupported");
+    query_interface = (void *)GetProcAddress(module, "CStdStubBuffer_QueryInterface");
+    release = (void *)GetProcAddress(module, "NdrCStdStubBuffer_Release");
+    vtbl.header.piid = &IID_IClassFactory;
+    vtbl.Vtbl.AddRef = addref;
+    stub.lpVtbl = &vtbl.Vtbl;
+    stub.RefCount = 1;
+
+    refs = addref(iface);
+    ok(refs == 2, "AddRef returned %lu.\n", refs);
+    ok(count_refs(iface) == 0, "disconnected stub has server references.\n");
+    ok(!support(iface, &IID_IClassFactory), "disconnected stub supports its interface.\n");
+    ok(stub.RefCount == 2, "disconnected support retained the stub.\n");
+    hr = connect(iface, (IUnknown *)&class_factory);
+    ok(hr == S_OK, "Connect returned %#lx.\n", hr);
+    ok(stub.pvServerObject == (IUnknown *)&class_factory, "Connect did not retain the server.\n");
+    ok(count_refs(iface) == 1, "connected CountRefs is not one.\n");
+    result = support(iface, &IID_IClassFactory);
+    ok(result == iface, "support returned %p.\n", result);
+    ok(stub.RefCount == 3, "support did not retain the returned stub.\n");
+    ok(!support(iface, &unknown_iid), "unsupported interface returned a stub.\n");
+    ok(stub.RefCount == 3, "unsupported interface changed the reference count.\n");
+    result = NULL;
+    hr = query_interface(iface, &IID_IUnknown, (void **)&result);
+    ok(hr == S_OK && result == iface, "IUnknown query returned %#lx, %p.\n", hr, result);
+    result = NULL;
+    hr = query_interface(iface, &IID_IRpcStubBuffer, (void **)&result);
+    ok(hr == S_OK && result == iface, "IRpcStubBuffer query returned %#lx, %p.\n", hr, result);
+    ok(stub.RefCount == 5, "queries did not retain their results.\n");
+    result = (void *)0xdeadbeef;
+    hr = query_interface(iface, &unknown_iid, (void **)&result);
+    ok(hr == E_NOINTERFACE && !result, "unknown query returned %#lx, %p.\n", hr, result);
+    ok(count_refs(iface) == 1, "CountRefs depends on stub references.\n");
+    /* Release only the added references; this fixture's stub is on the stack. */
+    for (i = 4; i; --i)
+    {
+        refs = release(iface, NULL);
+        ok(refs == i, "Release returned %lu, expected %u.\n", refs, i);
+    }
+    disconnect(iface);
+    ok(!stub.pvServerObject, "Disconnect retained the server.\n");
+    ok(count_refs(iface) == 0, "disconnected CountRefs is not zero.\n");
+    ok(!support(iface, &IID_IClassFactory), "disconnected support returned a stub.\n");
+    ok(stub.RefCount == 1, "disconnected support retained the stub.\n");
+
+done:
+    FreeLibrary(module);
+}
+
 START_TEST(proxy_factory)
 {
+    test_standard_stub_buffer_exports();
     test_direct_class_object();
     test_irundown_proxy();
     test_class_factory_proxy();

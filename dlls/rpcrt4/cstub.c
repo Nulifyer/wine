@@ -362,8 +362,11 @@ LPRPCSTUBBUFFER WINAPI CStdStubBuffer_IsIIDSupported(LPRPCSTUBBUFFER iface,
 
     TRACE("(%p)->IsIIDSupported(%s)\n", stub, debugstr_guid(riid));
 
-    if (IsEqualGUID(get_stub_header(stub)->piid, riid))
+    if (stub->pvServerObject && IsEqualGUID(get_stub_header(stub)->piid, riid))
+    {
+        IRpcStubBuffer_AddRef(iface);
         return iface;
+    }
     return NULL;
 }
 
@@ -371,7 +374,8 @@ ULONG WINAPI CStdStubBuffer_CountRefs(LPRPCSTUBBUFFER iface)
 {
   CStdStubBuffer *This = impl_from_IRpcStubBuffer(iface);
   TRACE("(%p)->CountRefs()\n",This);
-  return This->RefCount;
+  /* Count connected server references, not references to the stub itself. */
+  return This->pvServerObject != NULL;
 }
 
 HRESULT WINAPI CStdStubBuffer_DebugServerQueryInterface(LPRPCSTUBBUFFER iface,
@@ -387,24 +391,6 @@ void WINAPI CStdStubBuffer_DebugServerRelease(LPRPCSTUBBUFFER iface,
 {
   CStdStubBuffer *This = impl_from_IRpcStubBuffer(iface);
   TRACE("(%p)->DebugServerRelease(%p)\n",This,pv);
-}
-
-/* Compact stubs use runtime-owned methods. CountRefs counts connected servers,
- * independently of the COM references retained by QueryInterface and support. */
-static IRpcStubBuffer *WINAPI compact_stub_support(IRpcStubBuffer *iface, REFIID iid)
-{
-    CStdStubBuffer *stub = impl_from_IRpcStubBuffer(iface);
-    IRpcStubBuffer *supported;
-
-    if (!stub->pvServerObject) return NULL;
-    supported = CStdStubBuffer_IsIIDSupported(iface, iid);
-    if (supported) IRpcStubBuffer_AddRef(supported);
-    return supported;
-}
-
-static ULONG WINAPI compact_stub_count_refs(IRpcStubBuffer *iface)
-{
-    return impl_from_IRpcStubBuffer(iface)->pvServerObject != NULL;
 }
 
 static ULONG WINAPI compact_stub_release(IRpcStubBuffer *iface)
@@ -428,8 +414,8 @@ static const IRpcStubBufferVtbl compact_stub_vtbl =
     CStdStubBuffer_Connect,
     CStdStubBuffer_Disconnect,
     CStdStubBuffer_Invoke,
-    compact_stub_support,
-    compact_stub_count_refs,
+    CStdStubBuffer_IsIIDSupported,
+    CStdStubBuffer_CountRefs,
     CStdStubBuffer_DebugServerQueryInterface,
     CStdStubBuffer_DebugServerRelease
 };
@@ -521,8 +507,8 @@ static const IRpcStubBufferVtbl compact_delegating_stub_vtbl =
     CStdStubBuffer_Delegating_Connect,
     CStdStubBuffer_Delegating_Disconnect,
     CStdStubBuffer_Invoke,
-    compact_stub_support,
-    compact_stub_count_refs,
+    CStdStubBuffer_IsIIDSupported,
+    CStdStubBuffer_CountRefs,
     CStdStubBuffer_DebugServerQueryInterface,
     CStdStubBuffer_DebugServerRelease
 };
