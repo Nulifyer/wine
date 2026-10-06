@@ -28,11 +28,14 @@
 #include "wine/test.h"
 
 #define LVM_QUERYINTERFACE (LVM_FIRST + 189)
+#define LVM_RESETEMPTYTEXT (LVM_FIRST + 84)
 
 static const IID IID_IListView_Win7 =
     {0xe5b16af2, 0x3990, 0x4681, {0xa6, 0x09, 0x1f, 0x06, 0x0c, 0xd1, 0x42, 0x69}};
 static const IID IID_IListView2 =
     {0xc327e26b, 0x13c2, 0x47f7, {0x98, 0xe5, 0x79, 0xee, 0xd1, 0x26, 0x5e, 0x41}};
+static const IID IID_IListViewFooter =
+    {0xf0034da8, 0x8a22, 0x4151, {0x8f, 0x16, 0x2e, 0xba, 0x76, 0x56, 0x5b, 0xcc}};
 
 struct lv_work_area_with_dpi
 {
@@ -51,7 +54,11 @@ typedef HRESULT (WINAPI *listview_insert_column_fn)(IUnknown *, INT, const LVCOL
 typedef HRESULT (WINAPI *listview_delete_column_fn)(IUnknown *, INT);
 typedef HRESULT (WINAPI *listview_set_column_width_fn)(IUnknown *, INT, INT);
 typedef HRESULT (WINAPI *listview_get_selected_count_fn)(IUnknown *, INT *);
+typedef HRESULT (WINAPI *listview_get_extended_style_fn)(IUnknown *, DWORD *);
 typedef HRESULT (WINAPI *listview_set_extended_style_fn)(IUnknown *, DWORD, DWORD, DWORD *);
+typedef HRESULT (WINAPI *listview_reset_empty_text_fn)(IUnknown *);
+typedef HRESULT (WINAPI *listview_footer_is_visible_fn)(IUnknown *, INT *);
+typedef HRESULT (WINAPI *listview_footer_remove_all_buttons_fn)(IUnknown *);
 typedef HRESULT (WINAPI *listview_get_tooltip_fn)(IUnknown *, HWND *);
 typedef HRESULT (WINAPI *listview_get_column_margin_fn)(IUnknown *, RECT *);
 typedef HRESULT (WINAPI *listview_get_work_area_count_fn)(IUnknown *, INT *);
@@ -7834,8 +7841,9 @@ static void test_queryinterface(void)
     const void *const *vtbl;
     IUnknown *iface = (IUnknown *)0xdeadbeef, *unknown = NULL;
     IUnknown *iface2 = NULL;
+    IUnknown *footer = NULL, *footer_unknown = NULL;
     IUnknown *invalid_iface = (IUnknown *)0xdeadbeef;
-    DWORD old_style = 0xdeadbeef;
+    DWORD style = 0xdeadbeef, old_style = 0xdeadbeef;
     INT old_cx = 0, old_cy = 0;
     INT item_count = -1;
     LVCOLUMNW column = {0};
@@ -7843,6 +7851,7 @@ static void test_queryinterface(void)
     INT inserted = -1;
     INT selected_count = -1;
     INT work_area_count = -1;
+    INT footer_visible = -1;
     HWND header = NULL, hwnd, tooltip = NULL;
     LRESULT ret;
     HRESULT hr;
@@ -7924,12 +7933,45 @@ static void test_queryinterface(void)
     ok(hr == S_OK, "GetSelectedCount returned %#lx.\n", hr);
     ok(selected_count == 1, "Expected one selected item, got %d.\n", selected_count);
 
+    hr = ((listview_get_extended_style_fn)vtbl[80])(iface, &style);
+    ok(hr == S_OK, "GetExtendedStyle returned %#lx.\n", hr);
+    ok(style == 0, "Expected style 0, got %#lx.\n", style);
     hr = ((listview_set_extended_style_fn)vtbl[81])(iface, LVS_EX_FULLROWSELECT,
                                                     LVS_EX_FULLROWSELECT, &old_style);
     ok(hr == S_OK, "SetExtendedStyle returned %#lx.\n", hr);
     ok(old_style == 0, "Expected old style 0, got %#lx.\n", old_style);
     ok(SendMessageA(hwnd, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0) & LVS_EX_FULLROWSELECT,
        "Expected LVS_EX_FULLROWSELECT.\n");
+    style = 0;
+    hr = ((listview_get_extended_style_fn)vtbl[80])(iface, &style);
+    ok(hr == S_OK, "GetExtendedStyle returned %#lx.\n", hr);
+    ok(style & LVS_EX_FULLROWSELECT, "Expected LVS_EX_FULLROWSELECT, got %#lx.\n", style);
+
+    hr = ((listview_reset_empty_text_fn)vtbl[95])(iface);
+    ok(hr == S_OK, "ResetEmptyText returned %#lx.\n", hr);
+    ret = SendMessageA(hwnd, LVM_RESETEMPTYTEXT, 0, 0);
+    ok(ret == TRUE, "LVM_RESETEMPTYTEXT returned %Id.\n", ret);
+
+    ret = SendMessageA(hwnd, LVM_QUERYINTERFACE, (WPARAM)&IID_IListViewFooter, (LPARAM)&footer);
+    ok(ret == TRUE, "IListViewFooter query returned %Id.\n", ret);
+    ok(footer != NULL, "Expected an IListViewFooter interface.\n");
+    if (footer)
+    {
+        hr = footer->lpVtbl->QueryInterface(footer, &IID_IUnknown, (void **)&footer_unknown);
+        ok(hr == S_OK, "IListViewFooter IUnknown query returned %#lx.\n", hr);
+        ok(footer_unknown == iface, "Expected controlling unknown %p, got %p.\n",
+           iface, footer_unknown);
+        if (footer_unknown) footer_unknown->lpVtbl->Release(footer_unknown);
+
+        vtbl = *(const void *const **)footer;
+        hr = ((listview_footer_is_visible_fn)vtbl[3])(footer, &footer_visible);
+        ok(hr == S_OK, "IListViewFooter::IsVisible returned %#lx.\n", hr);
+        ok(footer_visible == FALSE, "Expected an invisible footer, got %d.\n", footer_visible);
+        hr = ((listview_footer_remove_all_buttons_fn)vtbl[8])(footer);
+        ok(hr == S_OK, "IListViewFooter::RemoveAllButtons returned %#lx.\n", hr);
+    }
+
+    vtbl = *(const void *const **)iface;
 
     tooltip = NULL;
     hr = ((listview_get_tooltip_fn)vtbl[84])(iface, &tooltip);
@@ -7981,6 +8023,7 @@ static void test_queryinterface(void)
     ok(invalid_iface == NULL, "Expected a NULL interface, got %p.\n", invalid_iface);
 
     if (iface2) iface2->lpVtbl->Release(iface2);
+    if (footer) footer->lpVtbl->Release(footer);
     iface->lpVtbl->Release(iface);
     DestroyWindow(hwnd);
 }

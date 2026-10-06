@@ -208,12 +208,21 @@ typedef struct tagDELAYED_ITEM_EDIT
 
 typedef struct tagLISTVIEW_INFO LISTVIEW_INFO;
 
-typedef struct listview_interface
+typedef struct listview_interface LISTVIEW_INTERFACE;
+
+typedef struct listview_footer_interface
+{
+    const void *const *lpVtbl;
+    LISTVIEW_INTERFACE *listview;
+} LISTVIEW_FOOTER_INTERFACE;
+
+struct listview_interface
 {
     const void *const *lpVtbl;
     LISTVIEW_INFO *info;
     LONG refs;
-} LISTVIEW_INTERFACE;
+    LISTVIEW_FOOTER_INTERFACE footer;
+};
 
 #define MAX_LISTVIEW_WORK_AREAS 16
 
@@ -352,11 +361,14 @@ struct tagLISTVIEW_INFO
 };
 
 #define LVM_QUERYINTERFACE (LVM_FIRST + 189)
+#define LVM_RESETEMPTYTEXT (LVM_FIRST + 84)
 
 static const IID IID_IListView_Win7 =
     {0xe5b16af2, 0x3990, 0x4681, {0xa6, 0x09, 0x1f, 0x06, 0x0c, 0xd1, 0x42, 0x69}};
 static const IID IID_IListView2 =
     {0xc327e26b, 0x13c2, 0x47f7, {0x98, 0xe5, 0x79, 0xee, 0xd1, 0x26, 0x5e, 0x41}};
+static const IID IID_IListViewFooter =
+    {0xf0034da8, 0x8a22, 0x4151, {0x8f, 0x16, 0x2e, 0xba, 0x76, 0x56, 0x5b, 0xcc}};
 
 static DWORD LISTVIEW_SetExtendedListViewStyle(LISTVIEW_INFO *infoPtr, DWORD mask, DWORD ex_style);
 static INT LISTVIEW_GetSelectedCount(const LISTVIEW_INFO *infoPtr);
@@ -365,6 +377,12 @@ static HRESULT WINAPI listview_iface_QueryInterface(LISTVIEW_INTERFACE *iface, R
 {
     if (!out) return E_POINTER;
     *out = NULL;
+    if (IsEqualIID(iid, &IID_IListViewFooter))
+    {
+        *out = &iface->footer;
+        InterlockedIncrement(&iface->refs);
+        return S_OK;
+    }
     if (!IsEqualIID(iid, &IID_IUnknown) && !IsEqualIID(iid, &IID_IListView_Win7) &&
         !IsEqualIID(iid, &IID_IListView2)) return E_NOINTERFACE;
     *out = iface;
@@ -455,6 +473,22 @@ static HRESULT WINAPI listview_iface_GetSelectedCount(LISTVIEW_INTERFACE *iface,
     *count = 0;
     if (!iface->info) return RPC_E_DISCONNECTED;
     *count = LISTVIEW_GetSelectedCount(iface->info);
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_GetExtendedStyle(LISTVIEW_INTERFACE *iface, DWORD *style)
+{
+    if (!style) return E_POINTER;
+    *style = 0;
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    *style = iface->info->dwLvExStyle;
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_ResetEmptyText(LISTVIEW_INTERFACE *iface)
+{
+    if (!iface->info) return RPC_E_DISCONNECTED;
+    InvalidateRect(iface->info->hwndSelf, NULL, TRUE);
     return S_OK;
 }
 
@@ -616,6 +650,87 @@ static HRESULT WINAPI listview_iface_EnableQuirks(LISTVIEW_INTERFACE *iface, DWO
     return S_OK;
 }
 
+static HRESULT WINAPI listview_footer_QueryInterface(LISTVIEW_FOOTER_INTERFACE *iface,
+                                                       REFIID iid, void **out)
+{
+    return listview_iface_QueryInterface(iface->listview, iid, out);
+}
+
+static ULONG WINAPI listview_footer_AddRef(LISTVIEW_FOOTER_INTERFACE *iface)
+{
+    return listview_iface_AddRef(iface->listview);
+}
+
+static ULONG WINAPI listview_footer_Release(LISTVIEW_FOOTER_INTERFACE *iface)
+{
+    return listview_iface_Release(iface->listview);
+}
+
+static HRESULT WINAPI listview_footer_IsVisible(LISTVIEW_FOOTER_INTERFACE *iface, INT *visible)
+{
+    if (!visible) return E_POINTER;
+    *visible = FALSE;
+    return iface->listview->info ? S_OK : RPC_E_DISCONNECTED;
+}
+
+static HRESULT WINAPI listview_footer_GetFooterFocus(LISTVIEW_FOOTER_INTERFACE *iface, INT *item)
+{
+    if (!item) return E_POINTER;
+    *item = -1;
+    return iface->listview->info ? S_OK : RPC_E_DISCONNECTED;
+}
+
+static HRESULT WINAPI listview_footer_SetFooterFocus(LISTVIEW_FOOTER_INTERFACE *iface, INT item)
+{
+    return iface->listview->info ? E_NOTIMPL : RPC_E_DISCONNECTED;
+}
+
+static HRESULT WINAPI listview_footer_SetIntroText(LISTVIEW_FOOTER_INTERFACE *iface,
+                                                    const WCHAR *text)
+{
+    return iface->listview->info ? E_NOTIMPL : RPC_E_DISCONNECTED;
+}
+
+static HRESULT WINAPI listview_footer_Show(LISTVIEW_FOOTER_INTERFACE *iface, IUnknown *callback)
+{
+    return iface->listview->info ? E_NOTIMPL : RPC_E_DISCONNECTED;
+}
+
+static HRESULT WINAPI listview_footer_RemoveAllButtons(LISTVIEW_FOOTER_INTERFACE *iface)
+{
+    return iface->listview->info ? S_OK : RPC_E_DISCONNECTED;
+}
+
+static HRESULT WINAPI listview_footer_InsertButton(LISTVIEW_FOOTER_INTERFACE *iface, INT index,
+                                                    const WCHAR *text, const WCHAR *subtext,
+                                                    UINT image, LPARAM data)
+{
+    return iface->listview->info ? E_NOTIMPL : RPC_E_DISCONNECTED;
+}
+
+static HRESULT WINAPI listview_footer_GetButtonLParam(LISTVIEW_FOOTER_INTERFACE *iface, INT index,
+                                                       LPARAM *data)
+{
+    if (!data) return E_POINTER;
+    *data = 0;
+    return iface->listview->info ? E_NOTIMPL : RPC_E_DISCONNECTED;
+}
+
+static const void *const listview_footer_vtbl[] =
+{
+    listview_footer_QueryInterface,
+    listview_footer_AddRef,
+    listview_footer_Release,
+    listview_footer_IsVisible,
+    listview_footer_GetFooterFocus,
+    listview_footer_SetFooterFocus,
+    listview_footer_SetIntroText,
+    listview_footer_Show,
+    listview_footer_RemoveAllButtons,
+    listview_footer_InsertButton,
+    listview_footer_GetButtonLParam,
+};
+
 static const void *const listview_iface_vtbl[150] =
 {
     [0] = listview_iface_QueryInterface,
@@ -635,9 +750,11 @@ static const void *const listview_iface_vtbl[150] =
     [67] = listview_iface_DeleteColumn,
     [72] = listview_iface_SetColumnWidth,
     [78] = listview_iface_GetSelectedCount,
+    [80] = listview_iface_GetExtendedStyle,
     [81] = listview_iface_SetExtendedStyle,
     [84] = listview_iface_GetToolTip,
     [94] = listview_iface_GetWorkAreaCount,
+    [95] = listview_iface_ResetEmptyText,
     [112] = listview_iface_SetOwnerDataCallback,
     [140] = listview_iface_GetColumnMargin,
     [141] = listview_iface_SetSubItemCallback,
@@ -9905,6 +10022,8 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, WPARAM wParam, const CREATESTRUCTW *
   infoPtr->iface->lpVtbl = listview_iface_vtbl;
   infoPtr->iface->info = infoPtr;
   infoPtr->iface->refs = 1;
+  infoPtr->iface->footer.lpVtbl = listview_footer_vtbl;
+  infoPtr->iface->footer.listview = infoPtr->iface;
   infoPtr->dwStyle = lpcs->style;    /* Note: may be changed in WM_CREATE */
   map_style_view(infoPtr);
   /* determine the type of structures to use */
@@ -12006,6 +12125,10 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
   case LVM_QUERYINTERFACE:
     return listview_iface_QueryInterface(infoPtr->iface, (REFIID)wParam, (void **)lParam) == S_OK;
+
+  case LVM_RESETEMPTYTEXT:
+    listview_iface_ResetEmptyText(infoPtr->iface);
+    return TRUE;
 
   case CCM_SETNOTIFYWINDOW:
   {
