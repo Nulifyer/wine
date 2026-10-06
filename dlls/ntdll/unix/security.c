@@ -1458,6 +1458,34 @@ NTSTATUS WINAPI NtCloseObjectAuditAlarm( UNICODE_STRING *subsystem, HANDLE handl
 
 
 /***********************************************************************
+ *             NtQuerySecurityPolicy  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQuerySecurityPolicy( const UNICODE_STRING *provider, const UNICODE_STRING *key,
+                                       const UNICODE_STRING *name, ULONG *type, void *value, ULONG *size )
+{
+    const UNICODE_STRING *strings[] = {provider, key, name};
+    unsigned int i;
+
+    TRACE( "(%p, %p, %p, %p, %p, %p)\n", provider, key, name, type, value, size );
+    if (!provider || !key || !name) return STATUS_INVALID_PARAMETER;
+    if (!virtual_check_buffer_for_write( type, sizeof(*type) ) ||
+        !virtual_check_buffer_for_write( size, sizeof(*size) )) return STATUS_ACCESS_VIOLATION;
+    if (!*size) return STATUS_INVALID_PARAMETER;
+    if (value && !virtual_check_buffer_for_write( value, *size )) return STATUS_ACCESS_VIOLATION;
+    for (i = 0; i < ARRAY_SIZE(strings); ++i)
+    {
+        if (!virtual_check_buffer_for_read( strings[i], sizeof(*strings[i]) ) ||
+            !virtual_check_buffer_for_read( strings[i]->Buffer, strings[i]->Length ))
+            return STATUS_ACCESS_VIOLATION;
+    }
+
+    /* No signed application-control secure settings are installed.  Do not
+     * fabricate a value or read ordinary registry values as signed policy. */
+    return STATUS_NOT_FOUND;
+}
+
+
+/***********************************************************************
  *             NtQuerySecurityObject  (NTDLL.@)
  */
 NTSTATUS WINAPI NtQuerySecurityObject( HANDLE handle, SECURITY_INFORMATION info,

@@ -366,6 +366,7 @@
 # @ stub NtQueryQuotaInformationFile
 @ stdcall -syscall=0x0051 NtQuerySection(long long ptr long ptr)
 @ stdcall -syscall NtQuerySecurityObject(long long ptr long ptr)
+@ stdcall -syscall NtQuerySecurityPolicy(ptr ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtQuerySemaphore (long long ptr long ptr)
 @ stdcall -syscall NtQuerySymbolicLinkObject(long ptr ptr)
 @ stdcall -syscall NtQuerySystemEnvironmentValue(ptr ptr long ptr)
@@ -1546,6 +1547,7 @@
 # @ stub ZwQueryQuotaInformationFile
 @ stdcall -private ZwQuerySection(long long ptr long ptr) NtQuerySection
 @ stdcall -private ZwQuerySecurityObject(long long ptr long ptr) NtQuerySecurityObject
+@ stdcall -private ZwQuerySecurityPolicy(ptr ptr ptr ptr ptr ptr) NtQuerySecurityPolicy
 @ stdcall -private ZwQuerySemaphore(long long ptr long ptr) NtQuerySemaphore
 @ stdcall -private ZwQuerySymbolicLinkObject(long ptr ptr) NtQuerySymbolicLinkObject
 @ stdcall -private ZwQuerySystemEnvironmentValue(ptr ptr long ptr) NtQuerySystemEnvironmentValue

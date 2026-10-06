@@ -39,6 +39,7 @@ SOURCES = \
 	rtl.c \
 	rtlbitmap.c \
 	rtlstr.c \
+	security_policy.c \
 	service_session.c \
 	string.c \
 	switchback.c \

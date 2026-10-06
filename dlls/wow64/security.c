@@ -635,6 +635,25 @@ NTSTATUS WINAPI wow64_NtQueryInformationToken( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtQuerySecurityPolicy
+ */
+NTSTATUS WINAPI wow64_NtQuerySecurityPolicy( UINT *args )
+{
+    const UNICODE_STRING32 *provider32 = get_ptr( &args );
+    const UNICODE_STRING32 *key32 = get_ptr( &args );
+    const UNICODE_STRING32 *name32 = get_ptr( &args );
+    ULONG *type = get_ptr( &args );
+    void *value = get_ptr( &args );
+    ULONG *size = get_ptr( &args );
+    UNICODE_STRING provider, key, name;
+
+    return NtQuerySecurityPolicy( unicode_str_32to64( &provider, provider32 ),
+                                   unicode_str_32to64( &key, key32 ),
+                                   unicode_str_32to64( &name, name32 ), type, value, size );
+}
+
+
+/**********************************************************************
  *           wow64_NtQuerySecurityObject
  */
 NTSTATUS WINAPI wow64_NtQuerySecurityObject( UINT *args )
