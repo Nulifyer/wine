@@ -38,6 +38,16 @@
 WINE_DEFAULT_DEBUG_CHANNEL(security);
 
 
+/***********************************************************************
+ *           GetIsEdpEnabled   (kernelbase.@)
+ */
+BOOL WINAPI GetIsEdpEnabled(void)
+{
+    /* Wine does not implement Windows enterprise data protection policy. */
+    return FALSE;
+}
+
+
 /******************************************************************************
  * SID functions
  ******************************************************************************/

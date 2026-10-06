@@ -4,6 +4,7 @@ IMPORTS   = advapi32
 SOURCES = \
 	appmodel_identity.c \
 	appmodel_state.c \
+	edp.c \
 	exit.c \
 	feature.c \
 	file.c \

@@ -577,7 +577,7 @@
 @ stdcall GetHandleInformation(long ptr)
 # @ stub GetHivePath
 @ stdcall GetIntegratedDisplaySize(ptr)
-# @ stub GetIsEdpEnabled
+@ stdcall GetIsEdpEnabled()
 @ stdcall GetKernelObjectSecurity(long long ptr long ptr)
 @ stdcall GetLargePageMinimum()
 @ stdcall GetLargestConsoleWindowSize(long)
