@@ -390,7 +390,7 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         0,    /* TokenChildProcessFlags */
         0,    /* TokenIsLessPrivilegedAppContainer */
         sizeof(DWORD), /* TokenIsSandboxed */
-        0,    /* TokenIsAppSilo */
+        sizeof(DWORD), /* TokenIsAppSilo */
         0,    /* TokenLoggingInformation */
         0,    /* TokenLearningMode */
     };
@@ -742,6 +742,11 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
             *(DWORD *)info = 0;
             break;
         }
+
+    case TokenIsAppSilo:
+        TRACE("TokenIsAppSilo semi-stub\n");
+        *(DWORD *)info = 0;
+        break;
 
     case TokenIsSandboxed:
         {

@@ -784,6 +784,14 @@ static void test_sandboxed_token(void)
     ok( size == sizeof(value), "got size %lu.\n", size );
     ok( !value, "current token reported sandboxed.\n" );
 
+    value = 0xcccccccc;
+    size = 0;
+    status = NtQueryInformationToken( GetCurrentProcessToken(), TokenIsAppSilo,
+                                      &value, sizeof(value), &size );
+    ok( status == STATUS_SUCCESS, "TokenIsAppSilo returned %#lx.\n", status );
+    ok( size == sizeof(value), "got size %lu.\n", size );
+    ok( !value, "current token reported as an app silo.\n" );
+
     sandboxed = 0xcc;
     status = pRtlCheckSandboxedToken( (HANDLE)0xdeadbeef, &sandboxed );
     ok( status == STATUS_INVALID_HANDLE, "invalid token returned %#lx.\n", status );
