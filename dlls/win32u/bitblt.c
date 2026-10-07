@@ -113,7 +113,7 @@ BOOL intersect_vis_rectangles( struct bitblt_coords *dst, struct bitblt_coords *
 }
 
 static BOOL get_vis_rectangles( DC *dc_dst, struct bitblt_coords *dst,
-                                DC *dc_src, struct bitblt_coords *src )
+                                DC *dc_src, struct bitblt_coords *src, BOOL device_coords )
 {
     RECT rect;
 
@@ -123,7 +123,7 @@ static BOOL get_vis_rectangles( DC *dc_dst, struct bitblt_coords *dst,
     rect.top    = dst->log_y;
     rect.right  = dst->log_x + dst->log_width;
     rect.bottom = dst->log_y + dst->log_height;
-    lp_to_dp( dc_dst, (POINT *)&rect, 2 );
+    if (!device_coords) lp_to_dp( dc_dst, (POINT *)&rect, 2 );
     dst->x      = rect.left;
     dst->y      = rect.top;
     dst->width  = rect.right - rect.left;
@@ -145,7 +145,7 @@ static BOOL get_vis_rectangles( DC *dc_dst, struct bitblt_coords *dst,
     rect.top    = src->log_y;
     rect.right  = src->log_x + src->log_width;
     rect.bottom = src->log_y + src->log_height;
-    lp_to_dp( dc_src, (POINT *)&rect, 2 );
+    if (!device_coords) lp_to_dp( dc_src, (POINT *)&rect, 2 );
     src->x      = rect.left;
     src->y      = rect.top;
     src->width  = rect.right - rect.left;
@@ -161,6 +161,50 @@ static BOOL get_vis_rectangles( DC *dc_dst, struct bitblt_coords *dst,
     if (IsRectEmpty( &dst->visrect )) return FALSE;
 
     return intersect_vis_rectangles( dst, src );
+}
+
+/* Draw already mapped rectangles without changing either DC's mapping state. */
+static BOOL device_blt( HDC hdc_dst, const RECT *dst_rect, HDC hdc_src,
+                        const RECT *src_rect, DWORD rop, BOOL alpha )
+{
+    DC *dc_dst, *dc_src;
+    struct bitblt_coords dst = {0}, src = {0};
+    BOOL ret = FALSE;
+
+    if (!(dc_dst = get_dc_ptr( hdc_dst ))) return FALSE;
+    if ((dc_src = get_dc_ptr( hdc_src )))
+    {
+        update_dc( dc_dst );
+        update_dc( dc_src );
+        dst.log_x = dst_rect->left;
+        dst.log_y = dst_rect->top;
+        dst.log_width = dst_rect->right - dst_rect->left;
+        dst.log_height = dst_rect->bottom - dst_rect->top;
+        src.log_x = src_rect->left;
+        src.log_y = src_rect->top;
+        src.log_width = src_rect->right - src_rect->left;
+        src.log_height = src_rect->bottom - src_rect->top;
+        ret = !get_vis_rectangles( dc_dst, &dst, dc_src, &src, TRUE );
+        if (!ret && alpha)
+        {
+            BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+            PHYSDEV dst_dev = GET_DC_PHYSDEV( dc_dst, pAlphaBlend );
+            PHYSDEV src_dev = GET_DC_PHYSDEV( dc_src, pAlphaBlend );
+            ret = dst_dev->funcs->pAlphaBlend( dst_dev, &dst, src_dev, &src, blend );
+        }
+        else if (!ret)
+        {
+            PHYSDEV dst_dev = GET_DC_PHYSDEV( dc_dst, pStretchBlt );
+            PHYSDEV src_dev = GET_DC_PHYSDEV( dc_src, pStretchBlt );
+            int mode = dc_dst->attr->stretch_blt_mode;
+            dc_dst->attr->stretch_blt_mode = COLORONCOLOR;
+            ret = dst_dev->funcs->pStretchBlt( dst_dev, &dst, src_dev, &src, rop );
+            dc_dst->attr->stretch_blt_mode = mode;
+        }
+        release_dc_ptr( dc_src );
+    }
+    release_dc_ptr( dc_dst );
+    return ret;
 }
 
 void free_heap_bits( struct gdi_image_bits *bits )
@@ -553,7 +597,7 @@ BOOL WINAPI NtGdiPatBlt( HDC hdc, INT left, INT top, INT width, INT height, DWOR
             dst.layout |= LAYOUT_BITMAPORIENTATIONPRESERVED;
             rop &= ~NOMIRRORBITMAP;
         }
-        ret = !get_vis_rectangles( dc, &dst, NULL, NULL );
+        ret = !get_vis_rectangles( dc, &dst, NULL, NULL, FALSE );
 
         TRACE("dst %p log=%d,%d %dx%d phys=%d,%d %dx%d vis=%s  rop=%06x\n",
               hdc, dst.log_x, dst.log_y, dst.log_width, dst.log_height,
@@ -618,7 +662,7 @@ BOOL WINAPI NtGdiStretchBlt( HDC hdcDst, INT xDst, INT yDst, INT widthDst, INT h
             dst.layout |= LAYOUT_BITMAPORIENTATIONPRESERVED;
             rop &= ~NOMIRRORBITMAP;
         }
-        ret = !get_vis_rectangles( dcDst, &dst, dcSrc, &src );
+        ret = !get_vis_rectangles( dcDst, &dst, dcSrc, &src, FALSE );
 
         TRACE("src %p log=%d,%d %dx%d phys=%d,%d %dx%d vis=%s  dst %p log=%d,%d %dx%d phys=%d,%d %dx%d vis=%s  rop=%06x\n",
               hdcSrc, src.log_x, src.log_y, src.log_width, src.log_height,
@@ -838,12 +882,71 @@ BOOL WINAPI NtGdiMaskBlt( HDC hdcDest, INT nXDest, INT nYDest, INT nWidth, INT n
     return TRUE;
 }
 
+/* Turn the existing color-key mask into a device clip. Masked pixels must keep
+ * all destination bits, including alpha; a monochrome SRCAND clears that byte. */
+static BOOL device_masked_blt( HDC dst, const RECT *dest, HDC src, const RECT *source,
+                               const BYTE *mask, SIZE_T stride )
+{
+    int width = source->right, height = source->bottom, x, y;
+    HRGN opaque, run, saved;
+    DC *dc;
+    BOOL ret = FALSE;
+
+    if (!(opaque = NtGdiCreateRectRgn( 0, 0, 0, 0 ))) return FALSE;
+    if (!(run = NtGdiCreateRectRgn( 0, 0, 0, 0 ))) goto done;
+    for (y = 0; y < height; ++y)
+    {
+        const BYTE *row = mask + y * stride;
+        for (x = 0; x < width; )
+        {
+            RECT rect;
+            int start;
+
+            while (x < width && (row[x / 8] & (0x80 >> (x % 8)))) ++x;
+            start = x;
+            while (x < width && !(row[x / 8] & (0x80 >> (x % 8)))) ++x;
+            if (start == x) continue;
+            if (dest->right > dest->left)
+            {
+                rect.left = dest->left + start;
+                rect.right = dest->left + x;
+            }
+            else
+            {
+                rect.left = dest->left - (x - 1);
+                rect.right = dest->left - start + 1;
+            }
+            rect.top = dest->bottom > dest->top ? dest->top + y : dest->top - y;
+            rect.bottom = rect.top + 1;
+            if (!NtGdiSetRectRgn( run, rect.left, rect.top, rect.right, rect.bottom ) ||
+                !NtGdiCombineRgn( opaque, opaque, run, RGN_OR )) goto done;
+        }
+    }
+    if (!(dc = get_dc_ptr( dst ))) goto done;
+    saved = dc->hClipRgn;
+    if (saved && !NtGdiCombineRgn( opaque, opaque, saved, RGN_AND ))
+    {
+        release_dc_ptr( dc );
+        goto done;
+    }
+    dc->hClipRgn = opaque;
+    update_dc_clipping( dc );
+    ret = device_blt( dst, dest, src, source, SRCCOPY, FALSE );
+    dc->hClipRgn = saved;
+    update_dc_clipping( dc );
+    release_dc_ptr( dc );
+done:
+    if (run) NtGdiDeleteObjectApp( run );
+    NtGdiDeleteObjectApp( opaque );
+    return ret;
+}
+
 /******************************************************************************
  *           NtGdiTransparentBlt    (win32u.@)
  */
-BOOL WINAPI NtGdiTransparentBlt( HDC hdcDest, int xDest, int yDest, int widthDest, int heightDest,
-                                 HDC hdcSrc, int xSrc, int ySrc, int widthSrc, int heightSrc,
-                                 UINT crTransparent )
+static BOOL transparent_blt( HDC hdcDest, int xDest, int yDest, int widthDest, int heightDest,
+                             HDC hdcSrc, int xSrc, int ySrc, int widthSrc, int heightSrc,
+                             UINT crTransparent, BOOL device_dst )
 {
     BOOL ret = FALSE;
     HDC hdcWork;
@@ -857,7 +960,20 @@ BOOL WINAPI NtGdiTransparentBlt( HDC hdcDest, int xDest, int yDest, int widthDes
     int oldStretchMode;
     DC *dc_src;
     DC *dc_work;
+    RECT dst_rect, src_rect;
+    void *mask_bits = NULL;
+    SIZE_T mask_stride = 0;
 
+    if (device_dst)
+    {
+        if (widthDest == INT_MIN || heightDest == INT_MIN ||
+            (LONGLONG)xDest + widthDest > INT_MAX || (LONGLONG)xDest + widthDest < INT_MIN ||
+            (LONGLONG)yDest + heightDest > INT_MAX || (LONGLONG)yDest + heightDest < INT_MIN) return FALSE;
+        SetRect( &dst_rect, xDest, yDest, xDest + widthDest, yDest + heightDest );
+        SetRect( &src_rect, 0, 0, abs(widthDest), abs(heightDest) );
+        widthDest = abs(widthDest);
+        heightDest = abs(heightDest);
+    }
     if(widthDest < 0 || heightDest < 0 || widthSrc < 0 || heightSrc < 0) {
         TRACE("Cannot mirror\n");
         return FALSE;
@@ -910,6 +1026,17 @@ BOOL WINAPI NtGdiTransparentBlt( HDC hdcDest, int xDest, int yDest, int widthDes
         goto error;
     }
 
+    if (device_dst)
+    {
+        SIZE_T bytes;
+        mask_stride = ((SIZE_T)widthDest + 15) / 16 * 2;
+        if (mask_stride > INT_MAX / heightDest) goto error;
+        bytes = mask_stride * heightDest;
+        if (!(mask_bits = malloc( bytes )) || NtGdiGetBitmapBits( bmpMask, bytes, mask_bits ) != bytes) goto error;
+        ret = device_masked_blt( hdcDest, &dst_rect, hdcWork, &src_rect, mask_bits, mask_stride );
+        goto error;
+    }
+
     /* Replace transparent color with black */
     NtGdiGetAndSetDCDword( hdcWork, NtGdiSetBkColor, RGB(0,0,0), NULL );
     NtGdiGetAndSetDCDword( hdcWork, NtGdiSetTextColor, RGB(255,255,255), NULL );
@@ -949,6 +1076,285 @@ error:
         NtGdiDeleteObjectApp( hdcMask );
     }
     if(bmpMask) NtGdiDeleteObjectApp( bmpMask );
+    free( mask_bits );
+    return ret;
+}
+
+BOOL WINAPI NtGdiTransparentBlt( HDC dst, int x, int y, int width, int height,
+                                 HDC src, int sx, int sy, int sw, int sh, UINT color )
+{
+    return transparent_blt( dst, x, y, width, height, src, sx, sy, sw, sh, color, FALSE );
+}
+
+struct draw_stream_image
+{
+    DWORD command;
+    RECT dst, src;
+    DWORD flags;
+    int left, right, top, bottom;
+    COLORREF color;
+};
+
+C_ASSERT( sizeof(struct draw_stream_image) == 60 );
+
+static BOOL capture_draw_stream( void *dst, const void *src, ULONG size )
+{
+    BOOL ret = TRUE;
+
+    __TRY
+    {
+        memcpy( dst, src, size );
+    }
+    __EXCEPT
+    {
+        ret = FALSE;
+    }
+    __ENDTRY
+    return ret;
+}
+
+/* The destination is retained throughout the stream. Regions here are already
+ * in device coordinates; the public region selector would mirror them again. */
+static void draw_stream_clip( DC *dc, HRGN clip )
+{
+    dc->hClipRgn = clip;
+    update_dc_clipping( dc );
+}
+
+static BOOL draw_stream_piece( HDC dst, HDC src, RECT d, RECT s,
+                               const struct draw_stream_image *image, BOOL mirror_x, BOOL mirror_y )
+{
+    if (IsRectEmpty( &d ) || IsRectEmpty( &s )) return TRUE;
+    if (mirror_x)
+    {
+        int tmp = d.left;
+        d.left = d.right - 1;
+        d.right = tmp - 1;
+    }
+    if (mirror_y)
+    {
+        int tmp = d.top;
+        d.top = d.bottom - 1;
+        d.bottom = tmp - 1;
+    }
+    if (image->flags & 8)
+        return transparent_blt( dst, d.left, d.top, d.right - d.left, d.bottom - d.top,
+                                src, s.left, s.top, s.right - s.left, s.bottom - s.top,
+                                image->color, TRUE );
+    return device_blt( dst, &d, src, &s, SRCCOPY, !!(image->flags & 4) );
+}
+
+static BOOL draw_stream_image( DC *dc, HDC hdc, HDC source, const struct draw_stream_image *image )
+{
+    RECT mapped = image->dst, bounds;
+    LONGLONG sw = (LONGLONG)image->src.right - image->src.left;
+    LONGLONG sh = (LONGLONG)image->src.bottom - image->src.top;
+    LONGLONG dw = (LONGLONG)mapped.right - mapped.left;
+    LONGLONG dh = (LONGLONG)mapped.bottom - mapped.top;
+    int dx[4], dy[4], sx[4], sy[4], x, y;
+    BOOL mirror_x, mirror_y, ret = TRUE;
+    HRGN saved = dc->hClipRgn, clip;
+
+    if (image->flags & ~0x7f || (image->flags & 12) == 12 ||
+        sw <= 0 || sh <= 0 || sw > INT_MAX || sh > INT_MAX ||
+        dw > INT_MAX || dw < -INT_MAX || dh > INT_MAX || dh < -INT_MAX ||
+        image->left < 0 || image->right < 0 || image->top < 0 || image->bottom < 0 ||
+        (LONGLONG)image->left + image->right > sw ||
+        (LONGLONG)image->top + image->bottom > sh) return FALSE;
+    if (!dw || !dh) return TRUE;
+
+    mirror_x = dw < 0;
+    mirror_y = dh < 0;
+    order_rect( &mapped );
+    lp_to_dp( dc, (POINT *)&mapped, 2 );
+    dw = (LONGLONG)mapped.right - mapped.left;
+    dh = (LONGLONG)mapped.bottom - mapped.top;
+    if (dw > INT_MAX || dw < -INT_MAX || dh > INT_MAX || dh < -INT_MAX) return FALSE;
+    mirror_x = (mirror_x != (dw < 0)) && (image->flags & 16);
+    mirror_y = (mirror_y != (dh < 0)) && (image->flags & 16);
+    if ((dw < 0 && mapped.left == INT_MAX) || (dh < 0 && mapped.top == INT_MAX)) return FALSE;
+    get_bounding_rect( &bounds, mapped.left, mapped.top, dw, dh );
+    if (IsRectEmpty( &bounds )) return TRUE;
+    if ((mirror_x && bounds.left == INT_MIN) || (mirror_y && bounds.top == INT_MIN) ||
+        (LONGLONG)bounds.left + max( image->left, image->right ) > INT_MAX ||
+        (LONGLONG)bounds.top + max( image->top, image->bottom ) > INT_MAX ||
+        (LONGLONG)bounds.right - max( image->left, image->right ) < INT_MIN ||
+        (LONGLONG)bounds.bottom - max( image->top, image->bottom ) < INT_MIN) return FALSE;
+    if (!(clip = NtGdiCreateRectRgn( bounds.left, bounds.top, bounds.right, bounds.bottom ))) return FALSE;
+    if (saved && !NtGdiCombineRgn( clip, clip, saved, RGN_AND ))
+    {
+        NtGdiDeleteObjectApp( clip );
+        return FALSE;
+    }
+    draw_stream_clip( dc, clip );
+
+    if (image->flags & 32)
+    {
+        RECT dest = {bounds.left, bounds.top, bounds.left + sw, bounds.top + sh};
+        if ((LONGLONG)bounds.left + sw > INT_MAX || (LONGLONG)bounds.top + sh > INT_MAX) ret = FALSE;
+        else ret = draw_stream_piece( hdc, source, dest, image->src, image, mirror_x, mirror_y );
+    }
+    else
+    {
+        dx[0] = bounds.left; dx[1] = bounds.left + image->left;
+        dx[2] = bounds.right - image->right; dx[3] = bounds.right;
+        dy[0] = bounds.top; dy[1] = bounds.top + image->top;
+        dy[2] = bounds.bottom - image->bottom; dy[3] = bounds.bottom;
+        sx[0] = image->src.left; sx[1] = image->src.left + image->left;
+        sx[2] = image->src.right - image->right; sx[3] = image->src.right;
+        sy[0] = image->src.top; sy[1] = image->src.top + image->top;
+        sy[2] = image->src.bottom - image->bottom; sy[3] = image->src.bottom;
+        for (y = 0; y < 3 && ret; ++y)
+            for (x = 0; x < 3 && ret; ++x)
+            {
+                RECT d = {dx[x], dy[y], dx[x+1], dy[y+1]};
+                RECT s = {sx[x], sy[y], sx[x+1], sy[y+1]};
+                int tx, ty, tile_w = s.right - s.left, tile_h = s.bottom - s.top;
+
+                if (IsRectEmpty( &d ) || IsRectEmpty( &s )) continue;
+                if (mirror_x)
+                {
+                    d.left = bounds.left + (bounds.right - dx[x+1]);
+                    d.right = bounds.left + (bounds.right - dx[x]);
+                }
+                if (mirror_y)
+                {
+                    d.top = bounds.top + (bounds.bottom - dy[y+1]);
+                    d.bottom = bounds.top + (bounds.bottom - dy[y]);
+                }
+                if (!(image->flags & 2))
+                    ret = draw_stream_piece( hdc, source, d, s, image, mirror_x, mirror_y );
+                else
+                {
+                    if (x != 1) tile_w = d.right - d.left;
+                    if (y != 1) tile_h = d.bottom - d.top;
+                    for (ty = d.top; ty < d.bottom && ret; )
+                    {
+                        int height = min( tile_h, d.bottom - ty );
+                        for (tx = d.left; tx < d.right && ret; )
+                        {
+                            int width = min( tile_w, d.right - tx );
+                            RECT tile = {tx, ty, tx + width, ty + height}, part = s;
+                            if (x == 1) part.right = part.left + width;
+                            if (y == 1) part.bottom = part.top + height;
+                            ret = draw_stream_piece( hdc, source, tile, part, image, mirror_x, mirror_y );
+                            tx += width;
+                        }
+                        ty += height;
+                    }
+                }
+            }
+    }
+    draw_stream_clip( dc, saved );
+    NtGdiDeleteObjectApp( clip );
+    return ret;
+}
+
+/******************************************************************************
+ *           NtGdiDrawStream   (win32u.@)
+ */
+BOOL WINAPI NtGdiDrawStream( HDC hdc, ULONG size, void *stream )
+{
+    DWORD error = RtlGetLastWin32Error(), magic, offset = sizeof(DWORD);
+    DC *dc;
+    HDC source = NULL;
+    HBITMAP old_bitmap = NULL;
+    HRGN original, clip = NULL;
+    BOOL ret = FALSE;
+
+    if (!(dc = get_dc_ptr( hdc ))) goto done;
+    original = dc->hClipRgn;
+    if (size < sizeof(magic) || (ULONG_PTR)stream > ~(ULONG_PTR)0 - size ||
+        !capture_draw_stream( &magic, stream, sizeof(magic) ) || magic != 0x44727753) goto cleanup;
+    update_dc( dc );
+    ret = TRUE;
+    while (offset < size)
+    {
+        union
+        {
+            DWORD command;
+            struct { DWORD command, dc; RECT rect; } clip;
+            struct { DWORD command, bitmap; } bitmap;
+            struct draw_stream_image image;
+        } packet;
+        ULONG command, length, remaining = size - offset;
+        const char *input = (const char *)stream + offset;
+
+        ret = FALSE;
+        if (remaining < sizeof(DWORD))
+        {
+            ret = TRUE;
+            break;
+        }
+        if (!capture_draw_stream( &packet.command, input, sizeof(DWORD) )) break;
+        command = packet.command;
+        switch (command)
+        {
+        case 0: length = sizeof(packet.clip); break;
+        case 1: length = sizeof(packet.bitmap); break;
+        case 9: length = sizeof(packet.image); break;
+        default: goto cleanup;
+        }
+        if (remaining < length) break;
+        /* A final command with a 1-3 byte trailer is not executed. */
+        if (remaining - length < sizeof(DWORD) && remaining != length)
+        {
+            ret = TRUE;
+            break;
+        }
+        if (!capture_draw_stream( &packet, input, length ) || packet.command != command) break;
+        switch (packet.command)
+        {
+        case 0:
+        {
+            RECT rect = packet.clip.rect, bounds;
+            LONGLONG width, height;
+            HRGN region;
+
+            if (packet.clip.dc != HandleToULong( hdc )) goto cleanup;
+            lp_to_dp( dc, (POINT *)&rect, 2 );
+            width = (LONGLONG)rect.right - rect.left;
+            height = (LONGLONG)rect.bottom - rect.top;
+            if (width > INT_MAX || width < -INT_MAX || height > INT_MAX || height < -INT_MAX) goto cleanup;
+            if ((width < 0 && rect.left == INT_MAX) || (height < 0 && rect.top == INT_MAX)) goto cleanup;
+            get_bounding_rect( &bounds, rect.left, rect.top, width, height );
+            if (!(region = NtGdiCreateRectRgn( bounds.left, bounds.top, bounds.right, bounds.bottom ))) goto cleanup;
+            if (original && !NtGdiCombineRgn( region, region, original, RGN_AND ))
+            {
+                NtGdiDeleteObjectApp( region );
+                goto cleanup;
+            }
+            draw_stream_clip( dc, region );
+            if (clip) NtGdiDeleteObjectApp( clip );
+            clip = region;
+            break;
+        }
+        case 1:
+            if (!source && !(source = NtGdiCreateCompatibleDC( hdc ))) goto cleanup;
+            if (!old_bitmap)
+            {
+                if (!(old_bitmap = NtGdiSelectBitmap( source, ULongToHandle( packet.bitmap.bitmap ) ))) goto cleanup;
+            }
+            else if (!NtGdiSelectBitmap( source, ULongToHandle( packet.bitmap.bitmap ) )) goto cleanup;
+            break;
+        case 9:
+            if (!old_bitmap || !draw_stream_image( dc, hdc, source, &packet.image )) goto cleanup;
+            break;
+        }
+        offset += length;
+        ret = TRUE;
+    }
+cleanup:
+    draw_stream_clip( dc, original );
+    if (clip) NtGdiDeleteObjectApp( clip );
+    if (source)
+    {
+        if (old_bitmap) NtGdiSelectBitmap( source, old_bitmap );
+        NtGdiDeleteObjectApp( source );
+    }
+    release_dc_ptr( dc );
+done:
+    RtlSetLastWin32Error( error );
     return ret;
 }
 
@@ -983,7 +1389,7 @@ BOOL WINAPI NtGdiAlphaBlend( HDC hdcDst, int xDst, int yDst, int widthDst, int h
         dst.log_width  = widthDst;
         dst.log_height = heightDst;
         dst.layout     = dcDst->attr->layout;
-        ret = !get_vis_rectangles( dcDst, &dst, dcSrc, &src );
+        ret = !get_vis_rectangles( dcDst, &dst, dcSrc, &src, FALSE );
 
         TRACE("src %p log=%d,%d %dx%d phys=%d,%d %dx%d vis=%s  dst %p log=%d,%d %dx%d phys=%d,%d %dx%d vis=%s  blend=%02x/%02x/%02x/%02x\n",
               hdcSrc, src.log_x, src.log_y, src.log_width, src.log_height,

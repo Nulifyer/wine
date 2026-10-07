@@ -917,15 +917,6 @@ BOOL WINAPI NtGdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
     return ret;
 }
 
-/******************************************************************************
- *           NtGdiDrawStream   (win32u.@)
- */
-BOOL WINAPI NtGdiDrawStream( HDC hdc, ULONG in, void *pvin )
-{
-    FIXME("stub: %p, %d, %p\n", hdc, in, pvin);
-    return FALSE;
-}
-
 /*************************************************************************
  *	     NtUserScrollDC    (win32u.@)
  */
