@@ -1317,6 +1317,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetMappedFileNameW( HANDLE process, void *addr, W
     len = mem->SectionFileName.Length / sizeof(WCHAR);
     memcpy( name, mem->SectionFileName.Buffer, min( mem->SectionFileName.Length, size * sizeof(WCHAR) ));
     if (len >= size) SetLastError( ERROR_INSUFFICIENT_BUFFER );
+    else SetLastError( ERROR_SUCCESS );
     name[min(len, size - 1)] = 0;
     return len;
 }

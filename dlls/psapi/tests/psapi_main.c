@@ -863,6 +863,7 @@ static void test_GetMappedFileName(void)
     SetLastError(0xdeadbeef);
     ret = GetMappedFileNameW(GetCurrentProcess(), base, map_nameW, ARRAY_SIZE(map_nameW));
     ok(ret, "GetMappedFileNameW error %ld\n", GetLastError());
+    ok(GetLastError() == ERROR_SUCCESS, "unexpected last error %ld\n", GetLastError());
     ok(ret > strlen(device_name), "map_name should be longer than device_name\n");
     if (nt_get_mapped_file_name(GetCurrentProcess(), base, nt_map_name, ARRAY_SIZE(nt_map_name)))
     {
