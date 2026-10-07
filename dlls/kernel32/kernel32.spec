@@ -180,7 +180,8 @@
 @ stdcall -import BaseGetNamedObjectDirectory(ptr)
 @ stub BaseInitAppcompatCache
 @ stdcall -import BaseInitAppcompatCacheSupport()
-# @ stub BaseIsAppcompatInfrastructureDisabled
+@ stdcall -import BaseIsAppcompatInfrastructureDisabled()
+@ stdcall BaseIsAppcompatInfrastructureDisabledWorker() kernelbase.BaseIsAppcompatInfrastructureDisabled
 @ stub BaseProcessInitPostImport
 # @ stub BaseQueryModuleData
 @ stdcall BaseSetLastNTError(long)

@@ -174,7 +174,7 @@
 @ stdcall -syscall NtAlpcImpersonateClientOfPort(ptr ptr ptr)
 @ stdcall -syscall NtAlpcOpenSenderProcess(ptr long ptr long long ptr)
 @ stdcall -syscall NtAlpcSendWaitReceivePort(ptr long ptr ptr ptr ptr ptr ptr)
-@ stub -syscall=0x004c NtApphelpCacheControl
+@ stdcall -syscall=0x004c NtApphelpCacheControl(long ptr)
 @ stdcall -syscall NtAreMappedFilesTheSame(ptr ptr)
 @ stdcall -syscall NtAssignProcessToJobObject(long long)
 @ stdcall -syscall NtAssociateWaitCompletionPacket(ptr ptr ptr ptr ptr long ptr ptr)
@@ -1364,7 +1364,7 @@
 @ stdcall -private ZwAlpcSetInformation(ptr long ptr long) NtAlpcSetInformation
 @ stdcall -private ZwAlpcImpersonateClientOfPort(ptr ptr ptr) NtAlpcImpersonateClientOfPort
 @ stdcall -private ZwAlpcSendWaitReceivePort(ptr long ptr ptr ptr ptr ptr ptr) NtAlpcSendWaitReceivePort
-@ stdcall -private ZwApphelpCacheControl() NtApphelpCacheControl
+@ stdcall -private ZwApphelpCacheControl(long ptr) NtApphelpCacheControl
 @ stdcall -private ZwAreMappedFilesTheSame(ptr ptr) NtAreMappedFilesTheSame
 @ stdcall -private ZwAssignProcessToJobObject(long long) NtAssignProcessToJobObject
 @ stdcall -private ZwCallbackReturn(ptr long long) NtCallbackReturn

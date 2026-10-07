@@ -4425,6 +4425,52 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
 }
 
 
+/**********************************************************************
+ *              NtApphelpCacheControl  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtApphelpCacheControl( ULONG service, void *context )
+{
+    /* Modern x64 Cdb lookup packet, also used by native AppHelp. */
+    struct cdb_lookup
+    {
+        BYTE reserved1[0xf8];
+        UNICODE_STRING name;
+        BYTE reserved2[0x70];
+        void *data;
+        ULONG data_size;
+        ULONG reserved3;
+    } lookup;
+    ULONG flags = 0;
+
+    TRACE( "%lu %p\n", service, context );
+
+    if (service >= 14) return STATUS_INVALID_PARAMETER;
+    if (service != 6 || !is_win64)
+    {
+        FIXME( "Unsupported AppCompat cache service %lu\n", service );
+        return STATUS_NOT_IMPLEMENTED;
+    }
+    C_ASSERT( sizeof(void *) != 8 || sizeof(lookup) == 0x188 );
+    C_ASSERT( sizeof(void *) != 8 || offsetof(struct cdb_lookup, name) == 0xf8 );
+    C_ASSERT( sizeof(void *) != 8 || offsetof(struct cdb_lookup, data) == 0x178 );
+    C_ASSERT( sizeof(void *) != 8 || offsetof(struct cdb_lookup, data_size) == 0x180 );
+
+    if ((ULONG_PTR)context & 7) return STATUS_DATATYPE_MISALIGNMENT;
+    if (virtual_uninterrupted_read_memory( context, &lookup, sizeof(lookup) ) != sizeof(lookup))
+        return STATUS_ACCESS_VIOLATION;
+    if (!lookup.name.Buffer || !lookup.name.Length || !lookup.data || lookup.data_size != sizeof(flags))
+        return STATUS_INVALID_PARAMETER;
+    if (!virtual_check_buffer_for_read( lookup.name.Buffer, lookup.name.Length ))
+        return STATUS_ACCESS_VIOLATION;
+    if ((ULONG_PTR)lookup.data & 3) return STATUS_DATATYPE_MISALIGNMENT;
+
+    /* No Cdb entries are registered in Wine yet. An empty-cache lookup
+     * reports zero flags; it does not initialize a database or install shims.
+     * Populated Cdb cache state and its mutations must be server-owned. */
+    return virtual_uninterrupted_write_memory( lookup.data, &flags, sizeof(flags) );
+}
+
+
 /******************************************************************************
  *              NtSetSystemInformation  (NTDLL.@)
  */

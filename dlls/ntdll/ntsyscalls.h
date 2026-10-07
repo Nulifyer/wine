@@ -77,7 +77,7 @@
     SYSCALL_ENTRY( 0x0049, NtQueryVolumeInformationFile, 20 ) \
     SYSCALL_ENTRY( 0x004a, NtCreateSection, 28 ) \
     SYSCALL_ENTRY( 0x004b, NtFlushBuffersFile, 8 ) \
-    SYSCALL_ENTRY( 0x004c, NtApphelpCacheControl, 0 ) \
+    SYSCALL_ENTRY( 0x004c, NtApphelpCacheControl, 8 ) \
     SYSCALL_ENTRY( 0x004d, NtCreateProcessEx, 0 ) \
     SYSCALL_ENTRY( 0x004e, NtCreateThread, 32 ) \
     SYSCALL_ENTRY( 0x004f, NtIsProcessInJob, 8 ) \
@@ -378,7 +378,7 @@
     SYSCALL_ENTRY( 0x0049, NtQueryVolumeInformationFile, 40 ) \
     SYSCALL_ENTRY( 0x004a, NtCreateSection, 56 ) \
     SYSCALL_ENTRY( 0x004b, NtFlushBuffersFile, 16 ) \
-    SYSCALL_ENTRY( 0x004c, NtApphelpCacheControl, 0 ) \
+    SYSCALL_ENTRY( 0x004c, NtApphelpCacheControl, 16 ) \
     SYSCALL_ENTRY( 0x004d, NtCreateProcessEx, 0 ) \
     SYSCALL_ENTRY( 0x004e, NtCreateThread, 64 ) \
     SYSCALL_ENTRY( 0x004f, NtIsProcessInJob, 16 ) \
@@ -599,7 +599,6 @@
 #define ALL_SYSCALLS ALL_SYSCALLS32
 #endif
 #define ALL_SYSCALL_STUBS \
-    SYSCALL_STUB( NtApphelpCacheControl ) \
     SYSCALL_STUB( NtCreateProcessEx ) \
     SYSCALL_STUB( NtMapUserPhysicalPagesScatter ) \
     SYSCALL_STUB( NtTraceEvent ) \

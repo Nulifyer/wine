@@ -5,6 +5,7 @@ SOURCES = \
 	access_audit.c \
 	alpc.c \
 	alpc_token.c \
+	appcompat.c \
 	atom.c \
 	boot_status.c \
 	change.c \

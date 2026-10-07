@@ -1485,6 +1485,18 @@ BOOL WINAPI BaseInitAppcompatCacheSupport(void)
 }
 
 
+/**********************************************************************
+ *           BaseIsAppcompatInfrastructureDisabled   (kernelbase.@)
+ *
+ * The Windows 11 Kernel32 query and worker share a FALSE-return body.
+ * This policy query does not report whether the legacy cache initialized.
+ */
+BOOL WINAPI BaseIsAppcompatInfrastructureDisabled(void)
+{
+    return FALSE;
+}
+
+
 /***********************************************************************
  *           GetCommandLineA   (kernelbase.@)
  */

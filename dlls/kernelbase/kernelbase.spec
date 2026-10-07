@@ -85,7 +85,7 @@
 @ stdcall BaseInitAppcompatCacheSupport()
 @ stub BaseInvalidateDllSearchPathCache
 @ stub BaseInvalidateProcessSearchPathCache
-# @ stub BaseIsAppcompatInfrastructureDisabled
+@ stdcall BaseIsAppcompatInfrastructureDisabled()
 # @ stub BaseMarkFileForDelete
 # @ stub BaseReadAppCompatDataForProcess
 @ stub BaseReleaseProcessDllPath

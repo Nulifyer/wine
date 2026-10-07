@@ -6,6 +6,7 @@ SOURCES = \
 	appmodel_state.c \
 	edp.c \
 	exit.c \
+	appcompat.c \
 	feature.c \
 	file.c \
 	globalization_key.c \

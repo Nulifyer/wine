@@ -187,6 +187,20 @@ static NTSTATUS put_system_proc_info( SYSTEM_PROCESS_INFORMATION32 *info32,
 
 
 /**********************************************************************
+ *           wow64_NtApphelpCacheControl
+ */
+NTSTATUS WINAPI wow64_NtApphelpCacheControl( UINT *args )
+{
+    ULONG service = get_ulong( &args );
+    void *context = get_ptr( &args );
+
+    /* The modern 32-bit packet is not established yet. */
+    if (service < 14) return STATUS_NOT_IMPLEMENTED;
+    return NtApphelpCacheControl( service, context );
+}
+
+
+/**********************************************************************
  *           wow64_NtDisplayString
  */
 NTSTATUS WINAPI wow64_NtDisplayString( UINT *args )
