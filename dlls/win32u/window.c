@@ -1596,6 +1596,7 @@ static LONG_PTR get_window_long_shm( HWND hwnd, UINT offset, UINT size, BOOL ans
     {
         switch (offset)
         {
+        case -1:            ret = (LONG_PTR)&window_shm->client; break;
         case GWLP_ID:        ret = window_shm->info.id; break;
         case GWLP_HINSTANCE: ret = window_shm->info.instance; break;
         case GWLP_USERDATA:  memcpy( &ret, (void *)&window_shm->info.user_data, size ); break;
@@ -1652,6 +1653,9 @@ static LONG_PTR get_window_long_size( HWND hwnd, INT offset, UINT size, BOOL ans
 
     switch (offset)
     {
+    case -1:
+        if (size == sizeof(LONG_PTR)) return get_window_long_shm( hwnd, offset, size, ansi, internal );
+        break;
     default:
         if (offset < 0) break;
         /* fallthrough */

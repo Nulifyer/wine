@@ -1105,6 +1105,15 @@ struct window_info
     client_ptr_t         wndproc;          /* window proc */
 };
 
+/* Read-only client state returned by GetWindowLongPtr[AW]( hwnd, -1 ). */
+struct window_client_state
+{
+    unsigned int        flags;            /* private flags, not yet implemented */
+    unsigned int        flags2;           /* private flags, not yet implemented */
+    unsigned int        ex_style;         /* extended window style */
+    unsigned int        style;            /* window style */
+};
+
 typedef volatile struct
 {
     struct obj_locator   class;            /* object locator for the window class shared object */
@@ -1118,6 +1127,7 @@ typedef volatile struct
     data_size_t          private_size;     /* length of private extra bytes range */
     data_size_t          extra_size;       /* size of the extra info */
     struct window_info   info;             /* window info (GWLP_*) */
+    struct window_client_state client;     /* native client style view */
     char                 extra[];          /* extra bytes storage */
 } window_shm_t;
 

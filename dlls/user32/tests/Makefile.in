@@ -39,5 +39,6 @@ SOURCES = \
 	win.c \
 	window_band.c \
 	window_lifecycle.c \
+	window_state.c \
 	winstation.c \
 	wsprintf.c

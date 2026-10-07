@@ -1089,6 +1089,15 @@ struct window_info
     client_ptr_t         wndproc;
 };
 
+
+struct window_client_state
+{
+    unsigned int        flags;
+    unsigned int        flags2;
+    unsigned int        ex_style;
+    unsigned int        style;
+};
+
 typedef volatile struct
 {
     struct obj_locator   class;
@@ -1102,6 +1111,7 @@ typedef volatile struct
     data_size_t          private_size;
     data_size_t          extra_size;
     struct window_info   info;
+    struct window_client_state client;
     char                 extra[];
 } window_shm_t;
 
@@ -9655,6 +9665,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1086
+#define SERVER_PROTOCOL_VERSION 1087
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

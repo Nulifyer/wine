@@ -261,6 +261,9 @@ void cleanup_dwm_logical_surfaces( unsigned int generation )
 }
 
 C_ASSERT( sizeof(window_shm_t) == offsetof(window_shm_t, extra[0]) );
+C_ASSERT( sizeof(struct window_client_state) == 16 );
+C_ASSERT( offsetof(struct window_client_state, ex_style) == 8 );
+C_ASSERT( offsetof(struct window_client_state, style) == 12 );
 
 static void window_dump( struct object *obj, int verbose );
 static void window_destroy( struct object *obj );
@@ -726,6 +729,18 @@ static struct ratio get_window_dpi( struct window *win )
     return dpi;
 }
 
+/* Publish styles to pointers retained by native controls.  The session mapping
+ * is read-only in clients and remains at a fixed address for the window. */
+static void sync_window_client_style( struct window *win )
+{
+    SHARED_WRITE_BEGIN( win->shared, window_shm_t )
+    {
+        shared->client.ex_style = win->ex_style;
+        shared->client.style = win->style;
+    }
+    SHARED_WRITE_END;
+}
+
 /* link a window at the right place in the siblings list */
 static int link_window( struct window *win, struct window *previous )
 {
@@ -782,6 +797,7 @@ static int link_window( struct window *win, struct window *previous )
     }
 
     win->is_linked = 1;
+    sync_window_client_style( win );
     return old_prev != win->entry.prev;
 }
 
@@ -1172,6 +1188,7 @@ static struct window *create_window( struct window *parent, struct window *owner
         shared->ansi            = ansi;
         shared->core_window     = parent ? parent->shared->core_window : 0;
         shared->destroying      = 0;
+        memset( (void *)&shared->client, 0, sizeof(shared->client) );
     }
     SHARED_WRITE_END;
 
@@ -2726,6 +2743,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     if (!(swp_flags & SWP_NOZORDER) && win->parent) zorder_changed |= link_window( win, previous );
     if (swp_flags & SWP_SHOWWINDOW) win->style |= WS_VISIBLE;
     else if (swp_flags & SWP_HIDEWINDOW) win->style &= ~WS_VISIBLE;
+    sync_window_client_style( win );
     if (win->dwm_context_id && old_style != win->style)
         notify_dwm_window_style_changed( win->desktop, win->dwm_context_id, win->handle,
                                          GWL_STYLE, win->style );
@@ -2945,6 +2963,7 @@ void free_window_handle( struct window *win )
     {
         struct region *vis_rgn = get_visible_region( win, DCX_WINDOW );
         win->style &= ~WS_VISIBLE;
+        sync_window_client_style( win );
         if (vis_rgn)
         {
             struct region *exposed_rgn = expose_window( win, &win->window_rect, vis_rgn, 0 );
@@ -3257,6 +3276,7 @@ DECL_HANDLER(create_window)
 
     win->style = req->style;
     win->ex_style = req->ex_style;
+    sync_window_client_style( win );
 
     reply->handle      = win->handle;
     reply->parent      = win->parent ? win->parent->handle : 0;
@@ -3675,6 +3695,7 @@ DECL_HANDLER(init_window_info)
     if (!(win = get_window( req->handle ))) return;
     win->style = req->style;
     win->ex_style = req->ex_style;
+    sync_window_client_style( win );
 
     /* changing window style triggers a non-client paint */
     win->paint_flags |= PAINT_NONCLIENT;
@@ -3744,6 +3765,8 @@ DECL_HANDLER(set_window_info)
             memcpy( (char *)shared->extra + req->offset, &req->new_info, req->size );
             break;
         }
+        shared->client.ex_style = win->ex_style;
+        shared->client.style = win->style;
     }
     SHARED_WRITE_END;
 
