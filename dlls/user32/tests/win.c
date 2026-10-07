@@ -1809,11 +1809,8 @@ static DWORD WINAPI test_shell_window_thread(LPVOID param)
     ret = SetWindowPos(hwnd4, hwnd5, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
     ok(ret, "SetWindowPos(hwnd4, hwnd5)\n");
 
-    todo_wine
-    {
-        nextWnd = GetWindow(hwnd4, GW_HWNDNEXT);
-        ok(nextWnd==0, "wrong next window for hwnd4 after SetWindowPos(): %p - expected 0\n", nextWnd);
-    }
+    nextWnd = GetWindow(hwnd4, GW_HWNDNEXT);
+    ok(nextWnd==0, "wrong next window for hwnd4 after SetWindowPos(): %p - expected 0\n", nextWnd);
 
     /* destroy test windows */
     DestroyWindow(hwnd2);

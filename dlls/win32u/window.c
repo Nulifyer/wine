@@ -4210,12 +4210,13 @@ static void map_dpi_winpos( WINDOWPOS *winpos )
 /***********************************************************************
  *           calc_winpos
  */
-static BOOL calc_winpos( WINDOWPOS *winpos, struct window_rects *old_rects, struct window_rects *new_rects )
+static BOOL calc_winpos( WINDOWPOS *winpos, struct window_rects *old_rects, struct window_rects *new_rects,
+                         BOOL send_messages )
 {
     WND *win;
 
     /* Send WM_WINDOWPOSCHANGING message */
-    if (!(winpos->flags & SWP_NOSENDCHANGING)
+    if (send_messages && !(winpos->flags & SWP_NOSENDCHANGING)
            && !((winpos->flags & SWP_AGG_NOCLIENTCHANGE) && (winpos->flags & SWP_SHOWWINDOW)))
         send_message( winpos->hwnd, WM_WINDOWPOSCHANGING, 0, (LPARAM)winpos );
 
@@ -4413,7 +4414,7 @@ static UINT calc_ncsize( WINDOWPOS *winpos, const struct window_rects *old_rects
 }
 
 /* fix redundant flags and values in the WINDOWPOS structure */
-static BOOL fixup_swp_flags( WINDOWPOS *winpos, const RECT *old_window_rect, int parent_x, int parent_y )
+static BOOL fixup_swp_flags( WINDOWPOS *winpos, const RECT *old_window_rect, int parent_x, int parent_y, HWND shell )
 {
     HWND parent;
     WND *win = get_win_ptr( winpos->hwnd );
@@ -4465,6 +4466,9 @@ static BOOL fixup_swp_flags( WINDOWPOS *winpos, const RECT *old_window_rect, int
         }
     }
 
+    /* Activation and a window procedure cannot raise the registered shell. */
+    if (winpos->hwnd == shell) winpos->hwndInsertAfter = HWND_BOTTOM;
+
     /* Check hwndInsertAfter */
     if (winpos->flags & SWP_NOZORDER) goto done;
 
@@ -4476,7 +4480,8 @@ static BOOL fixup_swp_flags( WINDOWPOS *winpos, const RECT *old_window_rect, int
     else if (winpos->hwndInsertAfter == HWND_BOTTOM)
     {
         if (!(win->dwExStyle & WS_EX_TOPMOST) &&
-            get_window_relative( winpos->hwnd, GW_HWNDLAST ) == winpos->hwnd)
+            (get_window_relative( winpos->hwnd, GW_HWNDLAST ) == winpos->hwnd ||
+             (shell && get_window_relative( shell, GW_HWNDPREV ) == winpos->hwnd)))
             winpos->flags |= SWP_NOZORDER;
     }
     else if (winpos->hwndInsertAfter == HWND_TOPMOST)
@@ -4493,7 +4498,9 @@ static BOOL fixup_swp_flags( WINDOWPOS *winpos, const RECT *old_window_rect, int
     else
     {
         if ((winpos->hwnd == winpos->hwndInsertAfter) ||
-            (winpos->hwnd == get_window_relative( winpos->hwndInsertAfter, GW_HWNDNEXT )))
+            (winpos->hwnd == get_window_relative( winpos->hwndInsertAfter, GW_HWNDNEXT )) ||
+            (shell && winpos->hwndInsertAfter == shell &&
+             winpos->hwnd == get_window_relative( shell, GW_HWNDPREV )))
             winpos->flags |= SWP_NOZORDER;
     }
  done:
@@ -4585,12 +4592,13 @@ done:
 }
 
 /* NtUserSetWindowPos implementation */
-BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
+static BOOL set_window_pos_internal( WINDOWPOS *winpos, int parent_x, int parent_y, BOOL send_messages )
 {
     RECT valid_rects[2], surface_rect;
     struct window_surface *surface;
     struct window_rects old_rects, new_rects;
     UINT orig_flags, context;
+    HWND shell = 0;
     BOOL ret = FALSE;
 
     orig_flags = winpos->flags;
@@ -4618,6 +4626,12 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
         }
     }
 
+    if (NtUserGetAncestor( winpos->hwnd, GA_PARENT ) == get_desktop_window())
+    {
+        shell = get_shell_window();
+        if (shell && winpos->hwnd == shell) winpos->hwndInsertAfter = HWND_BOTTOM;
+    }
+
     /* Make sure that coordinates are valid for WM_WINDOWPOSCHANGING */
     if (!(winpos->flags & SWP_NOMOVE))
     {
@@ -4636,10 +4650,10 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
 
     context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( winpos->hwnd ));
 
-    if (!calc_winpos( winpos, &old_rects, &new_rects )) goto done;
+    if (!calc_winpos( winpos, &old_rects, &new_rects, send_messages )) goto done;
 
     /* Fix redundant flags */
-    if (!fixup_swp_flags( winpos, &old_rects.window, parent_x, parent_y )) goto done;
+    if (!fixup_swp_flags( winpos, &old_rects.window, parent_x, parent_y, shell )) goto done;
 
     if((winpos->flags & (SWP_NOZORDER | SWP_HIDEWINDOW | SWP_SHOWWINDOW)) != SWP_NOZORDER)
     {
@@ -4707,7 +4721,7 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
 
     TRACE( "\tstatus flags = %04x\n", winpos->flags & SWP_AGG_STATUSFLAGS );
 
-    if (((winpos->flags & SWP_AGG_STATUSFLAGS) != SWP_AGG_NOPOSCHANGE)
+    if (send_messages && ((winpos->flags & SWP_AGG_STATUSFLAGS) != SWP_AGG_NOPOSCHANGE)
             && !((orig_flags & SWP_AGG_NOCLIENTCHANGE) && (orig_flags & SWP_SHOWWINDOW)))
     {
         /* WM_WINDOWPOSCHANGED is sent even if SWP_NOSENDCHANGING is set
@@ -4727,6 +4741,11 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
 done:
     set_thread_dpi_awareness_context( context );
     return ret;
+}
+
+BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
+{
+    return set_window_pos_internal( winpos, parent_x, parent_y, TRUE );
 }
 
 /*******************************************************************
@@ -7348,6 +7367,7 @@ HANDLE WINAPI NtUserQueryWindow( HWND hwnd, WINDOWINFOCLASS cls )
 */
 BOOL WINAPI NtUserSetShellWindowEx( HWND shell, HWND list_view )
 {
+    WINDOWPOS pos = {0};
     BOOL ret;
 
     /* shell =     Progman[Program Manager]
@@ -7372,7 +7392,11 @@ BOOL WINAPI NtUserSetShellWindowEx( HWND shell, HWND list_view )
     if (list_view && list_view != shell)
         NtUserSetWindowPos( list_view, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE );
 
-    NtUserSetWindowPos( shell, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE );
+    /* Registration updates the host position without position callbacks. */
+    pos.hwnd = get_full_window_handle( shell );
+    pos.hwndInsertAfter = HWND_BOTTOM;
+    pos.flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+    set_window_pos_internal( &pos, 0, 0, FALSE );
 
     SERVER_START_REQ(set_desktop_shell_windows)
     {

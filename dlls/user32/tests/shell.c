@@ -232,6 +232,63 @@ done:
     UnregisterClassW( cls.lpszClassName, cls.hInstance );
 }
 
+static HWND next_ordering_window( HWND hwnd, HWND shell, HWND peer, HWND later )
+{
+    unsigned int count = 0;
+
+    while ((hwnd = GetWindow( hwnd, GW_HWNDNEXT )) && count++ < 256)
+        if (hwnd == shell || hwnd == peer || hwnd == later) return hwnd;
+    return NULL;
+}
+
+static void test_shell_bottommost( HWND shell )
+{
+    const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+    const HWND requests[] = { HWND_TOP, HWND_TOPMOST, HWND_NOTOPMOST };
+    HWND peer, later;
+    unsigned int i;
+    BOOL ret;
+
+    peer = CreateWindowExA( 0, "#32770", "shell ordering peer", WS_OVERLAPPEDWINDOW,
+                           0, 0, 100, 100, NULL, NULL, GetModuleHandleA( NULL ), NULL );
+    ok( !!peer, "failed to create ordering peer, error %lu\n", GetLastError() );
+    if (!peer) return;
+    for (i = 0; i < ARRAY_SIZE(requests); ++i)
+    {
+        ret = SetWindowPos( shell, requests[i], 0, 0, 0, 0, flags );
+        ok( ret, "shell order request %u failed, error %lu\n", i, GetLastError() );
+        ok( next_ordering_window( peer, shell, peer, NULL ) == shell, "request %u raised the shell\n", i );
+        ok( !(GetWindowLongW( shell, GWL_EXSTYLE ) & WS_EX_TOPMOST),
+            "request %u made the shell topmost\n", i );
+    }
+    ret = SetWindowPos( peer, HWND_BOTTOM, 0, 0, 0, 0, flags );
+    ok( ret, "peer bottom request failed, error %lu\n", GetLastError() );
+    ok( next_ordering_window( peer, shell, peer, NULL ) == shell, "peer moved below the shell\n" );
+    ret = SetWindowPos( peer, shell, 0, 0, 0, 0, flags );
+    ok( ret, "peer after-shell request failed, error %lu\n", GetLastError() );
+    ok( next_ordering_window( peer, shell, peer, NULL ) == shell, "peer insertion moved below the shell\n" );
+
+    later = CreateWindowExA( 0, "#32770", "later ordering peer", WS_OVERLAPPEDWINDOW,
+                            0, 0, 100, 100, NULL, NULL, GetModuleHandleA( NULL ), NULL );
+    ok( !!later, "failed to create later ordering peer, error %lu\n", GetLastError() );
+    if (later)
+    {
+        ok( next_ordering_window( later, shell, peer, later ) == peer, "new peer has incorrect order\n" );
+        ret = SetWindowPos( later, HWND_BOTTOM, 0, 0, 0, 0, flags );
+        ok( ret, "later bottom request failed, error %lu\n", GetLastError() );
+        ok( next_ordering_window( peer, shell, peer, later ) == later, "later peer did not move below peer\n" );
+        ok( next_ordering_window( later, shell, peer, later ) == shell, "later peer moved below shell\n" );
+        ret = SetWindowPos( later, shell, 0, 0, 0, 0, flags );
+        ok( ret, "later after-shell request failed, error %lu\n", GetLastError() );
+        ok( next_ordering_window( later, shell, peer, later ) == shell, "later insertion moved below shell\n" );
+        ret = SetWindowPos( shell, peer, 0, 0, 0, 0, flags );
+        ok( ret, "shell after-peer request failed, error %lu\n", GetLastError() );
+        ok( next_ordering_window( later, shell, peer, later ) == shell, "after-peer request raised shell\n" );
+        DestroyWindow( later );
+    }
+    DestroyWindow( peer );
+}
+
 static DWORD WINAPI shell_change_notify_thread( void *arg )
 {
     HDESK desktop = arg;
@@ -330,6 +387,8 @@ static DWORD WINAPI shell_change_notify_thread( void *arg )
 
     ret = set_shell_window( hwnd );
     ok( ret, "failed to register shell window, error %lu\n", GetLastError() );
+
+    if (ret) test_shell_bottommost( hwnd );
 
     SetLastError( 0x13579bdf );
     ret = shell_register_hot_key( hwnd, 0x1234, 0x10, VK_F24, NULL );

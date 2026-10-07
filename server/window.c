@@ -746,6 +746,21 @@ static void sync_window_client_style( struct window *win )
 static int link_window( struct window *win, struct window *previous )
 {
     struct list *old_prev;
+    struct window *shell = win->desktop->shell_window;
+
+    /* The registered shell is bottommost, including when another sibling
+     * requests HWND_BOTTOM or insertion after the shell. */
+    if (shell && shell->parent == win->parent)
+    {
+        if (win == shell) previous = WINPTR_BOTTOM;
+        else if (shell->is_linked && (previous == WINPTR_BOTTOM || previous == shell))
+        {
+            win->ex_style &= ~WS_EX_TOPMOST;
+            previous = get_prev_window( shell );
+            if (previous == win) previous = get_prev_window( win );
+            if (!previous) previous = WINPTR_TOP;
+        }
+    }
 
     if (previous == WINPTR_NOTOPMOST)
     {
@@ -4660,7 +4675,8 @@ void set_window_rect_visible( user_handle_t window, struct rectangle rect )
     struct window *ptr, *win;
     struct rectangle tmp;
 
-    if (!(win = get_window( window )) || !win->parent || !is_visible( win )) return;  /* nothing to do */
+    if (!(win = get_window( window )) || !win->parent || !is_visible( win ) ||
+        win == win->desktop->shell_window) return;  /* cannot raise a bottommost shell */
 
     map_point_raw_to_virt( win->desktop, &rect.left, &rect.top );
     map_point_raw_to_virt( win->desktop, &rect.right, &rect.bottom );
@@ -4884,7 +4900,14 @@ DECL_HANDLER(set_desktop_shell_windows)
     if (new_shell_window != old_shell_window)
     {
         if (new_shell_window)
+        {
+            if (new_shell_window->parent)
+                set_window_pos( new_shell_window, WINPTR_BOTTOM, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                                &new_shell_window->window_rect, &new_shell_window->client_rect,
+                                &new_shell_window->visible_rect, &new_shell_window->surface_rect, &empty_rect );
             sync_dwm_window_link( new_shell_window, DWM_WINDOW_SHELL );
+            sync_dwm_visible_regions( desktop );
+        }
         notify_dwm_shell_window_changed( desktop,
                                          new_shell_window ? new_shell_window->handle : 0 );
     }
