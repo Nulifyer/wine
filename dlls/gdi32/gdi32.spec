@@ -260,6 +260,9 @@
 # @ stub GdiDisableUMPDSandboxing
 @ stdcall GdiDllInitialize(ptr long ptr)
 @ stdcall GdiDrawStream(long long ptr) NtGdiDrawStream
+@ stdcall -arch=win64 GditGetCallerTLStorage()
+@ stdcall -arch=win64 GditPopCallerInfo()
+@ stdcall -arch=win64 GditPushCallerInfo(ptr)
 # @ stub GdiEndDocEMF
 # @ stub GdiEndPageEMF
 # @ stub GdiEntry1

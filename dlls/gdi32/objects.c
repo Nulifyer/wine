@@ -42,6 +42,10 @@ DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0
 
 HMODULE gdi32_module;
 
+#ifdef _WIN64
+static DWORD caller_info_tls = TLS_OUT_OF_INDEXES;
+#endif
+
 struct hdc_list
 {
     HDC hdc;
@@ -137,12 +141,51 @@ HGDIOBJ get_full_gdi_handle( HGDIOBJ obj )
  */
 BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
 {
+#ifdef _WIN64
+    if (reason == DLL_PROCESS_DETACH && !reserved && caller_info_tls != TLS_OUT_OF_INDEXES)
+        TlsFree( caller_info_tls );
+#endif
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
 
+#ifdef _WIN64
+    if ((caller_info_tls = TlsAlloc()) == TLS_OUT_OF_INDEXES) return FALSE;
+#endif
     DisableThreadLibraryCalls( inst );
     gdi32_module = inst;
     return TRUE;
 }
+
+#ifdef _WIN64
+/* Caller telemetry is inactive until a Type 1 font activates address storage.
+ * Ordinary drawing retains only a per-thread depth, never dereferencing callers.
+ * Keep that state in our own allocated TLS slot, not native GDI/USER TEB fields.
+ * TLS values contain the counter itself and need no thread-detach allocation cleanup.
+ */
+BOOL WINAPI GditPushCallerInfo( void *caller )
+{
+    DWORD error = GetLastError();
+    DWORD depth = (UINT_PTR)TlsGetValue( caller_info_tls );
+
+    TlsSetValue( caller_info_tls, (void *)(UINT_PTR)(depth + 1) );
+    SetLastError( error );
+    return TRUE;
+}
+
+void WINAPI GditPopCallerInfo(void)
+{
+    DWORD error = GetLastError();
+    DWORD depth = (UINT_PTR)TlsGetValue( caller_info_tls );
+
+    if (depth) TlsSetValue( caller_info_tls, (void *)(UINT_PTR)(depth - 1) );
+    SetLastError( error );
+}
+
+void * WINAPI GditGetCallerTLStorage(void)
+{
+    /* Type 1 caller telemetry and its private address storage are not activated. */
+    return NULL;
+}
+#endif
 
 /***********************************************************************
  *           GetObjectType    (GDI32.@)
