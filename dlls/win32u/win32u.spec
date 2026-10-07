@@ -1249,8 +1249,8 @@
 @ stdcall -syscall NtUserQueryWindow(long long)
 @ stub -syscall NtUserRaiseLowerShellWindow
 @ stdcall -syscall NtUserRealChildWindowFromPoint(long long long)
-@ stub -syscall NtUserRealInternalGetMessage
-@ stub -syscall NtUserRealWaitMessageEx
+@ stdcall -syscall NtUserRealInternalGetMessage(ptr long long long long long)
+@ stdcall -syscall NtUserRealWaitMessageEx(long long)
 @ stdcall -syscall NtUserRealizePalette(long)
 @ stub -syscall NtUserReassociateQueueEventCompletionPacket
 @ stub -syscall NtUserRedrawFrame

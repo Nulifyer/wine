@@ -125,6 +125,33 @@ struct delegate_input_callback_params
     MSG msg;
 };
 
+/* Message-pump dispatch uses fixed-width data through the existing generic
+ * user callback so the same payload is valid for native and WoW64 USER32. */
+struct message_pump_callback_params
+{
+    struct dispatch_callback_params dispatch;
+    UINT64 hwnd;
+    UINT operation;
+    UINT first;
+    UINT last;
+    UINT flags;
+    BOOL blocking;
+    UINT reserved;
+};
+struct message_pump_callback_result
+{
+    UINT64 hwnd;
+    UINT64 wparam;
+    UINT64 lparam;
+    UINT message;
+    DWORD time;
+    POINT pt;
+    INT result;
+    UINT reserved;
+};
+C_ASSERT(sizeof(struct message_pump_callback_params) == 40);
+C_ASSERT(sizeof(struct message_pump_callback_result) == 48);
+
 /* NtUserLoadUserApiHookCallback params. String offsets are relative to this structure. */
 struct load_user_api_hook_params
 {
@@ -152,6 +179,8 @@ struct ntuser_thread_info
     UINT           dpi_context;       /* DPI awareness context */
     UINT64         client_imm;        /* client IMM thread info */
     UINT64         wmchar_data;       /* client data for WM_CHAR mappings */
+    UINT64         message_pump_dispatch; /* USER32 callback, marshalled by CallDispatchCallback */
+    ULONG          message_pump_refs; /* USER32 message-pump activation on this thread */
     BOOL           iam_access;        /* private IAM access for this thread */
 };
 
@@ -1218,6 +1247,8 @@ W32KAPI HWINSTA WINAPI NtUserOpenWindowStation( OBJECT_ATTRIBUTES *attr, ACCESS_
 W32KAPI BOOL    WINAPI NtUserOpenClipboard( HWND hwnd, ULONG unk );
 W32KAPI HDESK   WINAPI NtUserOpenDesktop( OBJECT_ATTRIBUTES *attr, DWORD flags, ACCESS_MASK access );
 W32KAPI HDESK   WINAPI NtUserOpenInputDesktop( DWORD flags, BOOL inherit, ACCESS_MASK access );
+W32KAPI BOOL    WINAPI NtUserRealInternalGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags, BOOL blocking );
+W32KAPI BOOL    WINAPI NtUserRealWaitMessageEx( UINT mask, DWORD timeout );
 W32KAPI BOOL    WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags );
 W32KAPI BOOL    WINAPI NtUserPerMonitorDPIPhysicalToLogicalPoint( HWND hwnd, POINT *pt );
 W32KAPI BOOL    WINAPI NtUserPostMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam );

@@ -1251,8 +1251,8 @@
     SYSCALL_ENTRY( 0x14df, NtUserQueryWindow, 8 ) \
     SYSCALL_ENTRY( 0x14e0, NtUserRaiseLowerShellWindow, 0 ) \
     SYSCALL_ENTRY( 0x14e1, NtUserRealChildWindowFromPoint, 12 ) \
-    SYSCALL_ENTRY( 0x14e2, NtUserRealInternalGetMessage, 0 ) \
-    SYSCALL_ENTRY( 0x14e3, NtUserRealWaitMessageEx, 0 ) \
+    SYSCALL_ENTRY( 0x14e2, NtUserRealInternalGetMessage, 24 ) \
+    SYSCALL_ENTRY( 0x14e3, NtUserRealWaitMessageEx, 8 ) \
     SYSCALL_ENTRY( 0x14e4, NtUserRealizePalette, 4 ) \
     SYSCALL_ENTRY( 0x14e5, NtUserReassociateQueueEventCompletionPacket, 0 ) \
     SYSCALL_ENTRY( 0x14e6, NtUserRedrawFrame, 0 ) \
@@ -2793,8 +2793,8 @@
     SYSCALL_ENTRY( 0x14df, NtUserQueryWindow, 16 ) \
     SYSCALL_ENTRY( 0x14e0, NtUserRaiseLowerShellWindow, 0 ) \
     SYSCALL_ENTRY( 0x14e1, NtUserRealChildWindowFromPoint, 24 ) \
-    SYSCALL_ENTRY( 0x14e2, NtUserRealInternalGetMessage, 0 ) \
-    SYSCALL_ENTRY( 0x14e3, NtUserRealWaitMessageEx, 0 ) \
+    SYSCALL_ENTRY( 0x14e2, NtUserRealInternalGetMessage, 48 ) \
+    SYSCALL_ENTRY( 0x14e3, NtUserRealWaitMessageEx, 16 ) \
     SYSCALL_ENTRY( 0x14e4, NtUserRealizePalette, 8 ) \
     SYSCALL_ENTRY( 0x14e5, NtUserReassociateQueueEventCompletionPacket, 0 ) \
     SYSCALL_ENTRY( 0x14e6, NtUserRedrawFrame, 0 ) \
@@ -3838,8 +3838,6 @@
     SYSCALL_STUB( NtUserQueryInformationThread ) \
     SYSCALL_STUB( NtUserQuerySendMessage ) \
     SYSCALL_STUB( NtUserRaiseLowerShellWindow ) \
-    SYSCALL_STUB( NtUserRealInternalGetMessage ) \
-    SYSCALL_STUB( NtUserRealWaitMessageEx ) \
     SYSCALL_STUB( NtUserReassociateQueueEventCompletionPacket ) \
     SYSCALL_STUB( NtUserRedrawFrame ) \
     SYSCALL_STUB( NtUserRedrawFrameAndHook ) \

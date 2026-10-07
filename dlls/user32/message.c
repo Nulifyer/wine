@@ -28,6 +28,141 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msg);
 
+/* The table is process-wide, while registration enables dispatch only on
+ * the calling thread. A live thread's registration keeps this table stable
+ * during dispatch; balanced final removal resets it under the registration
+ * lock. Windows does not balance registrations when a thread exits. */
+struct message_pump_hook
+{
+    DWORD size;
+    BOOL (CDECL *get_message)(MSG *, HWND, UINT, UINT, UINT, BOOL);
+    BOOL (CDECL *wait_message)(UINT, DWORD);
+    DWORD (CDECL *get_queue_status)(UINT);
+    DWORD (CDECL *msg_wait)(DWORD, const HANDLE *, DWORD, DWORD, DWORD);
+};
+typedef BOOL (CDECL *message_pump_init)(DWORD, struct message_pump_hook *);
+
+static BOOL CDECL real_get_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags, BOOL blocking )
+{
+    return NtUserRealInternalGetMessage( msg, hwnd, first, last, flags, blocking );
+}
+
+static BOOL CDECL real_wait_message( UINT mask, DWORD timeout )
+{
+    return NtUserRealWaitMessageEx( mask, timeout );
+}
+
+static DWORD CDECL real_queue_status( UINT mask )
+{
+    return NtUserGetQueueStatus( mask );
+}
+
+static DWORD CDECL real_msg_wait( DWORD count, const HANDLE *handles, DWORD timeout, DWORD mask, DWORD flags )
+{
+    return NtUserMsgWaitForMultipleObjectsEx( count, handles, timeout, mask, flags );
+}
+
+static const struct message_pump_hook original_message_pump =
+{
+    sizeof(struct message_pump_hook), real_get_message, real_wait_message, real_queue_status, real_msg_wait
+};
+static struct message_pump_hook message_pump =
+{
+    sizeof(struct message_pump_hook), real_get_message, real_wait_message, real_queue_status, real_msg_wait
+};
+static message_pump_init message_pump_callback;
+static ULONG message_pump_refs;
+static CRITICAL_SECTION message_pump_cs;
+static CRITICAL_SECTION_DEBUG message_pump_cs_debug =
+{
+    0, 0, &message_pump_cs,
+    { &message_pump_cs_debug.ProcessLocksList, &message_pump_cs_debug.ProcessLocksList },
+    0, 0, { (DWORD_PTR)(__FILE__ ": message_pump_cs") }
+};
+static CRITICAL_SECTION message_pump_cs = { &message_pump_cs_debug, -1, 0, 0, 0, 0 };
+
+static NTSTATUS WINAPI dispatch_message_pump( void *args, ULONG size )
+{
+    const struct message_pump_callback_params *params = args;
+    struct message_pump_callback_result result = {0};
+    MSG msg = {0};
+
+    if (size != sizeof(*params)) return STATUS_INVALID_PARAMETER;
+    if (params->operation == 0)
+    {
+        result.result = message_pump.get_message( &msg, (HWND)(UINT_PTR)params->hwnd,
+                                                 params->first, params->last, params->flags, params->blocking );
+        result.hwnd = (UINT_PTR)msg.hwnd;
+        result.wparam = msg.wParam;
+        result.lparam = msg.lParam;
+        result.message = msg.message;
+        result.time = msg.time;
+        result.pt = msg.pt;
+    }
+    else if (params->operation == 1)
+        result.result = message_pump.wait_message( params->first, params->last );
+    else return STATUS_INVALID_PARAMETER;
+    return NtCallbackReturn( &result, sizeof(result), STATUS_SUCCESS );
+}
+
+/***********************************************************************
+ *           RegisterMessagePumpHook (USER32.@)
+ */
+BOOL WINAPI RegisterMessagePumpHook( message_pump_init callback )
+{
+    struct message_pump_hook table = original_message_pump;
+    BOOL ret = FALSE;
+
+    EnterCriticalSection( &message_pump_cs );
+    if (!callback) SetLastError( ERROR_INVALID_PARAMETER );
+    else if (!message_pump_refs)
+    {
+        message_pump_callback = callback;
+        if (!callback( 0, &table ) || !table.size) goto done;
+        if (table.size > sizeof(table))
+        {
+            WARN( "unsupported message-pump table size %lu\n", table.size );
+            goto done;
+        }
+        message_pump = original_message_pump;
+        memcpy( &message_pump, &table, table.size );
+        ret = TRUE;
+    }
+    else ret = callback == message_pump_callback;
+    if (ret)
+    {
+        NtUserGetThreadInfo()->message_pump_dispatch = (UINT_PTR)dispatch_message_pump;
+        NtUserGetThreadInfo()->message_pump_refs++;
+        message_pump_refs++;
+    }
+done:
+    LeaveCriticalSection( &message_pump_cs );
+    return ret;
+}
+
+/***********************************************************************
+ *           UnregisterMessagePumpHook (USER32.@)
+ */
+BOOL WINAPI UnregisterMessagePumpHook(void)
+{
+    BOOL ret = FALSE;
+
+    EnterCriticalSection( &message_pump_cs );
+    if (NtUserGetThreadInfo()->message_pump_refs)
+    {
+        if (!--NtUserGetThreadInfo()->message_pump_refs) NtUserGetThreadInfo()->message_pump_dispatch = 0;
+        if (!--message_pump_refs)
+        {
+            message_pump_callback( 1, NULL );
+            message_pump_callback = NULL;
+            message_pump = original_message_pump;
+        }
+        ret = TRUE;
+    }
+    LeaveCriticalSection( &message_pump_cs );
+    return ret;
+}
+
 #define MAX_ATOM_LEN  255
 
 /* pack a pointer into a 32/64 portable format */
@@ -709,6 +844,31 @@ BOOL WINAPI PostThreadMessageA( DWORD thread, UINT msg, WPARAM wparam, LPARAM lp
  */
 BOOL WINAPI DECLSPEC_HOTPATCH PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
 {
+    if (NtUserGetThreadInfo()->message_pump_refs)
+    {
+        MSG msg;
+        UINT mask = flags >> 16;
+        BOOL ret;
+
+        /* Windows' public empty-queue fast path does not dispatch the hook.
+         * The original still processes driver/sent work without reentering
+         * the table. Preserve caller output when this peek returns false. */
+        if (!mask) mask = QS_ALLINPUT;
+        if (!HIWORD(NtUserGetQueueStatusReadonly( mask )))
+        {
+            ret = NtUserRealInternalGetMessage( &msg, hwnd, first, last, flags, FALSE );
+            if (ret)
+            {
+                if (!msg_out)
+                {
+                    SetLastError( ERROR_NOACCESS );
+                    return FALSE;
+                }
+                *msg_out = msg;
+            }
+            return ret;
+        }
+    }
     return NtUserPeekMessage( msg_out, hwnd, first, last, flags );
 }
 
@@ -739,10 +899,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetMessageA( MSG *msg, HWND hwnd, UINT first, UINT last )
 {
+    BOOL ret;
+
     if (get_pending_wmchar( msg, first, last, TRUE )) return TRUE;
-    if (GetMessageW( msg, hwnd, first, last ) < 0) return -1;
+    if ((ret = GetMessageW( msg, hwnd, first, last )) < 0) return ret;
     map_wparam_WtoA( msg, TRUE );
-    return (msg->message != WM_QUIT);
+    return ret;
 }
 
 static BOOL is_cjk(void)
@@ -930,10 +1092,38 @@ LPARAM WINAPI GetMessageExtraInfo(void)
 DWORD WINAPI MsgWaitForMultipleObjects( DWORD count, const HANDLE *handles,
                                         BOOL wait_all, DWORD timeout, DWORD mask )
 {
-    return NtUserMsgWaitForMultipleObjectsEx( count, handles, timeout, mask,
-                                              wait_all ? MWMO_WAITALL : 0 );
+    return MsgWaitForMultipleObjectsEx( count, handles, timeout, mask,
+                                         wait_all ? MWMO_WAITALL : 0 );
 }
 
+
+/***********************************************************************
+ *           MsgWaitForMultipleObjectsEx (USER32.@)
+ */
+DWORD WINAPI MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
+                                         DWORD timeout, DWORD mask, DWORD flags )
+{
+    if (NtUserGetThreadInfo()->message_pump_refs)
+        return message_pump.msg_wait( count, handles, timeout, mask, flags );
+    return NtUserMsgWaitForMultipleObjectsEx( count, handles, timeout, mask, flags );
+}
+
+/***********************************************************************
+ *           GetQueueStatus (USER32.@)
+ */
+DWORD WINAPI GetQueueStatus( UINT mask )
+{
+    if (NtUserGetThreadInfo()->message_pump_refs) return message_pump.get_queue_status( mask );
+    return NtUserGetQueueStatus( mask );
+}
+
+/***********************************************************************
+ *           WaitMessage (USER32.@)
+ */
+BOOL WINAPI WaitMessage(void)
+{
+    return NtUserWaitMessage();
+}
 
 /***********************************************************************
  *		WaitForInputIdle (USER32.@)

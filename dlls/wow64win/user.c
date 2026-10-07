@@ -3153,6 +3153,30 @@ NTSTATUS WINAPI wow64_NtUserGetMessage( UINT *args )
     return ret;
 }
 
+NTSTATUS WINAPI wow64_NtUserRealInternalGetMessage( UINT *args )
+{
+    MSG32 *msg32 = get_ptr( &args );
+    HWND hwnd = get_handle( &args );
+    UINT first = get_ulong( &args );
+    UINT last = get_ulong( &args );
+    UINT flags = get_ulong( &args );
+    BOOL blocking = get_ulong( &args );
+    MSG msg;
+    int ret;
+
+    ret = NtUserRealInternalGetMessage( &msg, hwnd, first, last, flags, blocking );
+    if (!(flags & 0xe300fffc)) msg_64to32( &msg, msg32 );
+    return ret;
+}
+
+NTSTATUS WINAPI wow64_NtUserRealWaitMessageEx( UINT *args )
+{
+    UINT mask = get_ulong( &args );
+    DWORD timeout = get_ulong( &args );
+
+    return NtUserRealWaitMessageEx( mask, timeout );
+}
+
 NTSTATUS WINAPI wow64_NtUserGetMessagePos( UINT *args )
 {
     return NtUserGetMessagePos();

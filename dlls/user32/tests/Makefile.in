@@ -22,6 +22,7 @@ SOURCES = \
 	inputhost.c \
 	listbox.c \
 	menu.c \
+	message_pump.c \
 	monitor.c \
 	msg.c \
 	native_ordinals.c \

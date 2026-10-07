@@ -3278,7 +3278,7 @@ static int peek_message( MSG *msg, const struct peek_message_filter *filter )
                 if (!(flags & PM_NOYIELD) && idle_event) NtSetEvent( idle_event, NULL );
             }
             *msg = info.msg;
-            msg->pt = point_phys_to_win_dpi( info.msg.hwnd, info.msg.pt );
+            msg->pt = info.msg.hwnd ? point_phys_to_win_dpi( info.msg.hwnd, info.msg.pt ) : info.msg.pt;
             thread_info->message_pos   = MAKELONG( msg->pt.x, msg->pt.y );
             thread_info->message_time  = info.msg.time;
             thread_info->message_extra = 0;
@@ -3617,18 +3617,45 @@ DWORD WINAPI NtUserWaitForInputIdle( HANDLE process, DWORD timeout, BOOL wow )
     return WAIT_TIMEOUT;
 }
 
+/* USER32 owns the hook table; queue entry points call back only for an
+ * activated thread. Supplied original functions deliberately bypass this. */
+static BOOL call_message_pump( struct message_pump_callback_params *params,
+                               struct message_pump_callback_result *result )
+{
+    struct ntuser_thread_info *client = get_user_thread_info()->client_info;
+    void *ret_ptr;
+    ULONG ret_len;
+
+    if (!client || !client->message_pump_refs) return FALSE;
+    params->dispatch.callback = client->message_pump_dispatch;
+    if (KeUserDispatchCallback( &params->dispatch, sizeof(*params), &ret_ptr, &ret_len ) ||
+        ret_len != sizeof(*result))
+    {
+        memset( result, 0, sizeof(*result) );
+        result->result = params->operation == 1 ? FALSE : -1;
+        RtlSetLastWin32Error( ERROR_INVALID_DATA );
+        return TRUE;
+    }
+    *result = *(struct message_pump_callback_result *)ret_ptr;
+    return TRUE;
+}
+
 /***********************************************************************
  *           NtUserWaitMessage (win32u.@)
  */
 BOOL WINAPI NtUserWaitMessage(void)
 {
+    struct message_pump_callback_params params = {.operation = 1, .first = 0x3cff};
+    struct message_pump_callback_result result;
+
+    if (call_message_pump( &params, &result )) return result.result;
     return NtUserMsgWaitForMultipleObjectsEx( 0, NULL, INFINITE, QS_ALLINPUT, 0 ) != WAIT_FAILED;
 }
 
 /***********************************************************************
  *           NtUserPeekMessage  (win32u.@)
  */
-BOOL WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
+static BOOL peek_message_user( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
 {
     struct peek_message_filter filter = {.hwnd = hwnd, .first = first, .last = last, .flags = flags};
     MSG msg;
@@ -3675,10 +3702,42 @@ BOOL WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, U
     return TRUE;
 }
 
+static void copy_message_pump_result( MSG *msg, const struct message_pump_callback_result *result )
+{
+    msg->hwnd = (HWND)(UINT_PTR)result->hwnd;
+    msg->message = result->message;
+    msg->wParam = result->wparam;
+    msg->lParam = result->lparam;
+    msg->time = result->time;
+    msg->pt = result->pt;
+}
+
 /***********************************************************************
- *           NtUserGetMessage  (win32u.@)
+ *           NtUserPeekMessage  (win32u.@)
  */
-BOOL WINAPI NtUserGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last )
+BOOL WINAPI NtUserPeekMessage( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags )
+{
+    struct message_pump_callback_params params =
+    {
+        .hwnd = (UINT_PTR)hwnd, .first = first, .last = last, .flags = flags
+    };
+    struct message_pump_callback_result result;
+
+    if (flags & 0xe300fffc)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_FLAGS );
+        return FALSE;
+    }
+    if (call_message_pump( &params, &result ))
+    {
+        if (result.result) copy_message_pump_result( msg, &result );
+        return result.result;
+    }
+    return peek_message_user( msg, hwnd, first, last, flags );
+}
+
+/* Blocking retrieval with caller-selected removal flags. */
+static BOOL get_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags )
 {
     struct user_thread_info *thread_info = get_user_thread_info();
     struct peek_message_filter filter = {.hwnd = hwnd, .first = first, .last = last};
@@ -3702,7 +3761,7 @@ BOOL WINAPI NtUserGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last )
     else mask = QS_ALLINPUT;
 
     filter.mask = mask;
-    filter.flags = PM_REMOVE | (mask << 16);
+    filter.flags = flags | (mask << 16);
     for (;;)
     {
         process_coremessaging_completion();
@@ -3726,6 +3785,65 @@ BOOL WINAPI NtUserGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last )
     check_for_driver_events();
 
     return msg->message != WM_QUIT;
+}
+
+/***********************************************************************
+ *           NtUserGetMessage  (win32u.@)
+ */
+BOOL WINAPI NtUserGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last )
+{
+    struct message_pump_callback_params params =
+    {
+        .hwnd = (UINT_PTR)hwnd, .first = first, .last = last, .flags = PM_REMOVE, .blocking = TRUE
+    };
+    struct message_pump_callback_result result;
+
+    if (!((first | last) & 0xfffe0000) && call_message_pump( &params, &result ))
+    {
+        copy_message_pump_result( msg, &result );
+        return result.result;
+    }
+    return get_message( msg, hwnd, first, last, PM_REMOVE );
+}
+
+/***********************************************************************
+ *           NtUserRealInternalGetMessage  (win32u.@)
+ *
+ * Original message-pump retrieval function. Unlike public PeekMessage it
+ * copies the zero-initialized output even when no message is available.
+ */
+BOOL WINAPI NtUserRealInternalGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last,
+                                         UINT flags, BOOL blocking )
+{
+    MSG result = {0};
+    BOOL ret;
+
+    if (flags & 0xe300fffc)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_FLAGS );
+        return FALSE;
+    }
+    if (blocking) ret = get_message( &result, hwnd, first, last, flags );
+    else ret = peek_message_user( &result, hwnd, first, last, flags );
+    *msg = result;
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserRealWaitMessageEx  (win32u.@)
+ */
+BOOL WINAPI NtUserRealWaitMessageEx( UINT mask, DWORD timeout )
+{
+    DWORD ret;
+
+    if (mask & 0xffffa200)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_FLAGS );
+        return FALSE;
+    }
+    ret = NtUserMsgWaitForMultipleObjectsEx( 0, NULL, timeout ? timeout : INFINITE, mask, 0 );
+    if (ret == WAIT_TIMEOUT) RtlSetLastWin32Error( ERROR_TIMEOUT );
+    return ret == WAIT_OBJECT_0;
 }
 
 /***********************************************************************
