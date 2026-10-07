@@ -690,7 +690,7 @@
 @ stdcall GetThreadDpiAwarenessContext()
 @ stdcall GetThreadDpiHostingBehavior()
 @ stdcall GetTitleBarInfo(long ptr) NtUserGetTitleBarInfo
-# @ stub GetTopLevelWindow
+@ stdcall GetTopLevelWindow(long) NtUserGetTopLevelWindow
 @ stdcall GetTopWindow(long)
 @ stdcall GetTouchInputInfo(long long ptr long)
 # @ stub GetUnpredictedMessagePos

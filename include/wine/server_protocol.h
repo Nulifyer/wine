@@ -3983,6 +3983,19 @@ struct get_window_tree_reply
 };
 
 
+struct get_toplevel_window_request
+{
+    struct request_header __header;
+    user_handle_t  handle;
+};
+struct get_toplevel_window_reply
+{
+    struct reply_header __header;
+    user_handle_t  toplevel;
+    char __pad_12[4];
+};
+
+
 struct set_window_pos_request
 {
     struct request_header __header;
@@ -8489,6 +8502,7 @@ enum request
     REQ_get_class_windows,
     REQ_get_window_children_from_point,
     REQ_get_window_tree,
+    REQ_get_toplevel_window,
     REQ_set_window_pos,
     REQ_get_window_rectangles,
     REQ_get_window_text,
@@ -8939,6 +8953,7 @@ union generic_request
     struct get_class_windows_request get_class_windows_request;
     struct get_window_children_from_point_request get_window_children_from_point_request;
     struct get_window_tree_request get_window_tree_request;
+    struct get_toplevel_window_request get_toplevel_window_request;
     struct set_window_pos_request set_window_pos_request;
     struct get_window_rectangles_request get_window_rectangles_request;
     struct get_window_text_request get_window_text_request;
@@ -9387,6 +9402,7 @@ union generic_reply
     struct get_class_windows_reply get_class_windows_reply;
     struct get_window_children_from_point_reply get_window_children_from_point_reply;
     struct get_window_tree_reply get_window_tree_reply;
+    struct get_toplevel_window_reply get_toplevel_window_reply;
     struct set_window_pos_reply set_window_pos_reply;
     struct get_window_rectangles_reply get_window_rectangles_reply;
     struct get_window_text_reply get_window_text_reply;
@@ -9665,6 +9681,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1087
+#define SERVER_PROTOCOL_VERSION 1088
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

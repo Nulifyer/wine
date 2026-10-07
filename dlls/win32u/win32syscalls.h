@@ -1105,7 +1105,7 @@
     SYSCALL_ENTRY( 0x144d, NtUserGetThreadDesktop, 4 ) \
     SYSCALL_ENTRY( 0x144e, NtUserGetThreadState, 4 ) \
     SYSCALL_ENTRY( 0x144f, NtUserGetTitleBarInfo, 8 ) \
-    SYSCALL_ENTRY( 0x1450, NtUserGetTopLevelWindow, 0 ) \
+    SYSCALL_ENTRY( 0x1450, NtUserGetTopLevelWindow, 4 ) \
     SYSCALL_ENTRY( 0x1451, NtUserGetTouchInputInfo, 0 ) \
     SYSCALL_ENTRY( 0x1452, NtUserGetTouchValidationStatus, 0 ) \
     SYSCALL_ENTRY( 0x1453, NtUserGetUniformSpaceMapping, 8 ) \
@@ -2647,7 +2647,7 @@
     SYSCALL_ENTRY( 0x144d, NtUserGetThreadDesktop, 8 ) \
     SYSCALL_ENTRY( 0x144e, NtUserGetThreadState, 8 ) \
     SYSCALL_ENTRY( 0x144f, NtUserGetTitleBarInfo, 16 ) \
-    SYSCALL_ENTRY( 0x1450, NtUserGetTopLevelWindow, 0 ) \
+    SYSCALL_ENTRY( 0x1450, NtUserGetTopLevelWindow, 8 ) \
     SYSCALL_ENTRY( 0x1451, NtUserGetTouchInputInfo, 0 ) \
     SYSCALL_ENTRY( 0x1452, NtUserGetTouchValidationStatus, 0 ) \
     SYSCALL_ENTRY( 0x1453, NtUserGetUniformSpaceMapping, 16 ) \
@@ -3752,7 +3752,6 @@
     SYSCALL_STUB( NtUserGetSuppressedWindowActions ) \
     SYSCALL_STUB( NtUserGetSysMenuOffset ) \
     SYSCALL_STUB( NtUserGetSystemContentRects ) \
-    SYSCALL_STUB( NtUserGetTopLevelWindow ) \
     SYSCALL_STUB( NtUserGetTouchInputInfo ) \
     SYSCALL_STUB( NtUserGetTouchValidationStatus ) \
     SYSCALL_STUB( NtUserGetUnpredictedMessagePos ) \

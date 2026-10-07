@@ -2711,6 +2711,13 @@ NTSTATUS WINAPI wow64_NtUserGetAncestor( UINT *args )
     return HandleToUlong( NtUserGetAncestor( hwnd, type ));
 }
 
+NTSTATUS WINAPI wow64_NtUserGetTopLevelWindow( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+
+    return HandleToUlong( NtUserGetTopLevelWindow( hwnd ));
+}
+
 NTSTATUS WINAPI wow64_NtUserGetAsyncKeyState( UINT *args )
 {
     INT key = get_ulong( &args );

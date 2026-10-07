@@ -3805,6 +3805,27 @@ DECL_HANDLER(get_window_parents)
 }
 
 
+/* Query the authoritative parent tree without following popup owners. */
+DECL_HANDLER(get_toplevel_window)
+{
+    struct window *win = get_window( req->handle );
+    struct window *top = NULL;
+
+    if (!win) return;
+    if (win->handle != req->handle)
+    {
+        set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
+        return;
+    }
+    while (win && win->parent)
+    {
+        top = win;
+        win = win->parent;
+    }
+    if (win && win == win->desktop->top_window && top) reply->toplevel = top->handle;
+}
+
+
 /* get a list of window siblings or children */
 DECL_HANDLER(get_window_list)
 {

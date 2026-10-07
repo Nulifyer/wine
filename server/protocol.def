@@ -2958,6 +2958,13 @@ enum message_type
     user_handle_t  last_child;    /* last child */
 @END
 
+/* Get the top-level window in the real desktop parent hierarchy */
+@REQ(get_toplevel_window)
+    user_handle_t  handle;        /* full handle to the window */
+@REPLY
+    user_handle_t  toplevel;      /* zero for desktop or message-only trees */
+@END
+
 /* Set the position and Z order of a window */
 @REQ(set_window_pos)
     unsigned short swp_flags;     /* SWP_* flags */

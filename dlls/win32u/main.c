@@ -1667,6 +1667,11 @@ HWND SYSCALL_API NtUserGetAncestor( HWND hwnd, UINT type )
     SYSCALL_FUNC( NtUserGetAncestor );
 }
 
+HWND SYSCALL_API NtUserGetTopLevelWindow( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserGetTopLevelWindow );
+}
+
 SHORT SYSCALL_API NtUserGetAsyncKeyState( INT key )
 {
     SYSCALL_FUNC( NtUserGetAsyncKeyState );

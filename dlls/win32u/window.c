@@ -1298,6 +1298,22 @@ HWND WINAPI NtUserGetAncestor( HWND hwnd, UINT type )
 }
 
 /***********************************************************************
+ *           NtUserGetTopLevelWindow (win32u.@)
+ */
+HWND WINAPI NtUserGetTopLevelWindow( HWND hwnd )
+{
+    HWND ret = 0;
+
+    SERVER_START_REQ( get_toplevel_window )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->toplevel );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/***********************************************************************
  *           NtUserIsTopLevelWindow (win32u.@)
  */
 BOOL WINAPI NtUserIsTopLevelWindow( HWND hwnd )

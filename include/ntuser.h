@@ -1112,6 +1112,7 @@ W32KAPI HWND    WINAPI NtUserFindWindowEx( HWND parent, HWND child, UNICODE_STRI
                                            UNICODE_STRING *title, ULONG unk );
 W32KAPI BOOL    WINAPI NtUserFlashWindowEx( FLASHWINFO *info );
 W32KAPI HWND    WINAPI NtUserGetAncestor( HWND hwnd, UINT type );
+W32KAPI HWND    WINAPI NtUserGetTopLevelWindow( HWND hwnd );
 W32KAPI SHORT   WINAPI NtUserGetAsyncKeyState( INT key );
 W32KAPI ULONG   WINAPI NtUserGetAtomName( ATOM atom, UNICODE_STRING *name );
 W32KAPI UINT    WINAPI NtUserGetCaretBlinkTime(void);

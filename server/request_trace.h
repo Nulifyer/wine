@@ -1979,6 +1979,16 @@ static void dump_get_window_tree_reply( const struct get_window_tree_reply *req 
     fprintf( stderr, ", last_child=%08x", req->last_child );
 }
 
+static void dump_get_toplevel_window_request( const struct get_toplevel_window_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+}
+
+static void dump_get_toplevel_window_reply( const struct get_toplevel_window_reply *req )
+{
+    fprintf( stderr, " toplevel=%08x", req->toplevel );
+}
+
 static void dump_set_window_pos_request( const struct set_window_pos_request *req )
 {
     fprintf( stderr, " swp_flags=%04x", req->swp_flags );
@@ -5052,6 +5062,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_class_windows_request,
     (dump_func)dump_get_window_children_from_point_request,
     (dump_func)dump_get_window_tree_request,
+    (dump_func)dump_get_toplevel_window_request,
     (dump_func)dump_set_window_pos_request,
     (dump_func)dump_get_window_rectangles_request,
     (dump_func)dump_get_window_text_request,
@@ -5499,6 +5510,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_class_windows_reply,
     (dump_func)dump_get_window_children_from_point_reply,
     (dump_func)dump_get_window_tree_reply,
+    (dump_func)dump_get_toplevel_window_reply,
     (dump_func)dump_set_window_pos_reply,
     (dump_func)dump_get_window_rectangles_reply,
     (dump_func)dump_get_window_text_reply,
@@ -5946,6 +5958,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "get_class_windows",
     "get_window_children_from_point",
     "get_window_tree",
+    "get_toplevel_window",
     "set_window_pos",
     "get_window_rectangles",
     "get_window_text",
