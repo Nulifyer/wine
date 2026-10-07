@@ -493,6 +493,9 @@
 @ stdcall LPtoDP(long ptr long)
 @ stdcall LineDDA(long long long long ptr long)
 @ stdcall LineTo(long long long)
+@ extern -arch=win64 LpkEditControl
+@ stdcall -arch=win64 LpkGetEditControl()
+@ stdcall -arch=win64 LpkpInitializeEditControl(ptr long)
 @ stub LoadImageColorMatcherA
 @ stub LoadImageColorMatcherW
 @ stdcall MaskBlt(long long long long long long long long long long long long)
