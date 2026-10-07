@@ -239,7 +239,10 @@ DECL_HANDLER(query_gdi_object)
     if (!slot) return;
     reply->handle = slot_handle( slot, req->handle & 0xffff );
     if (!req->backing || !slot->section) return;
-    reply->section = alloc_handle( current->process, slot->section, SECTION_MAP_READ | SECTION_MAP_WRITE, 0 );
+    /* The validated GDI identity grants access to its retained storage.  Do
+     * not reopen the creator's section through the consumer's object DACL. */
+    reply->section = alloc_handle_no_access_check( current->process, slot->section,
+                                                  SECTION_MAP_READ | SECTION_MAP_WRITE, 0 );
     if (reply->section) set_reply_data( slot->bitmap, sizeof(*slot->bitmap) );
 }
 
