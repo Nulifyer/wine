@@ -2599,6 +2599,13 @@ NTSTATUS WINAPI wow64_NtGdiGetRegionData( UINT *args )
     return NtGdiGetRegionData( hrgn, count, data );
 }
 
+NTSTATUS WINAPI wow64_NtGdiQueryFontAssocInfo( UINT *args )
+{
+    HDC hdc = get_handle( &args );
+
+    return NtGdiQueryFontAssocInfo( hdc );
+}
+
 NTSTATUS WINAPI wow64_NtGdiGetTextCharsetInfo( UINT *args )
 {
     HDC hdc = get_ptr( &args );

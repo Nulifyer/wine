@@ -4959,41 +4959,80 @@ HFONT WINAPI NtGdiHfontCreate( const void *logfont, ULONG size, ULONG type,
 #define ASSOC_CHARSET_ANSI   2
 #define ASSOC_CHARSET_SYMBOL 4
 
+#define ASSOC_DEFAULT_FONTS 8
+
+static DWORD get_font_association_settings(void)
+{
+    static LONG settings = -1;
+    LONG cached = InterlockedCompareExchange( &settings, -1, -1 );
+    DWORD value = 0, size;
+    char buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[32 * sizeof(WCHAR)])];
+    KEY_VALUE_PARTIAL_INFORMATION *info = (void *)buffer;
+    KEY_CACHED_INFORMATION key_info;
+    HKEY hkey, parent;
+    unsigned int i;
+    static const struct { const char *name; DWORD flag; } charsets[] =
+    {
+        { "ANSI(00)", ASSOC_CHARSET_ANSI },
+        { "OEM(FF)", ASSOC_CHARSET_OEM },
+        { "SYMBOL(02)", ASSOC_CHARSET_SYMBOL }
+    };
+    static const WCHAR yesW[] = {'y','e','s',0};
+    static const WCHAR default_fontsW[] =
+        {'A','s','s','o','c','i','a','t','e','d',' ','D','e','f','a','u','l','t','F','o','n','t','s'};
+
+    if (cached != -1) return cached;
+    if ((hkey = reg_open_key( NULL, associated_charset_keyW, sizeof(associated_charset_keyW) )))
+    {
+        for (i = 0; i < ARRAY_SIZE(charsets); ++i)
+        {
+            size = query_reg_ascii_value( hkey, charsets[i].name, info, sizeof(buffer) );
+            if (size == sizeof(yesW) && info->Type == REG_SZ &&
+                !wcsnicmp( (const WCHAR *)info->Data, yesW, ARRAY_SIZE(yesW) ))
+                value |= charsets[i].flag;
+        }
+        NtClose( hkey );
+    }
+    if ((parent = reg_open_key( NULL, font_assoc_keyW, sizeof(font_assoc_keyW) )))
+    {
+        if ((hkey = reg_open_key( parent, default_fontsW, sizeof(default_fontsW) )))
+        {
+            if (NtQueryKey( hkey, KeyCachedInformation, &key_info, sizeof(key_info), &size ) ||
+                key_info.Values || key_info.SubKeys) value |= ASSOC_DEFAULT_FONTS;
+            NtClose( hkey );
+        }
+        NtClose( parent );
+    }
+    cached = InterlockedCompareExchange( &settings, value, -1 );
+    return cached == -1 ? value : cached;
+}
+
 static DWORD get_associated_charset_info(void)
 {
-    static int associated_charset = -1;
+    return get_font_association_settings() & (ASSOC_CHARSET_OEM | ASSOC_CHARSET_ANSI | ASSOC_CHARSET_SYMBOL);
+}
 
-    if (associated_charset == -1)
+/***********************************************************************
+ *           NtGdiQueryFontAssocInfo    (win32u.@)
+ */
+ULONG WINAPI NtGdiQueryFontAssocInfo( HDC hdc )
+{
+    DC *dc;
+    DWORD settings;
+
+    if (!hdc) return get_associated_charset_info();
+    if (!(dc = get_dc_ptr( hdc )))
     {
-        char value_buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[32 * sizeof(WCHAR)])];
-        KEY_VALUE_PARTIAL_INFORMATION *info = (void *)value_buffer;
-        HKEY hkey;
-
-        static const WCHAR yesW[] = {'y','e','s',0};
-
-        associated_charset = 0;
-
-        if (!(hkey = reg_open_key( NULL, associated_charset_keyW, sizeof(associated_charset_keyW) )))
-            return 0;
-
-        if (query_reg_ascii_value( hkey, "ANSI(00)", info, sizeof(value_buffer) ) &&
-            info->Type == REG_SZ && !wcsicmp( (const WCHAR *)info->Data, yesW ))
-            associated_charset |= ASSOC_CHARSET_ANSI;
-
-        if (query_reg_ascii_value( hkey, "OEM(FF)", info, sizeof(value_buffer) ) &&
-            info->Type == REG_SZ && !wcsicmp( (const WCHAR *)info->Data, yesW ))
-            associated_charset |= ASSOC_CHARSET_OEM;
-
-        if (query_reg_ascii_value( hkey, "SYMBOL(02)", info, sizeof(value_buffer) ) &&
-            info->Type == REG_SZ && !wcsicmp( (const WCHAR *)info->Data, yesW ))
-            associated_charset |= ASSOC_CHARSET_SYMBOL;
-
-        NtClose( hkey );
-
-        TRACE("associated_charset = %d\n", associated_charset);
+        RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
+        return 0;
     }
-
-    return associated_charset;
+    settings = get_font_association_settings();
+    release_dc_ptr( dc );
+    /* No associated default font is registered by the font owner. The
+     * empty configuration matches native EUDC-not-ready queries. Configured
+     * association fonts require a separate realization and lifetime contract. */
+    if (settings) RtlSetLastWin32Error( ERROR_CALL_NOT_IMPLEMENTED );
+    return 0;
 }
 
 static void update_font_code_page( DC *dc, HANDLE font )

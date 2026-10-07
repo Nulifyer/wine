@@ -598,7 +598,7 @@
     SYSCALL_ENTRY( 0x1252, NtGdiPolyTextOutW, 0 ) \
     SYSCALL_ENTRY( 0x1253, NtGdiPtInRegion, 12 ) \
     SYSCALL_ENTRY( 0x1254, NtGdiPtVisible, 12 ) \
-    SYSCALL_ENTRY( 0x1255, NtGdiQueryFontAssocInfo, 0 ) \
+    SYSCALL_ENTRY( 0x1255, NtGdiQueryFontAssocInfo, 4 ) \
     SYSCALL_ENTRY( 0x1256, NtGdiQueryFonts, 0 ) \
     SYSCALL_ENTRY( 0x1257, NtGdiRectInRegion, 8 ) \
     SYSCALL_ENTRY( 0x1258, NtGdiRectVisible, 8 ) \
@@ -2140,7 +2140,7 @@
     SYSCALL_ENTRY( 0x1252, NtGdiPolyTextOutW, 0 ) \
     SYSCALL_ENTRY( 0x1253, NtGdiPtInRegion, 24 ) \
     SYSCALL_ENTRY( 0x1254, NtGdiPtVisible, 24 ) \
-    SYSCALL_ENTRY( 0x1255, NtGdiQueryFontAssocInfo, 0 ) \
+    SYSCALL_ENTRY( 0x1255, NtGdiQueryFontAssocInfo, 8 ) \
     SYSCALL_ENTRY( 0x1256, NtGdiQueryFonts, 0 ) \
     SYSCALL_ENTRY( 0x1257, NtGdiRectInRegion, 16 ) \
     SYSCALL_ENTRY( 0x1258, NtGdiRectVisible, 16 ) \
@@ -3469,7 +3469,6 @@
     SYSCALL_STUB( NtGdiPATHOBJ_vGetBounds ) \
     SYSCALL_STUB( NtGdiPolyPatBlt ) \
     SYSCALL_STUB( NtGdiPolyTextOutW ) \
-    SYSCALL_STUB( NtGdiQueryFontAssocInfo ) \
     SYSCALL_STUB( NtGdiQueryFonts ) \
     SYSCALL_STUB( NtGdiRemoveMergeFont ) \
     SYSCALL_STUB( NtGdiSTROBJ_bEnum ) \

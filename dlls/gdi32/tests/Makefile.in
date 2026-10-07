@@ -9,6 +9,7 @@ SOURCES = \
 	dib.c \
 	dpi.c \
 	font.c \
+	font_association.c \
 	gdiobj.c \
 	generated.c \
 	icm.c \

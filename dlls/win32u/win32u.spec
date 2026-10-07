@@ -596,7 +596,7 @@
 @ stub -syscall NtGdiPolyTextOutW
 @ stdcall -syscall NtGdiPtInRegion(long long long)
 @ stdcall -syscall NtGdiPtVisible(long long long)
-@ stub -syscall NtGdiQueryFontAssocInfo
+@ stdcall -syscall NtGdiQueryFontAssocInfo(long)
 @ stub -syscall NtGdiQueryFonts
 @ stdcall -syscall NtGdiRectInRegion(long ptr)
 @ stdcall -syscall NtGdiRectVisible(long ptr)

@@ -397,7 +397,7 @@
 @ stdcall GetEnhMetaFilePaletteEntries(long long ptr)
 @ stdcall GetEnhMetaFilePixelFormat(long long ptr)
 @ stdcall GetEnhMetaFileW(wstr)
-# @ stub GetFontAssocStatus
+@ stdcall GetFontAssocStatus(long)
 @ stdcall GetFontData(long long long ptr long) NtGdiGetFontData
 @ stdcall GetFontFileData(long long int64 ptr long)
 @ stdcall GetFontFileInfo(long long ptr long ptr) NtGdiGetFontFileInfo
@@ -526,7 +526,7 @@
 @ stdcall PolylineTo(long ptr long)
 @ stdcall PtInRegion(long long long) NtGdiPtInRegion
 @ stdcall PtVisible(long long long) NtGdiPtVisible
-# @ stub QueryFontAssocStatus
+@ stdcall QueryFontAssocStatus()
 @ stdcall RealizePalette(long)
 @ stdcall RectInRegion(long ptr) NtGdiRectInRegion
 @ stdcall RectVisible(long ptr) NtGdiRectVisible

@@ -430,6 +430,7 @@ W32KAPI BOOL     WINAPI NtGdiHLSurfGetInformation( HANDLE surface, UINT type, vo
 W32KAPI BOOL     WINAPI NtGdiHLSurfSetInformation( HANDLE surface, UINT type, const void *buffer, UINT size );
 W32KAPI DWORD    WINAPI NtGdiGetSpoolMessage( void *ptr1, DWORD data2, void *ptr3, DWORD data4 );
 W32KAPI UINT     WINAPI NtGdiGetSystemPaletteUse( HDC hdc );
+W32KAPI ULONG    WINAPI NtGdiQueryFontAssocInfo( HDC hdc );
 W32KAPI UINT     WINAPI NtGdiGetTextCharsetInfo( HDC hdc, FONTSIGNATURE *fs, DWORD flags );
 W32KAPI BOOL     WINAPI NtGdiGetTextExtentExW( HDC hdc, const WCHAR *str, INT count, INT max_ext,
                                                INT *nfit, INT *dxs, SIZE *size, UINT flags );

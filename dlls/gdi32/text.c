@@ -2012,6 +2012,22 @@ DWORD WINAPI GetKerningPairsA( HDC hdc, DWORD count, KERNINGPAIR *kern_pairA )
     return kern_pairs_copied;
 }
 
+/***********************************************************************
+ *           QueryFontAssocStatus    (GDI32.@)
+ */
+DWORD WINAPI QueryFontAssocStatus(void)
+{
+    return NtGdiQueryFontAssocInfo( NULL );
+}
+
+/***********************************************************************
+ *           GetFontAssocStatus    (GDI32.@)
+ */
+DWORD WINAPI GetFontAssocStatus( HDC hdc )
+{
+    return hdc ? NtGdiQueryFontAssocInfo( hdc ) : 0;
+}
+
 /*************************************************************************
  *             GetFontLanguageInfo   (GDI32.@)
  */
