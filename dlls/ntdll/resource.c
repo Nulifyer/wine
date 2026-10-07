@@ -347,9 +347,11 @@ static BOOL mui_type_is_satellite( const struct mui_resource *mui, ULONG_PTR typ
 }
 
 
-static BOOL mui_configs_match( const struct mui_resource *main, const struct mui_resource *alternate )
+static BOOL mui_configs_match( const struct mui_resource *main, const struct mui_resource *alternate,
+                               BOOL neutral )
 {
-    if (!(alternate->file_type & (MUI_FILETYPE_LANGUAGE_NEUTRAL_MUI >> 1))) return FALSE;
+    if (!(alternate->file_type & ((neutral ? MUI_FILETYPE_LANGUAGE_NEUTRAL_MAIN :
+                                  MUI_FILETYPE_LANGUAGE_NEUTRAL_MUI) >> 1))) return FALSE;
     return !memcmp( main->checksum, alternate->checksum, sizeof(main->checksum) ) &&
            !memcmp( main->service_checksum, alternate->service_checksum,
                     sizeof(main->service_checksum) );
@@ -399,7 +401,8 @@ static NTSTATUS map_alternate_resource( HMODULE module, const WCHAR *locale,
     IO_STATUS_BLOCK io;
     HANDLE file = NULL, section = NULL;
     WCHAR *buffer, *p;
-    SIZE_T prefix_len, filename_len, locale_len, path_len;
+    SIZE_T prefix_len, filename_len, directory_len, path_len;
+    const WCHAR *directory = *locale ? locale : L"SystemResources";
     NTSTATUS status;
 
     if ((status = get_module_filename( module, &section_name ))) return status;
@@ -410,8 +413,15 @@ static NTSTATUS map_alternate_resource( HMODULE module, const WCHAR *locale,
         filename--;
     prefix_len = filename - section_name->SectionFileName.Buffer;
     filename_len = section_name->SectionFileName.Length / sizeof(WCHAR) - prefix_len;
-    locale_len = wcslen( locale );
-    path_len = prefix_len + locale_len + 1 + filename_len + 4;
+    if (!*locale)
+    {
+        /* Neutral resources are siblings of the module's containing directory. */
+        if (prefix_len) prefix_len--;
+        while (prefix_len && section_name->SectionFileName.Buffer[prefix_len - 1] != '\\' &&
+               section_name->SectionFileName.Buffer[prefix_len - 1] != '/') prefix_len--;
+    }
+    directory_len = wcslen( directory );
+    path_len = prefix_len + directory_len + 1 + filename_len + 4;
     if (path_len >= 0x7fff / sizeof(WCHAR))
     {
         status = STATUS_NAME_TOO_LONG;
@@ -426,12 +436,12 @@ static NTSTATUS map_alternate_resource( HMODULE module, const WCHAR *locale,
     p = buffer;
     memcpy( p, section_name->SectionFileName.Buffer, prefix_len * sizeof(WCHAR) );
     p += prefix_len;
-    memcpy( p, locale, locale_len * sizeof(WCHAR) );
-    p += locale_len;
+    memcpy( p, directory, directory_len * sizeof(WCHAR) );
+    p += directory_len;
     *p++ = '\\';
     memcpy( p, filename, filename_len * sizeof(WCHAR) );
     p += filename_len;
-    memcpy( p, L".mui", 5 * sizeof(WCHAR) );
+    memcpy( p, *locale ? L".mui" : L".mun", 5 * sizeof(WCHAR) );
 
     path.Buffer = buffer;
     path.Length = path_len * sizeof(WCHAR);
@@ -443,7 +453,7 @@ static NTSTATUS map_alternate_resource( HMODULE module, const WCHAR *locale,
                          FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE );
     if (NT_SUCCESS(status))
         status = NtCreateSection( &section, STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ,
-                                  NULL, NULL, PAGE_READONLY, SEC_IMAGE_NO_EXECUTE, file );
+                                  NULL, NULL, PAGE_READONLY, SEC_COMMIT, file );
     if (NT_SUCCESS(status))
     {
         *view = NULL;
@@ -452,7 +462,7 @@ static NTSTATUS map_alternate_resource( HMODULE module, const WCHAR *locale,
                                      ViewShare, 0, PAGE_READONLY );
         if (NT_SUCCESS(status))
         {
-            *mapped_module = (HMODULE)((ULONG_PTR)*view | 2);
+            *mapped_module = (HMODULE)((ULONG_PTR)*view | 1);
             status = STATUS_SUCCESS;
         }
     }
@@ -467,74 +477,102 @@ done:
 }
 
 
-static struct alternate_resource_module *load_alternate_resource( HMODULE module,
-                                                                   const struct mui_resource *main_mui,
-                                                                   const WCHAR *locale )
+/* The resource lock protects mapping, lookup and cache teardown together.  An empty
+ * locale denotes the language-neutral file, including its cached failed load. */
+static NTSTATUS find_file_resource( HMODULE module, const struct mui_resource *main_mui,
+                                   const WCHAR *locale, const LDR_RESOURCE_INFO *info,
+                                   ULONG level, const void **ret )
 {
-    struct alternate_resource_module *alternate, *cached;
+    struct alternate_resource_module *alternate;
     const struct mui_resource *alternate_mui;
-    HMODULE resource_module;
+    HMODULE resource_module = NULL;
     ULONG mui_size;
-    void *view;
-    SIZE_T view_size;
-
-    RtlAcquireSRWLockShared( &alternate_resource_lock );
-    cached = find_cached_alternate( module, locale );
-    RtlReleaseSRWLockShared( &alternate_resource_lock );
-    if (cached) return cached;
-
-    if (map_alternate_resource( module, locale, &resource_module, &view, &view_size ))
-    {
-        TRACE( "failed to map alternate resource for %p locale %s\n", module, debugstr_w(locale) );
-        return NULL;
-    }
-    alternate_mui = get_mui_resource( resource_module, &mui_size );
-    if (!alternate_mui || !mui_configs_match( main_mui, alternate_mui ))
-    {
-        TRACE( "alternate resource %p has no matching MUI configuration\n", resource_module );
-        NtUnmapViewOfSection( NtCurrentProcess(), view );
-        return NULL;
-    }
-    if (!(alternate = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*alternate) )))
-    {
-        NtUnmapViewOfSection( NtCurrentProcess(), view );
-        return NULL;
-    }
-    alternate->base_module = (HMODULE)((ULONG_PTR)module & ~3);
-    alternate->resource_module = resource_module;
-    alternate->view = view;
-    alternate->view_size = view_size;
-    wcscpy( alternate->locale, locale );
+    void *view = NULL;
+    SIZE_T view_size = 0;
+    NTSTATUS status;
+    BOOL published = FALSE;
 
     RtlAcquireSRWLockExclusive( &alternate_resource_lock );
-    if ((cached = find_cached_alternate( module, locale )))
+    __TRY
     {
-        RtlReleaseSRWLockExclusive( &alternate_resource_lock );
-        NtUnmapViewOfSection( NtCurrentProcess(), view );
-        RtlFreeHeap( GetProcessHeap(), 0, alternate );
-        return cached;
+        if ((alternate = find_cached_alternate( module, locale ))) goto lookup;
+
+        status = map_alternate_resource( module, locale, &resource_module, &view, &view_size );
+        if (status)
+        {
+            if (status == STATUS_OBJECT_NAME_NOT_FOUND || status == STATUS_OBJECT_PATH_NOT_FOUND ||
+                status == STATUS_NO_SUCH_FILE)
+                status = *locale ? STATUS_MUI_FILE_NOT_FOUND : STATUS_RESOURCE_TYPE_NOT_FOUND;
+            goto done;
+        }
+        alternate_mui = get_mui_resource( resource_module, &mui_size );
+        status = STATUS_SUCCESS;
+        if (!alternate_mui || !mui_configs_match( main_mui, alternate_mui, !*locale ))
+        {
+            TRACE( "alternate resource %p has no matching MUI configuration\n", resource_module );
+            NtUnmapViewOfSection( NtCurrentProcess(), view );
+            view = NULL;
+            view_size = 0;
+            resource_module = NULL;
+            status = STATUS_MUI_INVALID_FILE;
+            if (*locale) goto done;
+        }
+        if (!(alternate = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*alternate) )))
+        {
+            if (view) NtUnmapViewOfSection( NtCurrentProcess(), view );
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        alternate->base_module = (HMODULE)((ULONG_PTR)module & ~3);
+        alternate->resource_module = resource_module;
+        alternate->view = view;
+        alternate->view_size = view_size;
+        wcscpy( alternate->locale, locale );
+        list_add_tail( &alternate_resource_modules, &alternate->entry );
+        published = TRUE;
+        if (status) goto done;
+
+    lookup:
+        if (alternate->resource_module)
+        {
+            LDR_RESOURCE_INFO lookup = *info;
+            if (!*locale) lookup.Language = 0;
+            status = find_entry( alternate->resource_module, &lookup, level, ret, FALSE );
+        }
+        else status = STATUS_RESOURCE_TYPE_NOT_FOUND;
+    done:
+        ;
     }
-    list_add_tail( &alternate_resource_modules, &alternate->entry );
+    __EXCEPT_PAGE_FAULT
+    {
+        status = GetExceptionCode();
+        if (view && !published) NtUnmapViewOfSection( NtCurrentProcess(), view );
+    }
+    __ENDTRY
     RtlReleaseSRWLockExclusive( &alternate_resource_lock );
-    return alternate;
+    return status;
 }
 
 
 static NTSTATUS find_alternate_resource( HMODULE module, const LDR_RESOURCE_INFO *info,
-                                         ULONG level, const void **ret )
+                                         ULONG level, const void **ret, NTSTATUS original_status )
 {
     WCHAR locale_buffer[LOCALE_NAME_MAX_LENGTH];
     UNICODE_STRING locale = { 0, sizeof(locale_buffer), locale_buffer };
     const struct mui_resource *mui;
-    struct alternate_resource_module *alternate;
     LANGID languages[128];
     ULONG mui_size, i, count;
     NTSTATUS status = STATUS_RESOURCE_TYPE_NOT_FOUND;
 
-    if (!info || !level) return status;
+    if (!info || !level || info->Type == 16 || info->Type == 24) return status;
     if (!(mui = get_mui_resource( module, &mui_size ))) return status;
-    if (!(mui->file_type & (MUI_FILETYPE_LANGUAGE_NEUTRAL_MAIN >> 1)) ||
-        !mui_type_is_satellite( mui, info->Type )) return status;
+    if (!(mui->file_type & (MUI_FILETYPE_LANGUAGE_NEUTRAL_MAIN >> 1))) return status;
+    if (!mui_type_is_satellite( mui, info->Type ))
+    {
+        if (original_status != STATUS_RESOURCE_TYPE_NOT_FOUND)
+            return status;
+        return find_file_resource( module, mui, L"", info, level, ret );
+    }
 
     count = get_resource_lcids( languages, ARRAY_SIZE(languages), info->Language );
     for (i = 0; i < count; i++)
@@ -543,12 +581,7 @@ static NTSTATUS find_alternate_resource( HMODULE module, const LDR_RESOURCE_INFO
         locale.Length = 0;
         if (RtlLcidToLocaleName( MAKELCID( languages[i], SORT_DEFAULT ), &locale, 0, FALSE )) continue;
         locale.Buffer[locale.Length / sizeof(WCHAR)] = 0;
-        if (!load_alternate_resource( module, mui, locale.Buffer )) continue;
-        RtlAcquireSRWLockShared( &alternate_resource_lock );
-        alternate = find_cached_alternate( module, locale.Buffer );
-        status = alternate ? find_entry( alternate->resource_module, info, level, ret, FALSE ) :
-                             STATUS_RESOURCE_TYPE_NOT_FOUND;
-        RtlReleaseSRWLockShared( &alternate_resource_lock );
+        status = find_file_resource( module, mui, locale.Buffer, info, level, ret );
         if (!status) return status;
     }
 
@@ -562,14 +595,7 @@ static NTSTATUS find_alternate_resource( HMODULE module, const LDR_RESOURCE_INFO
         {
             memcpy( locale_buffer, fallback, length * sizeof(WCHAR) );
             locale_buffer[length - 1] = 0;
-            if (load_alternate_resource( module, mui, locale_buffer ))
-            {
-                RtlAcquireSRWLockShared( &alternate_resource_lock );
-                alternate = find_cached_alternate( module, locale_buffer );
-                status = alternate ? find_entry( alternate->resource_module, info, level, ret, FALSE ) :
-                                     STATUS_RESOURCE_TYPE_NOT_FOUND;
-                RtlReleaseSRWLockShared( &alternate_resource_lock );
-            }
+            status = find_file_resource( module, mui, locale_buffer, info, level, ret );
         }
     }
     return status;
@@ -621,9 +647,11 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH LdrFindResource_U( HMODULE hmod, const LDR_RES
                      level > 2 ? info->Language : 0, level );
 
         status = find_entry( hmod, info, level, &res, FALSE );
-        if (status != STATUS_SUCCESS &&
-            find_alternate_resource( hmod, info, level, &res ) == STATUS_SUCCESS)
-            status = STATUS_SUCCESS;
+        if (status != STATUS_SUCCESS)
+        {
+            NTSTATUS alternate_status = find_alternate_resource( hmod, info, level, &res, status );
+            if (alternate_status != STATUS_RESOURCE_TYPE_NOT_FOUND) status = alternate_status;
+        }
         if (status == STATUS_SUCCESS) *entry = res;
     }
     __EXCEPT_PAGE_FAULT
@@ -681,7 +709,7 @@ BOOLEAN WINAPI LdrUnloadAlternateResourceModule( HMODULE module )
     {
         if (alternate->base_module != base) continue;
         list_remove( &alternate->entry );
-        NtUnmapViewOfSection( NtCurrentProcess(), alternate->view );
+        if (alternate->view) NtUnmapViewOfSection( NtCurrentProcess(), alternate->view );
         RtlFreeHeap( GetProcessHeap(), 0, alternate );
         found = TRUE;
     }
@@ -703,7 +731,7 @@ BOOLEAN WINAPI LdrFlushAlternateResourceModules(void)
                               struct alternate_resource_module, entry )
     {
         list_remove( &alternate->entry );
-        NtUnmapViewOfSection( NtCurrentProcess(), alternate->view );
+        if (alternate->view) NtUnmapViewOfSection( NtCurrentProcess(), alternate->view );
         RtlFreeHeap( GetProcessHeap(), 0, alternate );
         found = TRUE;
     }
