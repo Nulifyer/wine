@@ -1250,6 +1250,33 @@ static BOOL draw_stream_image( DC *dc, HDC hdc, HDC source, const struct draw_st
     return ret;
 }
 
+/* A session image is mapped into a private drawing object.  This retains the
+ * section without selecting the original public bitmap into a process DC. */
+static HBITMAP capture_stream_bitmap( HDC hdc, HBITMAP input, BOOL *owned, BOOL *dib )
+{
+    char buffer[FIELD_OFFSET(BITMAPINFO,bmiColors[256])];
+    BITMAPINFO *info = (BITMAPINFO *)buffer;
+    BITMAPOBJ *bitmap = GDI_GetObjPtr( input, NTGDI_OBJ_BITMAP );
+    HBITMAP result = input;
+    *owned = *dib = FALSE;
+    if (!bitmap) return 0;
+    *dib = is_bitmapobj_dib( bitmap );
+    if (bitmap->session_mapped && bitmap->shared_section)
+    {
+        memset( buffer, 0, sizeof(buffer) );
+        info->bmiHeader = bitmap->dib.dsBmih;
+        if (info->bmiHeader.biCompression == BI_BITFIELDS)
+            memcpy( info->bmiColors, bitmap->dib.dsBitfields, sizeof(bitmap->dib.dsBitfields) );
+        else if (bitmap->color_table)
+            memcpy( info->bmiColors, bitmap->color_table, info->bmiHeader.biClrUsed * sizeof(RGBQUAD) );
+        result = NtGdiCreateDIBSection( hdc, bitmap->shared_section, bitmap->dib.dsOffset,
+                                       info, DIB_RGB_COLORS, 0, 0, 0, NULL );
+        *owned = !!result;
+    }
+    GDI_ReleaseObj( input );
+    return result;
+}
+
 /******************************************************************************
  *           NtGdiDrawStream   (win32u.@)
  */
@@ -1258,9 +1285,9 @@ BOOL WINAPI NtGdiDrawStream( HDC hdc, ULONG size, void *stream )
     DWORD error = RtlGetLastWin32Error(), magic, offset = sizeof(DWORD);
     DC *dc;
     HDC source = NULL;
-    HBITMAP old_bitmap = NULL;
+    HBITMAP old_bitmap = NULL, captured_bitmap = NULL;
     HRGN original, clip = NULL;
-    BOOL ret = FALSE;
+    BOOL source_dib = FALSE, ret = FALSE;
 
     if (!(dc = get_dc_ptr( hdc ))) goto done;
     original = dc->hClipRgn;
@@ -1330,15 +1357,28 @@ BOOL WINAPI NtGdiDrawStream( HDC hdc, ULONG size, void *stream )
             break;
         }
         case 1:
-            if (!source && !(source = NtGdiCreateCompatibleDC( hdc ))) goto cleanup;
-            if (!old_bitmap)
+        {
+            BOOL owned;
+            HBITMAP bitmap = capture_stream_bitmap( hdc, ULongToHandle(packet.bitmap.bitmap), &owned, &source_dib );
+            HBITMAP previous;
+            if (!bitmap) goto cleanup;
+            if (!source && !(source = NtGdiCreateCompatibleDC( hdc )))
             {
-                if (!(old_bitmap = NtGdiSelectBitmap( source, ULongToHandle( packet.bitmap.bitmap ) ))) goto cleanup;
+                if (owned) NtGdiDeleteObjectApp( bitmap );
+                goto cleanup;
             }
-            else if (!NtGdiSelectBitmap( source, ULongToHandle( packet.bitmap.bitmap ) )) goto cleanup;
+            if (!(previous = NtGdiSelectBitmap( source, bitmap )))
+            {
+                if (owned) NtGdiDeleteObjectApp( bitmap );
+                goto cleanup;
+            }
+            if (!old_bitmap) old_bitmap = previous;
+            if (captured_bitmap) NtGdiDeleteObjectApp( captured_bitmap );
+            captured_bitmap = owned ? bitmap : NULL;
             break;
+        }
         case 9:
-            if (!old_bitmap || !draw_stream_image( dc, hdc, source, &packet.image )) goto cleanup;
+            if (!old_bitmap || !source_dib || !draw_stream_image( dc, hdc, source, &packet.image )) goto cleanup;
             break;
         }
         offset += length;
@@ -1352,6 +1392,7 @@ cleanup:
         if (old_bitmap) NtGdiSelectBitmap( source, old_bitmap );
         NtGdiDeleteObjectApp( source );
     }
+    if (captured_bitmap) NtGdiDeleteObjectApp( captured_bitmap );
     release_dc_ptr( dc );
 done:
     RtlSetLastWin32Error( error );

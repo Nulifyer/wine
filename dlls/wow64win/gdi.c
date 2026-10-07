@@ -373,7 +373,12 @@ NTSTATUS WINAPI wow64_NtGdiCreateSessionMappedDIBSection( UINT *args )
     DWORD offset = get_ulong( &args );
     const BITMAPINFO *bmi = get_ptr( &args );
 
-    return HandleToUlong( NtGdiCreateSessionMappedDIBSection( hdc, section, offset, bmi ) );
+    UINT usage = get_ulong( &args );
+    UINT header_size = get_ulong( &args );
+    ULONG flags = get_ulong( &args );
+    ULONG_PTR color_space = get_ulong( &args );
+    return HandleToUlong( NtGdiCreateSessionMappedDIBSection( hdc, section, offset, bmi, usage,
+                                                           header_size, flags, color_space ) );
 }
 
 NTSTATUS WINAPI wow64_NtGdiGetCurrentDpiInfo( UINT *args )

@@ -65,12 +65,11 @@ static void test_CreateSessionMappedDIBSection(void)
 {
     static const DWORD offset = 64;
     BITMAPINFO bmi = {{sizeof(BITMAPINFOHEADER), 2, 2, 1, 32, BI_RGB}};
-    BYTE expected[16], actual[16];
+    BYTE expected[16];
     HANDLE section;
-    HBITMAP bitmap, stock, restored, private_dib;
+    HBITMAP bitmap, private_dib;
     void *private_bits;
     BYTE *view;
-    int ret;
 
     if (!pCreateSessionMappedDIBSection)
     {
@@ -98,47 +97,10 @@ static void test_CreateSessionMappedDIBSection(void)
     memset( expected, 0x5a, sizeof(expected) );
     memcpy( view + offset, expected, sizeof(expected) );
     bitmap = pCreateSessionMappedDIBSection( 0, &bmi, DIB_RGB_COLORS, section, offset );
-    ok( !!bitmap, "CreateSessionMappedDIBSection failed, error %lu.\n", GetLastError() );
-    if (bitmap)
-    {
-        memset( actual, 0, sizeof(actual) );
-        ret = GetBitmapBits( bitmap, sizeof(actual), actual );
-        ok( ret == sizeof(actual), "GetBitmapBits returned %d.\n", ret );
-        ok( !memcmp( actual, expected, sizeof(actual) ), "Bitmap does not use the supplied section.\n" );
-
-        memset( expected, 0xa5, sizeof(expected) );
-        ret = SetBitmapBits( bitmap, sizeof(expected), expected );
-        ok( ret == sizeof(expected), "SetBitmapBits returned %d.\n", ret );
-        ok( !memcmp( view + offset, expected, sizeof(expected) ), "Section does not reflect bitmap writes.\n" );
-
-        if (pSetBitmapAttributes && pClearBitmapAttributes)
-        {
-            SetLastError( 0xdeadbeef );
-            stock = pSetBitmapAttributes( bitmap, 1 );
-            ok( HandleToULong(stock) == (HandleToULong(bitmap) | NTGDI_HANDLE_STOCK_OBJECT),
-                "Got stock handle %p for %p.\n", stock, bitmap );
-            ok( GetLastError() == 0xdeadbeef, "Got last error %lu.\n", GetLastError() );
-
-            SetLastError( 0xdeadbeef );
-            ok( !pSetBitmapAttributes( stock, 1 ), "Repeated set succeeded.\n" );
-            ok( GetLastError() == 0xdeadbeef, "Got last error %lu.\n", GetLastError() );
-
-            SetLastError( 0xdeadbeef );
-            restored = pClearBitmapAttributes( stock, 1 );
-            ok( restored == bitmap, "Got restored handle %p, expected %p.\n", restored, bitmap );
-            ok( GetLastError() == 0xdeadbeef, "Got last error %lu.\n", GetLastError() );
-            bitmap = restored;
-
-            SetLastError( 0xdeadbeef );
-            ok( !pClearBitmapAttributes( bitmap, 1 ), "Repeated clear succeeded.\n" );
-            ok( GetLastError() == 0xdeadbeef, "Got last error %lu.\n", GetLastError() );
-
-            SetLastError( 0xdeadbeef );
-            ok( !pSetBitmapAttributes( bitmap, 2 ), "Set with invalid flags succeeded.\n" );
-            ok( GetLastError() == 0xdeadbeef, "Got last error %lu.\n", GetLastError() );
-        }
-        ok( DeleteObject( bitmap ), "DeleteObject failed.\n" );
-    }
+    /* The ordinary test actor is not the registered logon process. */
+    ok( !bitmap, "Unregistered actor created a session bitmap %p.\n", bitmap );
+    ok( GetLastError() == ERROR_ACCESS_DENIED, "Got last error %lu.\n", GetLastError() );
+    if (bitmap) DeleteObject( bitmap );
 
     private_dib = CreateDIBSection( 0, &bmi, DIB_RGB_COLORS, &private_bits, NULL, 0 );
     ok( !!private_dib, "CreateDIBSection failed, error %lu.\n", GetLastError() );

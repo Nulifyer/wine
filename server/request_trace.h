@@ -4902,6 +4902,67 @@ static void dump_get_session_user_token_reply( const struct get_session_user_tok
     fprintf( stderr, " token=%04x", req->token );
 }
 
+static void dump_alloc_gdi_object_request( const struct alloc_gdi_object_request *req )
+{
+    fprintf( stderr, " type=%08x", req->type );
+}
+
+static void dump_alloc_gdi_object_reply( const struct alloc_gdi_object_reply *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+}
+
+static void dump_free_gdi_object_request( const struct free_gdi_object_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+}
+
+static void dump_bind_gdi_bitmap_request( const struct bind_gdi_bitmap_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", section=%04x", req->section );
+    dump_varargs_bytes( ", info=", cur_size );
+}
+
+static void dump_query_gdi_object_request( const struct query_gdi_object_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", backing=%d", req->backing );
+}
+
+static void dump_query_gdi_object_reply( const struct query_gdi_object_reply *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", section=%04x", req->section );
+    dump_varargs_bytes( ", info=", cur_size );
+}
+
+static void dump_set_gdi_bitmap_stock_request( const struct set_gdi_bitmap_stock_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", stock=%d", req->stock );
+}
+
+static void dump_set_gdi_bitmap_stock_reply( const struct set_gdi_bitmap_stock_reply *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+}
+
+static void dump_select_gdi_bitmap_request( const struct select_gdi_bitmap_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", delta=%d", req->delta );
+}
+
+static void dump_select_gdi_bitmap_reply( const struct select_gdi_bitmap_reply *req )
+{
+    fprintf( stderr, " count=%08x", req->count );
+}
+
+static void dump_check_gdi_bitmap_creator_request( const struct check_gdi_bitmap_creator_request *req )
+{
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -5351,6 +5412,13 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_query_activation_object_request,
     (dump_func)dump_set_activation_object_redirection_request,
     (dump_func)dump_get_session_user_token_request,
+    (dump_func)dump_alloc_gdi_object_request,
+    (dump_func)dump_free_gdi_object_request,
+    (dump_func)dump_bind_gdi_bitmap_request,
+    (dump_func)dump_query_gdi_object_request,
+    (dump_func)dump_set_gdi_bitmap_stock_request,
+    (dump_func)dump_select_gdi_bitmap_request,
+    (dump_func)dump_check_gdi_bitmap_creator_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -5800,6 +5868,13 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_query_activation_object_reply,
     NULL,
     (dump_func)dump_get_session_user_token_reply,
+    (dump_func)dump_alloc_gdi_object_reply,
+    NULL,
+    NULL,
+    (dump_func)dump_query_gdi_object_reply,
+    (dump_func)dump_set_gdi_bitmap_stock_reply,
+    (dump_func)dump_select_gdi_bitmap_reply,
+    NULL,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] =
@@ -6249,6 +6324,13 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "query_activation_object",
     "set_activation_object_redirection",
     "get_session_user_token",
+    "alloc_gdi_object",
+    "free_gdi_object",
+    "bind_gdi_bitmap",
+    "query_gdi_object",
+    "set_gdi_bitmap_stock",
+    "select_gdi_bitmap",
+    "check_gdi_bitmap_creator",
 };
 
 static const struct

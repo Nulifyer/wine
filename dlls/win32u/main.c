@@ -162,7 +162,8 @@ HBITMAP SYSCALL_API NtGdiCreateDIBSection( HDC hdc, HANDLE section, DWORD offset
 }
 
 HBITMAP SYSCALL_API NtGdiCreateSessionMappedDIBSection( HDC hdc, HANDLE section, DWORD offset,
-                                                        const BITMAPINFO *bmi )
+                                                        const BITMAPINFO *bmi, UINT usage, UINT header_size,
+                                                        ULONG flags, ULONG_PTR color_space )
 {
     SYSCALL_FUNC( NtGdiCreateSessionMappedDIBSection );
 }

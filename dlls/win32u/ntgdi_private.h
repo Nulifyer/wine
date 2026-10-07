@@ -138,6 +138,9 @@ typedef struct tagBITMAPOBJ
     struct gdi_obj_header obj;
     DIBSECTION            dib;
     SIZE                  size;   /* For SetBitmapDimension() */
+    HANDLE                shared_section; /* owned backing handle */
+    void                 *shared_view;
+    BOOL                  session_mapped;
     RGBQUAD              *color_table;  /* DIB color table if <= 8bpp (always 1 << bpp in size) */
 } BITMAPOBJ;
 
@@ -388,6 +391,12 @@ extern HGDIOBJ GDI_inc_ref_count( HGDIOBJ handle );
 extern BOOL GDI_dec_ref_count( HGDIOBJ handle );
 extern DWORD get_gdi_object_type( HGDIOBJ obj );
 extern void make_gdi_object_system( HGDIOBJ handle, BOOL set );
+extern const struct gdi_obj_funcs bitmap_funcs, dib_funcs;
+extern BOOL session_bitmap_authorized(void);
+extern BOOL bind_shared_bitmap( HBITMAP handle, BITMAPOBJ *bitmap, HANDLE section );
+extern BITMAPOBJ *import_shared_bitmap( HBITMAP handle );
+extern void destroy_shared_bitmap_cache( BITMAPOBJ *bitmap );
+extern BOOL prepare_public_bitmap( HBITMAP handle, BITMAPOBJ *bitmap );
 extern HBITMAP set_bitmap_stock( HBITMAP bitmap, BOOL stock );
 
 /* mapping.c */

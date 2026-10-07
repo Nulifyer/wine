@@ -191,7 +191,7 @@
     SYSCALL_ENTRY( 0x10bb, NtGdiCreateRectRgn, 16 ) \
     SYSCALL_ENTRY( 0x10bc, NtGdiCreateRoundRectRgn, 24 ) \
     SYSCALL_ENTRY( 0x10bd, NtGdiCreateServerMetaFile, 0 ) \
-    SYSCALL_ENTRY( 0x10be, NtGdiCreateSessionMappedDIBSection, 16 ) \
+    SYSCALL_ENTRY( 0x10be, NtGdiCreateSessionMappedDIBSection, 32 ) \
     SYSCALL_ENTRY( 0x10bf, NtGdiCreateSolidBrush, 8 ) \
     SYSCALL_ENTRY( 0x10c0, NtGdiDDCCIGetCapabilitiesString, 0 ) \
     SYSCALL_ENTRY( 0x10c1, NtGdiDDCCIGetCapabilitiesStringLength, 0 ) \
@@ -1733,7 +1733,7 @@
     SYSCALL_ENTRY( 0x10bb, NtGdiCreateRectRgn, 32 ) \
     SYSCALL_ENTRY( 0x10bc, NtGdiCreateRoundRectRgn, 48 ) \
     SYSCALL_ENTRY( 0x10bd, NtGdiCreateServerMetaFile, 0 ) \
-    SYSCALL_ENTRY( 0x10be, NtGdiCreateSessionMappedDIBSection, 32 ) \
+    SYSCALL_ENTRY( 0x10be, NtGdiCreateSessionMappedDIBSection, 64 ) \
     SYSCALL_ENTRY( 0x10bf, NtGdiCreateSolidBrush, 16 ) \
     SYSCALL_ENTRY( 0x10c0, NtGdiDDCCIGetCapabilitiesString, 0 ) \
     SYSCALL_ENTRY( 0x10c1, NtGdiDDCCIGetCapabilitiesStringLength, 0 ) \

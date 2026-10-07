@@ -84,7 +84,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(bitmap);
 static INT DIB_GetObject( HGDIOBJ handle, INT count, LPVOID buffer );
 static BOOL DIB_DeleteObject( HGDIOBJ handle );
 
-static const struct gdi_obj_funcs dib_funcs =
+const struct gdi_obj_funcs dib_funcs =
 {
     DIB_GetObject,     /* pGetObjectW */
     NULL,              /* pUnrealizeObject */
@@ -1583,15 +1583,33 @@ error:
  *           NtGdiCreateSessionMappedDIBSection    (win32u.@)
  */
 HBITMAP WINAPI NtGdiCreateSessionMappedDIBSection( HDC hdc, HANDLE section, DWORD offset,
-                                                   const BITMAPINFO *bmi )
+                                                   const BITMAPINFO *bmi, UINT usage, UINT header_size,
+                                                   ULONG flags, ULONG_PTR color_space )
 {
-    if (!section)
+    BITMAPOBJ *bitmap;
+    HBITMAP handle;
+    HANDLE retained;
+    if (!section || !bmi)
     {
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
-
-    return NtGdiCreateDIBSection( hdc, section, offset, bmi, DIB_RGB_COLORS, 0, 0, 0, NULL );
+    if (!session_bitmap_authorized()) return 0;
+    if (!(handle = NtGdiCreateDIBSection( hdc, section, offset, bmi, usage, header_size, flags,
+                                         color_space, NULL ))) return 0;
+    bitmap = GDI_GetObjPtr( handle, NTGDI_OBJ_BITMAP );
+    bitmap->session_mapped = TRUE;
+    if (!bind_shared_bitmap( handle, bitmap, section ) ||
+        NtDuplicateObject( GetCurrentProcess(), section, GetCurrentProcess(), &retained, 0, 0, DUPLICATE_SAME_ACCESS ))
+    {
+        GDI_ReleaseObj( handle );
+        NtGdiDeleteObjectApp( handle );
+        return 0;
+    }
+    bitmap->shared_section = retained;
+    bitmap->shared_view = (char *)bitmap->dib.dsBm.bmBits - (offset % system_info.AllocationGranularity);
+    GDI_ReleaseObj( handle );
+    return handle;
 }
 
 
@@ -1760,6 +1778,7 @@ static INT DIB_GetObject( HGDIOBJ handle, INT count, LPVOID buffer )
     {
         DIBSECTION *dib = buffer;
         *dib = bmp->dib;
+        if (bmp->session_mapped) dib->dsBm.bmBits = NULL;
         dib->dsBm.bmWidthBytes = get_dib_stride( dib->dsBm.bmWidth, dib->dsBm.bmBitsPixel );
         dib->dsBmih.biHeight = abs( dib->dsBmih.biHeight );
         ret = sizeof(DIBSECTION);
@@ -1768,6 +1787,7 @@ static INT DIB_GetObject( HGDIOBJ handle, INT count, LPVOID buffer )
     {
         BITMAP *bitmap = buffer;
         *bitmap = bmp->dib.dsBm;
+        if (bmp->session_mapped) bitmap->bmBits = NULL;
         bitmap->bmWidthBytes = get_dib_stride( bitmap->bmWidth, bitmap->bmBitsPixel );
         ret = sizeof(BITMAP);
     }
@@ -1785,6 +1805,11 @@ static BOOL DIB_DeleteObject( HGDIOBJ handle )
     BITMAPOBJ *bmp;
 
     if (!(bmp = free_gdi_handle( handle ))) return FALSE;
+    if (bmp->shared_view)
+    {
+        destroy_shared_bitmap_cache( bmp );
+        return TRUE;
+    }
 
     if (bmp->dib.dshSection)
     {

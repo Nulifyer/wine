@@ -11,6 +11,7 @@ EXTRADLLFLAGS = -nodefaultlibs
 SOURCES = \
 	bitblt.c \
 	bitmap.c \
+	shared_bitmap.c \
 	brush.c \
 	class.c \
 	clipboard.c \

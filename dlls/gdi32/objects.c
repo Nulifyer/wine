@@ -110,7 +110,10 @@ static HGDIOBJ entry_to_handle( GDI_HANDLE_ENTRY *entry )
 
 static DWORD get_object_type( HGDIOBJ obj )
 {
-    GDI_HANDLE_ENTRY *entry = handle_entry( obj );
+    GDI_HANDLE_ENTRY *entry;
+    if (gdi_handle_type( obj ) == NTGDI_OBJ_BITMAP)
+        return NtGdiExtGetObjectW( obj, 0, NULL ) ? NTGDI_OBJ_BITMAP : 0;
+    entry = handle_entry( obj );
     return entry ? entry->ExtType << NTGDI_HANDLE_TYPE_SHIFT : 0;
 }
 
@@ -130,7 +133,9 @@ void *get_gdi_client_ptr( HGDIOBJ obj, DWORD type )
 
 HGDIOBJ get_full_gdi_handle( HGDIOBJ obj )
 {
-    GDI_HANDLE_ENTRY *entry = handle_entry( obj );
+    GDI_HANDLE_ENTRY *entry;
+    if (gdi_handle_type( obj ) == NTGDI_OBJ_BITMAP && !NtGdiExtGetObjectW( obj, 0, NULL )) return 0;
+    entry = handle_entry( obj );
     return entry ? entry_to_handle( entry ) : 0;
 }
 
@@ -212,7 +217,7 @@ DWORD WINAPI GetObjectType( HGDIOBJ handle )
     case NTGDI_OBJ_ENHMETADC:   return OBJ_ENHMETADC;
     case NTGDI_OBJ_ENHMETAFILE: return OBJ_ENHMETAFILE;
     default:
-        SetLastError( ERROR_INVALID_HANDLE );
+        if (gdi_handle_type( handle ) != NTGDI_OBJ_BITMAP) SetLastError( ERROR_INVALID_HANDLE );
         return 0;
     }
 }
@@ -916,7 +921,7 @@ HBITMAP WINAPI CreateSessionMappedDIBSection( HDC hdc, const BITMAPINFO *bmi, UI
         return 0;
     }
 
-    return NtGdiCreateDIBSection( hdc, section, offset, bmi, usage, 0, 0, 0, NULL );
+    return NtGdiCreateSessionMappedDIBSection( hdc, section, offset, bmi, usage, 0, 0, 0 );
 }
 
 

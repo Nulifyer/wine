@@ -58,7 +58,7 @@ HBITMAP WINAPI NtGdiClearBitmapAttributes( HBITMAP bitmap, UINT flags )
 static INT BITMAP_GetObject( HGDIOBJ handle, INT count, LPVOID buffer );
 static BOOL BITMAP_DeleteObject( HGDIOBJ handle );
 
-static const struct gdi_obj_funcs bitmap_funcs =
+const struct gdi_obj_funcs bitmap_funcs =
 {
     BITMAP_GetObject,     /* pGetObjectW */
     NULL,                 /* pUnrealizeObject */
@@ -258,7 +258,11 @@ LONG WINAPI NtGdiGetBitmapBits(
     int dst_stride, max, ret;
     BITMAPOBJ *bmp = GDI_GetObjPtr( hbitmap, NTGDI_OBJ_BITMAP );
 
-    if (!bmp) return 0;
+    if (!bmp)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
+        return 0;
+    }
 
     dst_stride = get_bitmap_stride( bmp->dib.dsBm.bmWidth, bmp->dib.dsBm.bmBitsPixel );
     ret = max = dst_stride * bmp->dib.dsBm.bmHeight;
@@ -467,9 +471,16 @@ HGDIOBJ WINAPI NtGdiSelectBitmap( HDC hdc, HGDIOBJ handle )
         goto done;
     }
 
+    if (!GDI_inc_ref_count( handle ))
+    {
+        GDI_ReleaseObj( handle );
+        ret = 0;
+        goto done;
+    }
     physdev = GET_DC_PHYSDEV( dc, pSelectBitmap );
     if (!physdev->funcs->pSelectBitmap( physdev, handle ))
     {
+        GDI_dec_ref_count( handle );
         GDI_ReleaseObj( handle );
         ret = 0;
     }
@@ -478,7 +489,6 @@ HGDIOBJ WINAPI NtGdiSelectBitmap( HDC hdc, HGDIOBJ handle )
         drawable = dc->opengl_drawable;
         dc->opengl_drawable = NULL;
         dc->hBitmap = handle;
-        GDI_inc_ref_count( handle );
         dc->dirty = 0;
         dc->attr->vis_rect.left   = 0;
         dc->attr->vis_rect.top    = 0;
@@ -505,6 +515,11 @@ static BOOL BITMAP_DeleteObject( HGDIOBJ handle )
     BITMAPOBJ *bmp = free_gdi_handle( handle );
 
     if (!bmp) return FALSE;
+    if (bmp->shared_view)
+    {
+        destroy_shared_bitmap_cache( bmp );
+        return TRUE;
+    }
     free( bmp->dib.dsBm.bmBits );
     free( bmp );
     return TRUE;

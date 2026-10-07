@@ -1340,6 +1340,21 @@ static enum server_fd_type mapping_get_fd_type( struct fd *fd )
 }
 
 /* assign a mapping address to a PE image mapping */
+/* Retain ordinary bitmap storage after the creating process closes its handle. */
+struct object *get_gdi_section( struct process *process, obj_handle_t handle, mem_size_t *size )
+{
+    struct mapping *mapping = get_mapping_obj( process, handle, SECTION_MAP_READ | SECTION_MAP_WRITE );
+    if (!mapping) return NULL;
+    if (mapping->flags & SEC_IMAGE)
+    {
+        release_object( mapping );
+        set_error( STATUS_INVALID_PARAMETER );
+        return NULL;
+    }
+    *size = mapping->size;
+    return &mapping->obj;
+}
+
 static client_ptr_t assign_map_address( struct mapping *mapping )
 {
     unsigned int i;

@@ -49,6 +49,18 @@ typedef unsigned __int64 affinity_t;
 typedef unsigned __int64 object_id_t;
 typedef client_ptr_t mod_handle_t;
 
+#define GDI_BITMAP_DDB 1
+#define GDI_BITMAP_SESSION 2
+
+/* Pointer-free GDI bitmap backing description, shared by both client ABIs. */
+struct gdi_bitmap_data
+{
+    int width, height;
+    unsigned int stride, bpp, compression, offset, kind, color_count;
+    unsigned int masks[3];
+    unsigned int colors[256];
+};
+
 struct request_header
 {
     int          req;          /* request code */
@@ -5552,4 +5564,53 @@ struct alpc_message_info
     unsigned int    session_id; /* session identifier */
 @REPLY
     obj_handle_t    token;      /* primary user token */
+@END
+
+/* Allocate a session-wide dynamic GDI identity; drawing objects stay local. */
+@REQ(alloc_gdi_object)
+    unsigned int type;
+@REPLY
+    unsigned int handle;
+@END
+
+/* Release a private GDI identity owned by the calling process. */
+@REQ(free_gdi_object)
+    unsigned int handle;
+@END
+
+/* Bind owned bitmap storage; session DIBs require the registered logon actor. */
+@REQ(bind_gdi_bitmap)
+    unsigned int handle;
+    obj_handle_t section;
+    VARARG(info,bytes);
+@END
+
+/* Retrieve authoritative identity and optionally duplicate bitmap backing. */
+@REQ(query_gdi_object)
+    unsigned int handle;
+    int backing;
+@REPLY
+    unsigned int handle;
+    obj_handle_t section;
+    VARARG(info,bytes);
+@END
+
+/* Publish a bitmap, or transfer its public identity back to a private owner. */
+@REQ(set_gdi_bitmap_stock)
+    unsigned int handle;
+    int stock;
+@REPLY
+    unsigned int handle;
+@END
+
+/* Record bitmap selections (+/-1) and API read references (+/-2). */
+@REQ(select_gdi_bitmap)
+    unsigned int handle;
+    int delta;
+@REPLY
+    unsigned int count;
+@END
+
+/* Validate the session bitmap creator before examining caller-owned memory. */
+@REQ(check_gdi_bitmap_creator)
 @END

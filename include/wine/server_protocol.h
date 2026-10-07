@@ -33,6 +33,18 @@ typedef unsigned __int64 affinity_t;
 typedef unsigned __int64 object_id_t;
 typedef client_ptr_t mod_handle_t;
 
+#define GDI_BITMAP_DDB 1
+#define GDI_BITMAP_SESSION 2
+
+
+struct gdi_bitmap_data
+{
+    int width, height;
+    unsigned int stride, bpp, compression, offset, kind, color_count;
+    unsigned int masks[3];
+    unsigned int colors[256];
+};
+
 struct request_header
 {
     int          req;
@@ -8349,6 +8361,101 @@ struct get_session_user_token_reply
 };
 
 
+struct alloc_gdi_object_request
+{
+    struct request_header __header;
+    unsigned int type;
+};
+struct alloc_gdi_object_reply
+{
+    struct reply_header __header;
+    unsigned int handle;
+    char __pad_12[4];
+};
+
+
+struct free_gdi_object_request
+{
+    struct request_header __header;
+    unsigned int handle;
+};
+struct free_gdi_object_reply
+{
+    struct reply_header __header;
+};
+
+
+struct bind_gdi_bitmap_request
+{
+    struct request_header __header;
+    unsigned int handle;
+    obj_handle_t section;
+    /* VARARG(info,bytes); */
+    char __pad_20[4];
+};
+struct bind_gdi_bitmap_reply
+{
+    struct reply_header __header;
+};
+
+
+struct query_gdi_object_request
+{
+    struct request_header __header;
+    unsigned int handle;
+    int backing;
+    char __pad_20[4];
+};
+struct query_gdi_object_reply
+{
+    struct reply_header __header;
+    unsigned int handle;
+    obj_handle_t section;
+    /* VARARG(info,bytes); */
+};
+
+
+struct set_gdi_bitmap_stock_request
+{
+    struct request_header __header;
+    unsigned int handle;
+    int stock;
+    char __pad_20[4];
+};
+struct set_gdi_bitmap_stock_reply
+{
+    struct reply_header __header;
+    unsigned int handle;
+    char __pad_12[4];
+};
+
+
+struct select_gdi_bitmap_request
+{
+    struct request_header __header;
+    unsigned int handle;
+    int delta;
+    char __pad_20[4];
+};
+struct select_gdi_bitmap_reply
+{
+    struct reply_header __header;
+    unsigned int count;
+    char __pad_12[4];
+};
+
+
+struct check_gdi_bitmap_creator_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct check_gdi_bitmap_creator_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -8796,6 +8903,13 @@ enum request
     REQ_query_activation_object,
     REQ_set_activation_object_redirection,
     REQ_get_session_user_token,
+    REQ_alloc_gdi_object,
+    REQ_free_gdi_object,
+    REQ_bind_gdi_bitmap,
+    REQ_query_gdi_object,
+    REQ_set_gdi_bitmap_stock,
+    REQ_select_gdi_bitmap,
+    REQ_check_gdi_bitmap_creator,
     REQ_NB_REQUESTS
 };
 
@@ -9248,6 +9362,13 @@ union generic_request
     struct query_activation_object_request query_activation_object_request;
     struct set_activation_object_redirection_request set_activation_object_redirection_request;
     struct get_session_user_token_request get_session_user_token_request;
+    struct alloc_gdi_object_request alloc_gdi_object_request;
+    struct free_gdi_object_request free_gdi_object_request;
+    struct bind_gdi_bitmap_request bind_gdi_bitmap_request;
+    struct query_gdi_object_request query_gdi_object_request;
+    struct set_gdi_bitmap_stock_request set_gdi_bitmap_stock_request;
+    struct select_gdi_bitmap_request select_gdi_bitmap_request;
+    struct check_gdi_bitmap_creator_request check_gdi_bitmap_creator_request;
 };
 union generic_reply
 {
@@ -9698,8 +9819,15 @@ union generic_reply
     struct query_activation_object_reply query_activation_object_reply;
     struct set_activation_object_redirection_reply set_activation_object_redirection_reply;
     struct get_session_user_token_reply get_session_user_token_reply;
+    struct alloc_gdi_object_reply alloc_gdi_object_reply;
+    struct free_gdi_object_reply free_gdi_object_reply;
+    struct bind_gdi_bitmap_reply bind_gdi_bitmap_reply;
+    struct query_gdi_object_reply query_gdi_object_reply;
+    struct set_gdi_bitmap_stock_reply set_gdi_bitmap_stock_reply;
+    struct select_gdi_bitmap_reply select_gdi_bitmap_reply;
+    struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1089
+#define SERVER_PROTOCOL_VERSION 1092
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

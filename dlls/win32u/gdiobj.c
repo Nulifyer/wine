@@ -45,9 +45,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdi);
 #define FIRST_GDI_HANDLE 32
 
 static GDI_SHARED_MEMORY *gdi_shared;
-static GDI_HANDLE_ENTRY *next_free;
 static GDI_HANDLE_ENTRY *next_unused;
 static LONG debug_count;
+static BOOL dynamic_gdi_handles;
+static pthread_mutex_t gdi_lock;
 
 static inline HGDIOBJ entry_to_handle( GDI_HANDLE_ENTRY *entry )
 {
@@ -57,20 +58,68 @@ static inline HGDIOBJ entry_to_handle( GDI_HANDLE_ENTRY *entry )
 
 static inline GDI_HANDLE_ENTRY *handle_entry( HGDIOBJ handle )
 {
-    unsigned int idx = LOWORD(handle);
+    unsigned int idx = LOWORD(handle), full = 0;
+    GDI_HANDLE_ENTRY *entry;
+    BITMAPOBJ *bitmap;
 
-    if (idx < GDI_MAX_HANDLE_COUNT && gdi_shared->Handles[idx].Type)
+    if (idx >= GDI_MAX_HANDLE_COUNT) return NULL;
+    entry = &gdi_shared->Handles[idx];
+    if (idx >= 64 && (entry->Type == (NTGDI_OBJ_BITMAP >> 16) ||
+                      (HIWORD(handle) & 0x7f) == (NTGDI_OBJ_BITMAP >> 16)))
     {
-        if (!HIWORD( handle ) || HIWORD( handle ) == gdi_shared->Handles[idx].Unique)
-            return &gdi_shared->Handles[idx];
+        pthread_mutex_lock( &gdi_lock );
+        SERVER_START_REQ(query_gdi_object)
+        {
+            req->handle = HandleToULong( handle );
+            req->backing = FALSE;
+            if (!wine_server_call( req )) full = reply->handle;
+        }
+        SERVER_END_REQ;
+        if (!full) goto invalid_bitmap;
+        if (entry->Type && entry->Unique != HIWORD(full))
+        {
+            bitmap = (BITMAPOBJ *)(ULONG_PTR)entry->Object;
+            if (entry->Type != (NTGDI_OBJ_BITMAP >> 16) || !bitmap->shared_view || bitmap->obj.selcount)
+                goto invalid_bitmap;
+            destroy_shared_bitmap_cache( bitmap );
+            entry->Type = 0;
+            entry->Object = 0;
+        }
+        if (!entry->Type)
+        {
+            if (!(bitmap = import_shared_bitmap( ULongToHandle(full) ))) goto invalid_bitmap;
+            entry->Unique = HIWORD(full);
+            entry->Type = NTGDI_OBJ_BITMAP >> 16;
+            entry->Object = (UINT_PTR)bitmap;
+            entry->UserPointer = 0;
+            if (next_unused <= entry) next_unused = entry + 1;
+        }
+        pthread_mutex_unlock( &gdi_lock );
     }
+    if (entry->Type && (!HIWORD(handle) || HIWORD(handle) == entry->Unique)) return entry;
     if (handle) WARN( "invalid handle %p\n", handle );
+    return NULL;
+invalid_bitmap:
+    pthread_mutex_unlock( &gdi_lock );
     return NULL;
 }
 
 static inline struct gdi_obj_header *entry_obj( GDI_HANDLE_ENTRY *entry )
 {
     return (struct gdi_obj_header *)(ULONG_PTR)entry->Object;
+}
+
+static BOOL bitmap_server_ref( HGDIOBJ handle, int delta )
+{
+    NTSTATUS status;
+    SERVER_START_REQ(select_gdi_bitmap)
+    {
+        req->handle = HandleToULong( handle );
+        req->delta = delta;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return !status;
 }
 
 /***********************************************************************
@@ -87,7 +136,6 @@ static const LOGBRUSH DkGrayBrush = { BS_SOLID, RGB(64,64,64), 0 };
 
 static const LOGBRUSH DCBrush = { BS_SOLID, RGB(255,255,255), 0 };
 
-static pthread_mutex_t gdi_lock;
 
 
 /****************************************************************************
@@ -463,26 +511,24 @@ HBITMAP set_bitmap_stock( HBITMAP handle, BOOL stock )
     HBITMAP ret = 0;
     GDI_HANDLE_ENTRY *entry;
     BITMAPOBJ *bitmap;
-
     pthread_mutex_lock( &gdi_lock );
-    if (!(entry = handle_entry( handle )) || entry->ExtType << NTGDI_HANDLE_TYPE_SHIFT != NTGDI_OBJ_BITMAP)
+    if (!(entry = handle_entry( handle )) || entry->ExtType << 16 != NTGDI_OBJ_BITMAP || LOWORD(handle) < 64)
         goto done;
-
     bitmap = (BITMAPOBJ *)entry_obj( entry );
-    if (stock)
+    if (entry->StockFlag == !!stock || bitmap->obj.selcount) goto done;
+    if (stock && !prepare_public_bitmap( handle, bitmap )) goto done;
+    SERVER_START_REQ(set_gdi_bitmap_stock)
     {
-        if (entry->StockFlag || (is_bitmapobj_dib( bitmap ) && !bitmap->dib.dshSection)) goto done;
-        entry->StockFlag = 1;
-        bitmap->obj.system = TRUE;
+        req->handle = HandleToULong( entry_to_handle( entry ) );
+        req->stock = stock;
+        if (!wine_server_call( req )) ret = ULongToHandle( reply->handle );
     }
-    else
+    SERVER_END_REQ;
+    if (ret)
     {
-        if (!entry->StockFlag) goto done;
-        entry->StockFlag = 0;
-        bitmap->obj.system = FALSE;
+        entry->Unique = HIWORD(ret);
+        bitmap->obj.system = !!stock;
     }
-    ret = entry_to_handle( entry );
-
 done:
     pthread_mutex_unlock( &gdi_lock );
     return ret;
@@ -538,7 +584,12 @@ HGDIOBJ GDI_inc_ref_count( HGDIOBJ handle )
     GDI_HANDLE_ENTRY *entry;
 
     pthread_mutex_lock( &gdi_lock );
-    if ((entry = handle_entry( handle ))) entry_obj( entry )->selcount++;
+    if ((entry = handle_entry( handle )))
+    {
+        if (entry->Type != (NTGDI_OBJ_BITMAP >> 16) || LOWORD(handle) < 64 || bitmap_server_ref( handle, 1 ))
+            entry_obj( entry )->selcount++;
+        else handle = 0;
+    }
     else handle = 0;
     pthread_mutex_unlock( &gdi_lock );
     return handle;
@@ -558,6 +609,8 @@ BOOL GDI_dec_ref_count( HGDIOBJ handle )
     if ((entry = handle_entry( handle )))
     {
         assert( entry_obj( entry )->selcount );
+        if (entry->Type == (NTGDI_OBJ_BITMAP >> 16) && LOWORD(handle) >= 64)
+            bitmap_server_ref( handle, -1 );
         if (!--entry_obj( entry )->selcount && entry_obj( entry )->deleted)
         {
             /* handle delayed DeleteObject*/
@@ -753,17 +806,38 @@ HGDIOBJ alloc_gdi_handle( struct gdi_obj_header *obj, DWORD type, const struct g
 
     pthread_mutex_lock( &gdi_lock );
 
-    entry = next_free;
-    if (entry)
-        next_free = (GDI_HANDLE_ENTRY *)(UINT_PTR)entry->Object;
-    else if (next_unused < gdi_shared->Handles + GDI_MAX_HANDLE_COUNT)
-        entry = next_unused++;
+    if (dynamic_gdi_handles)
+    {
+        ret = 0;
+        SERVER_START_REQ(alloc_gdi_object)
+        {
+            req->type = type;
+            if (!wine_server_call( req )) ret = ULongToHandle( reply->handle );
+        }
+        SERVER_END_REQ;
+        if (!ret)
+        {
+            pthread_mutex_unlock( &gdi_lock );
+            if (TRACE_ON(gdi)) dump_gdi_objects();
+            return 0;
+        }
+        entry = &gdi_shared->Handles[LOWORD(ret)];
+        if (entry->Type)
+        {
+            BITMAPOBJ *bitmap = (BITMAPOBJ *)(ULONG_PTR)entry->Object;
+            assert( entry->Type == (NTGDI_OBJ_BITMAP >> 16) && bitmap->shared_view && !bitmap->obj.selcount );
+            destroy_shared_bitmap_cache( bitmap );
+            entry->Type = 0;
+            entry->UserPointer = 0;
+        }
+        entry->Unique = HIWORD(ret);
+        if (next_unused <= entry) next_unused = entry + 1;
+    }
     else
     {
-        pthread_mutex_unlock( &gdi_lock );
-        ERR( "out of GDI object handles, expect a crash\n" );
-        if (TRACE_ON(gdi)) dump_gdi_objects();
-        return 0;
+        assert( next_unused < gdi_shared->Handles + 64 );
+        entry = next_unused++;
+        if (++entry->Generation == 0x80) entry->Generation = 1;
     }
     obj->funcs    = funcs;
     obj->selcount = 0;
@@ -772,7 +846,6 @@ HGDIOBJ alloc_gdi_handle( struct gdi_obj_header *obj, DWORD type, const struct g
     entry->Object  = (UINT_PTR)obj;
     entry->ExtType = type >> NTGDI_HANDLE_TYPE_SHIFT;
     entry->Type    = entry->ExtType & 0x1f;
-    if (++entry->Generation == 0x80) entry->Generation = 1;
     ret = entry_to_handle( entry );
     pthread_mutex_unlock( &gdi_lock );
     TRACE( "allocated %s %p %u/%u\n", gdi_obj_type(type), ret,
@@ -794,12 +867,27 @@ void *free_gdi_handle( HGDIOBJ handle )
     pthread_mutex_lock( &gdi_lock );
     if ((entry = handle_entry( handle )))
     {
+        if (LOWORD(handle) >= 64)
+        {
+            NTSTATUS status;
+            SERVER_START_REQ(free_gdi_object)
+            {
+                req->handle = HandleToULong( entry_to_handle( entry ) );
+                status = wine_server_call( req );
+            }
+            SERVER_END_REQ;
+            if (status)
+            {
+                pthread_mutex_unlock( &gdi_lock );
+                return NULL;
+            }
+        }
         TRACE( "freed %s %p %u/%u\n", gdi_obj_type( entry->ExtType << NTGDI_HANDLE_TYPE_SHIFT ),
                handle, InterlockedDecrement( &debug_count ) + 1, GDI_MAX_HANDLE_COUNT );
         object = entry_obj( entry );
+        /* Keep the opaque object field after deletion, as the shared table
+         * exposes it to callers.  Type zero prevents local pointer lookup. */
         entry->Type = 0;
-        entry->Object = (UINT_PTR)next_free;
-        next_free = entry;
     }
     pthread_mutex_unlock( &gdi_lock );
     return object;
@@ -833,6 +921,11 @@ void *get_any_obj_ptr( HGDIOBJ handle, DWORD *type )
 
     if ((entry = handle_entry( handle )))
     {
+        if (entry->Type == (NTGDI_OBJ_BITMAP >> 16) && LOWORD(handle) >= 64 && !bitmap_server_ref( handle, 2 ))
+        {
+            pthread_mutex_unlock( &gdi_lock );
+            return NULL;
+        }
         ptr = entry_obj( entry );
         *type = entry->ExtType << NTGDI_HANDLE_TYPE_SHIFT;
     }
@@ -866,6 +959,8 @@ void *GDI_GetObjPtr( HGDIOBJ handle, DWORD type )
  */
 void GDI_ReleaseObj( HGDIOBJ handle )
 {
+    if (LOWORD(handle) >= 64 && gdi_shared->Handles[LOWORD(handle)].Type == (NTGDI_OBJ_BITMAP >> 16))
+        bitmap_server_ref( handle, -2 );
     pthread_mutex_unlock( &gdi_lock );
 }
 
@@ -1074,4 +1169,5 @@ void gdi_init(void)
 
     dpi = font_init();
     init_stock_objects( dpi );
+    dynamic_gdi_handles = TRUE;
 }

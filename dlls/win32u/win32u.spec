@@ -189,7 +189,7 @@
 @ stdcall -syscall NtGdiCreateRectRgn(long long long long)
 @ stdcall -syscall NtGdiCreateRoundRectRgn(long long long long long long)
 @ stub -syscall NtGdiCreateServerMetaFile
-@ stdcall -syscall NtGdiCreateSessionMappedDIBSection(long long long ptr)
+@ stdcall -syscall NtGdiCreateSessionMappedDIBSection(long long long ptr long long long long)
 @ stdcall -syscall NtGdiCreateSolidBrush(long long)
 @ stub -syscall NtGdiDDCCIGetCapabilitiesString
 @ stub -syscall NtGdiDDCCIGetCapabilitiesStringLength

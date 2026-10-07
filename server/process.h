@@ -181,4 +181,6 @@ static const unsigned int default_session_id = 1;
 
 extern void cleanup_process_wnf_states( struct process *process );
 
+extern void cleanup_process_gdi_objects( struct process *process );
+
 #endif  /* __WINE_SERVER_PROCESS_H */

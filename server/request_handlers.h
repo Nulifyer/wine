@@ -452,6 +452,13 @@ DECL_HANDLER(destroy_activation_object);
 DECL_HANDLER(query_activation_object);
 DECL_HANDLER(set_activation_object_redirection);
 DECL_HANDLER(get_session_user_token);
+DECL_HANDLER(alloc_gdi_object);
+DECL_HANDLER(free_gdi_object);
+DECL_HANDLER(bind_gdi_bitmap);
+DECL_HANDLER(query_gdi_object);
+DECL_HANDLER(set_gdi_bitmap_stock);
+DECL_HANDLER(select_gdi_bitmap);
+DECL_HANDLER(check_gdi_bitmap_creator);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -901,6 +908,13 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_query_activation_object,
     (req_handler)req_set_activation_object_redirection,
     (req_handler)req_get_session_user_token,
+    (req_handler)req_alloc_gdi_object,
+    (req_handler)req_free_gdi_object,
+    (req_handler)req_bind_gdi_bitmap,
+    (req_handler)req_query_gdi_object,
+    (req_handler)req_set_gdi_bitmap_stock,
+    (req_handler)req_select_gdi_bitmap,
+    (req_handler)req_check_gdi_bitmap_creator,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -3371,3 +3385,29 @@ C_ASSERT( offsetof(struct get_session_user_token_request, session_id) == 12 );
 C_ASSERT( sizeof(struct get_session_user_token_request) == 16 );
 C_ASSERT( offsetof(struct get_session_user_token_reply, token) == 8 );
 C_ASSERT( sizeof(struct get_session_user_token_reply) == 16 );
+C_ASSERT( offsetof(struct alloc_gdi_object_request, type) == 12 );
+C_ASSERT( sizeof(struct alloc_gdi_object_request) == 16 );
+C_ASSERT( offsetof(struct alloc_gdi_object_reply, handle) == 8 );
+C_ASSERT( sizeof(struct alloc_gdi_object_reply) == 16 );
+C_ASSERT( offsetof(struct free_gdi_object_request, handle) == 12 );
+C_ASSERT( sizeof(struct free_gdi_object_request) == 16 );
+C_ASSERT( offsetof(struct bind_gdi_bitmap_request, handle) == 12 );
+C_ASSERT( offsetof(struct bind_gdi_bitmap_request, section) == 16 );
+C_ASSERT( sizeof(struct bind_gdi_bitmap_request) == 24 );
+C_ASSERT( offsetof(struct query_gdi_object_request, handle) == 12 );
+C_ASSERT( offsetof(struct query_gdi_object_request, backing) == 16 );
+C_ASSERT( sizeof(struct query_gdi_object_request) == 24 );
+C_ASSERT( offsetof(struct query_gdi_object_reply, handle) == 8 );
+C_ASSERT( offsetof(struct query_gdi_object_reply, section) == 12 );
+C_ASSERT( sizeof(struct query_gdi_object_reply) == 16 );
+C_ASSERT( offsetof(struct set_gdi_bitmap_stock_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_gdi_bitmap_stock_request, stock) == 16 );
+C_ASSERT( sizeof(struct set_gdi_bitmap_stock_request) == 24 );
+C_ASSERT( offsetof(struct set_gdi_bitmap_stock_reply, handle) == 8 );
+C_ASSERT( sizeof(struct set_gdi_bitmap_stock_reply) == 16 );
+C_ASSERT( offsetof(struct select_gdi_bitmap_request, handle) == 12 );
+C_ASSERT( offsetof(struct select_gdi_bitmap_request, delta) == 16 );
+C_ASSERT( sizeof(struct select_gdi_bitmap_request) == 24 );
+C_ASSERT( offsetof(struct select_gdi_bitmap_reply, count) == 8 );
+C_ASSERT( sizeof(struct select_gdi_bitmap_reply) == 16 );
+C_ASSERT( sizeof(struct check_gdi_bitmap_creator_request) == 16 );

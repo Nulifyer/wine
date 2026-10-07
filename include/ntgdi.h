@@ -329,7 +329,8 @@ W32KAPI HBITMAP  WINAPI NtGdiCreateDIBSection( HDC hdc, HANDLE section, DWORD of
                                                UINT usage, UINT header_size, ULONG flags,
                                                ULONG_PTR color_space, void **bits );
 W32KAPI HBITMAP  WINAPI NtGdiCreateSessionMappedDIBSection( HDC hdc, HANDLE section, DWORD offset,
-                                                            const BITMAPINFO *bmi );
+                                                            const BITMAPINFO *bmi, UINT usage, UINT header_size,
+                                                            ULONG flags, ULONG_PTR color_space );
 W32KAPI HBITMAP  WINAPI NtGdiSetBitmapAttributes( HBITMAP bitmap, UINT flags );
 W32KAPI HBITMAP  WINAPI NtGdiClearBitmapAttributes( HBITMAP bitmap, UINT flags );
 W32KAPI HBITMAP  WINAPI NtGdiCreateDIBitmapInternal( HDC hdc, INT width, INT height, DWORD init,
