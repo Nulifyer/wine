@@ -495,6 +495,7 @@ static bool desktop_init( struct object *obj, const void *init_data )
     desktop->clip_flags = 0;
     desktop->cursor_win = 0;
     desktop->alt_pressed = 0;
+    desktop->pending_hotkey_modifiers = 0;
     memset( &desktop->key_repeat, 0, sizeof(desktop->key_repeat) );
     list_init( &desktop->threads );
     list_init( &desktop->hotkeys );

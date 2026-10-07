@@ -577,6 +577,15 @@ static BOOL unpack_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lpa
 
     switch(message)
     {
+    case WM_SHELL_WINDOWMANAGEMENT_NOTIFY:
+        if (*wparam || size != sizeof(struct shell_hotkey_notification) ||
+            ((struct shell_hotkey_notification *)*buffer)->kind != SHELL_WINDOWMANAGEMENT_NOTIFY_HOTKEY)
+            return FALSE;
+        *lparam = (LPARAM)*buffer;
+        TRACE_(key)( "shell hotkey notification hwnd %p id %s key %s\n", hwnd,
+                     wine_dbgstr_longlong( ((struct shell_hotkey_notification *)*buffer)->id ),
+                     wine_dbgstr_longlong( ((struct shell_hotkey_notification *)*buffer)->key ) );
+        return TRUE;
      case WM_NCCREATE:
      case WM_CREATE:
      {
@@ -3295,6 +3304,8 @@ static int peek_message( MSG *msg, const struct peek_message_filter *filter )
         result = call_window_proc( info.msg.hwnd, info.msg.message, info.msg.wParam,
                                    info.msg.lParam, info.type, FALSE, WMCHAR_MAP_RECVMESSAGE,
                                    info.type == MSG_ASCII );
+        if (info.type == MSG_NOTIFY && info.msg.message == WM_SHELL_WINDOWMANAGEMENT_NOTIFY)
+            TRACE_(key)( "shell hotkey callback hwnd %p returned %lx\n", info.msg.hwnd, result );
         if (thread_info->receive_info == &info)
             reply_winproc_result( result, info.msg.hwnd, info.msg.message,
                                   info.msg.wParam, info.msg.lParam );

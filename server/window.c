@@ -1117,6 +1117,11 @@ user_handle_t get_desktop_shell_window( struct desktop *desktop )
     return desktop->shell_window ? desktop->shell_window->handle : 0;
 }
 
+user_handle_t get_desktop_arrangement_callout_window( struct desktop *desktop )
+{
+    return desktop->arrangement_callout_window ? desktop->arrangement_callout_window->handle : 0;
+}
+
 /* get the top window size of a given desktop */
 void get_virtual_screen_rect( struct desktop *desktop, struct rectangle *rect, int is_raw )
 {

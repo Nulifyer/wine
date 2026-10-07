@@ -104,6 +104,7 @@ struct desktop
     struct thread_input *foreground_input; /* thread input of foreground thread */
     process_id_t         foreground_pid;   /* id of the foreground process */
     unsigned int         users;            /* processes and threads using this desktop */
+    unsigned int         pending_hotkey_modifiers; /* modifier-only release candidate */
     unsigned char        alt_pressed;      /* last key press was Alt (used to determine msg on release) */
     struct key_repeat    key_repeat;       /* key auto-repeat */
     unsigned int         clip_flags;       /* last cursor clip flags */
@@ -252,6 +253,7 @@ extern client_ptr_t get_class_client_ptr( struct window_class *class );
 extern struct winstation *get_visible_winstation(void);
 extern struct desktop *get_input_desktop( struct winstation *winstation );
 extern user_handle_t get_desktop_shell_window( struct desktop *desktop );
+extern user_handle_t get_desktop_arrangement_callout_window( struct desktop *desktop );
 extern int set_input_desktop( struct winstation *winstation, struct desktop *new_desktop );
 extern void set_winstation_composited( struct winstation *winstation, int composited );
 extern struct desktop *get_desktop_obj( struct process *process, obj_handle_t handle, unsigned int access );

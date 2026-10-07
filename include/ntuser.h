@@ -26,6 +26,20 @@
 #include <shellapi.h>
 #include <winternl.h>
 
+/* Native x64 shell-hotkey notification, copied through USER message transport. */
+#define WM_SHELL_WINDOWMANAGEMENT_NOTIFY 0x0342
+#define SHELL_WINDOWMANAGEMENT_NOTIFY_HOTKEY 13
+struct shell_hotkey_notification
+{
+    UINT64 window;
+    UINT64 kind;
+    UINT64 id;
+    UINT64 key;
+    UINT64 foreground_result;
+    UINT64 reserved[5];
+};
+C_ASSERT( sizeof(struct shell_hotkey_notification) == 80 );
+
 #define WM_WINDOW_SERVICES_DESTROY 0x0272
 #define GWLP_WINDOW_SERVICES       (-40)
 

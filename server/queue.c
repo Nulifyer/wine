@@ -190,6 +190,7 @@ struct hotkey
     unsigned int        vkey;         /* virtual key code */
     unsigned int        flags;        /* key modifiers */
     int                 shell;        /* shell-owned registration */
+    process_id_t        process_id;   /* authoritative registering process */
 };
 
 static void msg_queue_dump( struct object *obj, int verbose );
@@ -1858,30 +1859,75 @@ int handle_delegated_input_message( struct thread *thread, unsigned int hw_id,
     return 0;
 }
 
+static int send_notify_message_data( user_handle_t win, unsigned int message, lparam_t wparam,
+                                     lparam_t lparam, const void *data, unsigned int size );
+
+static int is_desktop_shell_process( struct desktop *desktop, struct process *process )
+{
+    struct thread *thread = get_window_thread( get_desktop_shell_window( desktop ) );
+    int ret = thread && thread->process == process;
+    if (thread) release_object( thread );
+    return ret;
+}
+
 static int queue_hotkey_message( struct desktop *desktop, struct message *msg )
 {
     desktop_shm_t *desktop_shm = desktop->shared;
     struct hotkey *hotkey;
-    unsigned int modifiers = 0;
+    unsigned int modifiers = 0, key = msg->wparam;
+    int release = msg->msg == WM_KEYUP || msg->msg == WM_SYSKEYUP;
+    int modifier = key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT ||
+                   key == VK_CONTROL || key == VK_LCONTROL || key == VK_RCONTROL ||
+                   key == VK_MENU || key == VK_LMENU || key == VK_RMENU ||
+                   key == VK_LWIN || key == VK_RWIN;
 
-    if (msg->msg != WM_KEYDOWN && msg->msg != WM_SYSKEYDOWN) return 0;
+    if (!release && msg->msg != WM_KEYDOWN && msg->msg != WM_SYSKEYDOWN) return 0;
 
     if (desktop_shm->keystate[VK_MENU] & 0x80) modifiers |= MOD_ALT;
     if (desktop_shm->keystate[VK_CONTROL] & 0x80) modifiers |= MOD_CONTROL;
     if (desktop_shm->keystate[VK_SHIFT] & 0x80) modifiers |= MOD_SHIFT;
     if ((desktop_shm->keystate[VK_LWIN] & 0x80) || (desktop_shm->keystate[VK_RWIN] & 0x80)) modifiers |= MOD_WIN;
 
+    if (!modifier) desktop->pending_hotkey_modifiers = 0;
+    else if (!release) desktop->pending_hotkey_modifiers = modifiers;
+    if (release)
+    {
+        modifiers = desktop->pending_hotkey_modifiers;
+        desktop->pending_hotkey_modifiers = 0;
+        if (!modifier || !modifiers) return 0;
+        key = 0;
+    }
+
     LIST_FOR_EACH_ENTRY( hotkey, &desktop->hotkeys, struct hotkey, entry )
     {
-        if (hotkey->vkey != msg->wparam) continue;
+        if (hotkey->vkey != key) continue;
+        if (release && (!hotkey->shell || hotkey->win || hotkey->foreground)) continue;
         if ((hotkey->flags & (MOD_ALT|MOD_CONTROL|MOD_SHIFT|MOD_WIN)) == modifiers) goto found;
     }
 
     return 0;
 
 found:
-    /* Preserve shell registration metadata even though Wine does not yet have
-     * the native shell-hotkey notification path that consumes it. */
+    if (hotkey->shell && !hotkey->win && !hotkey->foreground)
+    {
+        struct shell_hotkey_notification notification = {0};
+        user_handle_t target = get_desktop_arrangement_callout_window( desktop );
+        struct thread *thread = target ? get_window_thread( target ) : NULL;
+        int authorized = thread && thread->process->id == hotkey->process_id &&
+                         is_desktop_shell_process( desktop, thread->process );
+        if (thread) release_object( thread );
+        if (!authorized) return 0;
+        notification.kind = SHELL_WINDOWMANAGEMENT_NOTIFY_HOTKEY;
+        notification.id = (INT64)hotkey->id;
+        notification.key = ((UINT64)(hotkey->vkey & 0xffff) << 16) | modifiers;
+        if (!send_notify_message_data( target, WM_SHELL_WINDOWMANAGEMENT_NOTIFY, 0, 0,
+                                       &notification, sizeof(notification) )) return 0;
+        /* Modifier release still reaches the foreground input queue. */
+        if (release) return 0;
+        free_message( msg );
+        return 1;
+    }
+
     msg->type      = MSG_POSTED;
     msg->win       = hotkey->win;
     msg->msg       = WM_HOTKEY;
@@ -3057,31 +3103,40 @@ void post_message( user_handle_t win, unsigned int message, lparam_t wparam, lpa
     release_object( thread );
 }
 
-/* send a notify message to a window */
-void send_notify_message( user_handle_t win, unsigned int message, lparam_t wparam, lparam_t lparam )
+/* Copy asynchronous data into the receiving queue; no client pointer survives. */
+static int send_notify_message_data( user_handle_t win, unsigned int message, lparam_t wparam,
+                                     lparam_t lparam, const void *data, unsigned int size )
 {
     struct message *msg;
     struct thread *thread = get_window_thread( win );
+    int ret = 0;
 
-    if (!thread) return;
-
+    if (!thread) return 0;
     if (thread->queue && (msg = mem_alloc( sizeof(*msg) )))
     {
-        msg->type      = MSG_NOTIFY;
-        msg->win       = get_user_full_handle( win );
-        msg->msg       = message;
-        msg->wparam    = wparam;
-        msg->lparam    = lparam;
-        msg->result    = NULL;
-        msg->data      = NULL;
-        msg->data_size = 0;
-
-        get_message_defaults( thread->queue, &msg->x, &msg->y, &msg->time );
-
-        list_add_tail( &thread->queue->msg_list[SEND_MESSAGE], &msg->entry );
-        set_queue_bits( thread->queue, QS_SENDMESSAGE );
+        memset( msg, 0, sizeof(*msg) );
+        if (size && !(msg->data = memdup( data, size ))) free( msg );
+        else
+        {
+            msg->type = MSG_NOTIFY;
+            msg->win = get_user_full_handle( win );
+            msg->msg = message;
+            msg->wparam = wparam;
+            msg->lparam = lparam;
+            msg->data_size = size;
+            get_message_defaults( thread->queue, &msg->x, &msg->y, &msg->time );
+            list_add_tail( &thread->queue->msg_list[SEND_MESSAGE], &msg->entry );
+            set_queue_bits( thread->queue, QS_SENDMESSAGE );
+            ret = 1;
+        }
     }
     release_object( thread );
+    return ret;
+}
+
+void send_notify_message( user_handle_t win, unsigned int message, lparam_t wparam, lparam_t lparam )
+{
+    send_notify_message_data( win, message, wparam, lparam, NULL, 0 );
 }
 
 /* post a win event */
@@ -3324,6 +3379,13 @@ DECL_HANDLER(send_message)
     int access;
 
     reply->preserve_last_error = 0;
+    /* Only the server constructs this private, pointer-bearing notification. */
+    if (req->msg == WM_SHELL_WINDOWMANAGEMENT_NOTIFY)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+
 
     if (!(thread = get_thread_from_id( req->id ))) return;
 
@@ -3775,6 +3837,13 @@ DECL_HANDLER(register_hotkey)
 
     if (!(desktop = get_thread_desktop( current, 0 ))) return;
 
+    if (req->shell && !is_desktop_shell_process( desktop, current->process ))
+    {
+        release_object( desktop );
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+
     if (win_handle)
     {
         if (!(win_handle = get_valid_window_handle( win_handle )))
@@ -3837,6 +3906,7 @@ DECL_HANDLER(register_hotkey)
         new_hotkey->vkey       = req->vkey;
         new_hotkey->foreground = foreground_handle;
         new_hotkey->shell      = req->shell;
+        new_hotkey->process_id = current->process->id;
     }
 
     release_object( desktop );
