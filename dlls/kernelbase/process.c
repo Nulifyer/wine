@@ -1497,6 +1497,82 @@ BOOL WINAPI BaseIsAppcompatInfrastructureDisabled(void)
 }
 
 
+/**********************************************************************
+ *           BaseFreeAppCompatDataForProcess   (kernelbase.@)
+ */
+void WINAPI BaseFreeAppCompatDataForProcess( void *data )
+{
+    if (data) RtlFreeHeap( NtCurrentTeb()->Peb->ProcessHeap, 0, data );
+}
+
+
+/**********************************************************************
+ *           BaseReadAppCompatDataForProcess   (kernelbase.@)
+ *
+ * The Windows 11 x64 worker copies the process PEB's opaque shim data.
+ * Its result is a Win32 error code. Outputs are committed only on success.
+ */
+DWORD WINAPI BaseReadAppCompatDataForProcess( HANDLE process, void **data, void **remote )
+{
+#ifdef _WIN64
+    const SIZE_T size = 0x11c0;
+    const DWORD magic = 0xac0dedab;
+    PROCESS_BASIC_INFORMATION info;
+    PEB peb;
+    void *source, *copy;
+    BOOL wow64;
+    NTSTATUS status;
+    DWORD error;
+#endif
+
+    if (!process || !data) return ERROR_INVALID_PARAMETER;
+#ifdef _WIN64
+    if (!(copy = RtlAllocateHeap( NtCurrentTeb()->Peb->ProcessHeap, 0, size )))
+        return ERROR_NOT_ENOUGH_MEMORY;
+    if (process == GetCurrentProcess()) source = NtCurrentTeb()->Peb->ShimData;
+    else
+    {
+        if (!IsWow64Process( process, &wow64 )) goto failed;
+        /* Cross-bitness shim layouts have no accepted reference yet. */
+        if (wow64)
+        {
+            SetLastError( ERROR_NOT_SUPPORTED );
+            goto failed;
+        }
+        status = NtQueryInformationProcess( process, ProcessBasicInformation, &info, sizeof(info), NULL );
+        if (!set_ntstatus( status )) goto failed;
+        if (!ReadProcessMemory( process, info.PebBaseAddress, &peb, sizeof(peb), NULL )) goto failed;
+        source = peb.ShimData;
+    }
+    if (!source)
+    {
+        error = ERROR_NOT_FOUND;
+        goto done;
+    }
+    if (process == GetCurrentProcess()) memcpy( copy, source, size );
+    else if (!ReadProcessMemory( process, source, copy, size, NULL )) goto failed;
+    if (*(DWORD *)((BYTE *)copy + 0x208) != size || *(DWORD *)((BYTE *)copy + 0x20c) != magic)
+    {
+        error = ERROR_INVALID_DATA;
+        goto done;
+    }
+    *data = copy;
+    if (remote) *remote = source;
+    return ERROR_SUCCESS;
+
+failed:
+    error = GetLastError();
+done:
+    RtlFreeHeap( NtCurrentTeb()->Peb->ProcessHeap, 0, copy );
+    return error;
+#else
+    /* The frozen process-data contract covers x64 callers and targets. */
+    SetLastError( ERROR_NOT_SUPPORTED );
+    return ERROR_NOT_SUPPORTED;
+#endif
+}
+
+
 /***********************************************************************
  *           GetCommandLineA   (kernelbase.@)
  */

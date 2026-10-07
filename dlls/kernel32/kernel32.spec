@@ -176,6 +176,7 @@
 @ stdcall -import BaseFlushAppcompatCache()
 # @ stub BaseFormatObjectAttributes
 # @ stub BaseFormatTimeOut
+@ stdcall BaseFreeAppCompatDataForProcessWorker(ptr) kernelbase.BaseFreeAppCompatDataForProcess
 # @ stub BaseGenerateAppCompatData
 @ stdcall -import BaseGetNamedObjectDirectory(ptr)
 @ stub BaseInitAppcompatCache
@@ -184,6 +185,7 @@
 @ stdcall BaseIsAppcompatInfrastructureDisabledWorker() kernelbase.BaseIsAppcompatInfrastructureDisabled
 @ stub BaseProcessInitPostImport
 # @ stub BaseQueryModuleData
+@ stdcall BaseReadAppCompatDataForProcessWorker(long ptr ptr) kernelbase.BaseReadAppCompatDataForProcess
 @ stdcall BaseSetLastNTError(long)
 @ stdcall -fastcall BaseThreadInitThunk(long ptr ptr)
 @ stub BaseUpdateAppcompatCache

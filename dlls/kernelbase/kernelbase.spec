@@ -78,7 +78,7 @@
 @ stub BaseDumpAppcompatCache
 @ stdcall BaseFlushAppcompatCache()
 # @ stub BaseFormatObjectAttributes
-# @ stub BaseFreeAppCompatDataForProcess
+@ stdcall BaseFreeAppCompatDataForProcess(ptr)
 @ stdcall BaseGetNamedObjectDirectory(ptr)
 @ stub BaseGetProcessDllPath
 @ stub BaseGetProcessExePath
@@ -87,7 +87,7 @@
 @ stub BaseInvalidateProcessSearchPathCache
 @ stdcall BaseIsAppcompatInfrastructureDisabled()
 # @ stub BaseMarkFileForDelete
-# @ stub BaseReadAppCompatDataForProcess
+@ stdcall BaseReadAppCompatDataForProcess(long ptr ptr)
 @ stub BaseReleaseProcessDllPath
 @ stub BaseReleaseProcessExePath
 @ stub BaseUpdateAppcompatCache
