@@ -83,6 +83,19 @@ static inline DC *get_dc_obj( HDC hdc )
     }
 }
 
+/***********************************************************************
+ *           NtGdiGetDCDpiScaleValue    (win32u.@)
+ */
+INT WINAPI NtGdiGetDCDpiScaleValue( HDC hdc )
+{
+    /* DCs currently render without a separate GDI DPI transform. Window
+     * surface scaling happens in dce.c, outside the DC's mapping/world
+     * transforms. Windows returns the identity scale for invalid handles
+     * too, without changing last error. */
+    TRACE( "hdc %p\n", hdc );
+    return 1;
+}
+
 /* alloc DC_ATTR from a pool of memory accessible from client */
 static DC_ATTR *alloc_dc_attr(void)
 {

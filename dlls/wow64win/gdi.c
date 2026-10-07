@@ -2322,6 +2322,13 @@ NTSTATUS WINAPI wow64_NtGdiGetColorAdjustment( UINT *args )
     return NtGdiGetColorAdjustment( hdc, ca );
 }
 
+NTSTATUS WINAPI wow64_NtGdiGetDCDpiScaleValue( UINT *args )
+{
+    HDC hdc = get_handle( &args );
+
+    return NtGdiGetDCDpiScaleValue( hdc );
+}
+
 NTSTATUS WINAPI wow64_NtGdiGetDCDword( UINT *args )
 {
     HDC hdc = get_handle( &args );

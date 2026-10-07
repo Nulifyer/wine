@@ -379,7 +379,7 @@
 @ stdcall GetCurrentObject(long long)
 @ stdcall GetCurrentPositionEx(long ptr)
 @ stdcall GetDCBrushColor(long)
-# @ stub GetDCDpiScaleValue
+@ stdcall GetDCDpiScaleValue(long) NtGdiGetDCDpiScaleValue
 @ stdcall GetDCOrgEx(long ptr)
 @ stdcall GetDCPenColor(long)
 @ stdcall GetDIBColorTable(long long long ptr)

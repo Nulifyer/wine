@@ -15,11 +15,60 @@
 #include "winbase.h"
 #include "winerror.h"
 #include "winuser.h"
+#include "wingdi.h"
 
 struct current_dpi_info
 {
     DWORD values[24];
 };
+
+static INT (WINAPI *pGetDCDpiScaleValue)(HDC);
+static INT (WINAPI *pNtGdiGetDCDpiScaleValue)(HDC);
+
+static void check_identity_scale( HDC dc )
+{
+    INT ret;
+
+    SetLastError( 0xdeadbeef );
+    ret = pGetDCDpiScaleValue( dc );
+    ok( ret == 1, "DC %p has scale %d\n", dc, ret );
+    ok( GetLastError() == 0xdeadbeef, "public query changed error to %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    ret = pNtGdiGetDCDpiScaleValue( dc );
+    ok( ret == 1, "native DC %p has scale %d\n", dc, ret );
+    ok( GetLastError() == 0xdeadbeef, "native query changed error to %lu\n", GetLastError() );
+}
+
+static void test_dc_dpi_scale(void)
+{
+    XFORM transform = {2.5f, 0, 0, 3.5f, 4, 5};
+    HDC dc;
+
+    pGetDCDpiScaleValue = (void *)GetProcAddress( GetModuleHandleA( "gdi32.dll" ), "GetDCDpiScaleValue" );
+    pNtGdiGetDCDpiScaleValue = (void *)GetProcAddress( LoadLibraryA( "win32u.dll" ), "NtGdiGetDCDpiScaleValue" );
+    if (!pGetDCDpiScaleValue || !pNtGdiGetDCDpiScaleValue)
+    {
+        win_skip( "DC DPI scale exports unavailable\n" );
+        return;
+    }
+    check_identity_scale( NULL );
+    check_identity_scale( (HDC)(ULONG_PTR)0x1234 );
+    check_identity_scale( (HDC)(LONG_PTR)-1 );
+    check_identity_scale( (HDC)GetStockObject( WHITE_BRUSH ) );
+    dc = CreateCompatibleDC( NULL );
+    ok( !!dc, "CreateCompatibleDC failed %lu\n", GetLastError() );
+    if (!dc) return;
+    check_identity_scale( dc );
+    ok( !!SetMapMode( dc, MM_ANISOTROPIC ), "SetMapMode failed\n" );
+    ok( SetWindowExtEx( dc, 100, 100, NULL ), "SetWindowExtEx failed\n" );
+    ok( SetViewportExtEx( dc, 200, 300, NULL ), "SetViewportExtEx failed\n" );
+    check_identity_scale( dc );
+    ok( !!SetGraphicsMode( dc, GM_ADVANCED ), "SetGraphicsMode failed\n" );
+    ok( SetWorldTransform( dc, &transform ), "SetWorldTransform failed\n" );
+    check_identity_scale( dc );
+    ok( DeleteDC( dc ), "DeleteDC failed\n" );
+    check_identity_scale( dc );
+}
 
 START_TEST(dpi)
 {
@@ -39,6 +88,8 @@ START_TEST(dpi)
     POINT point = {0};
     BOOL ret;
     unsigned int i, j;
+
+    test_dc_dpi_scale();
 
     pGetCurrentDpiInfo = (void *)GetProcAddress( GetModuleHandleA( "gdi32.dll" ),
                                                  "GetCurrentDpiInfo" );

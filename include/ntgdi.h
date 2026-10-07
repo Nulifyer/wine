@@ -394,6 +394,7 @@ W32KAPI BOOL     WINAPI NtGdiGetCharWidthW( HDC hdc, UINT first_char, UINT last_
 W32KAPI BOOL     WINAPI NtGdiGetCharWidthInfo( HDC hdc, struct char_width_info *info );
 W32KAPI BOOL     WINAPI NtGdiGetColorAdjustment( HDC hdc, COLORADJUSTMENT *ca );
 W32KAPI BOOL     WINAPI NtGdiGetDCDword( HDC hdc, UINT method, DWORD *result );
+W32KAPI INT      WINAPI NtGdiGetDCDpiScaleValue( HDC hdc );
 W32KAPI HANDLE   WINAPI NtGdiGetDCObject( HDC hdc, UINT type );
 W32KAPI BOOL     WINAPI NtGdiGetDCPoint( HDC hdc, UINT method, POINT *result );
 W32KAPI INT      WINAPI NtGdiGetDIBitsInternal( HDC hdc, HBITMAP hbitmap, UINT startscan, UINT lines,
