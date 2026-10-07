@@ -2802,6 +2802,15 @@ enum message_type
 @END
 
 
+/* Set a window's monitor inheritance source */
+@REQ(inherit_window_monitor)
+    user_handle_t handle;        /* target window */
+    user_handle_t source;        /* full source handle, or zero to reset */
+@REPLY
+    int success;                /* false for a desktop target */
+@END
+
+
 /* Get information from a window handle */
 @REQ(get_window_info)
     user_handle_t  handle;      /* handle to the window */

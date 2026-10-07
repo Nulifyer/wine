@@ -1139,7 +1139,7 @@
 @ stub -syscall NtUserHwndQueryRedirectionInfo
 @ stub -syscall NtUserHwndSetRedirectionInfo
 @ stub -syscall NtUserImpersonateDdeClientWindow
-@ stub -syscall NtUserInheritWindowMonitor
+@ stdcall -syscall NtUserInheritWindowMonitor(long long)
 @ stub -syscall NtUserInitAnsiOem
 @ stub -syscall NtUserInitTask
 @ stdcall -syscall NtUserInitThreadCoreMessagingIocp(long)

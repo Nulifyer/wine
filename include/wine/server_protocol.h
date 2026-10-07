@@ -3732,6 +3732,22 @@ struct set_window_owner_reply
 
 
 
+struct inherit_window_monitor_request
+{
+    struct request_header __header;
+    user_handle_t handle;
+    user_handle_t source;
+    char __pad_20[4];
+};
+struct inherit_window_monitor_reply
+{
+    struct reply_header __header;
+    int success;
+    char __pad_12[4];
+};
+
+
+
 struct get_window_info_request
 {
     struct request_header __header;
@@ -8487,6 +8503,7 @@ enum request
     REQ_handle_delegated_input,
     REQ_get_desktop_window,
     REQ_set_window_owner,
+    REQ_inherit_window_monitor,
     REQ_get_window_info,
     REQ_init_window_info,
     REQ_set_window_info,
@@ -8938,6 +8955,7 @@ union generic_request
     struct handle_delegated_input_request handle_delegated_input_request;
     struct get_desktop_window_request get_desktop_window_request;
     struct set_window_owner_request set_window_owner_request;
+    struct inherit_window_monitor_request inherit_window_monitor_request;
     struct get_window_info_request get_window_info_request;
     struct init_window_info_request init_window_info_request;
     struct set_window_info_request set_window_info_request;
@@ -9387,6 +9405,7 @@ union generic_reply
     struct handle_delegated_input_reply handle_delegated_input_reply;
     struct get_desktop_window_reply get_desktop_window_reply;
     struct set_window_owner_reply set_window_owner_reply;
+    struct inherit_window_monitor_reply inherit_window_monitor_reply;
     struct get_window_info_reply get_window_info_reply;
     struct init_window_info_reply init_window_info_reply;
     struct set_window_info_reply set_window_info_reply;
@@ -9681,6 +9700,6 @@ union generic_reply
     struct get_session_user_token_reply get_session_user_token_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1088
+#define SERVER_PROTOCOL_VERSION 1089
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

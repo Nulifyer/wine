@@ -748,7 +748,7 @@
 @ stdcall InSendMessage()
 @ stdcall InSendMessageEx(ptr)
 @ stdcall InflateRect(ptr long long)
-# @ stub InheritWindowMonitor
+@ stdcall InheritWindowMonitor(long long) NtUserInheritWindowMonitor
 @ stdcall InitDManipHook()
 # @ stub InitializeGenericHidInjection
 # @ stub InitializeInputDeviceInjection

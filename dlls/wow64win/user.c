@@ -2711,6 +2711,14 @@ NTSTATUS WINAPI wow64_NtUserGetAncestor( UINT *args )
     return HandleToUlong( NtUserGetAncestor( hwnd, type ));
 }
 
+NTSTATUS WINAPI wow64_NtUserInheritWindowMonitor( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    HWND source = get_handle( &args );
+
+    return NtUserInheritWindowMonitor( hwnd, source );
+}
+
 NTSTATUS WINAPI wow64_NtUserGetTopLevelWindow( UINT *args )
 {
     HWND hwnd = get_handle( &args );

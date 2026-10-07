@@ -78,6 +78,7 @@ struct window
     struct object    obj;             /* object header */
     struct window   *parent;          /* parent window */
     user_handle_t    owner;           /* owner of this window */
+    user_handle_t    monitor_source;  /* full source handle; no retained reference */
     struct list      children;        /* list of children in Z-order */
     struct list      unlinked;        /* list of children not linked in the Z-order list */
     struct list      entry;           /* entry in parent's children list */
@@ -804,7 +805,21 @@ static int link_window( struct window *win, struct window *previous )
 static void set_window_monitor_dpi( struct window *win )
 {
     struct monitor_info *info;
+    struct window *source = get_user_object( win->monitor_source, NTUSER_OBJ_WINDOW );
+    struct window *top = source;
 
+    while (top && top->parent && !is_desktop_window( top->parent )) top = top->parent;
+    if (source && source != win && source->handle == win->monitor_source &&
+        !(top->style & WS_MINIMIZE))
+    {
+        SHARED_WRITE_BEGIN( win->shared, window_shm_t )
+        {
+            shared->dpi = source->shared->dpi;
+            shared->raw_dpi = source->shared->raw_dpi;
+        }
+        SHARED_WRITE_END;
+        return;
+    }
     if (!(info = get_monitor_from_rect( win->desktop->winstation, &win->window_rect, 0 ))) return;
 
     SHARED_WRITE_BEGIN( win->shared, window_shm_t )
@@ -838,6 +853,39 @@ static void set_window_subtree_core_status( struct window *win, int enabled )
     if (!!win->shared->core_window == enabled) return;
     if (win->is_core_window && !enabled) return;
     set_window_subtree_core_status_unchecked( win, enabled );
+}
+
+/* The accepted monitor inheritance partition has one active 96-DPI monitor.
+ * Different monitor scales require DPI-boundary positioning and notifications. */
+static int supports_monitor_inheritance( struct winstation *winstation )
+{
+    struct monitor_info *monitor, *end;
+    unsigned int count = 0;
+
+    for (monitor = winstation->monitors, end = monitor + winstation->monitor_count; monitor < end; ++monitor)
+    {
+        if (monitor->flags & (MONITOR_FLAG_CLONE | MONITOR_FLAG_INACTIVE)) continue;
+        if (monitor->dpi.num != USER_DEFAULT_SCREEN_DPI * monitor->dpi.den ||
+            monitor->raw_dpi.num != USER_DEFAULT_SCREEN_DPI * monitor->raw_dpi.den) return 0;
+        ++count;
+    }
+    return count == 1;
+}
+
+static void inherit_subtree_monitor_dpi( struct window *win, struct ratio dpi, struct ratio raw_dpi )
+{
+    struct window *child;
+
+    SHARED_WRITE_BEGIN( win->shared, window_shm_t )
+    {
+        shared->dpi = dpi;
+        shared->raw_dpi = raw_dpi;
+    }
+    SHARED_WRITE_END;
+    LIST_FOR_EACH_ENTRY( child, &win->children, struct window, entry )
+        inherit_subtree_monitor_dpi( child, dpi, raw_dpi );
+    LIST_FOR_EACH_ENTRY( child, &win->unlinked, struct window, entry )
+        inherit_subtree_monitor_dpi( child, dpi, raw_dpi );
 }
 
 /* attach or detach the parent window thread input if necessary */
@@ -1137,6 +1185,7 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->is_orphan      = 0;
     win->set_foreground = 0;
     win->is_core_window = 0;
+    win->monitor_source = 0;
     win->input_delegate = NULL;
     win->input_delegation_flags = 0;
     win->dwm_context_id = 0;
@@ -3823,6 +3872,48 @@ DECL_HANDLER(get_toplevel_window)
         win = win->parent;
     }
     if (win && win == win->desktop->top_window && top) reply->toplevel = top->handle;
+}
+
+
+/* Set the source monitor association on the authoritative window owner. */
+DECL_HANDLER(inherit_window_monitor)
+{
+    struct window *win = get_window( req->handle );
+    struct window *source = NULL;
+
+    if (!win) return;
+    if (win->handle != req->handle)
+    {
+        set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
+        return;
+    }
+    /* Windows rejects desktop targets without changing last-error. */
+    if (is_desktop_window( win )) return;
+    if (win->thread->process != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (req->source)
+    {
+        if (!(source = get_window( req->source ))) return;
+        if (source->handle != req->source)
+        {
+            set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
+            return;
+        }
+    }
+    if (!supports_monitor_inheritance( win->desktop->winstation ))
+    {
+        set_win32_error( ERROR_CALL_NOT_IMPLEMENTED );
+        return;
+    }
+    /* Like the native internal property, this stores a full handle rather
+     * than extending the source lifetime. Later selection revalidates it. */
+    win->monitor_source = source ? source->handle : 0;
+    set_window_monitor_dpi( win );
+    inherit_subtree_monitor_dpi( win, win->shared->dpi, win->shared->raw_dpi );
+    reply->success = 1;
 }
 
 

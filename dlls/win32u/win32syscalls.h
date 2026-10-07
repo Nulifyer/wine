@@ -1141,7 +1141,7 @@
     SYSCALL_ENTRY( 0x1471, NtUserHwndQueryRedirectionInfo, 0 ) \
     SYSCALL_ENTRY( 0x1472, NtUserHwndSetRedirectionInfo, 0 ) \
     SYSCALL_ENTRY( 0x1473, NtUserImpersonateDdeClientWindow, 0 ) \
-    SYSCALL_ENTRY( 0x1474, NtUserInheritWindowMonitor, 0 ) \
+    SYSCALL_ENTRY( 0x1474, NtUserInheritWindowMonitor, 8 ) \
     SYSCALL_ENTRY( 0x1475, NtUserInitAnsiOem, 0 ) \
     SYSCALL_ENTRY( 0x1476, NtUserInitTask, 0 ) \
     SYSCALL_ENTRY( 0x1477, NtUserInitThreadCoreMessagingIocp, 4 ) \
@@ -2683,7 +2683,7 @@
     SYSCALL_ENTRY( 0x1471, NtUserHwndQueryRedirectionInfo, 0 ) \
     SYSCALL_ENTRY( 0x1472, NtUserHwndSetRedirectionInfo, 0 ) \
     SYSCALL_ENTRY( 0x1473, NtUserImpersonateDdeClientWindow, 0 ) \
-    SYSCALL_ENTRY( 0x1474, NtUserInheritWindowMonitor, 0 ) \
+    SYSCALL_ENTRY( 0x1474, NtUserInheritWindowMonitor, 16 ) \
     SYSCALL_ENTRY( 0x1475, NtUserInitAnsiOem, 0 ) \
     SYSCALL_ENTRY( 0x1476, NtUserInitTask, 0 ) \
     SYSCALL_ENTRY( 0x1477, NtUserInitThreadCoreMessagingIocp, 8 ) \
@@ -3772,7 +3772,6 @@
     SYSCALL_STUB( NtUserHwndQueryRedirectionInfo ) \
     SYSCALL_STUB( NtUserHwndSetRedirectionInfo ) \
     SYSCALL_STUB( NtUserImpersonateDdeClientWindow ) \
-    SYSCALL_STUB( NtUserInheritWindowMonitor ) \
     SYSCALL_STUB( NtUserInitAnsiOem ) \
     SYSCALL_STUB( NtUserInitTask ) \
     SYSCALL_STUB( NtUserInitializeGenericHidInjection ) \

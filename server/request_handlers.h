@@ -159,6 +159,7 @@ DECL_HANDLER(undelegate_input);
 DECL_HANDLER(handle_delegated_input);
 DECL_HANDLER(get_desktop_window);
 DECL_HANDLER(set_window_owner);
+DECL_HANDLER(inherit_window_monitor);
 DECL_HANDLER(get_window_info);
 DECL_HANDLER(init_window_info);
 DECL_HANDLER(set_window_info);
@@ -607,6 +608,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_handle_delegated_input,
     (req_handler)req_get_desktop_window,
     (req_handler)req_set_window_owner,
+    (req_handler)req_inherit_window_monitor,
     (req_handler)req_get_window_info,
     (req_handler)req_init_window_info,
     (req_handler)req_set_window_info,
@@ -1836,6 +1838,11 @@ C_ASSERT( sizeof(struct set_window_owner_request) == 24 );
 C_ASSERT( offsetof(struct set_window_owner_reply, full_owner) == 8 );
 C_ASSERT( offsetof(struct set_window_owner_reply, prev_owner) == 12 );
 C_ASSERT( sizeof(struct set_window_owner_reply) == 16 );
+C_ASSERT( offsetof(struct inherit_window_monitor_request, handle) == 12 );
+C_ASSERT( offsetof(struct inherit_window_monitor_request, source) == 16 );
+C_ASSERT( sizeof(struct inherit_window_monitor_request) == 24 );
+C_ASSERT( offsetof(struct inherit_window_monitor_reply, success) == 8 );
+C_ASSERT( sizeof(struct inherit_window_monitor_reply) == 16 );
 C_ASSERT( offsetof(struct get_window_info_request, handle) == 12 );
 C_ASSERT( offsetof(struct get_window_info_request, offset) == 16 );
 C_ASSERT( offsetof(struct get_window_info_request, size) == 20 );

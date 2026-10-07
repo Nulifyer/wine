@@ -1298,6 +1298,23 @@ HWND WINAPI NtUserGetAncestor( HWND hwnd, UINT type )
 }
 
 /***********************************************************************
+ *           NtUserInheritWindowMonitor (win32u.@)
+ */
+BOOL WINAPI NtUserInheritWindowMonitor( HWND hwnd, HWND source )
+{
+    BOOL ret = FALSE;
+
+    SERVER_START_REQ( inherit_window_monitor )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        req->source = wine_server_user_handle( source );
+        if (!wine_server_call_err( req )) ret = reply->success;
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/***********************************************************************
  *           NtUserGetTopLevelWindow (win32u.@)
  */
 HWND WINAPI NtUserGetTopLevelWindow( HWND hwnd )

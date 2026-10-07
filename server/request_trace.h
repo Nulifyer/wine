@@ -1811,6 +1811,17 @@ static void dump_set_window_owner_reply( const struct set_window_owner_reply *re
     fprintf( stderr, ", prev_owner=%08x", req->prev_owner );
 }
 
+static void dump_inherit_window_monitor_request( const struct inherit_window_monitor_request *req )
+{
+    fprintf( stderr, " handle=%08x", req->handle );
+    fprintf( stderr, ", source=%08x", req->source );
+}
+
+static void dump_inherit_window_monitor_reply( const struct inherit_window_monitor_reply *req )
+{
+    fprintf( stderr, " success=%d", req->success );
+}
+
 static void dump_get_window_info_request( const struct get_window_info_request *req )
 {
     fprintf( stderr, " handle=%08x", req->handle );
@@ -5047,6 +5058,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_handle_delegated_input_request,
     (dump_func)dump_get_desktop_window_request,
     (dump_func)dump_set_window_owner_request,
+    (dump_func)dump_inherit_window_monitor_request,
     (dump_func)dump_get_window_info_request,
     (dump_func)dump_init_window_info_request,
     (dump_func)dump_set_window_info_request,
@@ -5495,6 +5507,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_get_desktop_window_reply,
     (dump_func)dump_set_window_owner_reply,
+    (dump_func)dump_inherit_window_monitor_reply,
     (dump_func)dump_get_window_info_reply,
     NULL,
     (dump_func)dump_set_window_info_reply,
@@ -5943,6 +5956,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "handle_delegated_input",
     "get_desktop_window",
     "set_window_owner",
+    "inherit_window_monitor",
     "get_window_info",
     "init_window_info",
     "set_window_info",
@@ -6276,6 +6290,7 @@ static const struct
     { "DISK_FULL",                   STATUS_DISK_FULL },
     { "ERROR_ACCESS_DENIED",         0xc0010000 | ERROR_ACCESS_DENIED },
     { "ERROR_ALREADY_EXISTS",        0xc0010000 | ERROR_ALREADY_EXISTS },
+    { "ERROR_CALL_NOT_IMPLEMENTED",  0xc0010000 | ERROR_CALL_NOT_IMPLEMENTED },
     { "ERROR_CLASS_ALREADY_EXISTS",  0xc0010000 | ERROR_CLASS_ALREADY_EXISTS },
     { "ERROR_CLASS_DOES_NOT_EXIST",  0xc0010000 | ERROR_CLASS_DOES_NOT_EXIST },
     { "ERROR_CLASS_HAS_WINDOWS",     0xc0010000 | ERROR_CLASS_HAS_WINDOWS },
