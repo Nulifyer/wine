@@ -278,6 +278,7 @@ struct tagLISTVIEW_INFO
   BOOL bNoItemMetrics;		/* flags if item metrics are not yet computed */
   INT nItemHeight;
   INT nItemWidth;
+  INT nListRows;            /* row count retained when LVS_NOSCROLL suppresses layout */
 
   /* style */
   DWORD dwStyle;		/* the cached window GWL_STYLE */
@@ -372,6 +373,8 @@ static const IID IID_IListViewFooter =
 
 static DWORD LISTVIEW_SetExtendedListViewStyle(LISTVIEW_INFO *infoPtr, DWORD mask, DWORD ex_style);
 static INT LISTVIEW_GetSelectedCount(const LISTVIEW_INFO *infoPtr);
+static HRESULT WINAPI listview_iface_GetCountPerPage(LISTVIEW_INTERFACE *iface, INT *count);
+static HRESULT WINAPI listview_iface_GetVisibleSlotCount(LISTVIEW_INTERFACE *iface, INT *count);
 
 static HRESULT WINAPI listview_iface_QueryInterface(LISTVIEW_INTERFACE *iface, REFIID iid, void **out)
 {
@@ -749,6 +752,7 @@ static const void *const listview_iface_vtbl[150] =
     [66] = listview_iface_InsertColumn,
     [67] = listview_iface_DeleteColumn,
     [72] = listview_iface_SetColumnWidth,
+    [76] = listview_iface_GetCountPerPage,
     [78] = listview_iface_GetSelectedCount,
     [80] = listview_iface_GetExtendedStyle,
     [81] = listview_iface_SetExtendedStyle,
@@ -756,6 +760,7 @@ static const void *const listview_iface_vtbl[150] =
     [94] = listview_iface_GetWorkAreaCount,
     [95] = listview_iface_ResetEmptyText,
     [112] = listview_iface_SetOwnerDataCallback,
+    [139] = listview_iface_GetVisibleSlotCount,
     [140] = listview_iface_GetColumnMargin,
     [141] = listview_iface_SetSubItemCallback,
     [144] = listview_iface_SetWorkAreasWithDpi,
@@ -1563,23 +1568,33 @@ static inline DWORD notify_postpaint (const LISTVIEW_INFO *infoPtr, NMLVCUSTOMDR
     return notify_customdraw(infoPtr, CDDS_POSTPAINT, lpnmlvcd);
 }
 
-/* returns TRUE when repaint needed, FALSE otherwise */
-static BOOL notify_measureitem(LISTVIEW_INFO *infoPtr)
+/* Returns -1 if the callback destroys the control, otherwise the repaint flag. */
+static INT notify_measureitem(LISTVIEW_INFO *infoPtr)
 {
+    LISTVIEW_INTERFACE *iface = infoPtr->iface;
     MEASUREITEMSTRUCT mis;
+    INT changed = 0;
+
     mis.CtlType = ODT_LISTVIEW;
     mis.CtlID = GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_ID);
     mis.itemID = -1;
     mis.itemWidth = 0;
     mis.itemData = 0;
     mis.itemHeight= infoPtr->nItemHeight;
+    listview_iface_AddRef(iface);
     SendMessageW(infoPtr->hwndNotify, WM_MEASUREITEM, mis.CtlID, (LPARAM)&mis);
+    if (!iface->info)
+    {
+        listview_iface_Release(iface);
+        return -1;
+    }
     if (infoPtr->nItemHeight != max(mis.itemHeight, 1))
     {
         infoPtr->nMeasureItemHeight = infoPtr->nItemHeight = max(mis.itemHeight, 1);
-        return TRUE;
+        changed = 1;
     }
-    return FALSE;
+    listview_iface_Release(iface);
+    return changed;
 }
 
 /******** Item iterator functions **********************************/
@@ -2265,7 +2280,9 @@ static inline INT LISTVIEW_GetCountPerColumn(const LISTVIEW_INFO *infoPtr)
 {
     INT nListHeight = infoPtr->rcList.bottom - infoPtr->rcList.top;
 
-    return infoPtr->nItemHeight ? max(nListHeight / infoPtr->nItemHeight, 1) : 0;
+    if (!infoPtr->nItemHeight) return 0;
+    if (infoPtr->uView == LV_VIEW_LIST) return max(infoPtr->nListRows, 1);
+    return max(nListHeight / infoPtr->nItemHeight, 1);
 }
 
 
@@ -3464,7 +3481,7 @@ static INT LISTVIEW_CalculateItemHeight(const LISTVIEW_INFO *infoPtr)
 	nItemHeight = infoPtr->ntmHeight;
 	if (infoPtr->himlState)
 	    nItemHeight = max(nItemHeight, infoPtr->iconStateSize.cy);
-	if (infoPtr->himlSmall)
+	if (infoPtr->himlSmall && ImageList_GetImageCount(infoPtr->himlSmall))
 	    nItemHeight = max(nItemHeight, infoPtr->iconSize.cy);
 	nItemHeight += HEIGHT_PADDING;
     if (infoPtr->nMeasureItemHeight > 0)
@@ -7038,12 +7055,60 @@ static INT LISTVIEW_GetCountPerPage(const LISTVIEW_INFO *infoPtr)
     case LV_VIEW_SMALLICON:
 	return infoPtr->nItemCount;
     case LV_VIEW_DETAILS:
-	return LISTVIEW_GetCountPerColumn(infoPtr);
+	return infoPtr->nItemHeight ? max(infoPtr->rcList.bottom - infoPtr->rcList.top, 0) / infoPtr->nItemHeight : 0;
     case LV_VIEW_LIST:
-	return LISTVIEW_GetCountPerRow(infoPtr) * LISTVIEW_GetCountPerColumn(infoPtr);
+        return infoPtr->nItemHeight && infoPtr->nItemWidth ?
+               (max(infoPtr->rcList.right - infoPtr->rcList.left, 0) / infoPtr->nItemWidth) *
+               LISTVIEW_GetCountPerColumn(infoPtr) : 0;
     }
     assert(FALSE);
     return 0;
+}
+
+/* The private capacity methods retain the public count owner and control lifetime. */
+static HRESULT WINAPI listview_iface_GetCountPerPage(LISTVIEW_INTERFACE *iface, INT *count)
+{
+    *count = 0;
+    if (!iface->info) return E_UNEXPECTED;
+    *count = LISTVIEW_GetCountPerPage(iface->info);
+    return S_OK;
+}
+
+static HRESULT WINAPI listview_iface_GetVisibleSlotCount(LISTVIEW_INTERFACE *iface, INT *count)
+{
+    const LISTVIEW_INFO *infoPtr = iface->info;
+    DWORD error = GetLastError();
+    RECT rect, frame = {0};
+    INT width, height, cell_width, cell_height, columns, rows;
+
+    *count = 0;
+    if (!infoPtr) return E_UNEXPECTED;
+    if (infoPtr->uView == LV_VIEW_DETAILS || infoPtr->uView == LV_VIEW_LIST)
+    {
+        *count = LISTVIEW_GetCountPerPage(infoPtr);
+        return S_OK;
+    }
+
+    /* Capacity uses the control extent before item-driven scrollbars are installed. */
+    GetWindowRect(infoPtr->hwndSelf, &rect);
+    AdjustWindowRectEx(&frame, infoPtr->dwStyle & ~(WS_HSCROLL | WS_VSCROLL), FALSE,
+                      GetWindowLongW(infoPtr->hwndSelf, GWL_EXSTYLE));
+    width = max(rect.right - rect.left - (frame.right - frame.left), 0);
+    height = max(rect.bottom - rect.top - (frame.bottom - frame.top), 0);
+    cell_width = max(infoPtr->nItemWidth, 1);
+    cell_height = max(infoPtr->nItemHeight, 1);
+    columns = max(width / cell_width, 1);
+    rows = max(height / cell_height, 1);
+    if (!(infoPtr->dwStyle & LVS_NOSCROLL) && (LONGLONG)columns * rows < infoPtr->nItemCount)
+    {
+        if ((infoPtr->dwStyle & LVS_ALIGNMASK) == LVS_ALIGNLEFT)
+            rows = max((height - GetSystemMetrics(SM_CYHSCROLL)) / cell_height, 1);
+        else
+            columns = max((width - GetSystemMetrics(SM_CXVSCROLL)) / cell_width, 1);
+    }
+    *count = (columns + 2) * (rows + 2);
+    SetLastError(error);
+    return S_OK;
 }
 
 /***
@@ -8874,7 +8939,14 @@ static BOOL LISTVIEW_SetColumnWidth(LISTVIEW_INFO *infoPtr, INT nColumn, INT cx)
 
     TRACE("(nColumn=%d, cx=%d)\n", nColumn, cx);
 
-    /* set column width only if in report or list mode */
+    /* Small-icon width changes even though the message returns FALSE. */
+    if (infoPtr->uView == LV_VIEW_SMALLICON && cx > 0)
+    {
+        infoPtr->nItemWidth = cx;
+        LISTVIEW_UpdateScroll(infoPtr);
+        LISTVIEW_InvalidateList(infoPtr);
+        return FALSE;
+    }
     if (infoPtr->uView != LV_VIEW_DETAILS && infoPtr->uView != LV_VIEW_LIST) return FALSE;
 
     /* take care of invalid cx values - LVSCW_AUTOSIZE_* values are negative,
@@ -9792,6 +9864,7 @@ static INT LISTVIEW_SetView(LISTVIEW_INFO *infoPtr, DWORD nView)
   }
 
   LISTVIEW_UpdateItemSize(infoPtr);
+  infoPtr->nListRows = -1;
   LISTVIEW_UpdateSize(infoPtr);
   LISTVIEW_UpdateScroll(infoPtr);
   LISTVIEW_InvalidateList(infoPtr);
@@ -10024,6 +10097,7 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, WPARAM wParam, const CREATESTRUCTW *
   infoPtr->iface->refs = 1;
   infoPtr->iface->footer.lpVtbl = listview_footer_vtbl;
   infoPtr->iface->footer.listview = infoPtr->iface;
+  infoPtr->nListRows = -1;
   infoPtr->dwStyle = lpcs->style;    /* Note: may be changed in WM_CREATE */
   map_style_view(infoPtr);
   /* determine the type of structures to use */
@@ -10109,6 +10183,7 @@ static LRESULT LISTVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
 
   TRACE("lpcs %p, style %#lx\n", lpcs, lpcs->style);
 
+  infoPtr->nListRows = -1;
   infoPtr->dwStyle = lpcs->style;
   map_style_view(infoPtr);
 
@@ -10137,7 +10212,7 @@ static LRESULT LISTVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
     }
     LISTVIEW_UpdateScroll(infoPtr);
     /* send WM_MEASUREITEM notification */
-    if (infoPtr->dwStyle & LVS_OWNERDRAWFIXED) notify_measureitem(infoPtr);
+    if ((infoPtr->dwStyle & LVS_OWNERDRAWFIXED) && notify_measureitem(infoPtr) < 0) return 0;
   }
 
   COMCTL32_OpenThemeForWindow(hwnd, L"ListView");
@@ -11649,6 +11724,11 @@ static void LISTVIEW_UpdateSize(LISTVIEW_INFO *infoPtr)
         infoPtr->rcList.bottom = max (infoPtr->rcList.bottom - 2, 0);
     }
 
+    if (infoPtr->uView == LV_VIEW_LIST &&
+        (!(infoPtr->dwStyle & LVS_NOSCROLL) || infoPtr->nListRows < 0))
+        infoPtr->nListRows = infoPtr->nItemHeight ?
+                            max((infoPtr->rcList.bottom - infoPtr->rcList.top) / infoPtr->nItemHeight, 1) : 0;
+
     /* When ListView control is created invisible, header isn't created right away. */
     if (infoPtr->hwndHeader)
     {
@@ -12405,9 +12485,12 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
           SetWindowPos(infoPtr->hwndSelf, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOACTIVATE |
                        SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
 
-          if ((infoPtr->dwStyle & LVS_OWNERDRAWFIXED) && (infoPtr->uView == LV_VIEW_DETAILS))
+          if ((infoPtr->dwStyle & LVS_OWNERDRAWFIXED) && infoPtr->uView != LV_VIEW_ICON &&
+              ((WINDOWPOS *)lParam)->cx > 0 && ((WINDOWPOS *)lParam)->cy > 0)
           {
-              if (notify_measureitem(infoPtr)) LISTVIEW_InvalidateList(infoPtr);
+              INT changed = notify_measureitem(infoPtr);
+              if (changed < 0) return 0;
+              if (changed) LISTVIEW_InvalidateList(infoPtr);
           }
           LISTVIEW_Size(infoPtr, ((WINDOWPOS *)lParam)->cx, ((WINDOWPOS *)lParam)->cy);
       }
