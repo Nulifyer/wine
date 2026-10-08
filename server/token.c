@@ -1058,7 +1058,7 @@ struct token *token_create_native_system(void)
         privileges[i].luid.low_part = privilege_ids[i];
         privileges[i].luid.high_part = 0;
         privileges[i].attrs = (privilege_ids[i] == 7 || privilege_ids[i] == 16 ||
-                               privilege_ids[i] == 20) ? SE_PRIVILEGE_ENABLED : 0;
+                               privilege_ids[i] == 20 || privilege_ids[i] == 29) ? SE_PRIVILEGE_ENABLED : 0;
     }
     token = create_token( TRUE, 0, &local_system_sid, groups, ARRAY_SIZE(groups),
                           privileges, ARRAY_SIZE(privileges), dacl, NULL, 0, -1, TokenElevationTypeDefault );
