@@ -217,6 +217,20 @@ static inline ALPC_PORT_ATTRIBUTES *alpc_port_attributes_32to64( ALPC_PORT_ATTRI
     return out;
 }
 
+static inline ALPC_PORT_MESSAGE *alpc_port_message_header_32to64( ALPC_PORT_MESSAGE *out,
+                                                                  const ALPC_PORT_MESSAGE32 *in )
+{
+    if (!in) return NULL;
+    out->DataLength = in->DataLength;
+    out->TotalLength = sizeof(*out) + out->DataLength;
+    out->Type = in->Type;
+    out->DataInfoOffset = in->DataInfoOffset;
+    client_id_32to64( &out->ClientId, &in->ClientId );
+    out->MessageId = in->MessageId;
+    out->ClientViewSize = in->ClientViewSize;
+    return out;
+}
+
 static inline ALPC_PORT_MESSAGE *alpc_port_message_32to64( ALPC_PORT_MESSAGE **out, SIZE_T out_msg_size,
                                                            const ALPC_PORT_MESSAGE32 *in, BOOL copy_msg )
 {
@@ -230,13 +244,7 @@ static inline ALPC_PORT_MESSAGE *alpc_port_message_32to64( ALPC_PORT_MESSAGE **o
 
     if (!copy_msg) goto done;
 
-    msg->DataLength = in->DataLength;
-    msg->TotalLength = sizeof(*msg) + msg->DataLength;
-    msg->Type = in->Type;
-    msg->DataInfoOffset = in->DataInfoOffset;
-    client_id_32to64( &msg->ClientId, &in->ClientId );
-    msg->MessageId = in->MessageId;
-    msg->ClientViewSize = in->ClientViewSize;
+    alpc_port_message_header_32to64( msg, in );
     memcpy( (unsigned char *)msg + sizeof(*msg), (const unsigned char *)in + sizeof(*in), in->DataLength );
 done:
     *out = msg;

@@ -699,6 +699,23 @@ NTSTATUS WINAPI wow64_NtAlpcImpersonateClientOfPort( UINT *args )
 }
 
 /**********************************************************************
+ *           wow64_NtAlpcQueryInformationMessage
+ */
+NTSTATUS WINAPI wow64_NtAlpcQueryInformationMessage( UINT *args )
+{
+    HANDLE port = get_handle( &args );
+    ALPC_PORT_MESSAGE32 *message32 = get_ptr( &args );
+    ALPC_MESSAGE_INFORMATION_CLASS info_class = get_ulong( &args );
+    void *info = get_ptr( &args );
+    ULONG length = get_ulong( &args );
+    ULONG *return_length = get_ptr( &args );
+    ALPC_PORT_MESSAGE message = {0};
+
+    return NtAlpcQueryInformationMessage( port, alpc_port_message_header_32to64( &message, message32 ),
+                                          info_class, info, length, return_length );
+}
+
+/**********************************************************************
  *           wow64_NtAlpcOpenSenderProcess
  */
 NTSTATUS WINAPI wow64_NtAlpcOpenSenderProcess( UINT *args )
@@ -709,14 +726,13 @@ NTSTATUS WINAPI wow64_NtAlpcOpenSenderProcess( UINT *args )
     ULONG flags = get_ulong( &args );
     ACCESS_MASK access = get_ulong( &args );
     OBJECT_ATTRIBUTES32 *attr32 = get_ptr( &args );
-    ALPC_PORT_MESSAGE *message;
+    ALPC_PORT_MESSAGE message = {0};
     struct object_attr64 attr;
     HANDLE process_handle = 0;
     NTSTATUS status;
 
     status = NtAlpcOpenSenderProcess( process_handle_ptr ? &process_handle : NULL, port_handle,
-                                      alpc_port_message_32to64( &message,
-                                          message32 ? sizeof(*message) : 0, message32, TRUE ),
+                                      alpc_port_message_header_32to64( &message, message32 ),
                                       flags, access, objattr_32to64( &attr, attr32 ) );
     if (!status) put_handle( process_handle_ptr, process_handle );
     return status;

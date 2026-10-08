@@ -4024,6 +4024,21 @@ static void dump_alpc_accept_connect_port_reply( const struct alpc_accept_connec
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_alpc_query_message_security_request( const struct alpc_query_message_security_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", callback_id=%08x", req->callback_id );
+    fprintf( stderr, ", info_class=%08x", req->info_class );
+    fprintf( stderr, ", length=%u", req->length );
+}
+
+static void dump_alpc_query_message_security_reply( const struct alpc_query_message_security_reply *req )
+{
+    fprintf( stderr, " required=%u", req->required );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
 static void dump_alpc_open_sender_process_request( const struct alpc_open_sender_process_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -5332,6 +5347,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_connect_port_request,
     (dump_func)dump_alpc_get_connect_result_request,
     (dump_func)dump_alpc_accept_connect_port_request,
+    (dump_func)dump_alpc_query_message_security_request,
     (dump_func)dump_alpc_open_sender_process_request,
     (dump_func)dump_alpc_disconnect_port_request,
     (dump_func)dump_alpc_impersonate_client_request,
@@ -5789,6 +5805,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_connect_port_reply,
     (dump_func)dump_alpc_get_connect_result_reply,
     (dump_func)dump_alpc_accept_connect_port_reply,
+    (dump_func)dump_alpc_query_message_security_reply,
     (dump_func)dump_alpc_open_sender_process_reply,
     NULL,
     NULL,
@@ -6246,6 +6263,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "alpc_connect_port",
     "alpc_get_connect_result",
     "alpc_accept_connect_port",
+    "alpc_query_message_security",
     "alpc_open_sender_process",
     "alpc_disconnect_port",
     "alpc_impersonate_client",

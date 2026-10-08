@@ -385,6 +385,42 @@ NTSTATUS WINAPI NtAlpcConnectPortEx( HANDLE *port_handle,
                          buffer_length, out_message_attributes, in_message_attributes, timeout );
 }
 
+NTSTATUS WINAPI NtAlpcQueryInformationMessage( HANDLE port_handle, ALPC_PORT_MESSAGE *message,
+                                               ALPC_MESSAGE_INFORMATION_CLASS info_class,
+                                               void *info, ULONG length, ULONG *return_length )
+{
+    unsigned char data[SECURITY_MAX_SID_SIZE];
+    ULONG required = 0;
+    NTSTATUS status;
+
+    TRACE( "%p %p %u %p %u %p\n", port_handle, message, (unsigned int)info_class,
+           info, (unsigned int)length, return_length );
+    /* The input message probe precedes handle access, including a null message
+     * combined with an invalid or zero-access handle. */
+    if (!message || (!info && length)) return STATUS_ACCESS_VIOLATION;
+    SERVER_START_REQ( alpc_query_message_security )
+    {
+        req->handle = wine_server_obj_handle( port_handle );
+        req->message_id = message->MessageId;
+        req->callback_id = message->ClientViewSize;
+        req->info_class = info_class;
+        req->length = length;
+        wine_server_set_reply( req, data, min( length, sizeof(data) ) );
+        status = wine_server_call( req );
+        required = reply->required;
+    }
+    SERVER_END_REQ;
+    if (!status)
+    {
+        /* A null full-size output faults without publishing ReturnLength. */
+        if (!info) return STATUS_ACCESS_VIOLATION;
+        memcpy( info, data, required );
+    }
+    if ((!status || status == STATUS_BUFFER_TOO_SMALL) && return_length)
+        *return_length = required;
+    return status;
+}
+
 NTSTATUS WINAPI NtAlpcOpenSenderProcess( HANDLE *process_handle, HANDLE port_handle,
                                          ALPC_PORT_MESSAGE *message, ULONG flags,
                                          ACCESS_MASK access, OBJECT_ATTRIBUTES *attributes )

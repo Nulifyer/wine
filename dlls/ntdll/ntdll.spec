@@ -170,6 +170,7 @@
 @ stdcall -syscall NtAlpcCreatePort(ptr ptr ptr)
 @ stdcall -syscall NtAlpcDisconnectPort(ptr long)
 @ stdcall NtAlpcQueryInformation(ptr long ptr long ptr)
+@ stdcall -syscall NtAlpcQueryInformationMessage(ptr ptr long ptr long ptr)
 @ stdcall -syscall NtAlpcSetInformation(ptr long ptr long)
 @ stdcall -syscall NtAlpcImpersonateClientOfPort(ptr ptr ptr)
 @ stdcall -syscall NtAlpcOpenSenderProcess(ptr long ptr long long ptr)
@@ -1366,6 +1367,7 @@
 @ stdcall -private ZwAlpcCreatePort(ptr ptr ptr) NtAlpcCreatePort
 @ stdcall -private ZwAlpcDisconnectPort(ptr long) NtAlpcDisconnectPort
 @ stdcall -private ZwAlpcQueryInformation(ptr long ptr long ptr) NtAlpcQueryInformation
+@ stdcall -private ZwAlpcQueryInformationMessage(ptr ptr long ptr long ptr) NtAlpcQueryInformationMessage
 @ stdcall -private ZwAlpcSetInformation(ptr long ptr long) NtAlpcSetInformation
 @ stdcall -private ZwAlpcImpersonateClientOfPort(ptr ptr ptr) NtAlpcImpersonateClientOfPort
 @ stdcall -private ZwAlpcSendWaitReceivePort(ptr long ptr ptr ptr ptr ptr ptr) NtAlpcSendWaitReceivePort

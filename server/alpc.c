@@ -2093,9 +2093,10 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
     {
         /* A dynamically tracked datagram has no stable sender context and
          * cannot be impersonated.  A synchronous sender is blocked until its
-         * reply, so retain its current effective token for authorization while
-         * keeping the token receipt attribute private. */
+         * reply, so retain its current effective token for authorization and
+         * expose its metadata in the receiving listener's receipt. */
         message->token = (struct token *)grab_object( thread_get_impersonation_token( current ) );
+        message->info.attributes_valid |= ALPC_MESSAGE_TOKEN_ATTRIBUTE;
     }
     received_context = request ? request->message_context : target->initial_message_context;
     if (!request && !(flags & 0x10000) && port->type == COMMUNICATION_PORT)
@@ -2943,6 +2944,53 @@ done:
     free_message( message );
     if (server) release_object( server );
     release_object( listener );
+}
+
+/* Querying requires the receiving queue, unlike endpoint impersonation. The
+ * request owns the token; caller-supplied sender IDs and type do not select it. */
+DECL_HANDLER(alpc_query_message_security)
+{
+    struct alpc_port *port;
+    struct alpc_request *request = NULL, *candidate;
+    struct token_identity identity;
+    const struct sid *sid;
+
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                    ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
+    LIST_FOR_EACH_ENTRY( candidate, &message_requests, struct alpc_request, entry )
+        if (candidate->id == req->message_id && candidate->id == req->callback_id)
+        {
+            request = candidate;
+            break;
+        }
+    if (!request) { set_error( STATUS_INVALID_MESSAGE ); goto done; }
+    if (request->canceled) { set_error( STATUS_REQUEST_CANCELED ); goto done; }
+    if (req->info_class >= MaxAlpcMessageInfoClass) { set_error( STATUS_INVALID_PARAMETER ); goto done; }
+    if (req->info_class != AlpcMessageSidInformation &&
+        req->info_class != AlpcMessageTokenModifiedIdInformation)
+    { set_error( STATUS_NOT_IMPLEMENTED ); goto done; }
+    if (request->queue != port) { set_error( STATUS_ACCESS_DENIED ); goto done; }
+    /* The fixed-size class validates its buffer before token availability. */
+    if (req->info_class == AlpcMessageTokenModifiedIdInformation && req->length < sizeof(identity.modified_id))
+    {
+        reply->required = sizeof(identity.modified_id);
+        set_error( STATUS_BUFFER_TOO_SMALL );
+        goto done;
+    }
+    if (!request->token) { set_error( STATUS_ACCESS_DENIED ); goto done; }
+    /* Queued, undelivered metadata is outside the established query contract. */
+    if (request->message) { set_error( STATUS_NOT_IMPLEMENTED ); goto done; }
+    sid = token_get_user( request->token );
+    reply->required = req->info_class == AlpcMessageSidInformation ? sid_len( sid ) : sizeof(identity.modified_id);
+    if (req->length < reply->required) { set_error( STATUS_BUFFER_TOO_SMALL ); goto done; }
+    if (req->info_class == AlpcMessageSidInformation) set_reply_data( sid, reply->required );
+    else
+    {
+        token_get_identity( request->token, &identity );
+        set_reply_data( &identity.modified_id, reply->required );
+    }
+done:
+    release_object( port );
 }
 
 DECL_HANDLER(alpc_open_sender_process)

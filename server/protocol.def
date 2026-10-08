@@ -4840,6 +4840,18 @@ struct alpc_message_info
     obj_handle_t handle;
 @END
 
+/* Query security metadata retained by a delivered message, without impersonation. */
+@REQ(alpc_query_message_security)
+    obj_handle_t handle;
+    unsigned int message_id;
+    unsigned int callback_id;
+    unsigned int info_class;
+    data_size_t length;
+@REPLY
+    data_size_t required;
+    VARARG(data,bytes);
+@END
+
 @REQ(alpc_open_sender_process)
     obj_handle_t handle;       /* listening port */
     unsigned int message_id;   /* delivered connection message id */
