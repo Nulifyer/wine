@@ -88,8 +88,8 @@ static void test_RtlThreadWorkOnBehalfTicket(void)
 {
     static const ULONG valid_flags[] = {0, 1, 2, 4, 5, 6};
     static const ULONG invalid_flags[] = {3, 7, 8, 0x80000000};
-    const ULONGLONG expected = 0x0123456789abcdef;
-    ULONGLONG ticket;
+    const ULONGLONG invalid = 0x0123456789abcdef;
+    ULONGLONG ticket, expected;
     NTSTATUS status;
     unsigned int i;
 
@@ -107,6 +107,14 @@ static void test_RtlThreadWorkOnBehalfTicket(void)
     status = pRtlGetThreadWorkOnBehalfTicket( &ticket, 0 );
     ok( status == STATUS_SUCCESS, "RtlGetThreadWorkOnBehalfTicket returned %#lx.\n", status );
     ok( !ticket, "Got unexpected initial ticket %#I64x.\n", ticket );
+
+    status = pRtlGetThreadWorkOnBehalfTicket( &expected, 6 );
+    ok( status == STATUS_SUCCESS, "implicit query returned %#lx.\n", status );
+    ok( !!expected, "Implicit ticket is zero.\n" );
+    status = pRtlSetThreadWorkOnBehalfTicket( &invalid );
+    ok( status == STATUS_INVALID_CID, "synthetic ticket returned %#lx.\n", status );
+    status = pRtlGetThreadWorkOnBehalfTicket( &ticket, 2 );
+    ok( !status && !ticket, "Rejected ticket changed attribution: %#lx, %#I64x.\n", status, ticket );
 
     status = pRtlSetThreadWorkOnBehalfTicket( &expected );
     ok( status == STATUS_SUCCESS, "RtlSetThreadWorkOnBehalfTicket returned %#lx.\n", status );
@@ -139,6 +147,8 @@ static void test_RtlThreadWorkOnBehalfTicket(void)
     status = pRtlGetThreadWorkOnBehalfTicket( &ticket, 0 );
     ok( status == STATUS_SUCCESS, "RtlGetThreadWorkOnBehalfTicket returned %#lx.\n", status );
     ok( !ticket, "Got unexpected cleared ticket %#I64x.\n", ticket );
+    status = pRtlGetThreadWorkOnBehalfTicket( &ticket, 6 );
+    ok( !status && ticket == expected, "Implicit ticket changed after clear: %#lx, %#I64x.\n", status, ticket );
 }
 
 static void test_RtlSetThreadSubProcessTag(void)

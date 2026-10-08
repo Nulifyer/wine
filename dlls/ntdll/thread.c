@@ -447,9 +447,8 @@ PVOID WINAPI RtlSetThreadSubProcessTag( PVOID tag )
  */
 NTSTATUS WINAPI RtlClearThreadWorkOnBehalfTicket( void )
 {
-    memset( NtCurrentTeb()->WorkingOnBehalfOfTicket, 0,
-            sizeof(NtCurrentTeb()->WorkingOnBehalfOfTicket) );
-    return STATUS_SUCCESS;
+    const ULONGLONG ticket = 0;
+    return RtlSetThreadWorkOnBehalfTicket( &ticket );
 }
 
 
@@ -458,12 +457,19 @@ NTSTATUS WINAPI RtlClearThreadWorkOnBehalfTicket( void )
  */
 NTSTATUS WINAPI RtlGetThreadWorkOnBehalfTicket( ULONGLONG *ticket, ULONG flags )
 {
-    if ((flags & ~7) || (flags & 3) == 3) return STATUS_INVALID_PARAMETER_2;
+    struct thread_work_ticket_info info;
+    NTSTATUS status;
 
-    /* Windows may query kernel scheduling state when flag 2 is set. Wine has
-     * no corresponding host-kernel state, so the TEB copy is authoritative. */
-    memcpy( ticket, NtCurrentTeb()->WorkingOnBehalfOfTicket, sizeof(*ticket) );
-    return STATUS_SUCCESS;
+    if ((flags & ~7) || (flags & 3) == 3) return STATUS_INVALID_PARAMETER_2;
+    if (!(flags & 2))
+    {
+        memcpy( ticket, NtCurrentTeb()->WorkingOnBehalfOfTicket, sizeof(*ticket) );
+        return STATUS_SUCCESS;
+    }
+    status = NtQueryInformationThread( GetCurrentThread(), ThreadWorkOnBehalfTicket,
+                                        &info, sizeof(info), NULL );
+    if (!status) *ticket = !(flags & 4) && (info.flags & 1) ? 0 : info.ticket;
+    return status;
 }
 
 
@@ -472,10 +478,16 @@ NTSTATUS WINAPI RtlGetThreadWorkOnBehalfTicket( ULONGLONG *ticket, ULONG flags )
  */
 NTSTATUS WINAPI RtlSetThreadWorkOnBehalfTicket( const ULONGLONG *ticket )
 {
-    if (!ticket) return STATUS_INVALID_PARAMETER;
+    ULONGLONG previous;
+    NTSTATUS status;
 
-    memcpy( NtCurrentTeb()->WorkingOnBehalfOfTicket, ticket, sizeof(*ticket) );
-    return STATUS_SUCCESS;
+    if (!ticket) return STATUS_INVALID_PARAMETER;
+    memcpy( &previous, NtCurrentTeb()->WorkingOnBehalfOfTicket, sizeof(previous) );
+    if (previous == *ticket) return STATUS_SUCCESS;
+    status = NtSetInformationThread( GetCurrentThread(), ThreadWorkOnBehalfTicket,
+                                      ticket, sizeof(*ticket) );
+    if (!status) memcpy( NtCurrentTeb()->WorkingOnBehalfOfTicket, ticket, sizeof(*ticket) );
+    return status;
 }
 
 

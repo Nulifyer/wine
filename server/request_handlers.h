@@ -24,6 +24,7 @@ DECL_HANDLER(get_process_image_name);
 DECL_HANDLER(get_process_vm_counters);
 DECL_HANDLER(set_process_info);
 DECL_HANDLER(get_thread_info);
+DECL_HANDLER(thread_work_ticket);
 DECL_HANDLER(get_thread_times);
 DECL_HANDLER(set_thread_info);
 DECL_HANDLER(suspend_thread);
@@ -480,6 +481,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_process_vm_counters,
     (req_handler)req_set_process_info,
     (req_handler)req_get_thread_info,
+    (req_handler)req_thread_work_ticket,
     (req_handler)req_get_thread_times,
     (req_handler)req_set_thread_info,
     (req_handler)req_suspend_thread,
@@ -1116,6 +1118,13 @@ C_ASSERT( offsetof(struct get_thread_info_reply, suspend_count) == 52 );
 C_ASSERT( offsetof(struct get_thread_info_reply, flags) == 56 );
 C_ASSERT( offsetof(struct get_thread_info_reply, desc_len) == 60 );
 C_ASSERT( sizeof(struct get_thread_info_reply) == 64 );
+C_ASSERT( offsetof(struct thread_work_ticket_request, handle) == 12 );
+C_ASSERT( offsetof(struct thread_work_ticket_request, set) == 16 );
+C_ASSERT( offsetof(struct thread_work_ticket_request, ticket) == 24 );
+C_ASSERT( sizeof(struct thread_work_ticket_request) == 32 );
+C_ASSERT( offsetof(struct thread_work_ticket_reply, ticket) == 8 );
+C_ASSERT( offsetof(struct thread_work_ticket_reply, flags) == 16 );
+C_ASSERT( sizeof(struct thread_work_ticket_reply) == 24 );
 C_ASSERT( offsetof(struct get_thread_times_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_thread_times_request) == 16 );
 C_ASSERT( offsetof(struct get_thread_times_reply, creation_time) == 8 );

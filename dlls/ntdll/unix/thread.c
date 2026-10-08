@@ -2180,6 +2180,28 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
 
     switch (class)
     {
+    case ThreadWorkOnBehalfTicket:
+    {
+        struct thread_work_ticket_info info;
+        if (length < sizeof(info)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!data) return STATUS_ACCESS_VIOLATION;
+        SERVER_START_REQ( thread_work_ticket )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            if (!(status = wine_server_call( req )))
+            {
+                info.ticket = reply->ticket;
+                info.flags = reply->flags;
+            }
+        }
+        SERVER_END_REQ;
+        if (!status)
+        {
+            memcpy( data, &info, sizeof(info) );
+            if (ret_len) *ret_len = sizeof(info);
+        }
+        return status;
+    }
     case ThreadBasicInformation:
     {
         THREAD_BASIC_INFORMATION info;
@@ -2503,6 +2525,19 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
 
     switch (class)
     {
+    case ThreadWorkOnBehalfTicket:
+        if (length != sizeof(ULONGLONG)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!data) return STATUS_ACCESS_VIOLATION;
+        SERVER_START_REQ( thread_work_ticket )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            req->set = 1;
+            req->ticket = *(const ULONGLONG *)data;
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        return status;
+
     case ThreadZeroTlsCell:
         if (handle == GetCurrentThread())
         {

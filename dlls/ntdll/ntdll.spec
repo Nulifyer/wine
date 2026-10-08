@@ -1324,6 +1324,8 @@
 @ stdcall TpWaitForTimer(ptr long)
 @ stdcall TpWaitForWait(ptr long)
 @ stdcall TpWaitForWork(ptr long)
+@ stdcall TpWorkOnBehalfClearTicket(ptr)
+@ stdcall TpWorkOnBehalfSetTicket(ptr ptr)
 @ stdcall -ret64 VerSetConditionMask(int64 long long)
 @ stdcall WinSqmAddToStream(long long long long)
 @ stdcall WinSqmAddToStreamEx(long long long long) WinSqmAddToStream

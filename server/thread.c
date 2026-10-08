@@ -182,6 +182,7 @@ static const struct fd_ops thread_fd_ops =
 };
 
 static struct list thread_list = LIST_INIT(thread_list);
+static unsigned int next_work_ticket;
 
 #if defined(__linux__) && defined(RLIMIT_NICE)
 static int nice_limit;
@@ -367,6 +368,8 @@ static inline void init_thread_structure( struct thread *thread )
     thread->reply_fd        = NULL;
     thread->wait_fd         = NULL;
     thread->state           = RUNNING;
+    thread->work_ticket     = 0;
+    thread->work_on_behalf  = 0;
     thread->exit_code       = 0;
     thread->priority        = 0;
     thread->base_priority   = 0;
@@ -1913,6 +1916,57 @@ DECL_HANDLER(get_thread_info)
 
         release_object( thread );
     }
+}
+
+/* The ticket names a thread lifetime, not a message or a security token.
+ * Reserve the low word; exhaustion never reuses an old identity. */
+unsigned __int64 thread_get_work_ticket( struct thread *thread )
+{
+    if (!thread->work_ticket)
+    {
+        if (next_work_ticket == ~0u)
+        {
+            set_error( STATUS_INSUFFICIENT_RESOURCES );
+            return 0;
+        }
+        thread->work_ticket = (unsigned __int64)++next_work_ticket << 32;
+    }
+    return thread->work_ticket;
+}
+
+DECL_HANDLER(thread_work_ticket)
+{
+    struct thread *thread, *source;
+    int found = 0;
+    unsigned int access = req->set ? THREAD_SET_INFORMATION : THREAD_QUERY_LIMITED_INFORMATION;
+
+    if (req->set > 1)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!(thread = get_thread_from_handle( req->handle, access ))) return;
+    if (req->set)
+    {
+        if (req->ticket)
+        {
+            LIST_FOR_EACH_ENTRY( source, &thread_list, struct thread, entry )
+                if (source->state == RUNNING && source->work_ticket == req->ticket) { found = 1; break; }
+            if (!found)
+            {
+                set_error( STATUS_INVALID_CID );
+                release_object( thread );
+                return;
+            }
+        }
+        thread->work_on_behalf = req->ticket;
+    }
+    else
+    {
+        reply->ticket = thread->work_on_behalf ? thread->work_on_behalf : thread_get_work_ticket( thread );
+        reply->flags = !thread->work_on_behalf;
+    }
+    release_object( thread );
 }
 
 /* fetch information about thread times */

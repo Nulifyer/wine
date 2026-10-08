@@ -412,7 +412,6 @@ static void alpc_port_destroy( struct object *obj )
 }
 
 static unsigned int next_message_id;
-static unsigned __int64 next_work_ticket;
 static struct list connecting_ports = LIST_INIT(connecting_ports);
 static struct list dwm_session_ports = LIST_INIT(dwm_session_ports);
 static struct list coremsg_kernel_ports = LIST_INIT(coremsg_kernel_ports);
@@ -2077,7 +2076,11 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
     if (!(message = new_message( data, size, type | (wow64 ? 0x1000 : 0), id, current ))) return 0;
     if (send_attributes & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)
     {
-        if (!(message->work_ticket = ++next_work_ticket)) message->work_ticket = ++next_work_ticket;
+        if (!(message->work_ticket = thread_get_work_ticket( current )))
+        {
+            free_message( message );
+            return 0;
+        }
         message->info.attributes_valid |= ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE;
     }
     if (!origin->connection_port && !origin->tracking_mode && origin->client_token)

@@ -1492,6 +1492,23 @@ struct get_thread_info_reply
 
 
 
+struct thread_work_ticket_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int set;
+    char __pad_20[4];
+    unsigned __int64 ticket;
+};
+struct thread_work_ticket_reply
+{
+    struct reply_header __header;
+    unsigned __int64 ticket;
+    unsigned int flags;
+    char __pad_20[4];
+};
+
+
 struct get_thread_times_request
 {
     struct request_header __header;
@@ -8475,6 +8492,7 @@ enum request
     REQ_get_process_vm_counters,
     REQ_set_process_info,
     REQ_get_thread_info,
+    REQ_thread_work_ticket,
     REQ_get_thread_times,
     REQ_set_thread_info,
     REQ_suspend_thread,
@@ -8934,6 +8952,7 @@ union generic_request
     struct get_process_vm_counters_request get_process_vm_counters_request;
     struct set_process_info_request set_process_info_request;
     struct get_thread_info_request get_thread_info_request;
+    struct thread_work_ticket_request thread_work_ticket_request;
     struct get_thread_times_request get_thread_times_request;
     struct set_thread_info_request set_thread_info_request;
     struct suspend_thread_request suspend_thread_request;
@@ -9391,6 +9410,7 @@ union generic_reply
     struct get_process_vm_counters_reply get_process_vm_counters_reply;
     struct set_process_info_reply set_process_info_reply;
     struct get_thread_info_reply get_thread_info_reply;
+    struct thread_work_ticket_reply thread_work_ticket_reply;
     struct get_thread_times_reply get_thread_times_reply;
     struct set_thread_info_reply set_thread_info_reply;
     struct suspend_thread_reply suspend_thread_reply;
@@ -9828,6 +9848,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1092
+#define SERVER_PROTOCOL_VERSION 1093
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -313,6 +313,19 @@ static void dump_get_thread_info_reply( const struct get_thread_info_reply *req 
     dump_varargs_unicode_str( ", desc=", cur_size );
 }
 
+static void dump_thread_work_ticket_request( const struct thread_work_ticket_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", set=%08x", req->set );
+    dump_uint64( ", ticket=", &req->ticket );
+}
+
+static void dump_thread_work_ticket_reply( const struct thread_work_ticket_reply *req )
+{
+    dump_uint64( " ticket=", &req->ticket );
+    fprintf( stderr, ", flags=%08x", req->flags );
+}
+
 static void dump_get_thread_times_request( const struct get_thread_times_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -4984,6 +4997,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_process_vm_counters_request,
     (dump_func)dump_set_process_info_request,
     (dump_func)dump_get_thread_info_request,
+    (dump_func)dump_thread_work_ticket_request,
     (dump_func)dump_get_thread_times_request,
     (dump_func)dump_set_thread_info_request,
     (dump_func)dump_suspend_thread_request,
@@ -5440,6 +5454,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_process_vm_counters_reply,
     NULL,
     (dump_func)dump_get_thread_info_reply,
+    (dump_func)dump_thread_work_ticket_reply,
     (dump_func)dump_get_thread_times_reply,
     NULL,
     (dump_func)dump_suspend_thread_reply,
@@ -5896,6 +5911,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "get_process_vm_counters",
     "set_process_info",
     "get_thread_info",
+    "thread_work_ticket",
     "get_thread_times",
     "set_thread_info",
     "suspend_thread",

@@ -1259,6 +1259,62 @@ static void test_tp_instance(void)
     CloseHandle(semaphores[1]);
 }
 
+struct work_finalization_context
+{
+    TP_CALLBACK_INSTANCE *last_instance;
+    LONG callbacks, finalizers;
+    HANDLE completed;
+};
+
+static void CALLBACK work_finalization_work_cb(TP_CALLBACK_INSTANCE *instance, void *userdata, TP_WORK *work)
+{
+    struct work_finalization_context *context = userdata;
+    context->last_instance = instance;
+    InterlockedIncrement(&context->callbacks);
+}
+
+static void CALLBACK work_finalization_cb(TP_CALLBACK_INSTANCE *instance, void *userdata)
+{
+    struct work_finalization_context *context = userdata;
+    ok(instance != NULL, "Missing finalization callback instance\n");
+    ok(instance != context->last_instance, "Finalizer reused the work callback instance\n");
+    InterlockedIncrement(&context->finalizers);
+    pTpCallbackReleaseSemaphoreOnCompletion(instance, context->completed, 1);
+}
+
+static void test_tp_work_finalization(void)
+{
+    struct work_finalization_context context = {0};
+    TP_CALLBACK_ENVIRON environment = {0};
+    TP_WORK *work;
+    TP_POOL *pool;
+    NTSTATUS status;
+    unsigned int i;
+
+    context.completed = CreateSemaphoreW(NULL, 0, 1, NULL);
+    status = pTpAllocPool(&pool, NULL);
+    ok(!status, "TpAllocPool returned %#lx\n", status);
+    pTpSetPoolMaxThreads(pool, 1);
+    environment.Version = 1;
+    environment.Pool = pool;
+    environment.FinalizationCallback = work_finalization_cb;
+    status = pTpAllocWork(&work, work_finalization_work_cb, &context, &environment);
+    ok(!status, "TpAllocWork returned %#lx\n", status);
+    for (i = 0; i < 2; ++i)
+    {
+        pTpPostWork(work);
+        pTpWaitForWork(work, FALSE);
+        ok(context.callbacks == i + 1, "Callback count %ld, expected %u\n", context.callbacks, i + 1);
+        ok(!context.finalizers, "Finalizer ran before closure: %ld\n", context.finalizers);
+        ok(WaitForSingleObject(context.completed, 0) == WAIT_TIMEOUT, "Finalizer cleanup ran before closure\n");
+    }
+    pTpReleaseWork(work);
+    ok(WaitForSingleObject(context.completed, 2000) == WAIT_OBJECT_0, "Finalizer cleanup did not complete\n");
+    ok(context.finalizers == 1, "Finalizer count %ld, expected 1\n", context.finalizers);
+    pTpReleasePool(pool);
+    CloseHandle(context.completed);
+}
+
 static void CALLBACK disassociate_cb(TP_CALLBACK_INSTANCE *instance, void *userdata, TP_WORK *work)
 {
     HANDLE *semaphores = userdata;
@@ -2606,6 +2662,11 @@ START_TEST(threadpool)
     char **argv;
     int argc = winetest_get_mainargs(&argv);
 
+    if (argc > 2 && !strcmp(argv[2], "finalization"))
+    {
+        if (init_threadpool()) test_tp_work_finalization();
+        return;
+    }
     if (argc > 2 && !strcmp(argv[2], "independent"))
     {
         if (init_threadpool()) test_tp_independent();
@@ -2623,6 +2684,7 @@ START_TEST(threadpool)
     test_tp_group_wait();
     test_tp_group_cancel();
     test_tp_instance();
+    test_tp_work_finalization();
     test_tp_disassociate();
     test_tp_independent();
     test_tp_timer();

@@ -1402,6 +1402,16 @@ typedef volatile struct
 #define GET_THREAD_INFO_FLAG_CRITICAL      0x10
 
 
+/* Query or set authoritative thread work-on-behalf attribution. */
+@REQ(thread_work_ticket)
+    obj_handle_t handle;
+    unsigned int set;
+    unsigned __int64 ticket;
+@REPLY
+    unsigned __int64 ticket;
+    unsigned int flags;        /* bit 0: implicit thread attribution */
+@END
+
 /* Retrieve information about thread times */
 @REQ(get_thread_times)
     obj_handle_t handle;        /* thread handle */

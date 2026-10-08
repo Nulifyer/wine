@@ -172,6 +172,7 @@ struct threadpool_object
     LONG                    num_running_callbacks;
     LONG                    num_associated_callbacks;
     LONG                    update_serial;
+    ULONGLONG               work_ticket; /* attribution captured when publishing work */
     /* arguments for callback */
     union
     {
@@ -241,6 +242,7 @@ struct threadpool_instance
     BOOL                    may_run_long;
     BOOL                    independent;
     BOOL                    pool_worker;
+    ULONGLONG               work_ticket;
     struct
     {
         CRITICAL_SECTION    *critical_section;
@@ -1500,7 +1502,9 @@ static void CALLBACK waitqueue_thread_proc( void *param )
             {
                 wait = objects[--num_handles];
                 assert( wait->type == TP_OBJECT_TYPE_WAIT );
+                RtlLeaveCriticalSection( &waitqueue.cs );
                 tp_object_release( wait );
+                RtlEnterCriticalSection( &waitqueue.cs );
             }
         }
 
@@ -2082,6 +2086,7 @@ static void tp_object_initialize( struct threadpool_object *object, struct threa
     RtlInitializeConditionVariable( &object->group_finished_event );
     object->completed_event         = NULL;
     object->num_pending_callbacks   = 0;
+    object->work_ticket             = 0;
     object->num_running_callbacks   = 0;
     object->num_associated_callbacks = 0;
     object->update_serial           = 0;
@@ -2168,7 +2173,12 @@ static void tp_object_submit( struct threadpool_object *object, BOOL signaled )
     /* Queue work item and increment refcount. */
     InterlockedIncrement( &object->refcount );
     if (!object->num_pending_callbacks++)
+    {
+        if (object->type == TP_OBJECT_TYPE_WORK || object->type == TP_OBJECT_TYPE_SIMPLE)
+            memcpy( &object->work_ticket, NtCurrentTeb()->WorkingOnBehalfOfTicket,
+                    sizeof(object->work_ticket) );
         tp_object_prio_queue( object );
+    }
 
     /* Count how often the object was signaled. */
     if (object->type == TP_OBJECT_TYPE_WAIT && signaled)
@@ -2306,6 +2316,43 @@ static void tp_wait_close_duped_handle( struct threadpool_object *wait )
 }
 
 /***********************************************************************
+ *           tp_instance_cleanup    (internal)
+ *
+ * Executes callback return cleanup.
+ */
+static void tp_instance_cleanup( struct threadpool_instance *instance )
+{
+    NTSTATUS status;
+
+    instance->work_ticket = 0;
+
+    /* Execute cleanup tasks. */
+    if (instance->cleanup.critical_section)
+    {
+        RtlLeaveCriticalSection( instance->cleanup.critical_section );
+    }
+    if (instance->cleanup.mutex)
+    {
+        status = NtReleaseMutant( instance->cleanup.mutex, NULL );
+        if (status != STATUS_SUCCESS) return;
+    }
+    if (instance->cleanup.semaphore)
+    {
+        status = NtReleaseSemaphore( instance->cleanup.semaphore, instance->cleanup.semaphore_count, NULL );
+        if (status != STATUS_SUCCESS) return;
+    }
+    if (instance->cleanup.event)
+    {
+        status = NtSetEvent( instance->cleanup.event, NULL );
+        if (status != STATUS_SUCCESS) return;
+    }
+    if (instance->cleanup.library)
+    {
+        LdrUnloadDll( instance->cleanup.library );
+    }
+}
+
+/***********************************************************************
  *           tp_object_release    (internal)
  *
  * Releases a reference to a threadpool object.
@@ -2335,12 +2382,21 @@ static BOOL tp_object_release( struct threadpool_object *object )
         }
         RtlLeaveCriticalSection( &group->cs );
 
-        tp_group_release( group );
     }
 
     if (object->type == TP_OBJECT_TYPE_WAIT)
         tp_wait_close_duped_handle( object );
 
+    if (object->finalization_callback)
+    {
+        struct threadpool_instance instance = {0};
+        instance.object = object;
+        instance.threadid = GetCurrentThreadId();
+        object->finalization_callback( (TP_CALLBACK_INSTANCE *)&instance, object->userdata );
+        tp_instance_cleanup( &instance );
+    }
+
+    if (object->group) tp_group_release( object->group );
     tp_threadpool_unlock( object->pool );
 
     if (object->race_dll)
@@ -2380,7 +2436,7 @@ static BOOL tp_object_execute( struct threadpool_object *object, BOOL wait_threa
     struct io_completion completion;
     struct threadpool *pool = object->pool;
     TP_WAIT_RESULT wait_result = 0;
-    NTSTATUS status;
+    ULONGLONG work_ticket = object->work_ticket;
 
     object->num_pending_callbacks--;
 
@@ -2410,12 +2466,16 @@ static BOOL tp_object_execute( struct threadpool_object *object, BOOL wait_threa
     instance.may_run_long               = object->may_run_long;
     instance.independent                = FALSE;
     instance.pool_worker                = !wait_thread;
+    instance.work_ticket                = 0;
     instance.cleanup.critical_section   = NULL;
     instance.cleanup.mutex              = NULL;
     instance.cleanup.semaphore          = NULL;
     instance.cleanup.semaphore_count    = 0;
     instance.cleanup.event              = NULL;
     instance.cleanup.library            = NULL;
+
+    RtlClearThreadWorkOnBehalfTicket();
+    if (work_ticket) RtlSetThreadWorkOnBehalfTicket( &work_ticket );
 
     switch (object->type)
     {
@@ -2489,41 +2549,8 @@ static BOOL tp_object_execute( struct threadpool_object *object, BOOL wait_threa
             break;
     }
 
-    /* Execute finalization callback. */
-    if (object->finalization_callback)
-    {
-        TRACE( "executing finalization callback %p(%p, %p)\n",
-               object->finalization_callback, callback_instance, object->userdata );
-        object->finalization_callback( callback_instance, object->userdata );
-        TRACE( "callback %p returned\n", object->finalization_callback );
-    }
+    tp_instance_cleanup( &instance );
 
-    /* Execute cleanup tasks. */
-    if (instance.cleanup.critical_section)
-    {
-        RtlLeaveCriticalSection( instance.cleanup.critical_section );
-    }
-    if (instance.cleanup.mutex)
-    {
-        status = NtReleaseMutant( instance.cleanup.mutex, NULL );
-        if (status != STATUS_SUCCESS) goto skip_cleanup;
-    }
-    if (instance.cleanup.semaphore)
-    {
-        status = NtReleaseSemaphore( instance.cleanup.semaphore, instance.cleanup.semaphore_count, NULL );
-        if (status != STATUS_SUCCESS) goto skip_cleanup;
-    }
-    if (instance.cleanup.event)
-    {
-        status = NtSetEvent( instance.cleanup.event, NULL );
-        if (status != STATUS_SUCCESS) goto skip_cleanup;
-    }
-    if (instance.cleanup.library)
-    {
-        LdrUnloadDll( instance.cleanup.library );
-    }
-
-skip_cleanup:
     if (wait_thread) RtlEnterCriticalSection( &waitqueue.cs );
     RtlEnterCriticalSection( &pool->cs );
 
@@ -2549,7 +2576,7 @@ skip_cleanup:
     {
         assert( pool->num_independent_workers );
         pool->num_independent_workers--;
-        return TRUE;
+        return pool->num_workers - pool->num_independent_workers > pool->max_workers;
     }
     return FALSE;
 }
@@ -2587,8 +2614,11 @@ static void CALLBACK threadpool_worker_proc( void *param )
             assert(pool->num_busy_workers);
             pool->num_busy_workers--;
 
+            /* Closure callbacks may execute arbitrary user code. */
+            RtlLeaveCriticalSection( &pool->cs );
             tp_object_release( object );
-            /* An independent worker does not rejoin the pool's bounded capacity. */
+            RtlEnterCriticalSection( &pool->cs );
+            /* Retire only if replacements already fill the bounded capacity. */
             if (retire) goto done;
         }
 
@@ -2955,6 +2985,28 @@ static NTSTATUS tp_callback_invalid_parameter(void)
 }
 
 /***********************************************************************
+ *           TpWorkOnBehalfSetTicket    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpWorkOnBehalfSetTicket( TP_CALLBACK_INSTANCE *instance, const ULONGLONG *ticket )
+{
+    struct threadpool_instance *this = impl_from_TP_CALLBACK_INSTANCE( instance );
+    NTSTATUS status;
+
+    if (!(status = RtlSetThreadWorkOnBehalfTicket( ticket ))) this->work_ticket = *ticket;
+    return status;
+}
+
+/***********************************************************************
+ *           TpWorkOnBehalfClearTicket    (NTDLL.@)
+ */
+void WINAPI TpWorkOnBehalfClearTicket( TP_CALLBACK_INSTANCE *instance )
+{
+    struct threadpool_instance *this = impl_from_TP_CALLBACK_INSTANCE( instance );
+    this->work_ticket = 0;
+    RtlClearThreadWorkOnBehalfTicket();
+}
+
+/***********************************************************************
  *           TpCallbackIndependent    (NTDLL.@)
  */
 NTSTATUS WINAPI TpCallbackIndependent( TP_CALLBACK_INSTANCE *instance )
@@ -2979,8 +3031,7 @@ NTSTATUS WINAPI TpCallbackIndependent( TP_CALLBACK_INSTANCE *instance )
     {
         pool->num_independent_workers++;
         /* Pending callbacks may have been queued while the pool was at its limit. */
-        if ((threadpool_get_next_item( pool ) ||
-             pool->num_workers - pool->num_independent_workers < pool->min_workers) &&
+        if (threadpool_get_next_item( pool ) &&
             pool->num_busy_workers >= pool->num_workers &&
             pool->num_workers - pool->num_independent_workers < pool->max_workers)
             status = tp_new_worker_thread( pool );

@@ -57,6 +57,8 @@ struct thread
     struct list            desktop_entry; /* entry in per-desktop thread list */
     struct process        *process;
     thread_id_t            id;            /* thread id */
+    unsigned __int64       work_ticket;   /* opaque identity for this thread lifetime */
+    unsigned __int64       work_on_behalf;/* explicit scheduling attribution, or zero */
     struct list            mutex_list;    /* list of currently owned mutexes */
     struct list            d3dkmt_mutexes;/* list of currently owned d3dkmt mutexes */
     unsigned int           system_regs;   /* which system regs have been set */
@@ -116,6 +118,7 @@ extern struct thread *current;
 extern struct thread *create_thread( int fd, struct process *process,
                                      const struct security_descriptor *sd );
 extern struct thread *get_thread_from_id( thread_id_t id );
+extern unsigned __int64 thread_get_work_ticket( struct thread *thread );
 extern struct thread *get_thread_from_handle( obj_handle_t handle, unsigned int access );
 extern struct thread *get_thread_from_tid( int tid );
 extern struct thread *get_thread_from_pid( int pid );

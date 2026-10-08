@@ -39,6 +39,13 @@ struct wine_server_fd_to_handle_params
     HANDLE      *handle;
 };
 
+/* Private ThreadWorkOnBehalfTicket query packet. */
+struct thread_work_ticket_info
+{
+    ULONGLONG ticket;
+    ULONGLONG flags;
+};
+
 struct wine_server_handle_to_fd_params
 {
     HANDLE        handle;
