@@ -1498,7 +1498,7 @@ NTSTATUS WINAPI NtQuerySecurityAttributesToken( HANDLE token, const UNICODE_STRI
     ULONG i, size, zero = 0;
     BOOL empty_name = FALSE;
 
-    TRACE( "(%p, %p, %lu, %p, %lu, %p)\n", token, names, count, buffer, length, retlen );
+    TRACE( "(%p, %p, %u, %p, %u, %p)\n", token, names, count, buffer, length, retlen );
 
     if (!!buffer != !!length) return STATUS_INVALID_PARAMETER;
     if (length && (ULONG_PTR)buffer % sizeof(void *)) return STATUS_DATATYPE_MISALIGNMENT;
