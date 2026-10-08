@@ -2410,7 +2410,8 @@ DECL_HANDLER(alpc_send_receive)
     /* The native RPC 0x400000 modifier preserves plain-message ownership.
      * It does not bypass endpoint authorization or resource validation. */
     if (req->flags & ~(ALPC_MSGFLG_REPLY_MESSAGE | ALPC_MSGFLG_RELEASE_MESSAGE |
-                       ALPC_MSGFLG_SYNC_REQUEST | 0x400000) ||
+                       ALPC_MSGFLG_SYNC_REQUEST | ALPC_MSGFLG_TRACK_PORT_REFERENCES |
+                       ALPC_MSGFLG_WOW64_CALL | 0x400000) ||
         ((req->flags & 0x20000) && (!req->receive || port->type == CONNECTION_PORT)))
     {
         set_error( STATUS_NOT_IMPLEMENTED );

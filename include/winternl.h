@@ -4725,6 +4725,8 @@ typedef struct _KCONTINUE_ARGUMENT
 #define ALPC_MSGFLG_REPLY_MESSAGE               0x00000001 /* Message is a reply */
 #define ALPC_MSGFLG_RELEASE_MESSAGE             0x00010000 /* Release the continuation */
 #define ALPC_MSGFLG_SYNC_REQUEST                0x00020000 /* Synchronously send and receive message */
+#define ALPC_MSGFLG_TRACK_PORT_REFERENCES        0x00040000
+#define ALPC_MSGFLG_WOW64_CALL                   0x80000000
 
 /* Message attribute flags */
 #define ALPC_MESSAGE_SECURITY_ATTRIBUTE         0x80000000
@@ -4786,6 +4788,39 @@ typedef struct _ALPC_PORT_MESSAGE
         ULONG CallbackId;
     } DUMMYUNIONNAME4;
 } ALPC_PORT_MESSAGE, *PALPC_PORT_MESSAGE, ALPC_PORT_MESSAGE_HEADER, *PALPC_PORT_MESSAGE_HEADER;
+
+typedef struct
+{
+    union
+    {
+        struct
+        {
+            USHORT DataLength;
+            USHORT TotalLength;
+        } DUMMYSTRUCTNAME1;
+        ULONG Length;
+    } DUMMYUNIONNAME1;
+    union
+    {
+        struct
+        {
+            USHORT Type;
+            USHORT DataInfoOffset;
+        } DUMMYSTRUCTNAME2;
+        ULONG ZeroInit;
+    } DUMMYUNIONNAME2;
+    union
+    {
+        CLIENT_ID32 ClientId;
+        double DoNotUseThisField;
+    } DUMMYUNIONNAME3;
+    ULONG MessageId;
+    union
+    {
+        ULONG ClientViewSize;
+        ULONG CallbackId;
+    } DUMMYUNIONNAME4;
+} ALPC_PORT_MESSAGE32, *PALPC_PORT_MESSAGE32, ALPC_PORT_MESSAGE_HEADER32, *PALPC_PORT_MESSAGE_HEADER32;
 
 typedef struct _ALPC_MESSAGE_ATTRIBUTES
 {

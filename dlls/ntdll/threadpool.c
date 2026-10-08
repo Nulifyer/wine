@@ -218,6 +218,7 @@ struct threadpool_object
                 PTP_ALPC_CALLBACK_EX callback_ex;
             };
             BOOL extended;
+            HANDLE port; /* original numeric callback registration handle */
             HANDLE lease;
             ULONG_PTR key;
             struct list entry; /* active registrations, locked via ioqueue.cs */
@@ -243,6 +244,9 @@ struct threadpool_instance
     BOOL                    independent;
     BOOL                    pool_worker;
     ULONGLONG               work_ticket;
+    HANDLE                  alpc_port; /* active extended callback only */
+    ALPC_PORT_MESSAGE       *alpc_message;
+    ULONG                   alpc_flags;
     struct
     {
         CRITICAL_SECTION    *critical_section;
@@ -2315,6 +2319,18 @@ static void tp_wait_close_duped_handle( struct threadpool_object *wait )
     }
 }
 
+static NTSTATUS tp_instance_send_alpc( struct threadpool_instance *instance )
+{
+    NTSTATUS status;
+
+    status = NtAlpcSendWaitReceivePort( instance->alpc_port, instance->alpc_flags,
+                                       instance->alpc_message, NULL, NULL, NULL, NULL, NULL );
+    RtlFreeHeap( GetProcessHeap(), 0, instance->alpc_message );
+    /* A transport failure consumes the slot just like a successful send. */
+    instance->alpc_message = NULL;
+    return status;
+}
+
 /***********************************************************************
  *           tp_instance_cleanup    (internal)
  *
@@ -2467,6 +2483,9 @@ static BOOL tp_object_execute( struct threadpool_object *object, BOOL wait_threa
     instance.independent                = FALSE;
     instance.pool_worker                = !wait_thread;
     instance.work_ticket                = 0;
+    instance.alpc_port                  = NULL;
+    instance.alpc_message               = NULL;
+    instance.alpc_flags                 = 0;
     instance.cleanup.critical_section   = NULL;
     instance.cleanup.mutex              = NULL;
     instance.cleanup.semaphore          = NULL;
@@ -2519,6 +2538,7 @@ static BOOL tp_object_execute( struct threadpool_object *object, BOOL wait_threa
         {
             if (object->u.alpc.extended)
             {
+                instance.alpc_port = object->u.alpc.port;
                 TRACE( "executing extended ALPC callback %p(%p, %p, %p, %p)\n",
                        object->u.alpc.callback_ex, callback_instance, object->userdata, object, NULL );
                 object->u.alpc.callback_ex( callback_instance, object->userdata,
@@ -2550,6 +2570,7 @@ static BOOL tp_object_execute( struct threadpool_object *object, BOOL wait_threa
     }
 
     tp_instance_cleanup( &instance );
+    if (instance.alpc_message) tp_instance_send_alpc( &instance );
 
     if (wait_thread) RtlEnterCriticalSection( &waitqueue.cs );
     RtlEnterCriticalSection( &pool->cs );
@@ -2681,6 +2702,7 @@ static NTSTATUS tp_alloc_alpc_completion( TP_ALPC **out, HANDLE port,
     }
     object->type = TP_OBJECT_TYPE_ALPC;
     object->u.alpc.extended = !!callback_ex;
+    object->u.alpc.port = port;
     if (callback_ex) object->u.alpc.callback_ex = callback_ex;
     else object->u.alpc.callback = callback;
     tp_object_initialize( object, pool, userdata, environment );
@@ -2982,6 +3004,43 @@ static NTSTATUS tp_callback_invalid_parameter(void)
     RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
     RtlRaiseException( &record );
     return STATUS_INVALID_PARAMETER;
+}
+
+/***********************************************************************
+ *           TpCallbackSendAlpcMessageOnCompletion    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpCallbackSendAlpcMessageOnCompletion( TP_CALLBACK_INSTANCE *instance, HANDLE port,
+                                                      ULONG flags, ALPC_PORT_MESSAGE *message )
+{
+    struct threadpool_instance *this = impl_from_TP_CALLBACK_INSTANCE( instance );
+    ALPC_PORT_MESSAGE *copy;
+    USHORT length;
+
+    TRACE( "%p %p %#x %p\n", instance, port, (unsigned int)flags, message );
+    if (!this || !this->alpc_port || this->alpc_port != port || this->alpc_message)
+        return tp_callback_invalid_parameter();
+
+    length = message->TotalLength;
+    /* Keep a complete readable header even for a short unaccepted input.
+     * Copy only the caller's advertised bytes, including a packed32 frame. */
+    if (!(copy = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, max( length, sizeof(*copy) ) )))
+        return STATUS_NO_MEMORY;
+    memcpy( copy, message, length );
+    this->alpc_message = copy;
+    this->alpc_flags = flags | ALPC_MSGFLG_TRACK_PORT_REFERENCES;
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           TpCallbackSendPendingAlpcMessage    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpCallbackSendPendingAlpcMessage( TP_CALLBACK_INSTANCE *instance )
+{
+    struct threadpool_instance *this = impl_from_TP_CALLBACK_INSTANCE( instance );
+
+    TRACE( "%p\n", instance );
+    if (!this || !this->alpc_message) return tp_callback_invalid_parameter();
+    return tp_instance_send_alpc( this );
 }
 
 /***********************************************************************

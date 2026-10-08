@@ -1295,6 +1295,8 @@
 @ stdcall TpCallbackMayRunLong(ptr)
 @ stdcall TpCallbackReleaseMutexOnCompletion(ptr long)
 @ stdcall TpCallbackReleaseSemaphoreOnCompletion(ptr long long)
+@ stdcall TpCallbackSendAlpcMessageOnCompletion(ptr long long ptr)
+@ stdcall TpCallbackSendPendingAlpcMessage(ptr)
 @ stdcall TpCallbackSetEventOnCompletion(ptr long)
 @ stdcall TpCallbackUnloadDllOnCompletion(ptr ptr)
 @ stdcall TpCancelAsyncIoOperation(ptr)

@@ -31,6 +31,9 @@
 WINE_DEFAULT_DEBUG_CHANNEL(alpc);
 WINE_DECLARE_DEBUG_CHANNEL(alpcpayload);
 
+C_ASSERT( sizeof(ALPC_PORT_MESSAGE32) == 24 );
+C_ASSERT( offsetof(ALPC_PORT_MESSAGE32, MessageId) == 16 );
+
 static void trace_message_data( const char *direction, HANDLE port_handle,
                                 const ALPC_PORT_MESSAGE *message )
 {
@@ -534,6 +537,9 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
 {
     SIZE_T capacity = recv_buffer_size ? *recv_buffer_size : 65535;
     NTSTATUS status;
+    BOOL packed32 = (flags & ALPC_MSGFLG_WOW64_CALL) && !is_wow64();
+    SIZE_T header_size = packed32 ? sizeof(ALPC_PORT_MESSAGE32) : sizeof(*send_msg);
+    ULONG message_id = 0;
     HANDLE wait_handle = NULL;
     unsigned char receipt[sizeof(struct token_identity) + sizeof(ULONGLONG)];
     unsigned int recv_attributes = recv_msg ? receive_attributes( recv_msg_attr ) : 0;
@@ -544,24 +550,30 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
      * Plain messages retain the same delivery and continuation semantics;
      * transferred resources still pass the attribute validator below. */
     if (flags & ~(ALPC_MSGFLG_REPLY_MESSAGE | ALPC_MSGFLG_RELEASE_MESSAGE |
-                  ALPC_MSGFLG_SYNC_REQUEST | 0x400000)) return STATUS_NOT_IMPLEMENTED;
+                  ALPC_MSGFLG_SYNC_REQUEST | ALPC_MSGFLG_TRACK_PORT_REFERENCES |
+                  ALPC_MSGFLG_WOW64_CALL | 0x400000)) return STATUS_NOT_IMPLEMENTED;
+    /* The ordinary WoW64 thunk has already widened its message. An explicit
+     * x64 WOW64_CALL uses the packed wire header only for this send partition. */
+    if (packed32 && recv_msg) return STATUS_NOT_IMPLEMENTED;
+    if (send_msg) message_id = packed32 ? ((ALPC_PORT_MESSAGE32 *)send_msg)->MessageId : send_msg->MessageId;
     if ((status = validate_message_attributes( send_msg_attr, recv_msg_attr, FALSE ))) return status;
     /* Native servers combine a reply with a synchronous receive to return the
      * current result and wait for the next request in one call. */
     if ((flags & 0x20000) &&
-        (!send_msg || (send_msg->MessageId && !recv_msg) || (flags & 0x10000)))
+        (!send_msg || (message_id && !recv_msg) || (flags & 0x10000)))
         return STATUS_INVALID_PARAMETER_2;
     if (recv_msg && capacity < sizeof(*recv_msg)) return STATUS_BUFFER_TOO_SMALL;
     if (capacity > ~(data_size_t)0) return STATUS_INVALID_PARAMETER;
-    if (send_msg && send_msg->TotalLength != sizeof(*send_msg) + send_msg->DataLength)
+    if (send_msg && (send_msg->TotalLength < header_size + send_msg->DataLength ||
+        (!packed32 && send_msg->TotalLength != header_size + send_msg->DataLength)))
         return STATUS_INVALID_PARAMETER;
-    trace_message_data( "send", port_handle, send_msg );
+    if (!packed32) trace_message_data( "send", port_handle, send_msg );
 
     SERVER_START_REQ( alpc_send_receive )
     {
         req->handle = wine_server_obj_handle( port_handle );
         req->flags = flags;
-        req->message_id = send_msg ? send_msg->MessageId : 0;
+        req->message_id = message_id;
         req->send = !!send_msg;
         req->receive = !!recv_msg;
         req->receive_attributes = recv_attributes;
@@ -569,7 +581,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         req->send_attributes = send_msg_attr ? send_msg_attr->ValidAttributes : 0;
         req->message_context = get_message_context( send_msg_attr );
         req->no_wait = timeout && !timeout->QuadPart;
-        if (send_msg) wine_server_add_data( req, send_msg + 1, send_msg->DataLength );
+        if (send_msg) wine_server_add_data( req, (const char *)send_msg + header_size, send_msg->DataLength );
         if (recv_msg) wine_server_set_reply( req, receive_buffer( recv_msg, recv_attributes, &receipt ),
                                             receive_capacity( recv_msg, capacity, recv_attributes ) );
         status = wine_server_call( req );

@@ -801,39 +801,6 @@ typedef struct
 
 typedef struct
 {
-    union
-    {
-        struct
-        {
-            USHORT DataLength;
-            USHORT TotalLength;
-        } DUMMYSTRUCTNAME1;
-        ULONG Length;
-    } DUMMYUNIONNAME1;
-    union
-    {
-        struct
-        {
-            USHORT Type;
-            USHORT DataInfoOffset;
-        } DUMMYSTRUCTNAME2;
-        ULONG ZeroInit;
-    } DUMMYUNIONNAME2;
-    union
-    {
-        CLIENT_ID32 ClientId;
-        double DoNotUseThisField;
-    } DUMMYUNIONNAME3;
-    ULONG MessageId;
-    union
-    {
-        ULONG ClientViewSize;
-        ULONG CallbackId;
-    } DUMMYUNIONNAME4;
-} ALPC_PORT_MESSAGE32, *PALPC_PORT_MESSAGE32, ALPC_PORT_MESSAGE_HEADER32, *PALPC_PORT_MESSAGE_HEADER32;
-
-typedef struct
-{
     ULONG AllocatedAttributes;
     ULONG ValidAttributes;
 } ALPC_MESSAGE_ATTRIBUTES32, *PALPC_MESSAGE_ATTRIBUTES32;
