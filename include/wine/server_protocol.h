@@ -7087,10 +7087,10 @@ struct alpc_impersonate_client_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    unsigned int flags;
     unsigned int message_present;
     unsigned int message_id;
     unsigned int callback_id;
-    char __pad_28[4];
 };
 struct alpc_impersonate_client_reply
 {
@@ -9869,6 +9869,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1094
+#define SERVER_PROTOCOL_VERSION 1095
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

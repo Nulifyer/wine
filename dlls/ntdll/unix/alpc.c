@@ -651,17 +651,24 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
 
 NTSTATUS WINAPI NtAlpcImpersonateClientOfPort( HANDLE port_handle, ALPC_PORT_MESSAGE *msg, void *reserved )
 {
+    ALPC_PORT_MESSAGE message;
     NTSTATUS status;
-    if (reserved) return STATUS_NOT_IMPLEMENTED;
+
+    TRACE( "%p %p %p.\n", port_handle, msg, reserved );
+    if (msg && virtual_uninterrupted_read_memory( msg, &message, sizeof(message) ) != sizeof(message))
+        return STATUS_ACCESS_VIOLATION;
+    if ((ULONG_PTR)reserved & ~0xf) return STATUS_INVALID_PARAMETER;
     SERVER_START_REQ( alpc_impersonate_client )
     {
         req->handle = wine_server_obj_handle( port_handle );
+        req->flags = (ULONG_PTR)reserved;
         req->message_present = !!msg;
-        req->message_id = msg ? msg->MessageId : 0;
-        req->callback_id = msg ? msg->ClientViewSize : 0;
+        req->message_id = msg ? message.MessageId : 0;
+        req->callback_id = msg ? message.ClientViewSize : 0;
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
+    TRACE( "status %#x.\n", status );
     return status;
 }
 

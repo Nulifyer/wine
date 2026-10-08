@@ -947,10 +947,18 @@ int token_assign_label( struct token *token, const struct sid *label )
 
 struct token *get_token_obj( struct process *process, obj_handle_t handle, unsigned int access )
 {
-    if (handle == 0xfffffffb && !current->token)
+    if (handle == 0xfffffffb)
     {
-        set_error( STATUS_NO_TOKEN );
-        return NULL;
+        if (!current->token)
+        {
+            set_error( STATUS_NO_TOKEN );
+            return NULL;
+        }
+        if ((access & TOKEN_QUERY) && current->token->impersonation_level == SecurityAnonymous)
+        {
+            set_error( STATUS_CANT_OPEN_ANONYMOUS );
+            return NULL;
+        }
     }
     return (struct token *)get_handle_obj( process, handle, access, &token_ops );
 }
@@ -1405,6 +1413,11 @@ int token_check_security_descriptor_access( struct token *token,
 const struct acl *token_get_default_dacl( struct token *token )
 {
     return token->default_dacl;
+}
+
+int token_get_impersonation_level( struct token *token )
+{
+    return token->impersonation_level;
 }
 
 const struct sid *token_get_user( struct token *token )
@@ -2196,7 +2209,7 @@ DECL_HANDLER(get_token_sid)
 
     reply->sid_len = 0;
 
-    if ((token = (struct token *)get_handle_obj( current->process, req->handle, TOKEN_QUERY, &token_ops )))
+    if ((token = get_token_obj( current->process, req->handle, TOKEN_QUERY )))
     {
         const struct sid *sid = NULL;
 

@@ -3230,6 +3230,7 @@ DECL_HANDLER(alpc_impersonate_client)
     struct token *source = NULL, *token = NULL;
     int level = SecurityAnonymous, found = 0;
 
+    if (req->flags & ~0xf) { set_error( STATUS_INVALID_PARAMETER ); return; }
     if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
                                                     ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
     if (!req->message_present)
@@ -3247,10 +3248,15 @@ DECL_HANDLER(alpc_impersonate_client)
             if (request->id == req->message_id && request->id == req->callback_id)
             {
                 found = 1;
-                if (!request->target || (request->target != port && request->target->connection_port != port) || !request->token)
+                if (!request->target || (request->target != port && request->target->connection_port != port))
                 { set_error( STATUS_ACCESS_DENIED ); goto done; }
-                source = request->token;
-                level = request->impersonation_level;
+                /* A listener validates message ownership but has no connected
+                 * security context to install. Only its accepted endpoint does. */
+                if (request->target == port)
+                {
+                    if (!(source = request->token)) { set_error( STATUS_ACCESS_DENIED ); goto done; }
+                    level = request->impersonation_level;
+                }
                 break;
             }
         if (!found)
@@ -3270,6 +3276,15 @@ DECL_HANDLER(alpc_impersonate_client)
                 }
         }
         if (!found) { set_error( STATUS_INVALID_MESSAGE ); goto done; }
+    }
+    if (level < (req->flags >> 2)) { set_error( STATUS_ACCESS_DENIED ); goto done; }
+    if (req->flags & 2) level = SecurityAnonymous;
+    else if (source && port->tracking_mode && level > SecurityAnonymous)
+    {
+        /* Dynamic synchronous requests retain the actual sending token. The
+         * negotiated level bounds the requirement check, not that token's level. */
+        int source_level = token_get_impersonation_level( source );
+        if (source_level >= SecurityAnonymous) level = source_level;
     }
     if (source)
     {

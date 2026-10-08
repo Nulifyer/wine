@@ -4063,6 +4063,7 @@ static void dump_alpc_disconnect_port_request( const struct alpc_disconnect_port
 static void dump_alpc_impersonate_client_request( const struct alpc_impersonate_client_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", flags=%08x", req->flags );
     fprintf( stderr, ", message_present=%08x", req->message_present );
     fprintf( stderr, ", message_id=%08x", req->message_id );
     fprintf( stderr, ", callback_id=%08x", req->callback_id );

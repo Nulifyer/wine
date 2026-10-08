@@ -4871,6 +4871,7 @@ struct alpc_message_info
 /* Apply the security context retained by an endpoint or delivered request. */
 @REQ(alpc_impersonate_client)
     obj_handle_t handle;
+    unsigned int flags;
     unsigned int message_present;
     unsigned int message_id;
     unsigned int callback_id;
