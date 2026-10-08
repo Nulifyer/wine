@@ -608,6 +608,47 @@ NTSTATUS WINAPI NtAlpcCancelMessage( HANDLE port_handle, ULONG flags, ALPC_CONTE
     return status;
 }
 
+NTSTATUS WINAPI NtAlpcCreateResourceReserve( HANDLE port, ULONG flags, SIZE_T size, ULONG *output )
+{
+    ULONG before, id = 0;
+    NTSTATUS status;
+
+    TRACE( "%p, %#x, %Iu, %p.\n", port, (unsigned int)flags, size, output );
+    if (flags) return STATUS_INVALID_PARAMETER;
+    if (virtual_uninterrupted_read_memory( output, &before, sizeof(before) ) != sizeof(before) ||
+        virtual_uninterrupted_write_memory( output, &before, sizeof(before) ))
+        return STATUS_ACCESS_VIOLATION;
+    SERVER_START_REQ( alpc_create_resource_reserve )
+    {
+        req->handle = wine_server_obj_handle( port );
+        req->size = size;
+        status = wine_server_call( req );
+        if (!status) id = reply->id;
+    }
+    SERVER_END_REQ;
+    if (!status && virtual_uninterrupted_write_memory( output, &id, sizeof(id) ))
+    {
+        NtAlpcDeleteResourceReserve( port, 0, id );
+        status = STATUS_ACCESS_VIOLATION;
+    }
+    return status;
+}
+
+NTSTATUS WINAPI NtAlpcDeleteResourceReserve( HANDLE port, ULONG flags, ULONG id )
+{
+    NTSTATUS status;
+    TRACE( "%p, %#x, %#x.\n", port, (unsigned int)flags, (unsigned int)id );
+    if (flags || !(id & 0x80000000)) return STATUS_INVALID_PARAMETER;
+    SERVER_START_REQ( alpc_delete_resource_reserve )
+    {
+        req->handle = wine_server_obj_handle( port );
+        req->id = id;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
                                            ALPC_PORT_MESSAGE *send_msg,
                                            ALPC_MESSAGE_ATTRIBUTES *send_msg_attr,
@@ -654,6 +695,9 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         req->handle = wine_server_obj_handle( port_handle );
         req->flags = flags;
         req->message_id = message_id;
+        req->callback_id = !send_msg ? 0 : packed32 ? ((ALPC_PORT_MESSAGE32 *)send_msg)->ClientViewSize :
+                                                   send_msg->ClientViewSize;
+        req->message_type = send_msg ? send_msg->Type : 0;
         req->send = !!send_msg;
         req->receive = !!recv_msg;
         req->receive_attributes = recv_attributes;

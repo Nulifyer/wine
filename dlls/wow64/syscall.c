@@ -638,6 +638,24 @@ NTSTATUS WINAPI wow64_NtAlpcCreatePort( UINT *args )
     return status;
 }
 
+/* Resource IDs have four-byte output on both ABIs, not handle conversion. */
+NTSTATUS WINAPI wow64_NtAlpcCreateResourceReserve( UINT *args )
+{
+    HANDLE port = get_handle( &args );
+    ULONG flags = get_ulong( &args );
+    SIZE_T size = get_ulong( &args );
+    ULONG *id = get_ptr( &args );
+    return NtAlpcCreateResourceReserve( port, flags, size, id );
+}
+
+NTSTATUS WINAPI wow64_NtAlpcDeleteResourceReserve( UINT *args )
+{
+    HANDLE port = get_handle( &args );
+    ULONG flags = get_ulong( &args );
+    ULONG id = get_ulong( &args );
+    return NtAlpcDeleteResourceReserve( port, flags, id );
+}
+
 /**********************************************************************
  *           wow64_NtAlpcSetInformation
  */

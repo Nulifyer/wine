@@ -4746,6 +4746,19 @@ enum inproc_sync_type
 @END
 
 
+/* A reserve preallocates one reusable message and request on a port. */
+@REQ(alpc_create_resource_reserve)
+    obj_handle_t handle;
+    mem_size_t size;
+@REPLY
+    unsigned int id;
+@END
+
+@REQ(alpc_delete_resource_reserve)
+    obj_handle_t handle;
+    unsigned int id;
+@END
+
 struct alpc_security_qos
 {
     int impersonation_level;
@@ -4774,6 +4787,8 @@ struct alpc_message_info
     obj_handle_t handle;
     unsigned int flags;
     unsigned int message_id;
+    unsigned int callback_id;
+    unsigned int message_type;
     int send;
     int receive;
     int wow64;

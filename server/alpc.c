@@ -148,7 +148,8 @@ struct alpc_request
     struct alpc_message *message;
     struct alpc_message *reply; /* weak, while a released private reply is fetched */
     struct alpc_wait *wait; /* weak; its private handle owns the blocking call */
-    unsigned int id, wow64, canceled, released;
+    unsigned int id, callback_id, wow64, canceled, released, no_impersonate;
+    struct alpc_resource_reserve *reserve; /* retained until reply consumption */
     client_ptr_t message_context;         /* context returned to the originating endpoint */
     client_ptr_t receive_message_context; /* context delivered to the current receiver */
     process_id_t pid;
@@ -178,7 +179,8 @@ static void cleanup_thread_message_waits( struct thread *thread );
 static void dispatch_receives( struct alpc_port *port );
 static void dispatch_all_receives( void );
 static int send_message( struct alpc_port *port, unsigned int flags, unsigned int id,
-                         int wow64, unsigned int send_attributes, client_ptr_t message_context,
+                         unsigned int callback_id, unsigned int message_type, int wow64,
+                         unsigned int send_attributes, client_ptr_t message_context,
                          const void *data, data_size_t size, struct alpc_wait *wait );
 
 static struct list message_requests = LIST_INIT(message_requests);
@@ -190,12 +192,71 @@ struct alpc_message
 {
     struct list entry;
     struct alpc_request *request;
+    struct alpc_resource_reserve *reserve; /* reference while this buffer is in use */
     struct alpc_port *destination; /* weak; queue or accepted receive view */
     struct alpc_message_info info;
     struct token *token; /* owned security capture for this receipt */
     unsigned __int64 work_ticket; /* opaque per-message work-on-behalf receipt */
     unsigned char data[];
 };
+
+/* Registration, active request and queued/private buffer each own a reference.
+ * Deletion removes registration; an in-flight message can still complete. */
+struct alpc_resource_reserve
+{
+    struct list entry;
+    struct alpc_port *owner; /* weak; final handle close unregisters resources */
+    struct alpc_message *buffer;
+    struct alpc_request *spare_request;
+    unsigned int refs, id, message_id, size, buffer_in_use;
+};
+static struct list resource_reserves = LIST_INIT(resource_reserves);
+static unsigned int next_resource_id;
+
+static unsigned int allocate_resource_id(void)
+{
+    struct alpc_resource_reserve *reserve;
+    struct alpc_request *request;
+    unsigned int id;
+    int occupied;
+
+    do
+    {
+        if (++next_resource_id >= 0x7fffffff) next_resource_id = 1;
+        id = 0x80000000 | next_resource_id;
+        occupied = 0;
+        LIST_FOR_EACH_ENTRY( reserve, &resource_reserves, struct alpc_resource_reserve, entry )
+            if (reserve->id == id) { occupied = 1; break; }
+        if (!occupied)
+            LIST_FOR_EACH_ENTRY( request, &message_requests, struct alpc_request, entry )
+                if (request->reserve && request->reserve->id == id) { occupied = 1; break; }
+    } while (occupied);
+    return id;
+}
+
+static void release_resource_reserve( struct alpc_resource_reserve *reserve )
+{
+    if (--reserve->refs) return;
+    assert( !reserve->owner && !reserve->buffer_in_use );
+    free( reserve->spare_request );
+    free( reserve->buffer );
+    free( reserve );
+}
+
+static void unregister_resource_reserve( struct alpc_resource_reserve *reserve )
+{
+    list_remove( &reserve->entry );
+    reserve->owner = NULL;
+    release_resource_reserve( reserve );
+}
+
+static struct alpc_resource_reserve *find_resource_reserve( struct alpc_port *port, unsigned int id )
+{
+    struct alpc_resource_reserve *reserve;
+    LIST_FOR_EACH_ENTRY( reserve, &resource_reserves, struct alpc_resource_reserve, entry )
+        if (reserve->id == id && (reserve->owner == port || reserve->owner->peer == port)) return reserve;
+    return NULL;
+}
 
 static void free_message_request( struct alpc_request *request );
 
@@ -213,7 +274,13 @@ static void free_message( struct alpc_message *message )
     if (!message) return;
     if (message->request && message->request->reply == message) free_message_request( message->request );
     if (message->token) release_object( message->token );
-    free( message );
+    if (message->reserve)
+    {
+        struct alpc_resource_reserve *reserve = message->reserve;
+        reserve->buffer_in_use = 0;
+        release_resource_reserve( reserve );
+    }
+    else free( message );
 }
 
 /* Token metadata is a bounded prefix of successful variable reply data.
@@ -931,7 +998,7 @@ static int handle_dwm_session_message( struct alpc_port *port, const struct alpc
          * ordinary port path. */
         if (message[0] == 0x40000025)
             port->kernel_session_phase = next_phase;
-        else if (send_message( port, req->flags, req->message_id, req->wow64,
+        else if (send_message( port, req->flags, req->message_id, req->callback_id, req->message_type, req->wow64,
                                req->send_attributes, req->message_context,
                                message, size, NULL ))
         {
@@ -990,13 +1057,11 @@ void cleanup_thread_alpc( struct thread *thread )
     cleanup_thread_message_waits( thread );
 }
 
-static struct alpc_message *new_message( const void *data, data_size_t size, unsigned int type,
-                                        unsigned int id, struct thread *sender )
+static void initialize_message( struct alpc_message *message, const void *data, data_size_t size,
+                                 unsigned int type, unsigned int id, struct thread *sender )
 {
-    struct alpc_message *message;
-    if (!(message = mem_alloc( sizeof(*message) + size ))) return NULL;
-    if (!id && !(id = ++next_message_id)) id = ++next_message_id;
     message->request = NULL;
+    message->reserve = NULL;
     message->destination = NULL;
     message->token = NULL;
     message->work_ticket = 0;
@@ -1008,6 +1073,32 @@ static struct alpc_message *new_message( const void *data, data_size_t size, uns
     message->info.tid = sender->id;
     message->info.size = size;
     if (size) memcpy( message->data, data, size );
+}
+
+static struct alpc_message *new_message( const void *data, data_size_t size, unsigned int type,
+                                        unsigned int id, struct thread *sender )
+{
+    struct alpc_message *message;
+    if (!(message = mem_alloc( sizeof(*message) + size ))) return NULL;
+    if (!id && !(id = ++next_message_id)) id = ++next_message_id;
+    initialize_message( message, data, size, type, id, sender );
+    return message;
+}
+
+static struct alpc_message *reserved_message( struct alpc_resource_reserve *reserve, const void *data,
+                                             data_size_t size, unsigned int type, unsigned int callback_id )
+{
+    struct alpc_message *message = reserve->buffer;
+    if (reserve->buffer_in_use || size > reserve->size)
+    {
+        set_error( STATUS_NOT_IMPLEMENTED ); /* capacity exhaustion is not yet observed */
+        return NULL;
+    }
+    initialize_message( message, data, size, type, reserve->message_id, current );
+    message->info.callback_id = callback_id;
+    message->reserve = reserve;
+    reserve->refs++;
+    reserve->buffer_in_use = 1;
     return message;
 }
 
@@ -1566,7 +1657,15 @@ static void free_message_request( struct alpc_request *request )
     list_remove( &request->entry );
     if (request->token) release_object( request->token );
     if (request->sender_process) release_object( request->sender_process );
-    free( request );
+    if (request->reserve)
+    {
+        struct alpc_resource_reserve *reserve = request->reserve;
+        assert( !reserve->spare_request );
+        memset( request, 0, sizeof(*request) );
+        reserve->spare_request = request;
+        release_resource_reserve( reserve );
+    }
+    else free( request );
 }
 
 static struct alpc_port *message_queue( struct alpc_port *endpoint );
@@ -1588,6 +1687,7 @@ static struct alpc_message *new_cancellation( struct alpc_request *request )
     struct alpc_message *message;
     if (!(message = new_message( NULL, 0, ALPC_MESSAGE_TYPE_CANCELED |
                                 (request->wow64 ? 0x1000 : 0), request->id, request->target->thread ))) return NULL;
+    message->info.callback_id = request->callback_id;
     message->info.pid = request->pid;
     message->info.tid = request->tid;
     return message;
@@ -1970,15 +2070,28 @@ static struct alpc_port *message_queue( struct alpc_port *endpoint )
 }
 
 static int send_message( struct alpc_port *port, unsigned int flags, unsigned int id,
-                         int wow64, unsigned int send_attributes, client_ptr_t message_context,
+                         unsigned int callback_id, unsigned int message_type, int wow64,
+                         unsigned int send_attributes, client_ptr_t message_context,
                          const void *data, data_size_t size, struct alpc_wait *wait )
 {
     struct alpc_port *target = port, *queue, *origin = port;
     struct alpc_request *request = NULL, *candidate;
     struct alpc_message *message;
+    struct alpc_resource_reserve *reserve = NULL;
+    int reserved_send = (message_type & 0x4000) && (id & 0x80000000);
     unsigned int type = flags & 0x10000 ? 3 : 0x2001;
     client_ptr_t received_context;
 
+    if (reserved_send)
+    {
+        if (!(reserve = find_resource_reserve( port, id )) || reserve->owner != port)
+        { set_error( STATUS_OBJECTID_NOT_FOUND ); return 0; }
+        if (!reserve->spare_request) { set_error( STATUS_RESOURCE_IN_USE ); return 0; }
+        if (flags || port->type != COMMUNICATION_PORT)
+        { set_error( STATUS_NOT_IMPLEMENTED ); return 0; }
+        id = 0;
+        if (!(callback_id = ++next_message_id)) callback_id = ++next_message_id;
+    }
     if (port->type == COMMUNICATION_PORT)
     {
         if (port->status == DISCONNECTED || (!port->peer && !id))
@@ -2030,6 +2143,9 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
             set_error( STATUS_INVALID_MESSAGE );
             return 0;
         }
+        if (request->reserve && request->callback_id != callback_id)
+        { set_error( STATUS_INVALID_MESSAGE ); return 0; }
+        if (request->reserve) reserve = request->reserve;
         /* A released private reply is already owned by the waiting operation.
          * Retain its request for result cleanup and impersonation, but reject
          * another reply independently of the retargeted endpoint pointers. */
@@ -2075,7 +2191,10 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
         set_error( STATUS_PORT_MESSAGE_TOO_LONG );
         return 0;
     }
-    if (!(message = new_message( data, size, type | (wow64 ? 0x1000 : 0), id, current ))) return 0;
+    type |= (message_type & 0x4000) | (wow64 ? 0x1000 : 0);
+    message = reserve ? reserved_message( reserve, data, size, type, callback_id ) :
+                        new_message( data, size, type, id, current );
+    if (!message) return 0;
     if (send_attributes & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)
     {
         if (!(message->work_ticket = thread_get_work_ticket( current )))
@@ -2103,7 +2222,16 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
     received_context = request ? request->message_context : target->initial_message_context;
     if (!request && !(flags & 0x10000) && port->type == COMMUNICATION_PORT)
     {
-        if (!(request = mem_alloc( sizeof(*request) ))) { free_message( message ); return 0; }
+        if (reserve)
+        {
+            request = reserve->spare_request;
+            reserve->spare_request = NULL;
+            reserve->refs++;
+        }
+        else if (!(request = mem_alloc( sizeof(*request) ))) { free_message( message ); return 0; }
+        request->reserve = reserve;
+        request->callback_id = message->info.callback_id;
+        request->no_impersonate = !!(message_type & 0x4000);
         request->token = NULL;
         request->sender_process = NULL;
         request->reply = NULL;
@@ -2196,6 +2324,11 @@ static int alpc_port_close_handle( struct object *obj, struct process *process, 
 
     if (cancel_operation) finish_connect_operation( port );
     if (obj->handle_count != 1 && !cancel_operation) return 1;
+    {
+        struct alpc_resource_reserve *reserve, *next;
+        LIST_FOR_EACH_ENTRY_SAFE( reserve, next, &resource_reserves, struct alpc_resource_reserve, entry )
+            if (reserve->owner == port) unregister_resource_reserve( reserve );
+    }
     if (port->pending_listener)
     {
         struct alpc_port *listener = port->pending_listener;
@@ -2382,6 +2515,50 @@ DECL_HANDLER(alpc_create_port)
     if (params.root) release_object( params.root );
 }
 
+DECL_HANDLER(alpc_create_resource_reserve)
+{
+    struct alpc_port *port;
+    struct alpc_resource_reserve *reserve;
+
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                    ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
+    if (req->size < 40) { set_error( STATUS_INVALID_PARAMETER ); goto done; }
+    if (req->size > 65495) { set_error( STATUS_BUFFER_OVERFLOW ); goto done; }
+    if (!(reserve = mem_alloc( sizeof(*reserve) ))) goto done;
+    memset( reserve, 0, sizeof(*reserve) );
+    reserve->buffer = mem_alloc( sizeof(*reserve->buffer) + req->size );
+    reserve->spare_request = mem_alloc( sizeof(*reserve->spare_request) );
+    if (!reserve->buffer || !reserve->spare_request)
+    {
+        free( reserve->buffer );
+        free( reserve->spare_request );
+        free( reserve );
+        goto done;
+    }
+    memset( reserve->spare_request, 0, sizeof(*reserve->spare_request) );
+    reserve->owner = port;
+    reserve->refs = 1;
+    reserve->size = req->size;
+    if (!(reserve->message_id = ++next_message_id)) reserve->message_id = ++next_message_id;
+    reserve->id = allocate_resource_id();
+    list_add_tail( &resource_reserves, &reserve->entry );
+    reply->id = reserve->id;
+done:
+    release_object( port );
+}
+
+DECL_HANDLER(alpc_delete_resource_reserve)
+{
+    struct alpc_port *port;
+    struct alpc_resource_reserve *reserve;
+
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                    ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
+    if ((reserve = find_resource_reserve( port, req->id ))) unregister_resource_reserve( reserve );
+    else set_error( STATUS_INVALID_HANDLE );
+    release_object( port );
+}
+
 /* The listening-port queue is shared by every duplicate of its handle. */
 DECL_HANDLER(alpc_send_receive)
 {
@@ -2425,7 +2602,7 @@ DECL_HANDLER(alpc_send_receive)
     }
     if ((req->flags & 0x20000) && !reply_receive && !(wait = create_message_wait( capacity ))) goto done;
     if (req->send && !send_message( port, reply_receive ? 1 : req->flags, req->message_id,
-                                    req->wow64, req->send_attributes, req->message_context,
+                                    req->callback_id, req->message_type, req->wow64, req->send_attributes, req->message_context,
                                     get_req_data(), size, wait )) goto done;
     if (wait)
     {
@@ -2525,7 +2702,7 @@ DECL_HANDLER(alpc_cancel_message)
 
     LIST_FOR_EACH_ENTRY( candidate, &message_requests, struct alpc_request, entry )
         if (candidate->id == req->message_id &&
-            (!req->callback_id || candidate->id == req->callback_id))
+            (!req->callback_id || candidate->callback_id == req->callback_id))
         {
             request = candidate;
             break;
@@ -2963,7 +3140,7 @@ DECL_HANDLER(alpc_query_message_security)
     if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
                                                     ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
     LIST_FOR_EACH_ENTRY( candidate, &message_requests, struct alpc_request, entry )
-        if (candidate->id == req->message_id && candidate->id == req->callback_id)
+        if (candidate->id == req->message_id && candidate->callback_id == req->callback_id)
         {
             request = candidate;
             break;
@@ -3016,7 +3193,7 @@ DECL_HANDLER(alpc_open_sender)
      * allocated when those probes failed. */
     if (req->capture_status) { set_error( req->capture_status ); goto done; }
     LIST_FOR_EACH_ENTRY( request, &message_requests, struct alpc_request, entry )
-        if (request->id == req->message_id && request->id == req->callback_id)
+        if (request->id == req->message_id && request->callback_id == req->callback_id)
         {
             found = 1;
             if (port != request->queue && port != request->target && port != request->source)
@@ -3187,7 +3364,7 @@ DECL_HANDLER(start_dwm_kernel)
         set_winstation_composited( port->composited_winstation, 1 );
     }
     if (initializing)
-        send_message( port, 0x10000, 0, 0, 0, 0,
+        send_message( port, 0x10000, 0, 0, 0, 0, 0, 0,
                       startup_begin, sizeof(startup_begin), NULL );
 }
 
@@ -3278,9 +3455,10 @@ DECL_HANDLER(alpc_impersonate_client)
     else
     {
         LIST_FOR_EACH_ENTRY( request, &message_requests, struct alpc_request, entry )
-            if (request->id == req->message_id && request->id == req->callback_id)
+            if (request->id == req->message_id && request->callback_id == req->callback_id)
             {
                 found = 1;
+                if (request->no_impersonate) { set_error( STATUS_ACCESS_DENIED ); goto done; }
                 if (!request->target || (request->target != port && request->target->connection_port != port))
                 { set_error( STATUS_ACCESS_DENIED ); goto done; }
                 /* A listener validates message ownership but has no connected

@@ -3936,12 +3936,31 @@ static void dump_alpc_create_port_reply( const struct alpc_create_port_reply *re
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_alpc_create_resource_reserve_request( const struct alpc_create_resource_reserve_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_uint64( ", size=", &req->size );
+}
+
+static void dump_alpc_create_resource_reserve_reply( const struct alpc_create_resource_reserve_reply *req )
+{
+    fprintf( stderr, " id=%08x", req->id );
+}
+
+static void dump_alpc_delete_resource_reserve_request( const struct alpc_delete_resource_reserve_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", id=%08x", req->id );
+}
+
 static void dump_alpc_send_receive_request( const struct alpc_send_receive_request *req )
 {
     fprintf( stderr, " receive_attributes=%08x", req->receive_attributes );
     fprintf( stderr, ", handle=%04x", req->handle );
     fprintf( stderr, ", flags=%08x", req->flags );
     fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", callback_id=%08x", req->callback_id );
+    fprintf( stderr, ", message_type=%08x", req->message_type );
     fprintf( stderr, ", send=%d", req->send );
     fprintf( stderr, ", receive=%d", req->receive );
     fprintf( stderr, ", wow64=%d", req->wow64 );
@@ -5347,6 +5366,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_d3dkmt_mutex_release_request,
     (dump_func)dump_alpc_set_completion_request,
     (dump_func)dump_alpc_create_port_request,
+    (dump_func)dump_alpc_create_resource_reserve_request,
+    (dump_func)dump_alpc_delete_resource_reserve_request,
     (dump_func)dump_alpc_send_receive_request,
     (dump_func)dump_alpc_get_message_result_request,
     (dump_func)dump_alpc_connect_port_request,
@@ -5805,6 +5826,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     (dump_func)dump_alpc_set_completion_reply,
     (dump_func)dump_alpc_create_port_reply,
+    (dump_func)dump_alpc_create_resource_reserve_reply,
+    NULL,
     (dump_func)dump_alpc_send_receive_reply,
     (dump_func)dump_alpc_get_message_result_reply,
     (dump_func)dump_alpc_connect_port_reply,
@@ -6263,6 +6286,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "d3dkmt_mutex_release",
     "alpc_set_completion",
     "alpc_create_port",
+    "alpc_create_resource_reserve",
+    "alpc_delete_resource_reserve",
     "alpc_send_receive",
     "alpc_get_message_result",
     "alpc_connect_port",
@@ -6505,6 +6530,7 @@ static const struct
     { "NO_SUCH_FILE",                STATUS_NO_SUCH_FILE },
     { "NO_SUCH_LOGON_SESSION",       STATUS_NO_SUCH_LOGON_SESSION },
     { "NO_TOKEN",                    STATUS_NO_TOKEN },
+    { "OBJECTID_NOT_FOUND",          STATUS_OBJECTID_NOT_FOUND },
     { "OBJECT_NAME_COLLISION",       STATUS_OBJECT_NAME_COLLISION },
     { "OBJECT_NAME_EXISTS",          STATUS_OBJECT_NAME_EXISTS },
     { "OBJECT_NAME_INVALID",         STATUS_OBJECT_NAME_INVALID },

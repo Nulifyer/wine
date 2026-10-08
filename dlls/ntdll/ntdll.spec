@@ -168,6 +168,8 @@
 @ stdcall -syscall NtAlpcConnectPort(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtAlpcConnectPortEx(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtAlpcCreatePort(ptr ptr ptr)
+@ stdcall -syscall NtAlpcCreateResourceReserve(ptr long long ptr)
+@ stdcall -syscall NtAlpcDeleteResourceReserve(ptr long long)
 @ stdcall -syscall NtAlpcDisconnectPort(ptr long)
 @ stdcall NtAlpcQueryInformation(ptr long ptr long ptr)
 @ stdcall -syscall NtAlpcQueryInformationMessage(ptr ptr long ptr long ptr)
@@ -1368,6 +1370,8 @@
 @ stdcall -private ZwAlpcCancelMessage(ptr long ptr) NtAlpcCancelMessage
 @ stdcall -private ZwAlpcConnectPort(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr) NtAlpcConnectPort
 @ stdcall -private ZwAlpcCreatePort(ptr ptr ptr) NtAlpcCreatePort
+@ stdcall -private ZwAlpcCreateResourceReserve(ptr long long ptr) NtAlpcCreateResourceReserve
+@ stdcall -private ZwAlpcDeleteResourceReserve(ptr long long) NtAlpcDeleteResourceReserve
 @ stdcall -private ZwAlpcDisconnectPort(ptr long) NtAlpcDisconnectPort
 @ stdcall -private ZwAlpcQueryInformation(ptr long ptr long ptr) NtAlpcQueryInformation
 @ stdcall -private ZwAlpcQueryInformationMessage(ptr ptr long ptr long ptr) NtAlpcQueryInformationMessage
