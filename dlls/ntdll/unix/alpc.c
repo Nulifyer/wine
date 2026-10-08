@@ -448,9 +448,10 @@ static NTSTATUS open_alpc_sender( HANDLE *output, HANDLE port_handle, ALPC_PORT_
     else if (NtReadVirtualMemory( GetCurrentProcess(), message, &header, sizeof(header), NULL ))
         capture_status = STATUS_ACCESS_VIOLATION;
     /* Validate publication before object allocation. Probe with the original
-     * bytes so failures leave native output unchanged. */
+     * bytes so failures leave native output unchanged. Buffer publication is
+     * local and must not depend on remote-process memory access. */
     if (NtReadVirtualMemory( GetCurrentProcess(), output, &before, sizeof(before), NULL ) ||
-        NtWriteVirtualMemory( GetCurrentProcess(), output, &before, sizeof(before), NULL ))
+        virtual_uninterrupted_write_memory( output, &before, sizeof(before) ))
         capture_status = STATUS_ACCESS_VIOLATION;
 
     SERVER_START_REQ( alpc_open_sender )
@@ -469,7 +470,7 @@ static NTSTATUS open_alpc_sender( HANDLE *output, HANDLE port_handle, ALPC_PORT_
         if (!status) handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
-    if (!status && NtWriteVirtualMemory( GetCurrentProcess(), output, &handle, sizeof(handle), NULL ))
+    if (!status && virtual_uninterrupted_write_memory( output, &handle, sizeof(handle) ))
     {
         NtClose( handle );
         status = STATUS_ACCESS_VIOLATION;
