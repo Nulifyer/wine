@@ -360,7 +360,7 @@ DECL_HANDLER(alpc_connect_port);
 DECL_HANDLER(alpc_get_connect_result);
 DECL_HANDLER(alpc_accept_connect_port);
 DECL_HANDLER(alpc_query_message_security);
-DECL_HANDLER(alpc_open_sender_process);
+DECL_HANDLER(alpc_open_sender);
 DECL_HANDLER(alpc_disconnect_port);
 DECL_HANDLER(alpc_impersonate_client);
 DECL_HANDLER(set_default_hard_error_port);
@@ -818,7 +818,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_alpc_get_connect_result,
     (req_handler)req_alpc_accept_connect_port,
     (req_handler)req_alpc_query_message_security,
-    (req_handler)req_alpc_open_sender_process,
+    (req_handler)req_alpc_open_sender,
     (req_handler)req_alpc_disconnect_port,
     (req_handler)req_alpc_impersonate_client,
     (req_handler)req_set_default_hard_error_port,
@@ -2960,15 +2960,19 @@ C_ASSERT( offsetof(struct alpc_query_message_security_request, length) == 28 );
 C_ASSERT( sizeof(struct alpc_query_message_security_request) == 32 );
 C_ASSERT( offsetof(struct alpc_query_message_security_reply, required) == 8 );
 C_ASSERT( sizeof(struct alpc_query_message_security_reply) == 16 );
-C_ASSERT( offsetof(struct alpc_open_sender_process_request, handle) == 12 );
-C_ASSERT( offsetof(struct alpc_open_sender_process_request, message_id) == 16 );
-C_ASSERT( offsetof(struct alpc_open_sender_process_request, sender_pid) == 20 );
-C_ASSERT( offsetof(struct alpc_open_sender_process_request, sender_tid) == 24 );
-C_ASSERT( offsetof(struct alpc_open_sender_process_request, access) == 28 );
-C_ASSERT( offsetof(struct alpc_open_sender_process_request, attributes) == 32 );
-C_ASSERT( sizeof(struct alpc_open_sender_process_request) == 40 );
-C_ASSERT( offsetof(struct alpc_open_sender_process_reply, handle) == 8 );
-C_ASSERT( sizeof(struct alpc_open_sender_process_reply) == 16 );
+C_ASSERT( offsetof(struct alpc_open_sender_request, handle) == 12 );
+C_ASSERT( offsetof(struct alpc_open_sender_request, message_id) == 16 );
+C_ASSERT( offsetof(struct alpc_open_sender_request, callback_id) == 20 );
+C_ASSERT( offsetof(struct alpc_open_sender_request, sender_pid) == 24 );
+C_ASSERT( offsetof(struct alpc_open_sender_request, sender_tid) == 28 );
+C_ASSERT( offsetof(struct alpc_open_sender_request, access) == 32 );
+C_ASSERT( offsetof(struct alpc_open_sender_request, attributes) == 36 );
+C_ASSERT( offsetof(struct alpc_open_sender_request, open_thread) == 40 );
+C_ASSERT( offsetof(struct alpc_open_sender_request, named) == 44 );
+C_ASSERT( offsetof(struct alpc_open_sender_request, capture_status) == 48 );
+C_ASSERT( sizeof(struct alpc_open_sender_request) == 56 );
+C_ASSERT( offsetof(struct alpc_open_sender_reply, handle) == 8 );
+C_ASSERT( sizeof(struct alpc_open_sender_reply) == 16 );
 C_ASSERT( offsetof(struct alpc_disconnect_port_request, handle) == 12 );
 C_ASSERT( offsetof(struct alpc_disconnect_port_request, flags) == 16 );
 C_ASSERT( sizeof(struct alpc_disconnect_port_request) == 24 );

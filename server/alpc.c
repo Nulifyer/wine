@@ -153,6 +153,7 @@ struct alpc_request
     client_ptr_t receive_message_context; /* context delivered to the current receiver */
     process_id_t pid;
     thread_id_t tid;
+    struct process *sender_process; /* retained independently of the connector */
     struct token *token; /* retained after the sending endpoint closes */
     int impersonation_level;
 };
@@ -1564,6 +1565,7 @@ static void free_message_request( struct alpc_request *request )
     lose_message_wait( request );
     list_remove( &request->entry );
     if (request->token) release_object( request->token );
+    if (request->sender_process) release_object( request->sender_process );
     free( request );
 }
 
@@ -2103,6 +2105,7 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
     {
         if (!(request = mem_alloc( sizeof(*request) ))) { free_message( message ); return 0; }
         request->token = NULL;
+        request->sender_process = NULL;
         request->reply = NULL;
         request->wait = NULL;
         request->message_context = message_context;
@@ -2121,6 +2124,8 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
         request->source = origin;
         request->target = target;
         request->queue = queue;
+        if (request->sender_process) release_object( request->sender_process );
+        request->sender_process = (struct process *)grab_object( current->process );
         request->pid = current->process->id;
         request->tid = current->id;
         request->wow64 = wow64;
@@ -2993,33 +2998,61 @@ done:
     release_object( port );
 }
 
-DECL_HANDLER(alpc_open_sender_process)
+/* Message identity selects retained objects, never an arbitrary client ID.
+ * A synchronous wait pins the actual sending thread. An ordinary request
+ * retains its process but cannot authorize a thread open. */
+DECL_HANDLER(alpc_open_sender)
 {
-    struct alpc_port *listener, *client, *sender = NULL;
+    struct alpc_port *port, *client;
+    struct alpc_request *request;
+    struct process *process = NULL;
+    struct thread *thread = NULL;
+    int found = 0;
 
     reply->handle = 0;
-    if (!(listener = (struct alpc_port *)get_handle_obj( current->process, req->handle,
-                                                        ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
-    if (listener->thread->process != current->process)
-    {
-        set_error( STATUS_ACCESS_DENIED );
-        goto done;
-    }
-    LIST_FOR_EACH_ENTRY( client, &listener->pending_connections, struct alpc_port, pending_entry )
-        if (client->connection_id == req->message_id && client->request_delivered &&
-            client->thread->process->id == req->sender_pid && client->thread->id == req->sender_tid)
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                    ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) return;
+    /* Native port errors precede the client buffer probes. No handle is
+     * allocated when those probes failed. */
+    if (req->capture_status) { set_error( req->capture_status ); goto done; }
+    LIST_FOR_EACH_ENTRY( request, &message_requests, struct alpc_request, entry )
+        if (request->id == req->message_id && request->id == req->callback_id)
         {
-            sender = client;
+            found = 1;
+            if (port != request->queue && port != request->target && port != request->source)
+            { set_error( STATUS_ACCESS_DENIED ); goto done; }
+            if (request->message || request->released || request->canceled)
+            { set_error( STATUS_NOT_IMPLEMENTED ); goto done; }
+            process = request->sender_process;
+            if (request->wait) thread = request->wait->thread;
             break;
         }
-    if (!sender) set_error( STATUS_INVALID_MESSAGE );
-    /* The delivered connection message already authenticates and pins the
-     * sender. Opening that correlated process is part of ALPC admission and
-     * does not repeat the target process DACL check. */
-    else reply->handle = alloc_handle_no_access_check( current->process, sender->thread->process,
-                                                       req->access, req->attributes );
+    if (!found)
+        LIST_FOR_EACH_ENTRY( client, &connecting_ports, struct alpc_port, connecting_entry )
+            if (client->connection_id == req->message_id && client->connection_id == req->callback_id &&
+                client->request_delivered)
+            {
+                found = 1;
+                if (client->pending_listener != port)
+                { set_error( STATUS_ACCESS_DENIED ); goto done; }
+                thread = client->thread;
+                process = thread->process;
+                break;
+            }
+    if (!found) { set_error( STATUS_INVALID_MESSAGE ); goto done; }
+    if (thread && (thread->process->id != req->sender_pid || thread->id != req->sender_tid))
+    { set_error( req->open_thread ? STATUS_ACCESS_DENIED : STATUS_INVALID_CID ); goto done; }
+    if (req->open_thread && !thread)
+    { set_error( STATUS_ACCESS_DENIED ); goto done; }
+    if (!thread && process->id != req->sender_pid)
+    { set_error( STATUS_ACCESS_DENIED ); goto done; }
+    if (req->named) { set_error( STATUS_INVALID_PARAMETER_MIX ); goto done; }
+    /* Delivered authority establishes which object may be opened. Ordinary
+     * object access still enforces the target's DACL and protected ceiling. */
+    reply->handle = alloc_handle( current->process, req->open_thread ? (void *)thread : (void *)process,
+                                  req->access, req->attributes );
 done:
-    release_object( listener );
+    release_object( port );
 }
 
 DECL_HANDLER(alpc_disconnect_port)

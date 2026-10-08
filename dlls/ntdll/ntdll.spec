@@ -174,6 +174,7 @@
 @ stdcall -syscall NtAlpcSetInformation(ptr long ptr long)
 @ stdcall -syscall NtAlpcImpersonateClientOfPort(ptr ptr ptr)
 @ stdcall -syscall NtAlpcOpenSenderProcess(ptr long ptr long long ptr)
+@ stdcall -syscall NtAlpcOpenSenderThread(ptr long ptr long long ptr)
 @ stdcall -syscall NtAlpcSendWaitReceivePort(ptr long ptr ptr ptr ptr ptr ptr)
 @ stdcall -syscall=0x004c NtApphelpCacheControl(long ptr)
 @ stdcall -syscall NtAreMappedFilesTheSame(ptr ptr)

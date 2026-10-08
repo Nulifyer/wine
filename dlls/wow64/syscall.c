@@ -717,27 +717,73 @@ NTSTATUS WINAPI wow64_NtAlpcQueryInformationMessage( UINT *args )
                                           info_class, info, length, return_length );
 }
 
-/**********************************************************************
- *           wow64_NtAlpcOpenSenderProcess
- */
-NTSTATUS WINAPI wow64_NtAlpcOpenSenderProcess( UINT *args )
+static NTSTATUS wow64_open_alpc_sender( UINT *args, BOOL open_thread )
 {
-    ULONG *process_handle_ptr = get_ptr( &args );
+    ULONG *handle_ptr = get_ptr( &args );
     HANDLE port_handle = get_handle( &args );
     ALPC_PORT_MESSAGE32 *message32 = get_ptr( &args );
     ULONG flags = get_ulong( &args );
     ACCESS_MASK access = get_ulong( &args );
     OBJECT_ATTRIBUTES32 *attr32 = get_ptr( &args );
-    ALPC_PORT_MESSAGE message = {0};
-    struct object_attr64 attr;
-    HANDLE process_handle = 0;
+    OBJECT_ATTRIBUTES32 captured_attr;
+    OBJECT_ATTRIBUTES attr = {0}, *attributes = NULL;
+    ALPC_PORT_MESSAGE32 header32;
+    ALPC_PORT_MESSAGE header, *message = (ALPC_PORT_MESSAGE *)message32;
+    HANDLE handle = NULL;
+    ULONG result = 0;
     NTSTATUS status;
 
-    status = NtAlpcOpenSenderProcess( process_handle_ptr ? &process_handle : NULL, port_handle,
-                                      alpc_port_message_header_32to64( &message, message32 ),
-                                      flags, access, objattr_32to64( &attr, attr32 ) );
-    if (!status) put_handle( process_handle_ptr, process_handle );
+    /* WoW64 attribute conversion precedes output clearing. A null attribute
+     * reaches native validation instead of becoming a fabricated structure. */
+    if (attr32)
+    {
+        if (NtReadVirtualMemory( GetCurrentProcess(), attr32, &captured_attr, sizeof(captured_attr), NULL ))
+            return STATUS_ACCESS_VIOLATION;
+        if (captured_attr.Length != sizeof(captured_attr)) return STATUS_INVALID_PARAMETER;
+        attr.Length = sizeof(attr);
+        attr.Attributes = captured_attr.Attributes;
+        attr.ObjectName = ULongToPtr( captured_attr.ObjectName );
+        attributes = &attr;
+    }
+    if (NtWriteVirtualMemory( GetCurrentProcess(), handle_ptr, &result, sizeof(result), NULL ))
+        return STATUS_ACCESS_VIOLATION;
+    if (!(flags & 0x40000000))
+    {
+        /* Preserve port-before-header error precedence when capture fails. */
+        if (NtReadVirtualMemory( GetCurrentProcess(), message32, &header32, sizeof(header32), NULL ))
+            message = NULL;
+        else message = alpc_port_message_header_32to64( &header, &header32 );
+    }
+    /* The native call receives a captured native-width header or the caller's
+     * explicitly selected native header. Other flags do not reject opening. */
+    flags |= 0x40000000;
+    if (open_thread)
+        status = NtAlpcOpenSenderThread( &handle, port_handle, message, flags, access, attributes );
+    else
+        status = NtAlpcOpenSenderProcess( &handle, port_handle, message, flags, access, attributes );
+    result = HandleToULong( handle );
+    if (NtWriteVirtualMemory( GetCurrentProcess(), handle_ptr, &result, sizeof(result), NULL ))
+    {
+        if (handle) NtClose( handle );
+        return STATUS_ACCESS_VIOLATION;
+    }
     return status;
+}
+
+/**********************************************************************
+ *           wow64_NtAlpcOpenSenderProcess
+ */
+NTSTATUS WINAPI wow64_NtAlpcOpenSenderProcess( UINT *args )
+{
+    return wow64_open_alpc_sender( args, FALSE );
+}
+
+/**********************************************************************
+ *           wow64_NtAlpcOpenSenderThread
+ */
+NTSTATUS WINAPI wow64_NtAlpcOpenSenderThread( UINT *args )
+{
+    return wow64_open_alpc_sender( args, TRUE );
 }
 
 /**********************************************************************

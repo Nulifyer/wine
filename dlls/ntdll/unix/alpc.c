@@ -421,31 +421,74 @@ NTSTATUS WINAPI NtAlpcQueryInformationMessage( HANDLE port_handle, ALPC_PORT_MES
     return status;
 }
 
+static NTSTATUS open_alpc_sender( HANDLE *output, HANDLE port_handle, ALPC_PORT_MESSAGE *message,
+                                  ULONG flags, ACCESS_MASK access, OBJECT_ATTRIBUTES *attributes,
+                                  BOOL open_thread )
+{
+    ALPC_PORT_MESSAGE header = {0};
+    OBJECT_ATTRIBUTES attr = {0};
+    HANDLE before, handle = NULL;
+    NTSTATUS status, capture_status = STATUS_SUCCESS;
+
+    if (NtReadVirtualMemory( GetCurrentProcess(), attributes, &attr, sizeof(attr), NULL ))
+        capture_status = STATUS_ACCESS_VIOLATION;
+    if (!(flags & 0x40000000) && (flags & ALPC_MSGFLG_WOW64_CALL))
+    {
+        ALPC_PORT_MESSAGE32 header32;
+        if (NtReadVirtualMemory( GetCurrentProcess(), message, &header32, sizeof(header32), NULL ))
+            capture_status = STATUS_ACCESS_VIOLATION;
+        else
+        {
+            header.MessageId = header32.MessageId;
+            header.ClientViewSize = header32.ClientViewSize;
+            header.ClientId.UniqueProcess = ULongToHandle( header32.ClientId.UniqueProcess );
+            header.ClientId.UniqueThread = ULongToHandle( header32.ClientId.UniqueThread );
+        }
+    }
+    else if (NtReadVirtualMemory( GetCurrentProcess(), message, &header, sizeof(header), NULL ))
+        capture_status = STATUS_ACCESS_VIOLATION;
+    /* Validate publication before object allocation. Probe with the original
+     * bytes so failures leave native output unchanged. */
+    if (NtReadVirtualMemory( GetCurrentProcess(), output, &before, sizeof(before), NULL ) ||
+        NtWriteVirtualMemory( GetCurrentProcess(), output, &before, sizeof(before), NULL ))
+        capture_status = STATUS_ACCESS_VIOLATION;
+
+    SERVER_START_REQ( alpc_open_sender )
+    {
+        req->handle = wine_server_obj_handle( port_handle );
+        req->message_id = header.MessageId;
+        req->callback_id = header.ClientViewSize;
+        req->sender_pid = HandleToULong( header.ClientId.UniqueProcess );
+        req->sender_tid = HandleToULong( header.ClientId.UniqueThread );
+        req->access = access;
+        req->attributes = attr.Attributes;
+        req->open_thread = open_thread;
+        req->named = !!attr.ObjectName;
+        req->capture_status = capture_status;
+        status = wine_server_call( req );
+        if (!status) handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    if (!status && NtWriteVirtualMemory( GetCurrentProcess(), output, &handle, sizeof(handle), NULL ))
+    {
+        NtClose( handle );
+        status = STATUS_ACCESS_VIOLATION;
+    }
+    return status;
+}
+
 NTSTATUS WINAPI NtAlpcOpenSenderProcess( HANDLE *process_handle, HANDLE port_handle,
                                          ALPC_PORT_MESSAGE *message, ULONG flags,
                                          ACCESS_MASK access, OBJECT_ATTRIBUTES *attributes )
 {
-    NTSTATUS status;
+    return open_alpc_sender( process_handle, port_handle, message, flags, access, attributes, FALSE );
+}
 
-    if (!process_handle || !message) return STATUS_ACCESS_VIOLATION;
-    if (flags) return STATUS_INVALID_PARAMETER;
-    if (attributes && (attributes->Length != sizeof(*attributes) || attributes->ObjectName ||
-                       attributes->RootDirectory || attributes->SecurityDescriptor))
-        return STATUS_INVALID_PARAMETER;
-
-    SERVER_START_REQ( alpc_open_sender_process )
-    {
-        req->handle = wine_server_obj_handle( port_handle );
-        req->message_id = message->MessageId;
-        req->sender_pid = HandleToULong( message->ClientId.UniqueProcess );
-        req->sender_tid = HandleToULong( message->ClientId.UniqueThread );
-        req->access = access;
-        req->attributes = attributes ? attributes->Attributes : 0;
-        status = wine_server_call( req );
-        if (!status) *process_handle = wine_server_ptr_handle( reply->handle );
-    }
-    SERVER_END_REQ;
-    return status;
+NTSTATUS WINAPI NtAlpcOpenSenderThread( HANDLE *thread_handle, HANDLE port_handle,
+                                        ALPC_PORT_MESSAGE *message, ULONG flags,
+                                        ACCESS_MASK access, OBJECT_ATTRIBUTES *attributes )
+{
+    return open_alpc_sender( thread_handle, port_handle, message, flags, access, attributes, TRUE );
 }
 
 NTSTATUS WINAPI NtAlpcCreatePort( HANDLE *port_handle, OBJECT_ATTRIBUTES *attr, ALPC_PORT_ATTRIBUTES *port_attr )

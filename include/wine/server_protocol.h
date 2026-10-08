@@ -7052,18 +7052,23 @@ struct alpc_query_message_security_reply
     char __pad_12[4];
 };
 
-struct alpc_open_sender_process_request
+
+struct alpc_open_sender_request
 {
     struct request_header __header;
     obj_handle_t handle;
     unsigned int message_id;
+    unsigned int callback_id;
     process_id_t sender_pid;
-    thread_id_t  sender_tid;
+    thread_id_t sender_tid;
     unsigned int access;
     unsigned int attributes;
-    char __pad_36[4];
+    unsigned int open_thread;
+    unsigned int named;
+    unsigned int capture_status;
+    char __pad_52[4];
 };
-struct alpc_open_sender_process_reply
+struct alpc_open_sender_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
@@ -8846,7 +8851,7 @@ enum request
     REQ_alpc_get_connect_result,
     REQ_alpc_accept_connect_port,
     REQ_alpc_query_message_security,
-    REQ_alpc_open_sender_process,
+    REQ_alpc_open_sender,
     REQ_alpc_disconnect_port,
     REQ_alpc_impersonate_client,
     REQ_set_default_hard_error_port,
@@ -9307,7 +9312,7 @@ union generic_request
     struct alpc_get_connect_result_request alpc_get_connect_result_request;
     struct alpc_accept_connect_port_request alpc_accept_connect_port_request;
     struct alpc_query_message_security_request alpc_query_message_security_request;
-    struct alpc_open_sender_process_request alpc_open_sender_process_request;
+    struct alpc_open_sender_request alpc_open_sender_request;
     struct alpc_disconnect_port_request alpc_disconnect_port_request;
     struct alpc_impersonate_client_request alpc_impersonate_client_request;
     struct set_default_hard_error_port_request set_default_hard_error_port_request;
@@ -9766,7 +9771,7 @@ union generic_reply
     struct alpc_get_connect_result_reply alpc_get_connect_result_reply;
     struct alpc_accept_connect_port_reply alpc_accept_connect_port_reply;
     struct alpc_query_message_security_reply alpc_query_message_security_reply;
-    struct alpc_open_sender_process_reply alpc_open_sender_process_reply;
+    struct alpc_open_sender_reply alpc_open_sender_reply;
     struct alpc_disconnect_port_reply alpc_disconnect_port_reply;
     struct alpc_impersonate_client_reply alpc_impersonate_client_reply;
     struct set_default_hard_error_port_reply set_default_hard_error_port_reply;
@@ -9869,6 +9874,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1095
+#define SERVER_PROTOCOL_VERSION 1096
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

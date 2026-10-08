@@ -4852,15 +4852,20 @@ struct alpc_message_info
     VARARG(data,bytes);
 @END
 
-@REQ(alpc_open_sender_process)
-    obj_handle_t handle;       /* listening port */
-    unsigned int message_id;   /* delivered connection message id */
-    process_id_t sender_pid;   /* delivered sender process id */
-    thread_id_t  sender_tid;   /* delivered sender thread id */
-    unsigned int access;       /* requested process access */
-    unsigned int attributes;   /* returned handle attributes */
+/* Open an object authenticated by a delivered request or pending connection. */
+@REQ(alpc_open_sender)
+    obj_handle_t handle;
+    unsigned int message_id;
+    unsigned int callback_id;
+    process_id_t sender_pid;
+    thread_id_t sender_tid;
+    unsigned int access;
+    unsigned int attributes;
+    unsigned int open_thread;
+    unsigned int named;
+    unsigned int capture_status;
 @REPLY
-    obj_handle_t handle;       /* process handle */
+    obj_handle_t handle;
 @END
 
 @REQ(alpc_disconnect_port)

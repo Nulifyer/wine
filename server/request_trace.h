@@ -4039,17 +4039,21 @@ static void dump_alpc_query_message_security_reply( const struct alpc_query_mess
     dump_varargs_bytes( ", data=", cur_size );
 }
 
-static void dump_alpc_open_sender_process_request( const struct alpc_open_sender_process_request *req )
+static void dump_alpc_open_sender_request( const struct alpc_open_sender_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", message_id=%08x", req->message_id );
+    fprintf( stderr, ", callback_id=%08x", req->callback_id );
     fprintf( stderr, ", sender_pid=%04x", req->sender_pid );
     fprintf( stderr, ", sender_tid=%04x", req->sender_tid );
     fprintf( stderr, ", access=%08x", req->access );
     fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, ", open_thread=%08x", req->open_thread );
+    fprintf( stderr, ", named=%08x", req->named );
+    fprintf( stderr, ", capture_status=%08x", req->capture_status );
 }
 
-static void dump_alpc_open_sender_process_reply( const struct alpc_open_sender_process_reply *req )
+static void dump_alpc_open_sender_reply( const struct alpc_open_sender_reply *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
 }
@@ -5349,7 +5353,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_get_connect_result_request,
     (dump_func)dump_alpc_accept_connect_port_request,
     (dump_func)dump_alpc_query_message_security_request,
-    (dump_func)dump_alpc_open_sender_process_request,
+    (dump_func)dump_alpc_open_sender_request,
     (dump_func)dump_alpc_disconnect_port_request,
     (dump_func)dump_alpc_impersonate_client_request,
     (dump_func)dump_set_default_hard_error_port_request,
@@ -5807,7 +5811,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_get_connect_result_reply,
     (dump_func)dump_alpc_accept_connect_port_reply,
     (dump_func)dump_alpc_query_message_security_reply,
-    (dump_func)dump_alpc_open_sender_process_reply,
+    (dump_func)dump_alpc_open_sender_reply,
     NULL,
     NULL,
     NULL,
@@ -6265,7 +6269,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "alpc_get_connect_result",
     "alpc_accept_connect_port",
     "alpc_query_message_security",
-    "alpc_open_sender_process",
+    "alpc_open_sender",
     "alpc_disconnect_port",
     "alpc_impersonate_client",
     "set_default_hard_error_port",
@@ -6461,6 +6465,7 @@ static const struct
     { "INVALID_PARAMETER_1",         STATUS_INVALID_PARAMETER_1 },
     { "INVALID_PARAMETER_2",         STATUS_INVALID_PARAMETER_2 },
     { "INVALID_PARAMETER_3",         STATUS_INVALID_PARAMETER_3 },
+    { "INVALID_PARAMETER_MIX",       STATUS_INVALID_PARAMETER_MIX },
     { "INVALID_PIPE_STATE",          STATUS_INVALID_PIPE_STATE },
     { "INVALID_READ_MODE",           STATUS_INVALID_READ_MODE },
     { "INVALID_SECURITY_DESCR",      STATUS_INVALID_SECURITY_DESCR },
