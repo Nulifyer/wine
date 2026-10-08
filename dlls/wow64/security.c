@@ -27,6 +27,7 @@
 #include "winternl.h"
 #include "wow64_private.h"
 #include "wine/debug.h"
+#include "wine/exception.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wow);
 
@@ -469,6 +470,39 @@ NTSTATUS WINAPI wow64_NtPrivilegedServiceAuditAlarm( UINT *args )
     return NtPrivilegedServiceAuditAlarm( unicode_str_32to64( &subsystem, subsystem32 ),
                                           unicode_str_32to64( &service, service32 ), token,
                                           privileges, granted );
+}
+
+
+/**********************************************************************
+ *           wow64_NtQuerySecurityAttributesToken
+ */
+NTSTATUS WINAPI wow64_NtQuerySecurityAttributesToken( UINT *args )
+{
+    HANDLE token = get_handle( &args );
+    const UNICODE_STRING32 *names32 = get_ptr( &args );
+    ULONG count = get_ulong( &args );
+    void *buffer = get_ptr( &args );
+    ULONG length = get_ulong( &args );
+    ULONG *retlen = get_ptr( &args );
+    UNICODE_STRING *names = NULL;
+    ULONG i;
+
+    if (names32 && count)
+    {
+        names = Wow64AllocateTemp( (SIZE_T)count * sizeof(*names) );
+        __TRY
+        {
+            for (i = 0; i < count; i++) unicode_str_32to64( names + i, names32 + i );
+        }
+        __EXCEPT_PAGE_FAULT { return STATUS_ACCESS_VIOLATION; }
+        __ENDTRY
+    }
+
+    /* Windows captures a native output buffer. Named absence writes no output,
+     * so caller buffer alignment/protection does not affect this partition. */
+    (void)buffer;
+    (void)length;
+    return NtQuerySecurityAttributesToken( token, names, count, NULL, 0, retlen );
 }
 
 

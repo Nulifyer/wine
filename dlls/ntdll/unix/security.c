@@ -35,6 +35,14 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
+struct token_security_attributes_information
+{
+    USHORT version;
+    USHORT reserved;
+    ULONG count;
+    void *attributes;
+};
+
 static BOOL is_equal_sid( const SID *sid1, const SID *sid2 )
 {
     size_t size1 = offsetof( SID, SubAuthority[sid1->SubAuthorityCount] );
@@ -333,13 +341,6 @@ static const char *debugstr_TokenInformationClass( TOKEN_INFORMATION_CLASS class
 NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS class,
                                          void *info, ULONG length, ULONG *retlen )
 {
-    struct token_security_attributes_information
-    {
-        USHORT version;
-        USHORT reserved;
-        ULONG count;
-        void *attributes;
-    };
     static const ULONG info_len [] =
     {
         0,
@@ -1482,6 +1483,52 @@ NTSTATUS WINAPI NtQuerySecurityPolicy( const UNICODE_STRING *provider, const UNI
     /* No signed application-control secure settings are installed.  Do not
      * fabricate a value or read ordinary registry values as signed policy. */
     return STATUS_NOT_FOUND;
+}
+
+
+/***********************************************************************
+ *             NtQuerySecurityAttributesToken  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQuerySecurityAttributesToken( HANDLE token, const UNICODE_STRING *names, ULONG count,
+                                               void *buffer, ULONG length, ULONG *retlen )
+{
+    struct token_security_attributes_information attributes;
+    UNICODE_STRING name;
+    NTSTATUS status;
+    ULONG i, size, zero = 0;
+    BOOL empty_name = FALSE;
+
+    TRACE( "(%p, %p, %lu, %p, %lu, %p)\n", token, names, count, buffer, length, retlen );
+
+    if (!!buffer != !!length) return STATUS_INVALID_PARAMETER;
+    if (length && (ULONG_PTR)buffer % sizeof(void *)) return STATUS_DATATYPE_MISALIGNMENT;
+    if (!virtual_check_buffer_for_write( buffer, length )) return STATUS_ACCESS_VIOLATION;
+    if ((ULONG_PTR)retlen % sizeof(*retlen)) return STATUS_DATATYPE_MISALIGNMENT;
+    if (!virtual_check_buffer_for_write( retlen, sizeof(*retlen) )) return STATUS_ACCESS_VIOLATION;
+    if (!!names != !!count) return STATUS_INVALID_PARAMETER;
+    if (count)
+    {
+        if ((ULONG_PTR)names % sizeof(void *)) return STATUS_DATATYPE_MISALIGNMENT;
+        if (!virtual_check_buffer_for_read( names, (SIZE_T)count * sizeof(*names) ))
+            return STATUS_ACCESS_VIOLATION;
+        for (i = 0; i < count; i++)
+        {
+            if (virtual_uninterrupted_read_memory( names + i, &name, sizeof(name) ) != sizeof(name))
+                return STATUS_ACCESS_VIOLATION;
+            if (name.Length && (ULONG_PTR)name.Buffer % sizeof(WCHAR)) return STATUS_DATATYPE_MISALIGNMENT;
+            if (!virtual_check_buffer_for_read( name.Buffer, name.Length )) return STATUS_ACCESS_VIOLATION;
+            if (!name.Length) empty_name = TRUE;
+        }
+    }
+
+    /* Resolve and authorize through the existing token-attribute owner. */
+    status = NtQueryInformationToken( token, TokenSecurityAttributes, &attributes, sizeof(attributes), &size );
+    if (status) return status;
+
+    /* Populated attributes and query-all need their own serialization contract. */
+    if (!count || attributes.count) return STATUS_NOT_IMPLEMENTED;
+    if ((status = virtual_uninterrupted_write_memory( retlen, &zero, sizeof(zero) ))) return status;
+    return empty_name ? STATUS_INVALID_PARAMETER : STATUS_NOT_FOUND;
 }
 
 

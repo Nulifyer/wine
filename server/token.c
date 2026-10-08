@@ -947,6 +947,11 @@ int token_assign_label( struct token *token, const struct sid *label )
 
 struct token *get_token_obj( struct process *process, obj_handle_t handle, unsigned int access )
 {
+    if (handle == 0xfffffffb && !current->token)
+    {
+        set_error( STATUS_NO_TOKEN );
+        return NULL;
+    }
     return (struct token *)get_handle_obj( process, handle, access, &token_ops );
 }
 
@@ -2272,7 +2277,7 @@ DECL_HANDLER(get_token_info)
 {
     struct token *token;
 
-    if ((token = (struct token *)get_handle_obj( current->process, req->handle, TOKEN_QUERY, &token_ops )))
+    if ((token = get_token_obj( current->process, req->handle, TOKEN_QUERY )))
     {
         token_get_identity( token, &reply->identity );
         reply->session_id = token->session_id;
