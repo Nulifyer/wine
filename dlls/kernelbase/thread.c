@@ -700,34 +700,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH TerminateThread( HANDLE handle, DWORD exit_code )
  */
 DWORD WINAPI DECLSPEC_HOTPATCH TlsAlloc(void)
 {
-    DWORD index;
-    PEB * const peb = NtCurrentTeb()->Peb;
+    ULONG index;
 
-    RtlAcquirePebLock();
-    index = RtlFindClearBitsAndSet( peb->TlsBitmap, 1, 1 );
-    if (index != ~0U) NtCurrentTeb()->TlsSlots[index] = 0; /* clear the value */
-    else
-    {
-        index = RtlFindClearBitsAndSet( peb->TlsExpansionBitmap, 1, 0 );
-        if (index != ~0U)
-        {
-            if (!NtCurrentTeb()->TlsExpansionSlots &&
-                !(NtCurrentTeb()->TlsExpansionSlots = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                         8 * sizeof(peb->TlsExpansionBitmapBits) * sizeof(void*) )))
-            {
-                RtlClearBits( peb->TlsExpansionBitmap, index, 1 );
-                index = ~0U;
-                SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-            }
-            else
-            {
-                NtCurrentTeb()->TlsExpansionSlots[index] = 0; /* clear the value */
-                index += TLS_MINIMUM_AVAILABLE;
-            }
-        }
-        else SetLastError( ERROR_NO_MORE_ITEMS );
-    }
-    RtlReleasePebLock();
+    if (!set_ntstatus( RtlTlsAlloc( &index ) )) return TLS_OUT_OF_INDEXES;
     return index;
 }
 
@@ -737,23 +712,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH TlsAlloc(void)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH TlsFree( DWORD index )
 {
-    BOOL ret;
-
-    RtlAcquirePebLock();
-    if (index >= TLS_MINIMUM_AVAILABLE)
-    {
-        ret = RtlAreBitsSet( NtCurrentTeb()->Peb->TlsExpansionBitmap, index - TLS_MINIMUM_AVAILABLE, 1 );
-        if (ret) RtlClearBits( NtCurrentTeb()->Peb->TlsExpansionBitmap, index - TLS_MINIMUM_AVAILABLE, 1 );
-    }
-    else
-    {
-        ret = RtlAreBitsSet( NtCurrentTeb()->Peb->TlsBitmap, index, 1 );
-        if (ret) RtlClearBits( NtCurrentTeb()->Peb->TlsBitmap, index, 1 );
-    }
-    if (ret) NtSetInformationThread( GetCurrentThread(), ThreadZeroTlsCell, &index, sizeof(index) );
-    else SetLastError( ERROR_INVALID_PARAMETER );
-    RtlReleasePebLock();
-    return ret;
+    return set_ntstatus( RtlTlsFree( index ) );
 }
 
 
@@ -781,28 +740,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH TlsGetValue( DWORD index )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH TlsSetValue( DWORD index, LPVOID value )
 {
-    if (index < TLS_MINIMUM_AVAILABLE)
-    {
-        NtCurrentTeb()->TlsSlots[index] = value;
-    }
-    else
-    {
-        index -= TLS_MINIMUM_AVAILABLE;
-        if (index >= 8 * sizeof(NtCurrentTeb()->Peb->TlsExpansionBitmapBits))
-        {
-            SetLastError( ERROR_INVALID_PARAMETER );
-            return FALSE;
-        }
-        if (!NtCurrentTeb()->TlsExpansionSlots &&
-            !(NtCurrentTeb()->TlsExpansionSlots = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
-                         8 * sizeof(NtCurrentTeb()->Peb->TlsExpansionBitmapBits) * sizeof(void*) )))
-        {
-            SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-            return FALSE;
-        }
-        NtCurrentTeb()->TlsExpansionSlots[index] = value;
-    }
-    return TRUE;
+    return set_ntstatus( RtlTlsSetValue( index, value ) );
 }
 
 

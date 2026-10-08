@@ -1184,6 +1184,9 @@
 @ stdcall RtlTimeToSecondsSince1970(ptr ptr)
 @ stdcall RtlTimeToSecondsSince1980(ptr ptr)
 @ stdcall RtlTimeToTimeFields (ptr ptr)
+@ stdcall RtlTlsAlloc(ptr)
+@ stdcall RtlTlsFree(long)
+@ stdcall RtlTlsSetValue(long ptr)
 # @ stub RtlTraceDatabaseAdd
 # @ stub RtlTraceDatabaseCreate
 # @ stub RtlTraceDatabaseDestroy

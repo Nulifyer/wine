@@ -501,6 +501,94 @@ DWORD WINAPI RtlGetThreadErrorMode( void )
 
 
 /***********************************************************************
+ *           RtlTlsAlloc  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlTlsAlloc( ULONG *result )
+{
+    PEB *peb = NtCurrentTeb()->Peb;
+    ULONG index;
+
+    RtlAcquirePebLock();
+    index = RtlFindClearBitsAndSet( peb->TlsBitmap, 1, 0 );
+    if (index != ~0u) NtCurrentTeb()->TlsSlots[index] = NULL;
+    else
+    {
+        index = RtlFindClearBitsAndSet( peb->TlsExpansionBitmap, 1, 0 );
+        if (index != ~0u)
+        {
+            if (!NtCurrentTeb()->TlsExpansionSlots &&
+                !(NtCurrentTeb()->TlsExpansionSlots = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                    8 * sizeof(peb->TlsExpansionBitmapBits) * sizeof(void *) )))
+            {
+                RtlClearBits( peb->TlsExpansionBitmap, index, 1 );
+                index = ~0u;
+            }
+            else
+            {
+                NtCurrentTeb()->TlsExpansionSlots[index] = NULL;
+                index += TLS_MINIMUM_AVAILABLE;
+            }
+        }
+    }
+    RtlReleasePebLock();
+    if (index == ~0u) return STATUS_NO_MEMORY;
+    *result = index;
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           RtlTlsFree  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlTlsFree( ULONG index )
+{
+    PEB *peb = NtCurrentTeb()->Peb;
+    RTL_BITMAP *bitmap = peb->TlsBitmap;
+    ULONG bit = index;
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
+
+    if (index >= TLS_MINIMUM_AVAILABLE)
+    {
+        bit -= TLS_MINIMUM_AVAILABLE;
+        if (bit >= 8 * sizeof(peb->TlsExpansionBitmapBits)) return STATUS_INVALID_PARAMETER;
+        bitmap = peb->TlsExpansionBitmap;
+    }
+    RtlAcquirePebLock();
+    /* Clear live thread cells before making the process index reusable. */
+    if (RtlAreBitsSet( bitmap, bit, 1 ) &&
+        NtSetInformationThread( GetCurrentThread(), ThreadZeroTlsCell, &index, sizeof(index) ) >= 0)
+    {
+        RtlClearBits( bitmap, bit, 1 );
+        status = STATUS_SUCCESS;
+    }
+    RtlReleasePebLock();
+    return status;
+}
+
+
+/***********************************************************************
+ *           RtlTlsSetValue  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlTlsSetValue( ULONG index, void *value )
+{
+    PEB *peb = NtCurrentTeb()->Peb;
+
+    if (index < TLS_MINIMUM_AVAILABLE) NtCurrentTeb()->TlsSlots[index] = value;
+    else
+    {
+        index -= TLS_MINIMUM_AVAILABLE;
+        if (index >= 8 * sizeof(peb->TlsExpansionBitmapBits)) return STATUS_INVALID_PARAMETER;
+        if (!NtCurrentTeb()->TlsExpansionSlots &&
+            !(NtCurrentTeb()->TlsExpansionSlots = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                8 * sizeof(peb->TlsExpansionBitmapBits) * sizeof(void *) )))
+            return STATUS_NO_MEMORY;
+        NtCurrentTeb()->TlsExpansionSlots[index] = value;
+    }
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
  *           _errno  (NTDLL.@)
  */
 int * CDECL _errno(void)
