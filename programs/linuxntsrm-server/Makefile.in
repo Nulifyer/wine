@@ -1,7 +1,7 @@
 MODULE = linuxntsrm-server.exe
 IMPORTS = ntdll
 
-EXTRADLLFLAGS = -nodefaultlibs -nostartfiles -mconsole -Wl,--entry,NtProcessStartup
+EXTRADLLFLAGS = -nodefaultlibs -nostartfiles -mconsole -Wl,--subsystem,native -Wl,--entry,NtProcessStartup
 
 SOURCES = \
 	main.c
