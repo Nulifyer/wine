@@ -4581,14 +4581,19 @@ void loader_init( CONTEXT *context, void **entry )
         update_load_config( wm->ldr.DllBase );
 #endif
 
-        if ((status = load_dll( NULL, L"kernel32.dll", 0, &kernel32, FALSE )) != STATUS_SUCCESS)
+        /* Native main images do not implicitly load the Win32 base. Declared
+         * imports still load and attach their dependencies through fixup_imports. */
+        if (RtlImageNtHeader( wm->ldr.DllBase )->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_NATIVE)
         {
-            MESSAGE( "wine: could not load kernel32.dll, status %lx\n", status );
-            NtTerminateProcess( GetCurrentProcess(), status );
+            if ((status = load_dll( NULL, L"kernel32.dll", 0, &kernel32, FALSE )) != STATUS_SUCCESS)
+            {
+                MESSAGE( "wine: could not load kernel32.dll, status %lx\n", status );
+                NtTerminateProcess( GetCurrentProcess(), status );
+            }
+            node_kernel32 = kernel32->ldr.DdagNode;
+            pBaseThreadInitThunk = RtlFindExportedRoutineByName( kernel32->ldr.DllBase, "BaseThreadInitThunk" );
+            LdrGetProcedureAddress( kernel32->ldr.DllBase, &ctrl_routine, 0, (void **)&pCtrlRoutine );
         }
-        node_kernel32 = kernel32->ldr.DdagNode;
-        pBaseThreadInitThunk = RtlFindExportedRoutineByName( kernel32->ldr.DllBase, "BaseThreadInitThunk" );
-        LdrGetProcedureAddress( kernel32->ldr.DllBase, &ctrl_routine, 0, (void **)&pCtrlRoutine );
 
         locale_init();
         if (needs_elevation())
@@ -4641,7 +4646,7 @@ void loader_init( CONTEXT *context, void **entry )
             RtlActivateActivationContext( 0, wm->ldr.ActivationContext, &cookie );
 
         if ((status = process_attach( node_ntdll, context ))
-             || (status = process_attach( node_kernel32, context )))
+             || (node_kernel32 && (status = process_attach( node_kernel32, context ))))
         {
             ERR( "Initializing system dll for %s failed, status %lx\n",
                  debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer), status );
