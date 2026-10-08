@@ -808,6 +808,7 @@ BOOL WINAPI AdjustTokenPrivileges( HANDLE token, BOOL disable, PTOKEN_PRIVILEGES
 BOOL WINAPI CheckTokenMembership( HANDLE token, PSID sid_to_check, PBOOL is_member )
 {
     PTOKEN_GROUPS token_groups = NULL;
+    TOKEN_USER *token_user = NULL;
     HANDLE thread_token = NULL;
     DWORD size, i;
     BOOL ret;
@@ -875,7 +876,23 @@ BOOL WINAPI CheckTokenMembership( HANDLE token, PSID sid_to_check, PBOOL is_memb
         }
     }
 
+    if (*is_member) goto exit;
+
+    /* The user SID need not also appear in TokenGroups. */
+    ret = GetTokenInformation(token, TokenUser, NULL, 0, &size);
+    if (!ret && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+        goto exit;
+    token_user = HeapAlloc(GetProcessHeap(), 0, size);
+    if (!token_user)
+    {
+        ret = FALSE;
+        goto exit;
+    }
+    ret = GetTokenInformation(token, TokenUser, token_user, size, &size);
+    if (ret && EqualSid(sid_to_check, token_user->User.Sid)) *is_member = TRUE;
+
 exit:
+    HeapFree(GetProcessHeap(), 0, token_user);
     HeapFree(GetProcessHeap(), 0, token_groups);
     if (thread_token != NULL) CloseHandle(thread_token);
     return ret;

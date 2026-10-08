@@ -18,6 +18,7 @@ SOURCES = \
 	registry.c \
 	rsrc.rc \
 	security.c \
+	security_membership.c \
 	state_helpers.c \
 	state_space.c \
 	sync.c \
