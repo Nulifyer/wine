@@ -550,6 +550,15 @@ static NTSTATUS connect_lpc_port( HANDLE *handle, UNICODE_STRING *name, SECURITY
         status = NtMapViewOfSection( lpc.section, NtCurrentProcess(), &lpc.base, is_wow64() ? ~0u : 0,
                                     0, &offset, &lpc.size, ViewUnmap, 0, PAGE_READWRITE );
         if (status) goto done;
+        /* Classic LPC commits the delivered range even for SEC_RESERVE storage.
+         * The existing mapping adapter owns shared commitment and peer visibility. */
+        {
+            void *base = lpc.base;
+            SIZE_T size = lpc.size;
+
+            status = NtAllocateVirtualMemory( NtCurrentProcess(), &base, 0, &size, MEM_COMMIT, PAGE_READWRITE );
+            if (status) goto done;
+        }
     }
     attributes.MaxMessageLength = 65535;
     status = connect_port( &port, name, NULL, &attributes, ALPC_SYNC_CONNECTION, sid, NULL, FALSE,

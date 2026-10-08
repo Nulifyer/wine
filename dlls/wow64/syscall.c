@@ -1143,8 +1143,24 @@ NTSTATUS WINAPI wow64_NtWow64CsrClientConnectToServer( UINT *args )
     void *info = get_ptr( &args );
     ULONG length = get_ulong( &args );
     BOOLEAN *server = get_ptr( &args );
+    PEB *peb = NtCurrentTeb()->Peb;
+    PEB32 *peb32 = ULongToPtr( NtCurrentTeb32()->Peb );
+    void *shared = peb->ReadOnlySharedMemoryBase;
+    void **data = peb->ReadOnlyStaticServerData;
+    ULONGLONG peer = peb->CsrServerReadOnlySharedMemoryBase;
+    NTSTATUS status;
 
-    return CsrClientConnectToServer( directory, index, info, length, server );
+    status = CsrClientConnectToServer( directory, index, info, length, server );
+    /* Publication follows a completed native transport, including a later
+     * module error. The native-server lookup branch leaves these fields alone. */
+    if (peb->ReadOnlySharedMemoryBase != shared || peb->ReadOnlyStaticServerData != data ||
+        peb->CsrServerReadOnlySharedMemoryBase != peer)
+    {
+        peb32->ReadOnlySharedMemoryBase = PtrToUlong( peb->ReadOnlySharedMemoryBase );
+        peb32->ReadOnlyStaticServerData = PtrToUlong( peb->ReadOnlyStaticServerData );
+        peb32->CsrServerReadOnlySharedMemoryBase = peb->CsrServerReadOnlySharedMemoryBase;
+    }
+    return status;
 }
 
 
