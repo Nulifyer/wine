@@ -401,6 +401,37 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
 
     TRACE( "(%p,%s,%p,%d,%p)\n", token, debugstr_TokenInformationClass(class), info, length, retlen );
 
+    if (class == TokenPrivateNameSpace || class == TokenBnoIsolation)
+    {
+        /* Probe outputs before resolving the handle. Authorization precedes
+           buffer-size reporting, and failures leave both outputs untouched. */
+        if (!virtual_check_buffer_for_write( retlen, sizeof(*retlen) ) ||
+            (length && !virtual_check_buffer_for_write( info, length )))
+            return STATUS_ACCESS_VIOLATION;
+
+        SERVER_START_REQ( get_token_info )
+        {
+            req->handle = wine_server_obj_handle( token );
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        if (status) return status;
+        len = class == TokenPrivateNameSpace ? sizeof(DWORD) : sizeof(TOKEN_BNO_ISOLATION_INFORMATION);
+        *retlen = len;
+        if (length < len) return STATUS_BUFFER_TOO_SMALL;
+
+        /* Wine creates standard tokens without private namespaces or BNO
+           isolation. Duplicate and filtered tokens retain those properties. */
+        if (class == TokenPrivateNameSpace) *(DWORD *)info = FALSE;
+        else
+        {
+            TOKEN_BNO_ISOLATION_INFORMATION *isolation = info;
+            isolation->IsolationPrefix = NULL;
+            isolation->IsolationEnabled = FALSE;
+        }
+        return STATUS_SUCCESS;
+    }
+
     if (class == TokenProcessTrustLevel)
     {
         BYTE sid[SECURITY_MAX_SID_SIZE];

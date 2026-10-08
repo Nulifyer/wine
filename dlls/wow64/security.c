@@ -532,8 +532,38 @@ NTSTATUS WINAPI wow64_NtQueryInformationToken( UINT *args )
     case TokenVirtualizationEnabled:  /* ULONG */
     case TokenUIAccess:  /* ULONG */
     case TokenIsAppContainer:  /* ULONG */
+    case TokenPrivateNameSpace:  /* ULONG */
         /* nothing to map */
         return NtQueryInformationToken( handle, class, info, len, retlen );
+
+    case TokenBnoIsolation: /* TOKEN_BNO_ISOLATION_INFORMATION */
+    {
+        TOKEN_BNO_ISOLATION_INFORMATION isolation;
+        TOKEN_BNO_ISOLATION_INFORMATION32 *isolation32 = info;
+
+        /* The native capture authorizes the token before caller output probes.
+           Preserve the caller's length on authorization failure. */
+        status = NtQueryInformationToken( handle, class, &isolation, sizeof(isolation), &ret_size );
+        if (status) return status;
+        if (!retlen) return STATUS_ACCESS_VIOLATION;
+        __TRY
+        {
+            *retlen = sizeof(*isolation32);
+        }
+        __EXCEPT_PAGE_FAULT { return STATUS_ACCESS_VIOLATION; }
+        __ENDTRY
+        if (len < sizeof(*isolation32)) return STATUS_BUFFER_TOO_SMALL;
+        __TRY
+        {
+            /* Standard tokens have no prefix string to relocate. Do not write
+               the structure padding or the unused caller buffer. */
+            isolation32->IsolationPrefix = PtrToUlong( isolation.IsolationPrefix );
+            isolation32->IsolationEnabled = isolation.IsolationEnabled;
+        }
+        __EXCEPT_PAGE_FAULT { return STATUS_ACCESS_VIOLATION; }
+        __ENDTRY
+        return STATUS_SUCCESS;
+    }
 
     case TokenProcessTrustLevel: /* optional SID pointer followed by SID */
     {

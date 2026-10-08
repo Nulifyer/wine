@@ -390,6 +390,12 @@ typedef struct
 
 typedef struct
 {
+    ULONG IsolationPrefix;
+    BOOLEAN IsolationEnabled;
+} TOKEN_BNO_ISOLATION_INFORMATION32;
+
+typedef struct
+{
     ULONG PrimaryGroup;
 } TOKEN_PRIMARY_GROUP32;
 
