@@ -603,6 +603,82 @@ static DWORD WINAPI alpc_connect_thread(void *arg)
     return 0;
 }
 
+static void test_received_token_acceptance(void)
+{
+    unsigned int mode;
+
+    if (!pNtAlpcAcceptConnectPort || !pAlpcInitializeMessageAttribute || !pAlpcGetMessageAttribute)
+    {
+        win_skip("ALPC acceptance attributes are unavailable.\n");
+        return;
+    }
+    for (mode = 0; mode < 4; ++mode)
+    {
+        struct alpc_connect_context context = {0};
+        struct alpc_test_frame message = {0};
+        union { ULONGLONG align; BYTE bytes[256]; } buffer;
+        ALPC_MESSAGE_ATTRIBUTES *attributes = (void *)&buffer;
+        ALPC_TOKEN_ATTR *token;
+        OBJECT_ATTRIBUTES object;
+        LARGE_INTEGER zero = {0};
+        HANDLE listener = NULL, server = NULL, thread = NULL;
+        WCHAR name[100];
+        SIZE_T size = sizeof(message), required;
+        ULONG valid;
+        NTSTATUS status;
+
+        winetest_push_context("mode %u", mode);
+        swprintf(name, ARRAY_SIZE(name), L"\\BaseNamedObjects\\WineAcceptToken_%lu_%u",
+                 GetCurrentProcessId(), mode);
+        RtlInitUnicodeString(&context.name, name);
+        init_port_attr(&context.attr, 0x70000, sizeof(message));
+        context.attr.SecurityQos.ImpersonationLevel = SecurityIdentification;
+        context.attr.SecurityQos.ContextTrackingMode = SECURITY_DYNAMIC_TRACKING;
+        InitializeObjectAttributes(&object, &context.name, 0, NULL, NULL);
+        status = pNtAlpcCreatePort(&listener, &object, &context.attr);
+        ok(!status, "Create port returned %#lx.\n", status);
+        if (status) goto cleanup;
+        thread = CreateThread(NULL, 0, alpc_connect_thread, &context, 0, NULL);
+        ok(!!thread, "CreateThread failed, error %lu.\n", GetLastError());
+        if (!thread) goto cleanup;
+        ok(WaitForSingleObject(listener, 3000) == WAIT_OBJECT_0, "Listener not signaled.\n");
+        memset(&buffer, 0xcc, sizeof(buffer));
+        status = pAlpcInitializeMessageAttribute(mode ? 0xfa000000 : ALPC_MESSAGE_TOKEN_ATTRIBUTE,
+                                                 attributes, sizeof(buffer), &required);
+        ok(!status, "Initialize attributes returned %#lx.\n", status);
+        if (status) goto cleanup;
+        status = pNtAlpcSendWaitReceivePort(listener, 0, NULL, NULL, &message.header,
+                                            &size, attributes, &zero);
+        ok(!status, "Receive returned %#lx.\n", status);
+        if (status) goto cleanup;
+        valid = attributes->ValidAttributes;
+        ok(valid == ALPC_MESSAGE_TOKEN_ATTRIBUTE, "Valid attributes %#lx.\n", valid);
+        token = pAlpcGetMessageAttribute(attributes, ALPC_MESSAGE_TOKEN_ATTRIBUTE);
+        if (mode == 2) memset(token, 0x5a, sizeof(*token));
+        SetLastError(0x12345678);
+        status = pNtAlpcAcceptConnectPort(&server, listener, 0, NULL, &context.attr,
+                                          NULL, &message.header, attributes, mode != 3);
+        ok(!status, "Accept returned %#lx.\n", status);
+        ok(GetLastError() == 0x12345678, "Last error changed to %lu.\n", GetLastError());
+        ok(attributes->ValidAttributes == valid, "Valid attributes changed.\n");
+        if (status) goto cleanup;
+        ok(WaitForSingleObject(thread, 5000) == WAIT_OBJECT_0, "Connector did not finish.\n");
+        ok(context.status == (mode == 3 ? STATUS_PORT_CONNECTION_REFUSED : STATUS_SUCCESS),
+           "Connect returned %#lx.\n", context.status);
+
+cleanup:
+        if (listener) CloseHandle(listener);
+        if (thread)
+        {
+            ok(WaitForSingleObject(thread, 11000) == WAIT_OBJECT_0, "Connector did not exit.\n");
+            CloseHandle(thread);
+        }
+        if (!context.status && context.port) CloseHandle(context.port);
+        if (server) CloseHandle(server);
+        winetest_pop_context();
+    }
+}
+
 static BOOL connect_alpc_pair(HANDLE listener, UNICODE_STRING *name, ALPC_PORT_ATTRIBUTES *attr,
                               HANDLE *server, HANDLE *client, void *port_context)
 {
@@ -1164,12 +1240,19 @@ START_TEST(alpc)
         return;
     }
 
+    if (argc > 2 && !strcmp(argv[2], "received-token"))
+    {
+        test_received_token_acceptance();
+        return;
+    }
+
     test_AlpcGetHeaderSize();
     test_AlpcGetMessageAttribute();
     test_AlpcInitializeMessageAttribute();
     test_NtAlpcCreatePort();
     test_NtAlpcQueryInformation();
     test_reply_receive_validation();
+    test_received_token_acceptance();
     test_accepted_port_routing();
     test_empty_view_reply();
     test_NtAlpcCancelMessage();

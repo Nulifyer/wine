@@ -52,7 +52,7 @@ static void trace_message_data( const char *direction, HANDLE port_handle,
 
 /* Resource-bearing input attributes remain outside the current contract. */
 static NTSTATUS validate_message_attributes( const ALPC_MESSAGE_ATTRIBUTES *send,
-                                             const ALPC_MESSAGE_ATTRIBUTES *receive )
+                                             const ALPC_MESSAGE_ATTRIBUTES *receive, BOOL accept_metadata )
 {
     const ALPC_VIEW_ATTR *view;
 
@@ -62,7 +62,8 @@ static NTSTATUS validate_message_attributes( const ALPC_MESSAGE_ATTRIBUTES *send
     if (send && (send->ValidAttributes & ~send->AllocatedAttributes)) return STATUS_INVALID_PARAMETER;
     if (send && (send->ValidAttributes & ~(ALPC_MESSAGE_CONTEXT_ATTRIBUTE |
                                            ALPC_MESSAGE_VIEW_ATTRIBUTE |
-                                           ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE)))
+                                           ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE |
+                                           (accept_metadata ? ALPC_MESSAGE_TOKEN_ATTRIBUTE : 0))))
         return STATUS_NOT_IMPLEMENTED;
     if (send && (send->ValidAttributes & ALPC_MESSAGE_VIEW_ATTRIBUTE))
     {
@@ -188,7 +189,9 @@ NTSTATUS WINAPI NtAlpcAcceptConnectPort( HANDLE *communication_port, HANDLE conn
     if (!communication_port || !send_msg) return STATUS_ACCESS_VIOLATION;
     if (flags || (obj_attr && (obj_attr->ObjectName || obj_attr->SecurityDescriptor)))
         return STATUS_NOT_IMPLEMENTED;
-    if ((status = validate_message_attributes( send_msg_attr, NULL ))) return status;
+    /* Acceptance returns receive-side token metadata. It does not submit a
+     * token: the server retains the connecting thread's authoritative token. */
+    if ((status = validate_message_attributes( send_msg_attr, NULL, TRUE ))) return status;
     if (send_msg->TotalLength != sizeof(*send_msg) + send_msg->DataLength) return STATUS_INVALID_PARAMETER;
     SERVER_START_REQ( alpc_accept_connect_port )
     {
@@ -233,7 +236,7 @@ static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
     if (flags & ~(ALPC_SYNC_CONNECTION | ALPC_PORTFLG_ALLOW_DUP_OBJECT) || !port_attr ||
         (obj_attr && obj_attr->SecurityDescriptor))
         return STATUS_NOT_IMPLEMENTED;
-    if ((status = validate_message_attributes( send_msg_attr, recv_msg_attr ))) return status;
+    if ((status = validate_message_attributes( send_msg_attr, recv_msg_attr, FALSE ))) return status;
     if (!port_name->Buffer || port_name->Length % sizeof(WCHAR)) return STATUS_OBJECT_NAME_INVALID;
     if (connect_msg && (!connect_msg_size || capacity < sizeof(*connect_msg) || capacity > ~(data_size_t)0 ||
                         connect_msg->TotalLength != sizeof(*connect_msg) + connect_msg->DataLength))
@@ -538,7 +541,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
     TRACE( "%p, %#x, %p, %p, %p, %p, %p, %p.\n", port_handle, (unsigned int)flags,
            send_msg, send_msg_attr, recv_msg, recv_buffer_size, recv_msg_attr, timeout );
     if (flags & ~(1 | 0x10000 | 0x20000)) return STATUS_NOT_IMPLEMENTED;
-    if ((status = validate_message_attributes( send_msg_attr, recv_msg_attr ))) return status;
+    if ((status = validate_message_attributes( send_msg_attr, recv_msg_attr, FALSE ))) return status;
     /* Native servers combine a reply with a synchronous receive to return the
      * current result and wait for the next request in one call. */
     if ((flags & 0x20000) &&
