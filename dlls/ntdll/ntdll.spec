@@ -1290,6 +1290,7 @@
 @ stdcall TpAllocTimer(ptr ptr ptr ptr)
 @ stdcall TpAllocWait(ptr ptr ptr ptr)
 @ stdcall TpAllocWork(ptr ptr ptr ptr)
+@ stdcall TpCallbackIndependent(ptr)
 @ stdcall TpCallbackLeaveCriticalSectionOnCompletion(ptr ptr)
 @ stdcall TpCallbackMayRunLong(ptr)
 @ stdcall TpCallbackReleaseMutexOnCompletion(ptr long)

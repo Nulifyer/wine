@@ -34,6 +34,7 @@ static NTSTATUS (WINAPI *pTpAllocTimer)(TP_TIMER **,PTP_TIMER_CALLBACK,PVOID,TP_
 static NTSTATUS (WINAPI *pTpAllocWait)(TP_WAIT **,PTP_WAIT_CALLBACK,PVOID,TP_CALLBACK_ENVIRON *);
 static NTSTATUS (WINAPI *pTpAllocWork)(TP_WORK **,PTP_WORK_CALLBACK,PVOID,TP_CALLBACK_ENVIRON *);
 static NTSTATUS (WINAPI *pTpCallbackMayRunLong)(TP_CALLBACK_INSTANCE *);
+static NTSTATUS (WINAPI *pTpCallbackIndependent)(TP_CALLBACK_INSTANCE *);
 static VOID     (WINAPI *pTpCallbackReleaseSemaphoreOnCompletion)(TP_CALLBACK_INSTANCE *,HANDLE,DWORD);
 static void     (WINAPI *pTpCancelAsyncIoOperation)(TP_IO *);
 static VOID     (WINAPI *pTpDisassociateCallback)(TP_CALLBACK_INSTANCE *);
@@ -85,6 +86,7 @@ static BOOL init_threadpool(void)
     GET_PROC(TpAllocWait);
     GET_PROC(TpAllocWork);
     GET_PROC(TpCallbackMayRunLong);
+    GET_PROC(TpCallbackIndependent);
     GET_PROC(TpCallbackReleaseSemaphoreOnCompletion);
     GET_PROC(TpCancelAsyncIoOperation);
     GET_PROC(TpDisassociateCallback);
@@ -2512,8 +2514,103 @@ static void test_tp_wait_early_closure(void)
     CloseHandle(semaphore);
 }
 
+struct independent_context
+{
+    HANDLE entered, independent, release, returned, second;
+    TP_WORK *second_work;
+    BOOL queue_before;
+};
+
+static void CALLBACK independent_second_cb(TP_CALLBACK_INSTANCE *instance, void *data, TP_WORK *work)
+{
+    SetEvent(((struct independent_context *)data)->second);
+}
+
+static void CALLBACK independent_first_cb(TP_CALLBACK_INSTANCE *instance, void *data, TP_WORK *work)
+{
+    struct independent_context *c = data;
+    NTSTATUS status;
+
+    SetEventWhenCallbackReturns(instance, c->returned);
+    if (c->queue_before) pTpPostWork(c->second_work);
+    SetLastError(0x12345678);
+    status = pTpCallbackIndependent(instance);
+    ok(!status, "TpCallbackIndependent returned %#lx\n", status);
+    ok(GetLastError() == 0x12345678, "last error changed to %lu\n", GetLastError());
+    SetEvent(c->independent);
+    SetEvent(c->entered);
+    WaitForSingleObject(c->release, 5000);
+}
+
+static DWORD WINAPI independent_waiter(void *work)
+{
+    pTpWaitForWork(work, FALSE);
+    return 0;
+}
+
+static void test_tp_independent(void)
+{
+    TP_CALLBACK_ENVIRON environment = {0};
+    struct independent_context c;
+    TP_POOL *pool;
+    TP_WORK *work;
+    NTSTATUS status;
+    HANDLE thread;
+    unsigned i;
+
+    if (!pTpCallbackIndependent) { win_skip("TpCallbackIndependent is unavailable\n"); return; }
+    for (i = 0; i < 2; ++i)
+    {
+        memset(&c, 0, sizeof(c));
+        c.queue_before = i;
+        c.entered = CreateEventW(NULL, TRUE, FALSE, NULL);
+        c.independent = CreateEventW(NULL, TRUE, FALSE, NULL);
+        c.release = CreateEventW(NULL, TRUE, FALSE, NULL);
+        c.returned = CreateEventW(NULL, TRUE, FALSE, NULL);
+        c.second = CreateEventW(NULL, TRUE, FALSE, NULL);
+        status = pTpAllocPool(&pool, NULL);
+        ok(!status, "TpAllocPool returned %#lx\n", status);
+        pTpSetPoolMaxThreads(pool, 1);
+        environment.Version = 1;
+        environment.Pool = pool;
+        status = pTpAllocWork(&c.second_work, independent_second_cb, &c, &environment);
+        ok(!status, "TpAllocWork returned %#lx\n", status);
+        status = pTpAllocWork(&work, independent_first_cb, &c, &environment);
+        ok(!status, "TpAllocWork returned %#lx\n", status);
+        pTpPostWork(work);
+        ok(WaitForSingleObject(c.entered, 2000) == WAIT_OBJECT_0, "first callback did not start\n");
+        ok(WaitForSingleObject(c.independent, 0) == WAIT_OBJECT_0, "independence did not finish\n");
+        if (!c.queue_before) pTpPostWork(c.second_work);
+        ok(WaitForSingleObject(c.second, 2000) == WAIT_OBJECT_0, "second callback did not progress\n");
+        thread = CreateThread(NULL, 0, independent_waiter, work, 0, NULL);
+        ok(WaitForSingleObject(thread, 100) == WAIT_TIMEOUT, "work wait ignored the independent callback\n");
+        ok(WaitForSingleObject(c.returned, 0) == WAIT_TIMEOUT, "return event was set early\n");
+        SetEvent(c.release);
+        ok(WaitForSingleObject(thread, 2000) == WAIT_OBJECT_0, "work wait did not finish\n");
+        ok(WaitForSingleObject(c.returned, 0) == WAIT_OBJECT_0, "return event was not set\n");
+        pTpWaitForWork(c.second_work, FALSE);
+        pTpReleaseWork(work);
+        pTpReleaseWork(c.second_work);
+        pTpReleasePool(pool);
+        CloseHandle(thread);
+        CloseHandle(c.entered);
+        CloseHandle(c.independent);
+        CloseHandle(c.release);
+        CloseHandle(c.returned);
+        CloseHandle(c.second);
+    }
+}
+
 START_TEST(threadpool)
 {
+    char **argv;
+    int argc = winetest_get_mainargs(&argv);
+
+    if (argc > 2 && !strcmp(argv[2], "independent"))
+    {
+        if (init_threadpool()) test_tp_independent();
+        return;
+    }
     test_RtlQueueWorkItem();
     test_RtlRegisterWait();
 
@@ -2527,6 +2624,7 @@ START_TEST(threadpool)
     test_tp_group_cancel();
     test_tp_instance();
     test_tp_disassociate();
+    test_tp_independent();
     test_tp_timer();
     test_tp_window_length();
     test_tp_wait();

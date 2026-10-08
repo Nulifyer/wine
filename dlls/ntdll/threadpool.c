@@ -114,6 +114,7 @@ struct threadpool
     int                     min_workers;
     int                     num_workers;
     int                     num_busy_workers;
+    int                     num_independent_workers;
     LONG                    base_priority;
     struct list             workers;
     HANDLE                  compl_port;
@@ -238,6 +239,8 @@ struct threadpool_instance
     DWORD                   threadid;
     BOOL                    associated;
     BOOL                    may_run_long;
+    BOOL                    independent;
+    BOOL                    pool_worker;
     struct
     {
         CRITICAL_SECTION    *critical_section;
@@ -399,7 +402,7 @@ static inline struct threadpool_instance *impl_from_TP_CALLBACK_INSTANCE( TP_CAL
 
 static void CALLBACK threadpool_worker_proc( void *param );
 static void tp_object_submit( struct threadpool_object *object, BOOL signaled );
-static void tp_object_execute( struct threadpool_object *object, BOOL wait_thread );
+static BOOL tp_object_execute( struct threadpool_object *object, BOOL wait_thread );
 static void tp_object_prepare_shutdown( struct threadpool_object *object );
 static BOOL tp_object_release( struct threadpool_object *object );
 static struct threadpool *default_threadpool = NULL;
@@ -1850,6 +1853,7 @@ static NTSTATUS tp_threadpool_alloc( struct threadpool **out )
     pool->min_workers             = 0;
     pool->num_workers             = 0;
     pool->num_busy_workers        = 0;
+    pool->num_independent_workers = 0;
     pool->base_priority           = 0;
     list_init( &pool->workers );
     pool->stack_info.StackReserve = nt->OptionalHeader.SizeOfStackReserve;
@@ -2158,7 +2162,7 @@ static void tp_object_submit( struct threadpool_object *object, BOOL signaled )
 
     /* Start new worker threads if required. */
     if (pool->num_busy_workers >= pool->num_workers &&
-        pool->num_workers < pool->max_workers)
+        pool->num_workers - pool->num_independent_workers < pool->max_workers)
         status = tp_new_worker_thread( pool );
 
     /* Queue work item and increment refcount. */
@@ -2369,7 +2373,7 @@ static struct list *threadpool_get_next_item( const struct threadpool *pool )
  * Executes a threadpool object callback, object->pool->cs has to be
  * held.
  */
-static void tp_object_execute( struct threadpool_object *object, BOOL wait_thread )
+static BOOL tp_object_execute( struct threadpool_object *object, BOOL wait_thread )
 {
     TP_CALLBACK_INSTANCE *callback_instance;
     struct threadpool_instance instance;
@@ -2404,6 +2408,8 @@ static void tp_object_execute( struct threadpool_object *object, BOOL wait_threa
     instance.threadid                   = GetCurrentThreadId();
     instance.associated                 = TRUE;
     instance.may_run_long               = object->may_run_long;
+    instance.independent                = FALSE;
+    instance.pool_worker                = !wait_thread;
     instance.cleanup.critical_section   = NULL;
     instance.cleanup.mutex              = NULL;
     instance.cleanup.semaphore          = NULL;
@@ -2538,6 +2544,14 @@ skip_cleanup:
         if (object_is_finished( object, FALSE ))
             RtlWakeAllConditionVariable( &object->finished_event );
     }
+
+    if (instance.independent && instance.pool_worker)
+    {
+        assert( pool->num_independent_workers );
+        pool->num_independent_workers--;
+        return TRUE;
+    }
+    return FALSE;
 }
 
 /***********************************************************************
@@ -2559,6 +2573,7 @@ static void CALLBACK threadpool_worker_proc( void *param )
         while ((ptr = threadpool_get_next_item( pool )))
         {
             struct threadpool_object *object = LIST_ENTRY( ptr, struct threadpool_object, pool_entry );
+            BOOL retire;
             assert( object->num_pending_callbacks > 0 );
 
             /* If further pending callbacks are queued, move the work item to
@@ -2567,12 +2582,14 @@ static void CALLBACK threadpool_worker_proc( void *param )
             if (object->num_pending_callbacks > 1)
                 tp_object_prio_queue( object );
 
-            tp_object_execute( object, FALSE );
+            retire = tp_object_execute( object, FALSE );
 
             assert(pool->num_busy_workers);
             pool->num_busy_workers--;
 
             tp_object_release( object );
+            /* An independent worker does not rejoin the pool's bounded capacity. */
+            if (retire) goto done;
         }
 
         /* Shutdown worker thread if requested. */
@@ -2586,12 +2603,13 @@ static void CALLBACK threadpool_worker_proc( void *param )
          * can be terminated. */
         timeout.QuadPart = (ULONGLONG)THREADPOOL_WORKER_TIMEOUT * -10000;
         if (RtlSleepConditionVariableCS( &pool->update_event, &pool->cs, &timeout ) == STATUS_TIMEOUT &&
-            !threadpool_get_next_item( pool ) && (pool->num_workers > max( pool->min_workers, 1 ) ||
+            !threadpool_get_next_item( pool ) && (pool->num_workers - pool->num_independent_workers > max( pool->min_workers, 1 ) ||
             (!pool->min_workers && !pool->objcount)))
         {
             break;
         }
     }
+done:
     pool->num_workers--;
     list_remove( &worker->entry );
     NtClose( worker->thread );
@@ -2924,16 +2942,69 @@ VOID WINAPI TpCallbackLeaveCriticalSectionOnCompletion( TP_CALLBACK_INSTANCE *in
 }
 
 /***********************************************************************
+ *           tp_callback_invalid_parameter    (internal)
+ */
+static NTSTATUS tp_callback_invalid_parameter(void)
+{
+    EXCEPTION_RECORD record = {0};
+
+    record.ExceptionCode = STATUS_INVALID_PARAMETER;
+    RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+    RtlRaiseException( &record );
+    return STATUS_INVALID_PARAMETER;
+}
+
+/***********************************************************************
+ *           TpCallbackIndependent    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpCallbackIndependent( TP_CALLBACK_INSTANCE *instance )
+{
+    struct threadpool_instance *this = impl_from_TP_CALLBACK_INSTANCE( instance );
+    struct threadpool *pool;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    TRACE( "%p\n", instance );
+
+    if (!this) return tp_callback_invalid_parameter();
+    pool = this->object->pool;
+    RtlEnterCriticalSection( &pool->cs );
+    if (this->independent || this->may_run_long)
+    {
+        RtlLeaveCriticalSection( &pool->cs );
+        return tp_callback_invalid_parameter();
+    }
+
+    this->independent = TRUE;
+    if (this->pool_worker)
+    {
+        pool->num_independent_workers++;
+        /* Pending callbacks may have been queued while the pool was at its limit. */
+        if ((threadpool_get_next_item( pool ) ||
+             pool->num_workers - pool->num_independent_workers < pool->min_workers) &&
+            pool->num_busy_workers >= pool->num_workers &&
+            pool->num_workers - pool->num_independent_workers < pool->max_workers)
+            status = tp_new_worker_thread( pool );
+        else
+            RtlWakeConditionVariable( &pool->update_event );
+    }
+    RtlLeaveCriticalSection( &pool->cs );
+    return status;
+}
+
+/***********************************************************************
  *           TpCallbackMayRunLong    (NTDLL.@)
  */
 NTSTATUS WINAPI TpCallbackMayRunLong( TP_CALLBACK_INSTANCE *instance )
 {
     struct threadpool_instance *this = impl_from_TP_CALLBACK_INSTANCE( instance );
-    struct threadpool_object *object = this->object;
+    struct threadpool_object *object;
     struct threadpool *pool;
     NTSTATUS status = STATUS_SUCCESS;
 
     TRACE( "%p\n", instance );
+
+    if (!this) return tp_callback_invalid_parameter();
+    object = this->object;
 
     if (this->threadid != GetCurrentThreadId())
     {
@@ -2941,16 +3012,23 @@ NTSTATUS WINAPI TpCallbackMayRunLong( TP_CALLBACK_INSTANCE *instance )
         return STATUS_UNSUCCESSFUL; /* FIXME */
     }
 
-    if (this->may_run_long)
-        return STATUS_SUCCESS;
-
     pool = object->pool;
     RtlEnterCriticalSection( &pool->cs );
+    if (this->independent)
+    {
+        RtlLeaveCriticalSection( &pool->cs );
+        return tp_callback_invalid_parameter();
+    }
+    if (this->may_run_long)
+    {
+        RtlLeaveCriticalSection( &pool->cs );
+        return STATUS_SUCCESS;
+    }
 
     /* Start new worker threads if required. */
     if (pool->num_busy_workers >= pool->num_workers)
     {
-        if (pool->num_workers < pool->max_workers)
+        if (pool->num_workers - pool->num_independent_workers < pool->max_workers)
         {
             status = tp_new_worker_thread( pool );
         }
@@ -2960,8 +3038,8 @@ NTSTATUS WINAPI TpCallbackMayRunLong( TP_CALLBACK_INSTANCE *instance )
         }
     }
 
-    RtlLeaveCriticalSection( &pool->cs );
     this->may_run_long = TRUE;
+    RtlLeaveCriticalSection( &pool->cs );
     return status;
 }
 
@@ -3266,7 +3344,7 @@ BOOL WINAPI TpSetPoolMinThreads( TP_POOL *pool, DWORD minimum )
 
     RtlEnterCriticalSection( &this->cs );
 
-    while (this->num_workers < minimum)
+    while (this->num_workers - this->num_independent_workers < minimum)
     {
         status = tp_new_worker_thread( this );
         if (status != STATUS_SUCCESS)
