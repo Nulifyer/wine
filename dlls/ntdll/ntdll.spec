@@ -107,6 +107,7 @@
 # @ stub LdrGetDllHandleEx
 @ stdcall LdrGetDllPath(wstr long ptr ptr)
 @ stdcall LdrGetProcedureAddress(ptr ptr long ptr)
+@ stdcall LdrGetProcedureAddressForCaller(ptr ptr long ptr long ptr)
 # @ stub LdrHotPatchRoutine
 @ stub LdrInitShimEngineDynamic
 @ stdcall LdrInitializeThunk(ptr long long long)

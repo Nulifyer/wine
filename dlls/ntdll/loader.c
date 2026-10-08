@@ -2114,14 +2114,12 @@ BOOLEAN WINAPI RtlIsThreadWithinLoaderCallout(void)
 }
 
 
-/******************************************************************
- *		LdrGetProcedureAddress  (NTDLL.@)
- */
-NTSTATUS WINAPI LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
-                                       ULONG ord, PVOID *address)
+static NTSTATUS get_procedure_address( HMODULE module, const ANSI_STRING *name, ULONG ord,
+                                      void **address, const void *caller, BOOL validate_ordinal )
 {
     IMAGE_EXPORT_DIRECTORY *exports;
-    WINE_MODREF *wm;
+    WINE_MODREF *wm, *importer;
+    LDR_DATA_TABLE_ENTRY *caller_module;
     DWORD exp_size;
     NTSTATUS ret = STATUS_PROCEDURE_NOT_FOUND;
 
@@ -2129,11 +2127,17 @@ NTSTATUS WINAPI LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
 
     /* check if the module itself is invalid to return the proper error */
     if (!(wm = get_modref( module ))) ret = STATUS_DLL_NOT_FOUND;
+    else if (validate_ordinal && !name && !ord) ret = STATUS_INVALID_PARAMETER;
     else if ((exports = RtlImageDirectoryEntryToData( module, TRUE,
                                                       IMAGE_DIRECTORY_ENTRY_EXPORT, &exp_size )))
     {
-        void *proc = name ? find_named_export( module, exports, exp_size, name->Buffer, -1, NULL, wm, TRUE )
-                          : find_ordinal_export( module, exports, exp_size, ord - exports->Base, NULL, wm, TRUE );
+        void *proc;
+
+        importer = wm;
+        if (caller && !LdrFindEntryForAddress( caller, &caller_module ))
+            importer = CONTAINING_RECORD( caller_module, WINE_MODREF, ldr );
+        proc = name ? find_named_export( module, exports, exp_size, name->Buffer, -1, NULL, importer, TRUE )
+                    : find_ordinal_export( module, exports, exp_size, ord - exports->Base, NULL, importer, TRUE );
         if (proc)
         {
             *address = proc;
@@ -2148,6 +2152,54 @@ NTSTATUS WINAPI LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
 
     RtlLeaveCriticalSection( &loader_section );
     return ret;
+}
+
+
+/******************************************************************
+ *		LdrGetProcedureAddress  (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrGetProcedureAddress( HMODULE module, const ANSI_STRING *name,
+                                      ULONG ord, void **address )
+{
+    return get_procedure_address( module, name, ord, address, NULL, FALSE );
+}
+
+
+/******************************************************************
+ *		LdrGetProcedureAddressForCaller  (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrGetProcedureAddressForCaller( HMODULE module, const ANSI_STRING *name,
+                                               ULONG ord, void **address, ULONG flags,
+                                               void *caller )
+{
+    ANSI_STRING terminated;
+    char buffer[128], *allocated = NULL;
+    void *proc = NULL;
+    NTSTATUS status;
+
+    TRACE( "%p, %p, %lu, %p, %#lx, %p\n", module, name, ord, address, flags, caller );
+
+    if (name && (name->MaximumLength <= name->Length || name->Buffer[name->Length]))
+    {
+        terminated = *name;
+        terminated.Buffer = buffer;
+        if (name->Length >= sizeof(buffer))
+        {
+            if (!(allocated = RtlAllocateHeap( GetProcessHeap(), 0, (SIZE_T)name->Length + 1 )))
+                return STATUS_INSUFFICIENT_RESOURCES;
+            terminated.Buffer = allocated;
+        }
+        if (name->Length) memcpy( terminated.Buffer, name->Buffer, name->Length );
+        terminated.Buffer[name->Length] = 0;
+        name = &terminated;
+    }
+
+    status = get_procedure_address( module, name, ord, &proc, caller, TRUE );
+    if (status == STATUS_PROCEDURE_NOT_FOUND)
+        status = name ? STATUS_ENTRYPOINT_NOT_FOUND : STATUS_ORDINAL_NOT_FOUND;
+    *address = proc;
+    if (allocated) RtlFreeHeap( GetProcessHeap(), 0, allocated );
+    return status;
 }
 
 

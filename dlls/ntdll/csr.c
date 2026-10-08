@@ -65,9 +65,8 @@ NTSTATUS WINAPI CsrClientConnectToServer( const WCHAR *directory, ULONG index, v
         if (!status)
         {
             RtlInitAnsiString( &export, "CsrCallServerFromServer" );
-            status = LdrGetProcedureAddress( module, &export, 0, (void **)&server_dispatch );
-            /* The native CSR lookup uses LdrGetProcedureAddressForCaller. */
-            if (status == STATUS_PROCEDURE_NOT_FOUND) status = STATUS_ENTRYPOINT_NOT_FOUND;
+            status = LdrGetProcedureAddressForCaller( module, &export, 0, (void **)&server_dispatch,
+                                                     0, __builtin_return_address(0) );
         }
     }
     RtlLeaveCriticalSection( peb->LoaderLock );
