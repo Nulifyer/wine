@@ -18,6 +18,7 @@ SOURCES = \
 	alpc.c \
 	atom.c \
 	crypt.c \
+	csr.c \
 	debugbuffer.c \
 	env.c \
 	error.c \

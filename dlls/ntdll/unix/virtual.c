@@ -7377,6 +7377,18 @@ NTSTATUS WINAPI NtWow64GetNativeSystemInformation( SYSTEM_INFORMATION_CLASS clas
 }
 
 /***********************************************************************
+ *             NtWow64CsrClientConnectToServer    (NTDLL.@)
+ *             ZwWow64CsrClientConnectToServer    (NTDLL.@)
+ */
+NTSTATUS WINAPI NtWow64CsrClientConnectToServer( const WCHAR *directory, ULONG index, void *info,
+                                               ULONG length, BOOLEAN *server )
+{
+    /* Native CSR delegation requires the 64-bit PE runtime. */
+    return STATUS_NOT_SUPPORTED;
+}
+
+
+/***********************************************************************
  *             NtWow64IsProcessorFeaturePresent   (NTDLL.@)
  *             ZwWow64IsProcessorFeaturePresent   (NTDLL.@)
  */

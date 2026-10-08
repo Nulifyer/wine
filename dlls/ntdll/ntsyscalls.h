@@ -302,11 +302,12 @@
     SYSCALL_ENTRY( 0x012a, NtWaitForDebugEvent, 16 ) \
     SYSCALL_ENTRY( 0x012b, NtWaitForKeyedEvent, 16 ) \
     SYSCALL_ENTRY( 0x012c, NtWow64AllocateVirtualMemory64, 28 ) \
-    SYSCALL_ENTRY( 0x012d, NtWow64GetNativeSystemInformation, 16 ) \
-    SYSCALL_ENTRY( 0x012e, NtWow64IsProcessorFeaturePresent, 4 ) \
-    SYSCALL_ENTRY( 0x012f, NtWow64QueryInformationProcess64, 20 ) \
-    SYSCALL_ENTRY( 0x0130, NtWow64ReadVirtualMemory64, 28 ) \
-    SYSCALL_ENTRY( 0x0131, NtWow64WriteVirtualMemory64, 28 )
+    SYSCALL_ENTRY( 0x012d, NtWow64CsrClientConnectToServer, 20 ) \
+    SYSCALL_ENTRY( 0x012e, NtWow64GetNativeSystemInformation, 16 ) \
+    SYSCALL_ENTRY( 0x012f, NtWow64IsProcessorFeaturePresent, 4 ) \
+    SYSCALL_ENTRY( 0x0130, NtWow64QueryInformationProcess64, 20 ) \
+    SYSCALL_ENTRY( 0x0131, NtWow64ReadVirtualMemory64, 28 ) \
+    SYSCALL_ENTRY( 0x0132, NtWow64WriteVirtualMemory64, 28 )
 #ifdef _WIN64
 #define ALL_SYSCALLS \
     SYSCALL_ENTRY( 0x0000, NtAccessCheck, 64 ) \

@@ -1126,6 +1126,21 @@ NTSTATUS WINAPI wow64_NtSetDefaultUILanguage( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtWow64CsrClientConnectToServer
+ */
+NTSTATUS WINAPI wow64_NtWow64CsrClientConnectToServer( UINT *args )
+{
+    const WCHAR *directory = get_ptr( &args );
+    ULONG index = get_ulong( &args );
+    void *info = get_ptr( &args );
+    ULONG length = get_ulong( &args );
+    BOOLEAN *server = get_ptr( &args );
+
+    return CsrClientConnectToServer( directory, index, info, length, server );
+}
+
+
+/**********************************************************************
  *           wow64_NtWow64IsProcessorFeaturePresent
  */
 NTSTATUS WINAPI wow64_NtWow64IsProcessorFeaturePresent( UINT *args )

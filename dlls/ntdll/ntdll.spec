@@ -19,7 +19,7 @@
 @ stub CsrCaptureMessageString
 @ stub CsrCaptureTimeout
 @ stub CsrClientCallServer
-@ stub CsrClientConnectToServer
+@ stdcall CsrClientConnectToServer(ptr long ptr long ptr)
 @ stub CsrClientMaxMessage
 @ stub CsrClientSendMessage
 @ stub CsrClientThreadConnect
@@ -495,6 +495,7 @@
 # @ stub NtWaitLowEventPair
 @ stdcall -syscall=0x0001 NtWorkerFactoryWorkerReady(ptr)
 @ stdcall -syscall -arch=win32 NtWow64AllocateVirtualMemory64(long ptr long long ptr long long)
+@ stdcall -syscall -arch=win32 NtWow64CsrClientConnectToServer(ptr long ptr long ptr)
 @ stdcall -syscall -arch=win32 NtWow64GetNativeSystemInformation(long ptr long ptr)
 @ stdcall -syscall -arch=win32 NtWow64IsProcessorFeaturePresent(long)
 @ stdcall -syscall -arch=win32 NtWow64QueryInformationProcess64(long long ptr long ptr)
@@ -1686,6 +1687,7 @@
 # @ stub ZwWaitLowEventPair
 @ stdcall -private ZwWorkerFactoryWorkerReady(ptr) NtWorkerFactoryWorkerReady
 @ stdcall -private -arch=win32 ZwWow64AllocateVirtualMemory64(long ptr long long ptr long long) NtWow64AllocateVirtualMemory64
+@ stdcall -private -arch=win32 ZwWow64CsrClientConnectToServer(ptr long ptr long ptr) NtWow64CsrClientConnectToServer
 @ stdcall -private -arch=win32 ZwWow64GetNativeSystemInformation(long ptr long ptr) NtWow64GetNativeSystemInformation
 @ stdcall -private -arch=win32 ZwWow64IsProcessorFeaturePresent(long) NtWow64IsProcessorFeaturePresent
 @ stdcall -private -arch=win32 ZwWow64QueryInformationProcess64(long long ptr long ptr) NtWow64QueryInformationProcess64
