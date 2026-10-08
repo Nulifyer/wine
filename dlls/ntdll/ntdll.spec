@@ -1313,6 +1313,7 @@
 @ stdcall TpReleaseTimer(ptr)
 @ stdcall TpReleaseWait(ptr)
 @ stdcall TpReleaseWork(ptr)
+@ stdcall TpSetDefaultPoolStackInformation(ptr)
 @ stdcall TpSetPoolMaxThreads(ptr long)
 @ stdcall TpSetPoolMinThreads(ptr long)
 @ stdcall TpSetPoolStackInformation(ptr ptr)

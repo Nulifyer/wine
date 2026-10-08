@@ -412,6 +412,11 @@ static BOOL tp_object_execute( struct threadpool_object *object, BOOL wait_threa
 static void tp_object_prepare_shutdown( struct threadpool_object *object );
 static BOOL tp_object_release( struct threadpool_object *object );
 static struct threadpool *default_threadpool = NULL;
+/* Serialize default configuration with singleton creation. Pool worker state
+ * remains protected by its existing critical section. */
+static RTL_SRWLOCK default_threadpool_lock;
+static TP_POOL_STACK_INFORMATION default_stack_info;
+static BOOL default_stack_configured;
 
 static BOOL array_reserve(void **elements, unsigned int *capacity, unsigned int count, unsigned int size)
 {
@@ -1873,6 +1878,22 @@ static NTSTATUS tp_threadpool_alloc( struct threadpool **out )
     return STATUS_SUCCESS;
 }
 
+/* Get the permanent process default pool without creating a worker. */
+static NTSTATUS tp_threadpool_get_default( struct threadpool **out )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+
+    RtlAcquireSRWLockExclusive( &default_threadpool_lock );
+    if (!default_threadpool)
+    {
+        status = tp_threadpool_alloc( &default_threadpool );
+        if (!status && default_stack_configured) default_threadpool->stack_info = default_stack_info;
+    }
+    *out = default_threadpool;
+    RtlReleaseSRWLockExclusive( &default_threadpool_lock );
+    return status;
+}
+
 /***********************************************************************
  *           tp_threadpool_shutdown    (internal)
  *
@@ -1949,20 +1970,7 @@ static NTSTATUS tp_threadpool_lock( struct threadpool **out, TP_CALLBACK_ENVIRON
 
     if (!pool)
     {
-        if (!default_threadpool)
-        {
-            status = tp_threadpool_alloc( &pool );
-            if (status != STATUS_SUCCESS)
-                return status;
-
-            if (InterlockedCompareExchangePointer( (void *)&default_threadpool, pool, NULL ) != NULL)
-            {
-                tp_threadpool_shutdown( pool );
-                tp_threadpool_release( pool );
-            }
-        }
-
-        pool = default_threadpool;
+        if ((status = tp_threadpool_get_default( &pool ))) return status;
     }
 
     RtlEnterCriticalSection( &pool->cs );
@@ -3772,6 +3780,40 @@ NTSTATUS WINAPI TpSetPoolThreadBasePriority( TP_POOL *pool, LONG priority )
             NtSetInformationThread( worker->thread, ThreadBasePriority, &this->base_priority, sizeof(this->base_priority) );
     RtlLeaveCriticalSection( &this->cs );
     return status;
+}
+
+/***********************************************************************
+ *           TpSetDefaultPoolStackInformation    (NTDLL.@)
+ */
+NTSTATUS WINAPI TpSetDefaultPoolStackInformation( TP_POOL_STACK_INFORMATION *stack_info )
+{
+    TP_POOL_STACK_INFORMATION info;
+    BOOL changed = FALSE;
+
+    TRACE( "%p\n", stack_info );
+    if (!stack_info) return STATUS_INVALID_PARAMETER;
+    info = *stack_info;
+
+    RtlAcquireSRWLockExclusive( &default_threadpool_lock );
+    default_stack_configured = TRUE;
+    if (info.StackReserve > default_stack_info.StackReserve)
+    {
+        default_stack_info.StackReserve = info.StackReserve;
+        changed = TRUE;
+    }
+    if (info.StackCommit > default_stack_info.StackCommit)
+    {
+        default_stack_info.StackCommit = info.StackCommit;
+        changed = TRUE;
+    }
+    if (changed && default_threadpool)
+    {
+        RtlEnterCriticalSection( &default_threadpool->cs );
+        default_threadpool->stack_info = default_stack_info;
+        RtlLeaveCriticalSection( &default_threadpool->cs );
+    }
+    RtlReleaseSRWLockExclusive( &default_threadpool_lock );
+    return STATUS_SUCCESS;
 }
 
 /***********************************************************************
