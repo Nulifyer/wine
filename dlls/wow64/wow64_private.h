@@ -289,7 +289,7 @@ static inline ALPC_MESSAGE_ATTRIBUTES *alpc_port_message_attributes_32to64( ALPC
 
         to_attr->Flags = from_attr->Flags;
         to_attr->ContextHandle = UlongToHandle( from_attr->ContextHandle );
-        /* A selected context has no QoS pointer. Inline creation is rejected
+        /* Preserve the ABI pointer for syscall probing. Inline creation is rejected
          * by the native owner without dereferencing this foreign address. */
         to_attr->QoS = copy_attributes ? UlongToPtr( from_attr->QoSPointer ) : NULL;
     }

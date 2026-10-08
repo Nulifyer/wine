@@ -294,6 +294,29 @@ static void unregister_security_context( struct alpc_security_context *context )
     free( context );
 }
 
+/* Both explicit construction and send-time thread capture retain the effective
+ * token through the same owner. A temporary registration is removed after send;
+ * queued messages and requests keep independent token references and identity. */
+static struct alpc_security_context *new_security_context( struct alpc_port *port,
+                                                         int level, int tracking, int effective )
+{
+    struct alpc_security_context *context;
+    struct token *token;
+
+    if (level < SecurityAnonymous || level > SecurityDelegation)
+    { set_error( STATUS_BAD_IMPERSONATION_LEVEL ); return NULL; }
+    if (!(context = mem_alloc( sizeof(*context) ))) return NULL;
+    token = thread_get_impersonation_token( current );
+    context->token = tracking ? (struct token *)grab_object( token ) :
+                               token_duplicate_impersonation( token, level, effective & 1 );
+    if (!context->token) { free( context ); return NULL; }
+    context->owner = port;
+    context->id = allocate_resource_id();
+    context->impersonation_level = level;
+    list_add_tail( &security_contexts, &context->entry );
+    return context;
+}
+
 static void free_message_request( struct alpc_request *request );
 
 static data_size_t get_receipt_size( unsigned int attributes )
@@ -2628,7 +2651,6 @@ DECL_HANDLER(alpc_create_security_context)
 {
     struct alpc_port *port;
     struct alpc_security_context *context;
-    struct token *token;
     int level, tracking, effective;
 
     if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->handle,
@@ -2636,19 +2658,7 @@ DECL_HANDLER(alpc_create_security_context)
     level = req->qos_present ? req->impersonation_level : port->impersonation_level;
     tracking = req->qos_present ? req->tracking_mode : port->tracking_mode;
     effective = req->qos_present ? req->effective_only : port->effective_only;
-    if (level < SecurityAnonymous || level > SecurityDelegation)
-    { set_error( STATUS_BAD_IMPERSONATION_LEVEL ); goto done; }
-    if (!(context = mem_alloc( sizeof(*context) ))) goto done;
-    token = thread_get_impersonation_token( current );
-    context->token = tracking ? (struct token *)grab_object( token ) :
-                               token_duplicate_impersonation( token, level, effective & 1 );
-    if (!context->token) { free( context ); goto done; }
-    context->owner = port;
-    context->id = allocate_resource_id();
-    context->impersonation_level = level;
-    list_add_tail( &security_contexts, &context->entry );
-    reply->id = context->id;
-done:
+    if ((context = new_security_context( port, level, tracking, effective ))) reply->id = context->id;
     release_object( port );
 }
 
@@ -2673,6 +2683,8 @@ DECL_HANDLER(alpc_send_receive)
     data_size_t capacity;
     data_size_t size = get_req_data_size();
     struct alpc_wait *wait = NULL;
+    struct alpc_security_context *captured = NULL;
+    client_ptr_t security_context = req->security_context;
     int reply_receive;
 
     if (!get_receive_capacity( req->receive_attributes, &capacity )) return;
@@ -2706,10 +2718,24 @@ DECL_HANDLER(alpc_send_receive)
         set_error( STATUS_NOT_IMPLEMENTED );
         goto done;
     }
+    if ((req->operation & ALPC_OPERATION_SEND) &&
+        (req->send_attributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE) &&
+        (security_context == (client_ptr_t)-2 ||
+         ((req->operation & ALPC_OPERATION_WOW64) && security_context == 0xfffffffe)))
+    {
+        int qos = req->operation & ALPC_OPERATION_SECURITY_QOS;
+        int level = qos ? (req->operation & ALPC_OPERATION_SECURITY_LEVEL_MASK) >>
+                         ALPC_OPERATION_SECURITY_LEVEL_SHIFT : port->impersonation_level;
+        int tracking = qos ? !!(req->operation & ALPC_OPERATION_SECURITY_DYNAMIC) : port->tracking_mode;
+        int effective = qos ? !!(req->operation & ALPC_OPERATION_SECURITY_EFFECTIVE) : port->effective_only;
+
+        if (!(captured = new_security_context( port, level, tracking, effective ))) goto done;
+        security_context = captured->id;
+    }
     if ((req->flags & 0x20000) && !reply_receive && !(wait = create_message_wait( capacity ))) goto done;
     if ((req->operation & ALPC_OPERATION_SEND) && !send_message( port, reply_receive ? 1 : req->flags, req->message_id,
                                     req->callback_id, req->message_type, (req->operation & ALPC_OPERATION_WOW64), req->send_attributes, req->message_context,
-                                    req->security_context,
+                                    security_context,
                                     get_req_data(), size, wait )) goto done;
     if (wait)
     {
@@ -2752,6 +2778,7 @@ DECL_HANDLER(alpc_send_receive)
     free_message( take_message( queue, message ) );
 
 done:
+    if (captured) unregister_security_context( captured );
     if (wait)
     {
         if (!reply->wait_handle) close_handle( current->process, wait->handle );

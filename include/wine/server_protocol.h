@@ -6989,6 +6989,12 @@ struct alpc_message_info
 #define ALPC_OPERATION_WOW64   0x04
 #define ALPC_OPERATION_NO_WAIT 0x08
 
+#define ALPC_OPERATION_SECURITY_QOS       0x10
+#define ALPC_OPERATION_SECURITY_DYNAMIC   0x20
+#define ALPC_OPERATION_SECURITY_EFFECTIVE 0x40
+#define ALPC_OPERATION_SECURITY_LEVEL_SHIFT 8
+#define ALPC_OPERATION_SECURITY_LEVEL_MASK  0x300
+
 
 struct alpc_send_receive_request
 {
@@ -9946,6 +9952,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1098
+#define SERVER_PROTOCOL_VERSION 1099
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

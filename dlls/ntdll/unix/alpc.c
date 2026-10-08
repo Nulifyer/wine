@@ -53,7 +53,7 @@ static void trace_message_data( const char *direction, HANDLE port_handle,
     }
 }
 
-/* Explicit, already-created security contexts use the authoritative port owner.
+/* Selected contexts and current-thread captures use the authoritative port owner.
  * Inline creation and other transferred resources remain outside this partition. */
 static NTSTATUS validate_message_attributes( const ALPC_MESSAGE_ATTRIBUTES *send,
                                              const ALPC_MESSAGE_ATTRIBUTES *receive, BOOL accept_metadata )
@@ -74,7 +74,7 @@ static NTSTATUS validate_message_attributes( const ALPC_MESSAGE_ATTRIBUTES *send
     if (send && (send->ValidAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE))
     {
         security = wine_alpc_get_attribute( send, ALPC_MESSAGE_SECURITY_ATTRIBUTE );
-        if (accept_metadata || !security || security->Flags || security->QoS) return STATUS_NOT_IMPLEMENTED;
+        if (accept_metadata || !security || security->Flags) return STATUS_NOT_IMPLEMENTED;
     }
     if (send && (send->ValidAttributes & ALPC_MESSAGE_VIEW_ATTRIBUTE))
     {
@@ -101,6 +101,26 @@ static client_ptr_t get_security_context( const ALPC_MESSAGE_ATTRIBUTES *attribu
     if (!attributes || !(attributes->ValidAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE)) return 0;
     security = wine_alpc_get_attribute( attributes, ALPC_MESSAGE_SECURITY_ATTRIBUTE );
     return wine_server_client_ptr( security->ContextHandle );
+}
+
+/* QoS belongs to the caller ABI. Probe its complete input even when an existing
+ * security context retains its original capture. No foreign pointer reaches the server. */
+static NTSTATUS capture_send_security_qos( const ALPC_MESSAGE_ATTRIBUTES *attributes, unsigned int *operation )
+{
+    const ALPC_SECURITY_ATTR *security;
+    SECURITY_QUALITY_OF_SERVICE qos;
+
+    *operation = 0;
+    if (!attributes || !(attributes->ValidAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE)) return STATUS_SUCCESS;
+    security = wine_alpc_get_attribute( attributes, ALPC_MESSAGE_SECURITY_ATTRIBUTE );
+    if (!security->QoS) return STATUS_SUCCESS;
+    if (virtual_uninterrupted_read_memory( security->QoS, &qos, sizeof(qos) ) != sizeof(qos))
+        return STATUS_ACCESS_VIOLATION;
+    if (qos.ImpersonationLevel > SecurityDelegation) return STATUS_BAD_IMPERSONATION_LEVEL;
+    *operation = ALPC_OPERATION_SECURITY_QOS | (qos.ImpersonationLevel << ALPC_OPERATION_SECURITY_LEVEL_SHIFT);
+    if (qos.ContextTrackingMode) *operation |= ALPC_OPERATION_SECURITY_DYNAMIC;
+    if (qos.EffectiveOnly & 1) *operation |= ALPC_OPERATION_SECURITY_EFFECTIVE;
+    return STATUS_SUCCESS;
 }
 
 /* The payload stays at message + 1. Its token prefix temporarily occupies
@@ -747,6 +767,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
     HANDLE wait_handle = NULL;
     unsigned char receipt[sizeof(struct token_identity) + sizeof(ULONGLONG) + sizeof(unsigned int)];
     unsigned int recv_attributes = recv_msg ? receive_attributes( recv_msg_attr ) : 0;
+    unsigned int security_operation;
 
     TRACE( "%p, %#x, %p, %p, %p, %p, %p, %p.\n", port_handle, (unsigned int)flags,
            send_msg, send_msg_attr, recv_msg, recv_buffer_size, recv_msg_attr, timeout );
@@ -761,6 +782,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
     if (packed32 && recv_msg) return STATUS_NOT_IMPLEMENTED;
     if (send_msg) message_id = packed32 ? ((ALPC_PORT_MESSAGE32 *)send_msg)->MessageId : send_msg->MessageId;
     if ((status = validate_message_attributes( send_msg_attr, recv_msg_attr, FALSE ))) return status;
+    if ((status = capture_send_security_qos( send_msg_attr, &security_operation ))) return status;
     /* Native servers combine a reply with a synchronous receive to return the
      * current result and wait for the next request in one call. */
     if ((flags & 0x20000) &&
@@ -781,7 +803,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         req->callback_id = !send_msg ? 0 : packed32 ? ((ALPC_PORT_MESSAGE32 *)send_msg)->ClientViewSize :
                                                    send_msg->ClientViewSize;
         req->message_type = send_msg ? send_msg->Type : 0;
-        req->operation = (send_msg ? ALPC_OPERATION_SEND : 0) |
+        req->operation = security_operation | (send_msg ? ALPC_OPERATION_SEND : 0) |
                          (recv_msg ? ALPC_OPERATION_RECEIVE : 0) |
                          (is_wow64() ? ALPC_OPERATION_WOW64 : 0) |
                          (timeout && !timeout->QuadPart ? ALPC_OPERATION_NO_WAIT : 0);
