@@ -3089,33 +3089,6 @@ NTSTATUS WINAPI NtCreatePort( HANDLE *handle, OBJECT_ATTRIBUTES *attr, ULONG inf
 
 
 /***********************************************************************
- *             NtConnectPort (NTDLL.@)
- */
-NTSTATUS WINAPI NtConnectPort( HANDLE *handle, UNICODE_STRING *name, SECURITY_QUALITY_OF_SERVICE *qos,
-                               LPC_SECTION_WRITE *write, LPC_SECTION_READ *read, ULONG *max_len,
-                               void *info, ULONG *info_len )
-{
-    FIXME( "(%p,%s,%p,%p,%p,%p,%p,%p),stub!\n", handle, debugstr_us(name), qos,
-           write, read, max_len, info, info_len );
-    if (info && info_len) TRACE("msg = %s\n", debugstr_an( info, *info_len ));
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-
-/***********************************************************************
- *             NtSecureConnectPort (NTDLL.@)
- */
-NTSTATUS WINAPI NtSecureConnectPort( HANDLE *handle, UNICODE_STRING *name, SECURITY_QUALITY_OF_SERVICE *qos,
-                                     LPC_SECTION_WRITE *write, PSID sid, LPC_SECTION_READ *read,
-                                     ULONG *max_len, void *info, ULONG *info_len )
-{
-    FIXME( "(%p,%s,%p,%p,%p,%p,%p,%p,%p),stub!\n", handle, debugstr_us(name), qos,
-           write, sid, read, max_len, info, info_len );
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-
-/***********************************************************************
  *             NtListenPort (NTDLL.@)
  */
 NTSTATUS WINAPI NtListenPort( HANDLE handle, LPC_MESSAGE *msg )

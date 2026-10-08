@@ -216,7 +216,7 @@ DECL_HANDLER(bind_gdi_bitmap)
         get_req_data_size() != sizeof(data)) goto invalid;
     memcpy( &data, get_req_data(), sizeof(data) );
     if (data.kind == GDI_BITMAP_SESSION && !check_bitmap_logon_actor()) return;
-    if (!(section = get_gdi_section( current->process, req->section, &size ))) return;
+    if (!(section = get_shared_data_section( current->process, req->section, &size ))) return;
     if (!valid_bitmap_data( &data, size ))
     {
         release_object( section );

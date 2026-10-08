@@ -820,6 +820,16 @@ typedef struct
 
 typedef struct
 {
+    ULONG Length, SectionHandle, SectionOffset, ViewSize, ViewBase, TargetViewBase;
+} LPC_SECTION_WRITE32;
+
+typedef struct
+{
+    ULONG Length, ViewSize, ViewBase;
+} LPC_SECTION_READ32;
+
+typedef struct
+{
     ULONG Flags;
     ULONG SectionHandle;
     ULONG ViewBase;

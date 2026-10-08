@@ -266,6 +266,8 @@ extern void reset_event( struct event *event );
 /* ALPC port functions */
 
 extern struct object *get_alpc_port_obj( struct process *process, obj_handle_t handle, unsigned int access );
+extern int has_closed_alpc_views( struct thread *thread );
+extern void cleanup_process_alpc_views( struct process *process );
 
 /* mutex functions */
 

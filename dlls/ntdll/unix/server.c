@@ -1943,7 +1943,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
     sigset_t sigset;
     HANDLE port;
     unsigned int ret;
-    int fd;
+    int fd, alpc_views = 0;
 
     if (HandleToLong( handle ) >= ~5 && HandleToLong( handle ) <= ~0)
         return STATUS_SUCCESS;
@@ -1961,12 +1961,14 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
     {
         req->handle = wine_server_obj_handle( handle );
         ret = wine_server_call( req );
+        if (!ret) alpc_views = reply->alpc_views;
     }
     SERVER_END_REQ;
 
     server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
 
     if (fd != -1) close( fd );
+    if (alpc_views) alpc_unmap_closed_views();
 
     if (ret != STATUS_INVALID_HANDLE || !handle) return ret;
     if (!peb || !peb->BeingDebugged) return ret;

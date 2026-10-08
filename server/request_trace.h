@@ -401,6 +401,11 @@ static void dump_close_handle_request( const struct close_handle_request *req )
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_close_handle_reply( const struct close_handle_reply *req )
+{
+    fprintf( stderr, " alpc_views=%d", req->alpc_views );
+}
+
 static void dump_set_handle_info_request( const struct set_handle_info_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -4042,6 +4047,58 @@ static void dump_alpc_get_connect_result_reply( const struct alpc_get_connect_re
     dump_varargs_bytes( ", message=", cur_size );
 }
 
+static void dump_alpc_get_lpc_connect_info_request( const struct alpc_get_lpc_connect_info_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_alpc_get_lpc_connect_info_reply( const struct alpc_get_lpc_connect_info_reply *req )
+{
+    dump_uint64( " max_msg_len=", &req->max_msg_len );
+    dump_uint64( ", remote_view=", &req->remote_view );
+}
+
+static void dump_alpc_capture_lpc_section_request( const struct alpc_capture_lpc_section_request *req )
+{
+    fprintf( stderr, " section=%04x", req->section );
+    dump_uint64( ", offset=", &req->offset );
+    dump_uint64( ", size=", &req->size );
+}
+
+static void dump_alpc_capture_lpc_section_reply( const struct alpc_capture_lpc_section_reply *req )
+{
+    fprintf( stderr, " section=%04x", req->section );
+}
+
+static void dump_alpc_connection_view_request( const struct alpc_connection_view_request *req )
+{
+    fprintf( stderr, " listener=%04x", req->listener );
+    fprintf( stderr, ", message_id=%08x", req->message_id );
+    dump_uint64( ", base=", &req->base );
+}
+
+static void dump_alpc_connection_view_reply( const struct alpc_connection_view_reply *req )
+{
+    fprintf( stderr, " section=%04x", req->section );
+    dump_uint64( ", offset=", &req->offset );
+    dump_uint64( ", size=", &req->size );
+}
+
+static void dump_alpc_delete_section_view_request( const struct alpc_delete_section_view_request *req )
+{
+    fprintf( stderr, " port=%04x", req->port );
+    dump_uint64( ", base=", &req->base );
+}
+
+static void dump_alpc_get_closed_view_request( const struct alpc_get_closed_view_request *req )
+{
+}
+
+static void dump_alpc_get_closed_view_reply( const struct alpc_get_closed_view_reply *req )
+{
+    dump_uint64( " base=", &req->base );
+}
+
 static void dump_alpc_accept_connect_port_request( const struct alpc_accept_connect_port_request *req )
 {
     fprintf( stderr, " connection=%04x", req->connection );
@@ -5392,6 +5449,11 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_get_message_result_request,
     (dump_func)dump_alpc_connect_port_request,
     (dump_func)dump_alpc_get_connect_result_request,
+    (dump_func)dump_alpc_get_lpc_connect_info_request,
+    (dump_func)dump_alpc_capture_lpc_section_request,
+    (dump_func)dump_alpc_connection_view_request,
+    (dump_func)dump_alpc_delete_section_view_request,
+    (dump_func)dump_alpc_get_closed_view_request,
     (dump_func)dump_alpc_accept_connect_port_request,
     (dump_func)dump_alpc_query_message_security_request,
     (dump_func)dump_alpc_open_sender_request,
@@ -5523,7 +5585,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_resume_thread_reply,
     (dump_func)dump_queue_apc_reply,
     (dump_func)dump_get_apc_result_reply,
-    NULL,
+    (dump_func)dump_close_handle_reply,
     (dump_func)dump_set_handle_info_reply,
     (dump_func)dump_dup_handle_reply,
     (dump_func)dump_allocate_reserve_object_reply,
@@ -5854,6 +5916,11 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_get_message_result_reply,
     (dump_func)dump_alpc_connect_port_reply,
     (dump_func)dump_alpc_get_connect_result_reply,
+    (dump_func)dump_alpc_get_lpc_connect_info_reply,
+    (dump_func)dump_alpc_capture_lpc_section_reply,
+    (dump_func)dump_alpc_connection_view_reply,
+    NULL,
+    (dump_func)dump_alpc_get_closed_view_reply,
     (dump_func)dump_alpc_accept_connect_port_reply,
     (dump_func)dump_alpc_query_message_security_reply,
     (dump_func)dump_alpc_open_sender_reply,
@@ -6316,6 +6383,11 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "alpc_get_message_result",
     "alpc_connect_port",
     "alpc_get_connect_result",
+    "alpc_get_lpc_connect_info",
+    "alpc_capture_lpc_section",
+    "alpc_connection_view",
+    "alpc_delete_section_view",
+    "alpc_get_closed_view",
     "alpc_accept_connect_port",
     "alpc_query_message_security",
     "alpc_open_sender",
@@ -6521,6 +6593,7 @@ static const struct
     { "INVALID_SID",                 STATUS_INVALID_SID },
     { "INVALID_STATE_TRANSITION",    STATUS_INVALID_STATE_TRANSITION },
     { "INVALID_USER_BUFFER",         STATUS_INVALID_USER_BUFFER },
+    { "INVALID_VIEW_SIZE",           STATUS_INVALID_VIEW_SIZE },
     { "IO_REPARSE_DATA_INVALID",     STATUS_IO_REPARSE_DATA_INVALID },
     { "IO_REPARSE_TAG_INVALID",      STATUS_IO_REPARSE_TAG_INVALID },
     { "IO_TIMEOUT",                  STATUS_IO_TIMEOUT },

@@ -649,6 +649,7 @@ unsigned int get_handle_table_count( struct process *process )
 DECL_HANDLER(close_handle)
 {
     unsigned int err = close_handle( current->process, req->handle );
+    if (!err) reply->alpc_views = has_closed_alpc_views( current );
     set_error( err );
 }
 

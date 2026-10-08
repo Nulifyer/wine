@@ -1228,6 +1228,98 @@ cleanup:
     }
 }
 
+/* Candidate admission guard. Windows behavior without a received view
+ * attribute is outside the established classic-view reference partition. */
+struct classic_view_connect_context
+{
+    UNICODE_STRING name;
+    LPC_SECTION_WRITE view;
+    NTSTATUS status;
+    HANDLE port;
+};
+
+static DWORD WINAPI classic_view_connect_thread(void *arg)
+{
+    struct classic_view_connect_context *context = arg;
+    SECURITY_QUALITY_OF_SERVICE qos = {sizeof(qos), SecurityImpersonation, SECURITY_DYNAMIC_TRACKING, TRUE};
+
+    context->status = NtConnectPort(&context->port, &context->name, &qos,
+                                    &context->view, NULL, NULL, NULL, NULL);
+    if (!context->status) NtClose(context->port);
+    return 0;
+}
+
+static void test_classic_view_admission_guard(void)
+{
+    struct classic_view_connect_context context = {0};
+    ALPC_PORT_ATTRIBUTES attr = {0};
+    ALPC_PORT_MESSAGE message = {0};
+    OBJECT_ATTRIBUTES object_attr;
+    LARGE_INTEGER section_size, timeout;
+    HANDLE listener, server, thread;
+    WCHAR name[100];
+    SIZE_T size;
+    NTSTATUS status;
+    DWORD wait;
+
+    if (strcmp(winetest_platform, "wine"))
+    {
+        skip("Candidate-only classic view admission guard.\n");
+        return;
+    }
+    swprintf(name, ARRAY_SIZE(name), L"\\wine_classic_view_guard_%lx", GetCurrentProcessId());
+    RtlInitUnicodeString(&context.name, name);
+    InitializeObjectAttributes(&object_attr, &context.name, OBJ_CASE_INSENSITIVE, NULL, NULL);
+    init_port_attr(&attr, 0x20000, 0x100);
+    status = pNtAlpcCreatePort(&listener, &object_attr, &attr);
+    ok(!status, "Create listener returned %#lx.\n", status);
+    if (status) return;
+    section_size.QuadPart = 0x10000;
+    context.view.Length = sizeof(context.view);
+    context.view.ViewSize = section_size.QuadPart;
+    status = NtCreateSection(&context.view.SectionHandle, SECTION_ALL_ACCESS, NULL, &section_size,
+                             PAGE_READWRITE, SEC_COMMIT, NULL);
+    ok(!status, "Create section returned %#lx.\n", status);
+    if (status) { NtClose(listener); return; }
+    context.status = STATUS_PENDING;
+    thread = CreateThread(NULL, 0, classic_view_connect_thread, &context, 0, NULL);
+    ok(thread != NULL, "Create thread failed, error %lu.\n", GetLastError());
+    if (!thread) goto done;
+    timeout.QuadPart = -50000000;
+    size = sizeof(message);
+    /* Deliberately receive no attributes, hence no receiver mapping. */
+    status = pNtAlpcSendWaitReceivePort(listener, 0, NULL, NULL, &message, &size, NULL, &timeout);
+    ok(!status, "Receive connection returned %#lx.\n", status);
+    if (!status)
+    {
+        server = (HANDLE)0x1234;
+        status = pNtAlpcAcceptConnectPort(&server, listener, 0, NULL, &attr, NULL, &message, NULL, TRUE);
+        ok(status == STATUS_NOT_IMPLEMENTED, "Unmapped view acceptance returned %#lx.\n", status);
+        ok(server == (HANDLE)0x1234, "Unmapped view published port %p.\n", server);
+        if (!status) NtClose(server);
+        else
+        {
+            status = pNtAlpcAcceptConnectPort(&server, listener, 0, NULL, &attr, NULL, &message, NULL, FALSE);
+            ok(!status, "Refuse connection returned %#lx.\n", status);
+        }
+    }
+    NtClose(listener);
+    listener = NULL;
+    wait = WaitForSingleObject(thread, 5000);
+    ok(wait == WAIT_OBJECT_0, "Connector did not complete, wait %lu.\n", wait);
+    if (wait == WAIT_OBJECT_0)
+        ok(context.status == STATUS_PORT_CONNECTION_REFUSED, "Connector returned %#lx.\n", context.status);
+    else
+    {
+        TerminateThread(thread, 1);
+        WaitForSingleObject(thread, INFINITE);
+    }
+    NtClose(thread);
+done:
+    NtClose(context.view.SectionHandle);
+    if (listener) NtClose(listener);
+}
+
 START_TEST(alpc)
 {
     char **argv;
@@ -1255,6 +1347,7 @@ START_TEST(alpc)
     test_received_token_acceptance();
     test_accepted_port_routing();
     test_empty_view_reply();
+    test_classic_view_admission_guard();
     test_NtAlpcCancelMessage();
     test_async_connection_completion();
     test_power_port();

@@ -119,6 +119,8 @@ struct alpc_port
     unsigned int            wow64;
     unsigned int            receive_sequence;
     client_ptr_t            initial_message_context;
+    client_ptr_t            remote_view_base;       /* receiver's actual classic LPC mapping */
+    unsigned int            classic_view;           /* acceptance requires the receiver mapping */
     client_ptr_t            context;
     enum alpc_port_enum_type type;                  /* communication port or connection port */
     enum alpc_port_status    status;                /* port status */
@@ -137,6 +139,166 @@ struct alpc_port
     unsigned int             flags;                 /* flags in port attributes */
     mem_size_t               max_msg_len;           /* max message length in port attributes */
 };
+
+static const struct object_ops alpc_port_ops;
+
+/* The section reference is independent of both user handles and mappings.
+ * A delivered receiver registration survives connector closure and ordinary
+ * unmapping. Its address remains the explicit deletion target on Windows. */
+struct alpc_section_view
+{
+    struct list entry;
+    struct alpc_port *owner;       /* weak; last real handle closes registrations */
+    struct process *process;      /* weak; process teardown removes registrations */
+    struct thread *closer;        /* weak; owns synchronous close unmaps */
+    struct object *section;
+    client_ptr_t base;
+    mem_size_t offset, size;
+    unsigned int message_id, receiver, delivered;
+};
+static struct list section_views = LIST_INIT(section_views);
+
+static struct alpc_section_view *new_section_view( struct alpc_port *owner, struct object *section,
+                                                  client_ptr_t base, mem_size_t offset, mem_size_t size,
+                                                  unsigned int message_id, int receiver )
+{
+    struct alpc_section_view *view;
+    if (!(view = mem_alloc( sizeof(*view) ))) return NULL;
+    view->owner = owner;
+    view->process = owner->thread->process;
+    view->closer = NULL;
+    view->section = grab_object( section );
+    view->base = base;
+    view->offset = offset;
+    view->size = size;
+    view->message_id = message_id;
+    view->receiver = receiver;
+    view->delivered = 0;
+    list_add_tail( &section_views, &view->entry );
+    return view;
+}
+
+static void free_section_view( struct alpc_section_view *view )
+{
+    list_remove( &view->entry );
+    release_object( view->section );
+    free( view );
+}
+
+static void queue_section_unmap( struct alpc_section_view *view )
+{
+    union apc_call call = {0};
+    if (view->base && view->process->running_threads)
+    {
+        call.unmap_view.type = APC_UNMAP_VIEW;
+        call.unmap_view.addr = view->base;
+        thread_queue_apc( view->process, NULL, NULL, &call );
+    }
+    free_section_view( view );
+}
+
+static void close_section_views( struct alpc_port *port, struct process *process )
+{
+    struct alpc_section_view *view, *next;
+    LIST_FOR_EACH_ENTRY_SAFE( view, next, &section_views, struct alpc_section_view, entry )
+        if (view->owner == port)
+        {
+            view->owner = NULL;
+            if (!view->base) free_section_view( view );
+            else if (current && process == current->process && view->process == process)
+                view->closer = current;
+            else queue_section_unmap( view );
+        }
+}
+
+int has_closed_alpc_views( struct thread *thread )
+{
+    struct alpc_section_view *view;
+    LIST_FOR_EACH_ENTRY( view, &section_views, struct alpc_section_view, entry )
+        if (!view->owner && view->closer == thread) return 1;
+    return 0;
+}
+
+void cleanup_process_alpc_views( struct process *process )
+{
+    struct alpc_section_view *view, *next;
+    LIST_FOR_EACH_ENTRY_SAFE( view, next, &section_views, struct alpc_section_view, entry )
+        if (view->process == process) free_section_view( view );
+}
+
+DECL_HANDLER(alpc_get_closed_view)
+{
+    struct alpc_section_view *view;
+    LIST_FOR_EACH_ENTRY( view, &section_views, struct alpc_section_view, entry )
+        if (!view->owner && view->closer == current && view->process == current->process)
+        {
+            reply->base = view->base;
+            free_section_view( view );
+            break;
+        }
+}
+
+DECL_HANDLER(alpc_capture_lpc_section)
+{
+    struct object *section;
+    mem_size_t size;
+    if (!(section = get_shared_data_section( current->process, req->section, &size ))) return;
+    if (!req->size || req->offset >= size || req->size > size - req->offset)
+        set_error( STATUS_INVALID_VIEW_SIZE );
+    else reply->section = alloc_handle( current->process, section, SECTION_MAP_READ | SECTION_MAP_WRITE, 0 );
+    release_object( section );
+}
+
+DECL_HANDLER(alpc_connection_view)
+{
+    struct alpc_port *listener, *client;
+    struct alpc_section_view *view;
+    if (!(listener = (struct alpc_port *)get_handle_obj( current->process, req->listener,
+                                                       ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
+    if (listener->thread->process != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto done;
+    }
+    LIST_FOR_EACH_ENTRY( view, &section_views, struct alpc_section_view, entry )
+        if (view->owner == listener && view->receiver && view->delivered &&
+            view->message_id == req->message_id && view->process == current->process) break;
+    if (&view->entry == &section_views) { set_error( STATUS_INVALID_MESSAGE ); goto done; }
+    if (req->base)
+    {
+        if (view->base || !is_data_section_view( current->process, view->section, req->base, view->offset, view->size ))
+        { set_error( STATUS_INVALID_ADDRESS ); goto done; }
+        view->base = req->base;
+        LIST_FOR_EACH_ENTRY( client, &listener->pending_connections, struct alpc_port, pending_entry )
+            if (client->connection_id == req->message_id) client->remote_view_base = view->base;
+    }
+    else
+    {
+        if (view->base) { set_error( STATUS_RESOURCE_IN_USE ); goto done; }
+        reply->section = alloc_handle( current->process, view->section, SECTION_MAP_READ | SECTION_MAP_WRITE, 0 );
+        reply->offset = view->offset;
+        reply->size = view->size;
+    }
+done:
+    release_object( listener );
+}
+
+DECL_HANDLER(alpc_delete_section_view)
+{
+    struct alpc_port *port;
+    struct alpc_section_view *view;
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->port,
+                                                   ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
+    if (port->thread->process != current->process)
+    { set_error( STATUS_ACCESS_DENIED ); goto done; }
+    LIST_FOR_EACH_ENTRY( view, &section_views, struct alpc_section_view, entry )
+        if (view->owner == port && view->receiver && view->base &&
+            view->base == req->base && view->process == current->process) break;
+    if (&view->entry == &section_views) set_error( STATUS_INVALID_ADDRESS );
+    else free_section_view( view );
+done:
+    release_object( port );
+}
 
 /* The registry owns each live request. Endpoint pointers are weak and are
  * cleared or removed on final handle close. A released private reply retains
@@ -479,6 +641,8 @@ static bool alpc_port_init( struct object *obj, const void *init_data )
     port->completion_key = 0;
     port->completion_associated = 0;
     port->initial_message_context = 0;
+    port->remote_view_base = 0;
+    port->classic_view = 0;
     return !!(port->sync = port->counted_sync ? create_semaphore_sync( 0, 0x7fffffff ) :
                                               create_internal_sync( 1, 1 ));
 }
@@ -1118,6 +1282,9 @@ static void finish_connect_operation( struct alpc_port *port )
 void cleanup_thread_alpc( struct thread *thread )
 {
     struct alpc_port *port, *next;
+    struct alpc_section_view *view, *view_next;
+    LIST_FOR_EACH_ENTRY_SAFE( view, view_next, &section_views, struct alpc_section_view, entry )
+        if (view->closer == thread) queue_section_unmap( view );
     LIST_FOR_EACH_ENTRY_SAFE( port, next, &connecting_ports, struct alpc_port, connecting_entry )
         if (port->thread == thread) close_handle( thread->process, port->connecting_handle );
     cleanup_thread_message_waits( thread );
@@ -1945,6 +2112,10 @@ static struct alpc_message *take_message( struct alpc_port *queue, struct alpc_m
     if ((message->info.type & 0xff) == ALPC_MESSAGE_TYPE_CONNECTION_REQUEST)
     {
         struct alpc_port *client;
+        struct alpc_section_view *view;
+        LIST_FOR_EACH_ENTRY( view, &section_views, struct alpc_section_view, entry )
+            if (view->owner == queue && view->receiver && view->message_id == message->info.id)
+                view->delivered = 1;
         LIST_FOR_EACH_ENTRY( client, &queue->pending_connections, struct alpc_port, pending_entry )
             if (client->connection_id == message->info.id) client->request_delivered = 1;
     }
@@ -2407,6 +2578,7 @@ static int alpc_port_close_handle( struct object *obj, struct process *process, 
 
     if (cancel_operation) finish_connect_operation( port );
     if (obj->handle_count != 1 && !cancel_operation) return 1;
+    close_section_views( port, process );
     {
         struct alpc_resource_reserve *reserve, *next;
         LIST_FOR_EACH_ENTRY_SAFE( reserve, next, &resource_reserves, struct alpc_resource_reserve, entry )
@@ -2420,6 +2592,10 @@ static int alpc_port_close_handle( struct object *obj, struct process *process, 
     if (port->pending_listener)
     {
         struct alpc_port *listener = port->pending_listener;
+        struct alpc_section_view *view, *next;
+        LIST_FOR_EACH_ENTRY_SAFE( view, next, &section_views, struct alpc_section_view, entry )
+            if (view->owner == listener && view->receiver && !view->delivered &&
+                view->message_id == port->connection_id) free_section_view( view );
         /* Convert an undelivered request to a cancellation notification.
          * If it was already received, publish a new notification with its ID. */
         LIST_FOR_EACH_ENTRY( message, &listener->messages, struct alpc_message, entry )
@@ -2427,6 +2603,7 @@ static int alpc_port_close_handle( struct object *obj, struct process *process, 
         if (&message->entry != &listener->messages)
         {
             message->info.size = 0;
+            message->info.attributes_valid &= ~ALPC_MESSAGE_VIEW_ATTRIBUTE;
             message->info.type = ALPC_MESSAGE_TYPE_CANCELED | (port->wow64 ? 0x1000 : 0);
         }
         else if ((message = new_message( NULL, 0, ALPC_MESSAGE_TYPE_CANCELED |
@@ -2885,6 +3062,7 @@ DECL_HANDLER(alpc_connect_port)
     static const WCHAR pdc_port_name[] = {'\\','P','d','c','P','o','r','t'};
     static const WCHAR power_port_name[] = {'\\','P','o','w','e','r','P','o','r','t'};
     const struct alpc_security_qos *qos = get_req_data();
+    struct alpc_lpc_view lpc = {0};
     const unsigned char *data = (const unsigned char *)(qos + 1);
     data_size_t size = get_req_data_size(), payload_size;
     struct unicode_str name;
@@ -2894,6 +3072,9 @@ DECL_HANDLER(alpc_connect_port)
     struct coremsg_kernel_port *coremsg_port = NULL;
     struct pdc_client *pdc_client = NULL;
     struct alpc_message *message;
+    struct object *section = NULL;
+    struct alpc_section_view *local_view;
+    mem_size_t section_size;
     enum alpc_kernel_port kernel_port = ALPC_KERNEL_PORT_NONE;
     struct alpc_port_init_data init = { .type = COMMUNICATION_PORT,
                                         .flags = req->port_flags |
@@ -2923,6 +3104,26 @@ DECL_HANDLER(alpc_connect_port)
         set_error( STATUS_NOT_IMPLEMENTED );
         return;
     }
+    if (req->client_flags & ~7) { set_error( STATUS_INVALID_PARAMETER ); return; }
+    if (req->client_flags & 4)
+    {
+        if (size < sizeof(lpc)) { set_error( STATUS_INVALID_PARAMETER ); return; }
+        memcpy( &lpc, data, sizeof(lpc) );
+        data += sizeof(lpc);
+        size -= sizeof(lpc);
+    }
+    if (req->name_size > size || req->sid_size > size - req->name_size ||
+        req->server_sd_size > size - req->name_size - req->sid_size)
+    { set_error( STATUS_INVALID_PARAMETER ); return; }
+    if (lpc.section)
+    {
+        if (!(section = get_shared_data_section( current->process, lpc.section, &section_size ))) return;
+        if (!lpc.size || lpc.offset >= section_size || lpc.size > section_size - lpc.offset ||
+            !is_data_section_view( current->process, section, lpc.base, lpc.offset, lpc.size ))
+        { set_error( STATUS_INVALID_VIEW_SIZE ); goto done; }
+    }
+    else if (lpc.base || lpc.offset || lpc.size)
+    { set_error( STATUS_INVALID_PARAMETER ); goto done; }
     name.str = (const WCHAR *)data;
     name.len = req->name_size;
     if (current->process->native_dwm_owner && getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
@@ -2937,13 +3138,13 @@ DECL_HANDLER(alpc_connect_port)
                          sid->sub_count > SID_MAX_SUB_AUTHORITIES || sid_len( sid ) != req->sid_size))
     {
         set_error( STATUS_INVALID_SID );
-        return;
+        goto done;
     }
     server_sd = (const struct security_descriptor *)(data + req->name_size + req->sid_size);
     if (req->server_sd_size && !sd_is_valid( server_sd, req->server_sd_size ))
     {
         set_error( STATUS_INVALID_SECURITY_DESCR );
-        return;
+        goto done;
     }
     payload_size = size - req->name_size - req->sid_size - req->server_sd_size;
     if (!req->rootdir && !req->attributes && name.len == sizeof(power_port_name) &&
@@ -2963,6 +3164,7 @@ DECL_HANDLER(alpc_connect_port)
     }
     if (kernel_port != ALPC_KERNEL_PORT_NONE)
     {
+        if (req->client_flags & 4) { set_error( STATUS_NOT_IMPLEMENTED ); goto done; }
         if (req->sid_size || req->server_sd_size ||
             (kernel_port != ALPC_KERNEL_PDC_PORT &&
              (coremsg_port ? payload_size != COREMSG_CONNECTION_PARAMS_SIZE : payload_size)))
@@ -3045,7 +3247,7 @@ DECL_HANDLER(alpc_connect_port)
         goto done;
     }
     if (!(lookup = open_object( current->process, req->rootdir, ALPC_PORT_QUERY_STATE,
-                                &alpc_port_ops, name, req->attributes ))) return;
+                                &alpc_port_ops, name, req->attributes ))) goto done;
     if (!(listener = (struct alpc_port *)get_handle_obj( current->process, lookup,
                                                         ALPC_PORT_QUERY_STATE, &alpc_port_ops ))) goto done;
     if (listener->type != CONNECTION_PORT || listener->status == DISCONNECTED)
@@ -3100,8 +3302,28 @@ DECL_HANDLER(alpc_connect_port)
         client->connecting_handle = handle;
         list_add_tail( &connecting_ports, &client->connecting_entry );
     }
+    if (section)
+    {
+        client->classic_view = 1;
+        if (!(local_view = new_section_view( client, section, lpc.base, lpc.offset,
+                                             lpc.size, message->info.id, 0 )))
+        {
+            free_message( message );
+            close_handle( current->process, handle );
+            goto done;
+        }
+        if (!new_section_view( listener, section, 0, lpc.offset, lpc.size, message->info.id, 1 ))
+        {
+            free_section_view( local_view );
+            free_message( message );
+            close_handle( current->process, handle );
+            goto done;
+        }
+    }
     message->token = (struct token *)grab_object( client->client_token );
-    message->info.attributes_valid |= ALPC_MESSAGE_TOKEN_ATTRIBUTE;
+    if (req->client_flags & 4)
+        message->info.attributes_valid = section ? ALPC_MESSAGE_VIEW_ATTRIBUTE : 0;
+    else message->info.attributes_valid |= ALPC_MESSAGE_TOKEN_ATTRIBUTE;
     client->context = handle;
     client->initial_message_context = req->message_context;
     message->info.sequence = ++listener->receive_sequence;
@@ -3118,6 +3340,7 @@ DECL_HANDLER(alpc_connect_port)
     dispatch_receives( listener );
 
 done:
+    if (section) release_object( section );
     if (client && !reply->handle && client->connecting_wait_handle)
     {
         unsigned int status = get_error();
@@ -3130,6 +3353,23 @@ done:
     if (client) release_object( client );
     if (listener) release_object( listener );
     if (lookup) close_handle( current->process, lookup );
+}
+
+DECL_HANDLER(alpc_get_lpc_connect_info)
+{
+    struct alpc_port *client;
+    if (!(client = (struct alpc_port *)get_handle_obj( current->process, req->handle,
+                                                      ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
+    if (client->thread != current || client->connecting_handle != req->handle)
+        set_error( STATUS_ACCESS_DENIED );
+    else if (client->connect_status) set_error( client->connect_status );
+    else if (!client->peer || !client->peer->connection_port) set_error( STATUS_PORT_DISCONNECTED );
+    else
+    {
+        reply->remote_view = client->remote_view_base;
+        reply->max_msg_len = client->peer->connection_port->max_msg_len;
+    }
+    release_object( client );
 }
 
 DECL_HANDLER(alpc_get_connect_result)
@@ -3179,6 +3419,7 @@ DECL_HANDLER(alpc_accept_connect_port)
                                         .max_msg_len = req->max_msg_len };
     struct object_params params = { .ops = &alpc_port_ops, .init_data = &init };
     struct alpc_message *message = NULL;
+    struct alpc_section_view *view;
     data_size_t size = get_req_data_size();
     obj_handle_t handle;
 
@@ -3223,6 +3464,20 @@ DECL_HANDLER(alpc_accept_connect_port)
         }
         unlink_pending( client );
         goto done;
+    }
+    /* The supported classic contract publishes the receiver's real mapping.
+     * A receive without the view attribute cannot establish that mapping. */
+    if (client->classic_view)
+    {
+        LIST_FOR_EACH_ENTRY( view, &section_views, struct alpc_section_view, entry )
+            if (view->owner == listener && view->receiver && view->delivered &&
+                view->message_id == client->connection_id && view->base &&
+                is_data_section_view( current->process, view->section, view->base, view->offset, view->size )) break;
+        if (&view->entry == &section_views)
+        {
+            set_error( STATUS_NOT_IMPLEMENTED );
+            goto done;
+        }
     }
     if (size > 65535 - sizeof(ALPC_PORT_MESSAGE) || size + sizeof(ALPC_PORT_MESSAGE) > client->max_msg_len)
     {

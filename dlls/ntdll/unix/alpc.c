@@ -31,6 +31,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(alpc);
 WINE_DECLARE_DEBUG_CHANNEL(alpcpayload);
 
+C_ASSERT( sizeof(LPC_SECTION_WRITE) == (sizeof(void *) == 8 ? 48 : 24) );
+C_ASSERT( sizeof(LPC_SECTION_READ) == (sizeof(void *) == 8 ? 24 : 12) );
 C_ASSERT( sizeof(ALPC_PORT_MESSAGE32) == 24 );
 C_ASSERT( offsetof(ALPC_PORT_MESSAGE32, MessageId) == 16 );
 
@@ -186,7 +188,7 @@ static void receive_message_info( NTSTATUS status, const struct alpc_message_inf
     if (attributes && info->sequence)
     {
         attributes->ValidAttributes = info->attributes_valid & attributes->AllocatedAttributes;
-        if (status) attributes->ValidAttributes &= ~ALPC_MESSAGE_SECURITY_ATTRIBUTE;
+        if (status) attributes->ValidAttributes &= ~(ALPC_MESSAGE_SECURITY_ATTRIBUTE | ALPC_MESSAGE_VIEW_ATTRIBUTE);
         if (attributes->ValidAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE)
         {
             security = wine_alpc_get_attribute( attributes, ALPC_MESSAGE_SECURITY_ATTRIBUTE );
@@ -266,6 +268,98 @@ NTSTATUS WINAPI NtAlpcAcceptConnectPort( HANDLE *communication_port, HANDLE conn
     return status;
 }
 
+struct lpc_connect_data
+{
+    HANDLE section;
+    void *base, *remote;
+    SIZE_T size;
+    ULONG offset, max_len;
+    BOOL port_owns_view;
+};
+
+static NTSTATUS receive_section_view( HANDLE port, ALPC_PORT_MESSAGE *message,
+                                      ALPC_MESSAGE_ATTRIBUTES *attributes )
+{
+    ALPC_VIEW_ATTR *view;
+    HANDLE section = NULL;
+    LARGE_INTEGER offset;
+    SIZE_T size = 0;
+    void *base = NULL;
+    NTSTATUS status;
+
+    if (!message || !attributes || !(attributes->ValidAttributes & ALPC_MESSAGE_VIEW_ATTRIBUTE))
+        return STATUS_SUCCESS;
+    SERVER_START_REQ( alpc_connection_view )
+    {
+        req->listener = wine_server_obj_handle( port );
+        req->message_id = message->MessageId;
+        req->base = 0;
+        status = wine_server_call( req );
+        section = wine_server_ptr_handle( reply->section );
+        offset.QuadPart = reply->offset;
+        size = reply->size;
+    }
+    SERVER_END_REQ;
+    if (status) goto failed;
+    status = NtMapViewOfSection( section, NtCurrentProcess(), &base, is_wow64() ? ~0u : 0,
+                                0, &offset, &size, ViewUnmap, 0, PAGE_READWRITE );
+    if (!status)
+    {
+        SERVER_START_REQ( alpc_connection_view )
+        {
+            req->listener = wine_server_obj_handle( port );
+            req->message_id = message->MessageId;
+            req->base = wine_server_client_ptr( base );
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        if (status) NtUnmapViewOfSection( NtCurrentProcess(), base );
+    }
+    NtClose( section );
+    if (status) goto failed;
+    view = wine_alpc_get_attribute( attributes, ALPC_MESSAGE_VIEW_ATTRIBUTE );
+    view->Flags = 0;
+    view->SectionHandle = NULL;
+    view->ViewBase = base;
+    view->ViewSize = size;
+    return STATUS_SUCCESS;
+failed:
+    attributes->ValidAttributes &= ~ALPC_MESSAGE_VIEW_ATTRIBUTE;
+    return status;
+}
+
+void alpc_unmap_closed_views(void)
+{
+    client_ptr_t base;
+    NTSTATUS status;
+    for (;;)
+    {
+        SERVER_START_REQ( alpc_get_closed_view )
+        {
+            status = wine_server_call( req );
+            base = reply->base;
+        }
+        SERVER_END_REQ;
+        if (status || !base) return;
+        NtUnmapViewOfSection( NtCurrentProcess(), wine_server_get_ptr( base ) );
+    }
+}
+
+NTSTATUS WINAPI NtAlpcDeleteSectionView( HANDLE port, ULONG flags, void *base )
+{
+    NTSTATUS status;
+    if (flags) return STATUS_INVALID_PARAMETER;
+    SERVER_START_REQ( alpc_delete_section_view )
+    {
+        req->port = wine_server_obj_handle( port );
+        req->base = wine_server_client_ptr( base );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    if (!status) NtUnmapViewOfSection( NtCurrentProcess(), base );
+    return status;
+}
+
 static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
                               OBJECT_ATTRIBUTES *obj_attr, ALPC_PORT_ATTRIBUTES *port_attr,
                               DWORD flags, PSID required_server_sid,
@@ -273,12 +367,14 @@ static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
                               BOOL security_context,
                               ALPC_PORT_MESSAGE *connect_msg, SIZE_T *connect_msg_size,
                               ALPC_MESSAGE_ATTRIBUTES *send_msg_attr,
-                              ALPC_MESSAGE_ATTRIBUTES *recv_msg_attr, LARGE_INTEGER *timeout )
+                              ALPC_MESSAGE_ATTRIBUTES *recv_msg_attr, LARGE_INTEGER *timeout,
+                              struct lpc_connect_data *lpc )
 {
     HANDLE handle = NULL, wait_handle = NULL;
     NTSTATUS status;
     SIZE_T capacity = connect_msg_size ? *connect_msg_size : 0;
     struct alpc_security_qos qos;
+    struct alpc_lpc_view view = {0};
     struct object_attributes *server_objattr = NULL;
     const struct security_descriptor *server_sd = NULL;
     data_size_t server_objattr_size = 0, server_sd_size = 0;
@@ -321,12 +417,20 @@ static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
         req->name_size = port_name->Length;
         req->sid_size = sid_size;
         req->server_sd_size = server_sd_size;
-        req->client_flags = (is_wow64() ? 1 : 0) | (security_context ? 2 : 0);
+        req->client_flags = (is_wow64() ? 1 : 0) | (security_context ? 2 : 0) | (lpc ? 4 : 0);
         req->message_context = get_message_context( send_msg_attr );
         qos.impersonation_level = port_attr->SecurityQos.ImpersonationLevel;
         qos.tracking_mode = port_attr->SecurityQos.ContextTrackingMode;
         qos.effective_only = port_attr->SecurityQos.EffectiveOnly;
         wine_server_add_data( req, &qos, sizeof(qos) );
+        if (lpc)
+        {
+            view.section = wine_server_obj_handle( lpc->section );
+            view.base = wine_server_client_ptr( lpc->base );
+            view.offset = lpc->offset;
+            view.size = lpc->size;
+            wine_server_add_data( req, &view, sizeof(view) );
+        }
         wine_server_add_data( req, port_name->Buffer, port_name->Length );
         if (sid_size) wine_server_add_data( req, required_server_sid, sid_size );
         if (server_sd_size) wine_server_add_data( req, server_sd, server_sd_size );
@@ -334,6 +438,7 @@ static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
         status = wine_server_call( req );
         if (!status)
         {
+            if (lpc) lpc->port_owns_view = TRUE;
             handle = wine_server_ptr_handle( reply->handle );
             wait_handle = wine_server_ptr_handle( reply->wait_handle );
         }
@@ -352,6 +457,20 @@ static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
     /* Exactly one wait owns the caller's timeout. A pending request is canceled
      * by closing the private client handle, with the server also canceling it on thread termination. */
     status = NtWaitForSingleObject( wait_handle, FALSE, timeout );
+    if (!status && lpc)
+    {
+        SERVER_START_REQ( alpc_get_lpc_connect_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            status = wine_server_call( req );
+            if (!status)
+            {
+                lpc->remote = wine_server_get_ptr( reply->remote_view );
+                lpc->max_len = reply->max_msg_len;
+            }
+        }
+        SERVER_END_REQ;
+    }
     if (!status)
     {
         SERVER_START_REQ( alpc_get_connect_result )
@@ -374,6 +493,106 @@ static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
     return status;
 }
 
+static NTSTATUS connect_lpc_port( HANDLE *handle, UNICODE_STRING *name, SECURITY_QUALITY_OF_SERVICE *qos,
+                                  LPC_SECTION_WRITE *write, PSID sid, LPC_SECTION_READ *read,
+                                  ULONG *max_len, void *info, ULONG *info_len )
+{
+    struct lpc_connect_data lpc = {0};
+    LPC_SECTION_WRITE write_copy;
+    LPC_SECTION_READ read_copy;
+    ALPC_PORT_ATTRIBUTES attributes = {0};
+    ALPC_PORT_MESSAGE *message;
+    LARGE_INTEGER offset;
+    ULONG length = 0;
+    SIZE_T capacity;
+    NTSTATUS status;
+    HANDLE port;
+
+    if (!handle || !name || !qos) return STATUS_ACCESS_VIOLATION;
+    if (virtual_uninterrupted_read_memory( qos, &attributes.SecurityQos, sizeof(*qos) ) != sizeof(*qos))
+        return STATUS_ACCESS_VIOLATION;
+    if (write)
+    {
+        if (virtual_uninterrupted_read_memory( write, &write_copy, sizeof(write_copy) ) != sizeof(write_copy))
+            return STATUS_ACCESS_VIOLATION;
+        if (write_copy.Length != sizeof(write_copy)) return STATUS_INVALID_PARAMETER;
+    }
+    if (read)
+    {
+        if (virtual_uninterrupted_read_memory( read, &read_copy, sizeof(read_copy) ) != sizeof(read_copy))
+            return STATUS_ACCESS_VIOLATION;
+        if (read_copy.Length != sizeof(read_copy)) return STATUS_INVALID_PARAMETER;
+    }
+    if (info_len && virtual_uninterrupted_read_memory( info_len, &length, sizeof(length) ) != sizeof(length))
+        return STATUS_ACCESS_VIOLATION;
+    if (length > 65535 - sizeof(*message) || (length && !info)) return STATUS_INVALID_PARAMETER;
+    capacity = sizeof(*message) + length;
+    if (!(message = calloc( 1, capacity ))) return STATUS_NO_MEMORY;
+    message->DataLength = length;
+    message->TotalLength = capacity;
+    if (length && virtual_uninterrupted_read_memory( info, message + 1, length ) != length)
+    { status = STATUS_ACCESS_VIOLATION; goto done; }
+    if (write)
+    {
+        lpc.offset = write_copy.SectionOffset;
+        lpc.size = write_copy.ViewSize;
+        SERVER_START_REQ( alpc_capture_lpc_section )
+        {
+            req->section = wine_server_obj_handle( write_copy.SectionHandle );
+            req->offset = lpc.offset;
+            req->size = lpc.size;
+            status = wine_server_call( req );
+            lpc.section = wine_server_ptr_handle( reply->section );
+        }
+        SERVER_END_REQ;
+        if (status) goto done;
+        offset.QuadPart = lpc.offset;
+        status = NtMapViewOfSection( lpc.section, NtCurrentProcess(), &lpc.base, is_wow64() ? ~0u : 0,
+                                    0, &offset, &lpc.size, ViewUnmap, 0, PAGE_READWRITE );
+        if (status) goto done;
+    }
+    attributes.MaxMessageLength = 65535;
+    status = connect_port( &port, name, NULL, &attributes, ALPC_SYNC_CONNECTION, sid, NULL, FALSE,
+                           message, &capacity, NULL, NULL, NULL, &lpc );
+    if (status) goto done;
+    if (write)
+    {
+        write_copy.ViewBase = lpc.base;
+        write_copy.TargetViewBase = lpc.remote;
+        write_copy.ViewSize = lpc.size;
+        *write = write_copy;
+    }
+    if (read)
+    {
+        read_copy.ViewSize = 0;
+        read_copy.ViewBase = NULL;
+        *read = read_copy;
+    }
+    if (max_len) *max_len = lpc.max_len;
+    if (info && message->DataLength) memcpy( info, message + 1, message->DataLength );
+    if (info_len) *info_len = message->DataLength;
+    *handle = port;
+done:
+    if (status && lpc.base && !lpc.port_owns_view) NtUnmapViewOfSection( NtCurrentProcess(), lpc.base );
+    if (lpc.section) NtClose( lpc.section );
+    free( message );
+    return status;
+}
+
+NTSTATUS WINAPI NtConnectPort( HANDLE *handle, UNICODE_STRING *name, SECURITY_QUALITY_OF_SERVICE *qos,
+                               LPC_SECTION_WRITE *write, LPC_SECTION_READ *read, ULONG *max_len,
+                               void *info, ULONG *info_len )
+{
+    return connect_lpc_port( handle, name, qos, write, NULL, read, max_len, info, info_len );
+}
+
+NTSTATUS WINAPI NtSecureConnectPort( HANDLE *handle, UNICODE_STRING *name, SECURITY_QUALITY_OF_SERVICE *qos,
+                                     LPC_SECTION_WRITE *write, PSID sid, LPC_SECTION_READ *read,
+                                     ULONG *max_len, void *info, ULONG *info_len )
+{
+    return connect_lpc_port( handle, name, qos, write, sid, read, max_len, info, info_len );
+}
+
 NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_name,
                                    OBJECT_ATTRIBUTES *obj_attr, ALPC_PORT_ATTRIBUTES *port_attr,
                                    DWORD flags, PSID required_server_sid,
@@ -384,7 +603,7 @@ NTSTATUS WINAPI NtAlpcConnectPort( HANDLE *port_handle, UNICODE_STRING *port_nam
     NTSTATUS status;
 
     status = connect_port( port_handle, port_name, obj_attr, port_attr, flags, required_server_sid, NULL, FALSE,
-                           connect_msg, connect_msg_size, send_msg_attr, recv_msg_attr, timeout );
+                           connect_msg, connect_msg_size, send_msg_attr, recv_msg_attr, timeout, NULL );
     if (port_name && port_name->Buffer && port_name->Length == 8 * sizeof(WCHAR) &&
         port_name->Buffer[0] == '\\' && port_name->Buffer[1] == 'P' && port_name->Buffer[2] == 'd' &&
         port_name->Buffer[3] == 'c' && port_name->Buffer[4] == 'P' && port_name->Buffer[5] == 'o' &&
@@ -433,7 +652,7 @@ NTSTATUS WINAPI NtAlpcConnectPortEx( HANDLE *port_handle,
     lookup_attributes.ObjectName = NULL;
     return connect_port( port_handle, connection_port_attributes->ObjectName, &lookup_attributes,
                          port_attributes, flags, NULL, server_security_requirements, security_context, connection_message,
-                         buffer_length, out_message_attributes, in_message_attributes, timeout );
+                         buffer_length, out_message_attributes, in_message_attributes, timeout, NULL );
 }
 
 NTSTATUS WINAPI NtAlpcQueryInformationMessage( HANDLE port_handle, ALPC_PORT_MESSAGE *message,
@@ -839,6 +1058,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         SERVER_END_REQ;
         NtClose( wait_handle );
     }
+    if (!status) status = receive_section_view( port_handle, recv_msg, recv_msg_attr );
     if (!status) trace_message_data( "receive", port_handle, recv_msg );
     return status;
 }

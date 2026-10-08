@@ -692,6 +692,14 @@ NTSTATUS WINAPI wow64_NtAlpcCreateSecurityContext( UINT *args )
     return STATUS_SUCCESS;
 }
 
+NTSTATUS WINAPI wow64_NtAlpcDeleteSectionView( UINT *args )
+{
+    HANDLE port = get_handle( &args );
+    ULONG flags = get_ulong( &args );
+    void *base = get_ptr( &args );
+    return NtAlpcDeleteSectionView( port, flags, base );
+}
+
 NTSTATUS WINAPI wow64_NtAlpcDeleteSecurityContext( UINT *args )
 {
     HANDLE port = get_handle( &args );

@@ -362,6 +362,11 @@ DECL_HANDLER(alpc_send_receive);
 DECL_HANDLER(alpc_get_message_result);
 DECL_HANDLER(alpc_connect_port);
 DECL_HANDLER(alpc_get_connect_result);
+DECL_HANDLER(alpc_get_lpc_connect_info);
+DECL_HANDLER(alpc_capture_lpc_section);
+DECL_HANDLER(alpc_connection_view);
+DECL_HANDLER(alpc_delete_section_view);
+DECL_HANDLER(alpc_get_closed_view);
 DECL_HANDLER(alpc_accept_connect_port);
 DECL_HANDLER(alpc_query_message_security);
 DECL_HANDLER(alpc_open_sender);
@@ -824,6 +829,11 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_alpc_get_message_result,
     (req_handler)req_alpc_connect_port,
     (req_handler)req_alpc_get_connect_result,
+    (req_handler)req_alpc_get_lpc_connect_info,
+    (req_handler)req_alpc_capture_lpc_section,
+    (req_handler)req_alpc_connection_view,
+    (req_handler)req_alpc_delete_section_view,
+    (req_handler)req_alpc_get_closed_view,
     (req_handler)req_alpc_accept_connect_port,
     (req_handler)req_alpc_query_message_security,
     (req_handler)req_alpc_open_sender,
@@ -1172,6 +1182,8 @@ C_ASSERT( offsetof(struct get_apc_result_reply, result) == 8 );
 C_ASSERT( sizeof(struct get_apc_result_reply) == 48 );
 C_ASSERT( offsetof(struct close_handle_request, handle) == 12 );
 C_ASSERT( sizeof(struct close_handle_request) == 16 );
+C_ASSERT( offsetof(struct close_handle_reply, alpc_views) == 8 );
+C_ASSERT( sizeof(struct close_handle_reply) == 16 );
 C_ASSERT( offsetof(struct set_handle_info_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_handle_info_request, flags) == 16 );
 C_ASSERT( offsetof(struct set_handle_info_request, mask) == 20 );
@@ -2967,6 +2979,31 @@ C_ASSERT( sizeof(struct alpc_get_connect_result_request) == 24 );
 C_ASSERT( offsetof(struct alpc_get_connect_result_reply, status) == 8 );
 C_ASSERT( offsetof(struct alpc_get_connect_result_reply, info) == 16 );
 C_ASSERT( sizeof(struct alpc_get_connect_result_reply) == 64 );
+C_ASSERT( offsetof(struct alpc_get_lpc_connect_info_request, handle) == 12 );
+C_ASSERT( sizeof(struct alpc_get_lpc_connect_info_request) == 16 );
+C_ASSERT( offsetof(struct alpc_get_lpc_connect_info_reply, max_msg_len) == 8 );
+C_ASSERT( offsetof(struct alpc_get_lpc_connect_info_reply, remote_view) == 16 );
+C_ASSERT( sizeof(struct alpc_get_lpc_connect_info_reply) == 24 );
+C_ASSERT( offsetof(struct alpc_capture_lpc_section_request, section) == 12 );
+C_ASSERT( offsetof(struct alpc_capture_lpc_section_request, offset) == 16 );
+C_ASSERT( offsetof(struct alpc_capture_lpc_section_request, size) == 24 );
+C_ASSERT( sizeof(struct alpc_capture_lpc_section_request) == 32 );
+C_ASSERT( offsetof(struct alpc_capture_lpc_section_reply, section) == 8 );
+C_ASSERT( sizeof(struct alpc_capture_lpc_section_reply) == 16 );
+C_ASSERT( offsetof(struct alpc_connection_view_request, listener) == 12 );
+C_ASSERT( offsetof(struct alpc_connection_view_request, message_id) == 16 );
+C_ASSERT( offsetof(struct alpc_connection_view_request, base) == 24 );
+C_ASSERT( sizeof(struct alpc_connection_view_request) == 32 );
+C_ASSERT( offsetof(struct alpc_connection_view_reply, section) == 8 );
+C_ASSERT( offsetof(struct alpc_connection_view_reply, offset) == 16 );
+C_ASSERT( offsetof(struct alpc_connection_view_reply, size) == 24 );
+C_ASSERT( sizeof(struct alpc_connection_view_reply) == 32 );
+C_ASSERT( offsetof(struct alpc_delete_section_view_request, port) == 12 );
+C_ASSERT( offsetof(struct alpc_delete_section_view_request, base) == 16 );
+C_ASSERT( sizeof(struct alpc_delete_section_view_request) == 24 );
+C_ASSERT( sizeof(struct alpc_get_closed_view_request) == 16 );
+C_ASSERT( offsetof(struct alpc_get_closed_view_reply, base) == 8 );
+C_ASSERT( sizeof(struct alpc_get_closed_view_reply) == 16 );
 C_ASSERT( offsetof(struct alpc_accept_connect_port_request, connection) == 12 );
 C_ASSERT( offsetof(struct alpc_accept_connect_port_request, port_flags) == 16 );
 C_ASSERT( offsetof(struct alpc_accept_connect_port_request, max_msg_len) == 24 );

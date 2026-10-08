@@ -1485,6 +1485,8 @@ typedef volatile struct
 /* Close a handle for the current process */
 @REQ(close_handle)
     obj_handle_t handle;       /* handle to close */
+@REPLY
+    int alpc_views;            /* this close owns pending local ALPC unmaps */
 @END
 
 
@@ -4766,6 +4768,15 @@ struct alpc_security_qos
     int effective_only;
 };
 
+/* Classic admission extends the variable payload, leaving fixed requests bounded. */
+struct alpc_lpc_view
+{
+    obj_handle_t section;
+    client_ptr_t base;
+    mem_size_t offset;
+    mem_size_t size;
+};
+
 /* Capture the current effective token into an endpoint-owned context. */
 @REQ(alpc_create_security_context)
     obj_handle_t handle;
@@ -4848,7 +4859,7 @@ struct alpc_message_info
     data_size_t name_size;
     data_size_t sid_size;
     data_size_t server_sd_size;
-    int client_flags; /* bit 0: WoW64, bit 1: explicit security context */
+    int client_flags; /* bit 0: WoW64, bit 1: security context, bit 2: classic LPC */
     client_ptr_t message_context;
     VARARG(data,bytes);
 @REPLY
@@ -4863,6 +4874,45 @@ struct alpc_message_info
     unsigned int status;
     struct alpc_message_info info;
     VARARG(message,bytes);
+@END
+
+/* Read accepted classic metadata before consuming the connection result. */
+@REQ(alpc_get_lpc_connect_info)
+    obj_handle_t handle;
+@REPLY
+    mem_size_t max_msg_len;
+    client_ptr_t remote_view;
+@END
+
+/* Capture section authority before mapping or publishing a classic request. */
+@REQ(alpc_capture_lpc_section)
+    obj_handle_t section;
+    mem_size_t offset;
+    mem_size_t size;
+@REPLY
+    obj_handle_t section;      /* temporary handle, same mapping rights only */
+@END
+
+/* Acquire/map a view only for a connection delivered to this listener. */
+@REQ(alpc_connection_view)
+    obj_handle_t listener;
+    unsigned int message_id;
+    client_ptr_t base;         /* zero to acquire, nonzero to register */
+@REPLY
+    obj_handle_t section;      /* temporary receiver handle */
+    mem_size_t offset;
+    mem_size_t size;
+@END
+
+@REQ(alpc_delete_section_view)
+    obj_handle_t port;
+    client_ptr_t base;
+@END
+
+/* Drain views assigned to this closing thread; never return another process's addresses. */
+@REQ(alpc_get_closed_view)
+@REPLY
+    client_ptr_t base;
 @END
 
 @REQ(alpc_accept_connect_port)

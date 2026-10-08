@@ -1340,8 +1340,9 @@ static enum server_fd_type mapping_get_fd_type( struct fd *fd )
 }
 
 /* assign a mapping address to a PE image mapping */
-/* Retain ordinary bitmap storage after the creating process closes its handle. */
-struct object *get_gdi_section( struct process *process, obj_handle_t handle, mem_size_t *size )
+/* Retain shared data storage only with both mapping rights. Image sections
+ * cannot back writable GDI or LPC data views. */
+struct object *get_shared_data_section( struct process *process, obj_handle_t handle, mem_size_t *size )
 {
     struct mapping *mapping = get_mapping_obj( process, handle, SECTION_MAP_READ | SECTION_MAP_WRITE );
     if (!mapping) return NULL;
@@ -1353,6 +1354,17 @@ struct object *get_gdi_section( struct process *process, obj_handle_t handle, me
     }
     *size = mapping->size;
     return &mapping->obj;
+}
+
+int is_data_section_view( struct process *process, struct object *section,
+                          client_ptr_t base, mem_size_t offset, mem_size_t size )
+{
+    struct mapping *mapping = (struct mapping *)section;
+    struct memory_view *view = find_mapped_view( process, base );
+
+    assert( section->ops == &mapping_ops );
+    return view && view->base == base && view->fd == mapping->fd &&
+           view->start == offset && view->size >= size && !(view->flags & SEC_IMAGE);
 }
 
 static client_ptr_t assign_map_address( struct mapping *mapping )

@@ -817,6 +817,7 @@ static void process_destroy( struct object *obj )
     cleanup_process_coremsg_connections( process );
     cleanup_process_wnf_states( process );
     close_process_handles( process );
+    cleanup_process_alpc_views( process );
     set_process_startup_state( process, STARTUP_ABORTED );
 
     if (process->job)

@@ -3857,14 +3857,14 @@ typedef struct _LPC_SECTION_WRITE {
   ULONG Length;
   HANDLE SectionHandle;
   ULONG SectionOffset;
-  ULONG ViewSize;
+  SIZE_T ViewSize;
   PVOID ViewBase;
   PVOID TargetViewBase;
 } LPC_SECTION_WRITE, *PLPC_SECTION_WRITE;
 
 typedef struct _LPC_SECTION_READ {
   ULONG Length;
-  ULONG ViewSize;
+  SIZE_T ViewSize;
   PVOID ViewBase;
 } LPC_SECTION_READ, *PLPC_SECTION_READ;
 

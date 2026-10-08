@@ -1621,6 +1621,8 @@ struct close_handle_request
 struct close_handle_reply
 {
     struct reply_header __header;
+    int alpc_views;
+    char __pad_12[4];
 };
 
 
@@ -6942,6 +6944,15 @@ struct alpc_security_qos
 };
 
 
+struct alpc_lpc_view
+{
+    obj_handle_t section;
+    client_ptr_t base;
+    mem_size_t offset;
+    mem_size_t size;
+};
+
+
 struct alpc_create_security_context_request
 {
     struct request_header __header;
@@ -7075,6 +7086,75 @@ struct alpc_get_connect_result_reply
     char __pad_12[4];
     struct alpc_message_info info;
     /* VARARG(message,bytes); */
+};
+
+
+struct alpc_get_lpc_connect_info_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct alpc_get_lpc_connect_info_reply
+{
+    struct reply_header __header;
+    mem_size_t max_msg_len;
+    client_ptr_t remote_view;
+};
+
+
+struct alpc_capture_lpc_section_request
+{
+    struct request_header __header;
+    obj_handle_t section;
+    mem_size_t offset;
+    mem_size_t size;
+};
+struct alpc_capture_lpc_section_reply
+{
+    struct reply_header __header;
+    obj_handle_t section;
+    char __pad_12[4];
+};
+
+
+struct alpc_connection_view_request
+{
+    struct request_header __header;
+    obj_handle_t listener;
+    unsigned int message_id;
+    char __pad_20[4];
+    client_ptr_t base;
+};
+struct alpc_connection_view_reply
+{
+    struct reply_header __header;
+    obj_handle_t section;
+    char __pad_12[4];
+    mem_size_t offset;
+    mem_size_t size;
+};
+
+struct alpc_delete_section_view_request
+{
+    struct request_header __header;
+    obj_handle_t port;
+    client_ptr_t base;
+};
+struct alpc_delete_section_view_reply
+{
+    struct reply_header __header;
+};
+
+
+struct alpc_get_closed_view_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct alpc_get_closed_view_reply
+{
+    struct reply_header __header;
+    client_ptr_t base;
 };
 
 struct alpc_accept_connect_port_request
@@ -8919,6 +8999,11 @@ enum request
     REQ_alpc_get_message_result,
     REQ_alpc_connect_port,
     REQ_alpc_get_connect_result,
+    REQ_alpc_get_lpc_connect_info,
+    REQ_alpc_capture_lpc_section,
+    REQ_alpc_connection_view,
+    REQ_alpc_delete_section_view,
+    REQ_alpc_get_closed_view,
     REQ_alpc_accept_connect_port,
     REQ_alpc_query_message_security,
     REQ_alpc_open_sender,
@@ -9384,6 +9469,11 @@ union generic_request
     struct alpc_get_message_result_request alpc_get_message_result_request;
     struct alpc_connect_port_request alpc_connect_port_request;
     struct alpc_get_connect_result_request alpc_get_connect_result_request;
+    struct alpc_get_lpc_connect_info_request alpc_get_lpc_connect_info_request;
+    struct alpc_capture_lpc_section_request alpc_capture_lpc_section_request;
+    struct alpc_connection_view_request alpc_connection_view_request;
+    struct alpc_delete_section_view_request alpc_delete_section_view_request;
+    struct alpc_get_closed_view_request alpc_get_closed_view_request;
     struct alpc_accept_connect_port_request alpc_accept_connect_port_request;
     struct alpc_query_message_security_request alpc_query_message_security_request;
     struct alpc_open_sender_request alpc_open_sender_request;
@@ -9847,6 +9937,11 @@ union generic_reply
     struct alpc_get_message_result_reply alpc_get_message_result_reply;
     struct alpc_connect_port_reply alpc_connect_port_reply;
     struct alpc_get_connect_result_reply alpc_get_connect_result_reply;
+    struct alpc_get_lpc_connect_info_reply alpc_get_lpc_connect_info_reply;
+    struct alpc_capture_lpc_section_reply alpc_capture_lpc_section_reply;
+    struct alpc_connection_view_reply alpc_connection_view_reply;
+    struct alpc_delete_section_view_reply alpc_delete_section_view_reply;
+    struct alpc_get_closed_view_reply alpc_get_closed_view_reply;
     struct alpc_accept_connect_port_reply alpc_accept_connect_port_reply;
     struct alpc_query_message_security_reply alpc_query_message_security_reply;
     struct alpc_open_sender_reply alpc_open_sender_reply;
@@ -9952,6 +10047,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1099
+#define SERVER_PROTOCOL_VERSION 1100
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

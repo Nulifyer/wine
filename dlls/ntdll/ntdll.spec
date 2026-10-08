@@ -172,6 +172,7 @@
 @ stdcall -syscall NtAlpcCreateResourceReserve(ptr long long ptr)
 @ stdcall -syscall NtAlpcCreateSecurityContext(ptr long ptr)
 @ stdcall -syscall NtAlpcDeleteResourceReserve(ptr long long)
+@ stdcall -syscall NtAlpcDeleteSectionView(ptr long ptr)
 @ stdcall -syscall NtAlpcDeleteSecurityContext(ptr long ptr)
 @ stdcall -syscall NtAlpcDisconnectPort(ptr long)
 @ stdcall NtAlpcQueryInformation(ptr long ptr long ptr)
@@ -1377,6 +1378,7 @@
 @ stdcall -private ZwAlpcCreateResourceReserve(ptr long long ptr) NtAlpcCreateResourceReserve
 @ stdcall -private ZwAlpcCreateSecurityContext(ptr long ptr) NtAlpcCreateSecurityContext
 @ stdcall -private ZwAlpcDeleteResourceReserve(ptr long long) NtAlpcDeleteResourceReserve
+@ stdcall -private ZwAlpcDeleteSectionView(ptr long ptr) NtAlpcDeleteSectionView
 @ stdcall -private ZwAlpcDeleteSecurityContext(ptr long ptr) NtAlpcDeleteSecurityContext
 @ stdcall -private ZwAlpcDisconnectPort(ptr long) NtAlpcDisconnectPort
 @ stdcall -private ZwAlpcQueryInformation(ptr long ptr long ptr) NtAlpcQueryInformation

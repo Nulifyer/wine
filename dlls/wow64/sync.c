@@ -191,6 +191,67 @@ NTSTATUS WINAPI wow64_NtCompleteConnectPort( UINT *args )
 }
 
 
+C_ASSERT( sizeof(LPC_SECTION_WRITE32) == 24 );
+C_ASSERT( sizeof(LPC_SECTION_READ32) == 12 );
+
+static NTSTATUS connect_lpc_port( ULONG *handle_ptr, UNICODE_STRING32 *name32,
+                                  SECURITY_QUALITY_OF_SERVICE *qos, LPC_SECTION_WRITE32 *write32,
+                                  SID *sid, LPC_SECTION_READ32 *read32, ULONG *max_len,
+                                  void *info, ULONG *info_len, BOOL secure )
+{
+    LPC_SECTION_WRITE write;
+    LPC_SECTION_READ read;
+    UNICODE_STRING name;
+    HANDLE handle = NULL;
+    NTSTATUS status;
+
+    if (!handle_ptr) return STATUS_ACCESS_VIOLATION;
+    if (write32)
+    {
+        if (write32->Length != sizeof(*write32)) return STATUS_INVALID_PARAMETER;
+        write.Length = sizeof(write);
+        write.SectionHandle = UlongToHandle( write32->SectionHandle );
+        write.SectionOffset = write32->SectionOffset;
+        write.ViewSize = write32->ViewSize;
+        write.ViewBase = UlongToPtr( write32->ViewBase );
+        write.TargetViewBase = UlongToPtr( write32->TargetViewBase );
+    }
+    if (read32)
+    {
+        if (read32->Length != sizeof(*read32)) return STATUS_INVALID_PARAMETER;
+        read.Length = sizeof(read);
+        read.ViewSize = read32->ViewSize;
+        read.ViewBase = UlongToPtr( read32->ViewBase );
+    }
+    if (secure)
+        status = NtSecureConnectPort( &handle, unicode_str_32to64( &name, name32 ), qos,
+                                      write32 ? &write : NULL, sid, read32 ? &read : NULL,
+                                      max_len, info, info_len );
+    else
+        status = NtConnectPort( &handle, unicode_str_32to64( &name, name32 ), qos,
+                                write32 ? &write : NULL, read32 ? &read : NULL,
+                                max_len, info, info_len );
+    if (!status)
+    {
+        *handle_ptr = HandleToUlong( handle );
+        if (write32)
+        {
+            write32->ViewSize = write.ViewSize;
+            write32->ViewBase = PtrToUlong( write.ViewBase );
+            write32->TargetViewBase = PtrToUlong( write.TargetViewBase );
+        }
+        if (read32)
+        {
+            read32->ViewSize = read.ViewSize;
+            read32->ViewBase = PtrToUlong( read.ViewBase );
+        }
+    }
+    else if (status == STATUS_INVALID_HANDLE || status == STATUS_OBJECT_TYPE_MISMATCH ||
+             status == STATUS_ACCESS_DENIED || status == STATUS_PORT_CONNECTION_REFUSED)
+        *handle_ptr = 0;
+    return status;
+}
+
 /**********************************************************************
  *           wow64_NtConnectPort
  */
@@ -199,15 +260,13 @@ NTSTATUS WINAPI wow64_NtConnectPort( UINT *args )
     ULONG *handle_ptr = get_ptr( &args );
     UNICODE_STRING32 *name32 = get_ptr( &args );
     SECURITY_QUALITY_OF_SERVICE *qos = get_ptr( &args );
-    LPC_SECTION_WRITE *write = get_ptr( &args );
-    LPC_SECTION_READ *read = get_ptr( &args );
+    LPC_SECTION_WRITE32 *write = get_ptr( &args );
+    LPC_SECTION_READ32 *read = get_ptr( &args );
     ULONG *max_len = get_ptr( &args );
     void *info = get_ptr( &args );
     ULONG *info_len = get_ptr( &args );
 
-    FIXME( "%p %p %p %p %p %p %p %p: stub\n",
-           handle_ptr, name32, qos, write, read, max_len, info, info_len );
-    return STATUS_NOT_IMPLEMENTED;
+    return connect_lpc_port( handle_ptr, name32, qos, write, NULL, read, max_len, info, info_len, FALSE );
 }
 
 
@@ -1386,16 +1445,14 @@ NTSTATUS WINAPI wow64_NtSecureConnectPort( UINT *args )
     ULONG *handle_ptr = get_ptr( &args );
     UNICODE_STRING32 *name32 = get_ptr( &args );
     SECURITY_QUALITY_OF_SERVICE *qos = get_ptr( &args );
-    LPC_SECTION_WRITE *write = get_ptr( &args );
+    LPC_SECTION_WRITE32 *write = get_ptr( &args );
     SID *sid = get_ptr( &args );
-    LPC_SECTION_READ *read = get_ptr( &args );
+    LPC_SECTION_READ32 *read = get_ptr( &args );
     ULONG *max_len = get_ptr( &args );
     void *info = get_ptr( &args );
     ULONG *info_len = get_ptr( &args );
 
-    FIXME( "%p %p %p %p %p %p %p %p %p: stub\n",
-           handle_ptr, name32, qos, write, sid, read, max_len, info, info_len );
-    return STATUS_NOT_IMPLEMENTED;
+    return connect_lpc_port( handle_ptr, name32, qos, write, sid, read, max_len, info, info_len, TRUE );
 }
 
 

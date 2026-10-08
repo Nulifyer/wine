@@ -182,7 +182,9 @@ extern void free_mapped_views( struct process *process );
 extern size_t get_page_size(void);
 extern struct mapping *create_fd_mapping( struct object *root, struct unicode_str name, struct fd *fd,
                                           unsigned int attr, const struct security_descriptor *sd );
-extern struct object *get_gdi_section( struct process *process, obj_handle_t handle, mem_size_t *size );
+extern struct object *get_shared_data_section( struct process *process, obj_handle_t handle, mem_size_t *size );
+extern int is_data_section_view( struct process *process, struct object *section,
+                                 client_ptr_t base, mem_size_t offset, mem_size_t size );
 extern struct mapping *create_anonymous_mapping( mem_size_t size, unsigned int file_access );
 extern struct object *create_user_data_mapping( struct object *root, struct unicode_str name,
                                                 unsigned int attr, const struct security_descriptor *sd );
