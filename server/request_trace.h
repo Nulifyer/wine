@@ -3953,6 +3953,26 @@ static void dump_alpc_delete_resource_reserve_request( const struct alpc_delete_
     fprintf( stderr, ", id=%08x", req->id );
 }
 
+static void dump_alpc_create_security_context_request( const struct alpc_create_security_context_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", qos_present=%d", req->qos_present );
+    fprintf( stderr, ", impersonation_level=%d", req->impersonation_level );
+    fprintf( stderr, ", tracking_mode=%d", req->tracking_mode );
+    fprintf( stderr, ", effective_only=%d", req->effective_only );
+}
+
+static void dump_alpc_create_security_context_reply( const struct alpc_create_security_context_reply *req )
+{
+    fprintf( stderr, " id=%08x", req->id );
+}
+
+static void dump_alpc_delete_security_context_request( const struct alpc_delete_security_context_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_uint64( ", id=", &req->id );
+}
+
 static void dump_alpc_send_receive_request( const struct alpc_send_receive_request *req )
 {
     fprintf( stderr, " receive_attributes=%08x", req->receive_attributes );
@@ -3961,12 +3981,10 @@ static void dump_alpc_send_receive_request( const struct alpc_send_receive_reque
     fprintf( stderr, ", message_id=%08x", req->message_id );
     fprintf( stderr, ", callback_id=%08x", req->callback_id );
     fprintf( stderr, ", message_type=%08x", req->message_type );
-    fprintf( stderr, ", send=%d", req->send );
-    fprintf( stderr, ", receive=%d", req->receive );
-    fprintf( stderr, ", wow64=%d", req->wow64 );
-    fprintf( stderr, ", no_wait=%d", req->no_wait );
+    fprintf( stderr, ", operation=%08x", req->operation );
     fprintf( stderr, ", send_attributes=%08x", req->send_attributes );
     dump_uint64( ", message_context=", &req->message_context );
+    dump_uint64( ", security_context=", &req->security_context );
     dump_varargs_bytes( ", message=", cur_size );
 }
 
@@ -5368,6 +5386,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_create_port_request,
     (dump_func)dump_alpc_create_resource_reserve_request,
     (dump_func)dump_alpc_delete_resource_reserve_request,
+    (dump_func)dump_alpc_create_security_context_request,
+    (dump_func)dump_alpc_delete_security_context_request,
     (dump_func)dump_alpc_send_receive_request,
     (dump_func)dump_alpc_get_message_result_request,
     (dump_func)dump_alpc_connect_port_request,
@@ -5827,6 +5847,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_set_completion_reply,
     (dump_func)dump_alpc_create_port_reply,
     (dump_func)dump_alpc_create_resource_reserve_reply,
+    NULL,
+    (dump_func)dump_alpc_create_security_context_reply,
     NULL,
     (dump_func)dump_alpc_send_receive_reply,
     (dump_func)dump_alpc_get_message_result_reply,
@@ -6288,6 +6310,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "alpc_create_port",
     "alpc_create_resource_reserve",
     "alpc_delete_resource_reserve",
+    "alpc_create_security_context",
+    "alpc_delete_security_context",
     "alpc_send_receive",
     "alpc_get_message_result",
     "alpc_connect_port",

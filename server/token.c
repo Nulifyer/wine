@@ -2336,6 +2336,7 @@ DECL_HANDLER(set_token_default_dacl)
 {
     struct token *token;
     const struct acl *acl = get_req_data();
+    struct acl *copy = NULL;
     unsigned int acl_size = get_req_data_size();
 
     if (acl_size && !acl_is_valid( acl, acl_size ))
@@ -2348,12 +2349,14 @@ DECL_HANDLER(set_token_default_dacl)
                                                  TOKEN_ADJUST_DEFAULT,
                                                  &token_ops )))
     {
+        if (acl_size && !(copy = memdup( acl, acl_size )))
+        {
+            release_object( token );
+            return;
+        }
         free( token->default_dacl );
-        token->default_dacl = NULL;
-
-        if (acl_size)
-            token->default_dacl = memdup( acl, acl_size );
-
+        token->default_dacl = copy;
+        allocate_luid( &token->modified_id );
         release_object( token );
     }
 }

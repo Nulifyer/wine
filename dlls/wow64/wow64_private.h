@@ -269,10 +269,11 @@ static inline ALPC_MESSAGE_ATTRIBUTES *alpc_port_message_attributes_32to64( ALPC
 
     attr->ValidAttributes = in->ValidAttributes;
     /* Unsupported input rights are rejected by the NT owner. Never follow
-     * a security QoS pointer merely to reject that input. Receive buffers are
+     * an input security QoS pointer during conversion. Receive buffers are
      * initialized by allocated geometry, irrespective of caller validity. */
     if (copy_attributes && ((in->ValidAttributes & ~in->AllocatedAttributes) ||
-                            (in->ValidAttributes & ~ALPC_MESSAGE_CONTEXT_ATTRIBUTE)))
+                            (in->ValidAttributes & ~(ALPC_MESSAGE_CONTEXT_ATTRIBUTE |
+                                                     ALPC_MESSAGE_SECURITY_ATTRIBUTE))))
     {
         *out = attr;
         return attr;
@@ -288,9 +289,9 @@ static inline ALPC_MESSAGE_ATTRIBUTES *alpc_port_message_attributes_32to64( ALPC
 
         to_attr->Flags = from_attr->Flags;
         to_attr->ContextHandle = UlongToHandle( from_attr->ContextHandle );
-        /* Resource-bearing security input is not supported. This pointer
-         * is output storage owned by the x86 caller, not data to dereference. */
-        to_attr->QoS = NULL;
+        /* A selected context has no QoS pointer. Inline creation is rejected
+         * by the native owner without dereferencing this foreign address. */
+        to_attr->QoS = copy_attributes ? UlongToPtr( from_attr->QoSPointer ) : NULL;
     }
     if (in->AllocatedAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE)
         current_from_attr += sizeof(ALPC_SECURITY_ATTR32);

@@ -53,21 +53,29 @@ static void trace_message_data( const char *direction, HANDLE port_handle,
     }
 }
 
-/* Resource-bearing input attributes remain outside the current contract. */
+/* Explicit, already-created security contexts use the authoritative port owner.
+ * Inline creation and other transferred resources remain outside this partition. */
 static NTSTATUS validate_message_attributes( const ALPC_MESSAGE_ATTRIBUTES *send,
                                              const ALPC_MESSAGE_ATTRIBUTES *receive, BOOL accept_metadata )
 {
     const ALPC_VIEW_ATTR *view;
+    const ALPC_SECURITY_ATTR *security;
 
     if ((send && (send->AllocatedAttributes & ~ALPC_MESSAGE_ATTRIBUTE_ALL)) ||
         (receive && (receive->AllocatedAttributes & ~ALPC_MESSAGE_ATTRIBUTE_ALL)))
         return STATUS_NOT_IMPLEMENTED;
     if (send && (send->ValidAttributes & ~send->AllocatedAttributes)) return STATUS_INVALID_PARAMETER;
     if (send && (send->ValidAttributes & ~(ALPC_MESSAGE_CONTEXT_ATTRIBUTE |
+                                           ALPC_MESSAGE_SECURITY_ATTRIBUTE |
                                            ALPC_MESSAGE_VIEW_ATTRIBUTE |
                                            ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE |
                                            (accept_metadata ? ALPC_MESSAGE_TOKEN_ATTRIBUTE : 0))))
         return STATUS_NOT_IMPLEMENTED;
+    if (send && (send->ValidAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE))
+    {
+        security = wine_alpc_get_attribute( send, ALPC_MESSAGE_SECURITY_ATTRIBUTE );
+        if (accept_metadata || !security || security->Flags || security->QoS) return STATUS_NOT_IMPLEMENTED;
+    }
     if (send && (send->ValidAttributes & ALPC_MESSAGE_VIEW_ATTRIBUTE))
     {
         view = wine_alpc_get_attribute( send, ALPC_MESSAGE_VIEW_ATTRIBUTE );
@@ -87,14 +95,23 @@ static client_ptr_t get_message_context( const ALPC_MESSAGE_ATTRIBUTES *attribut
     return wine_server_client_ptr( context->MessageContext );
 }
 
+static client_ptr_t get_security_context( const ALPC_MESSAGE_ATTRIBUTES *attributes )
+{
+    const ALPC_SECURITY_ATTR *security;
+    if (!attributes || !(attributes->ValidAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE)) return 0;
+    security = wine_alpc_get_attribute( attributes, ALPC_MESSAGE_SECURITY_ATTRIBUTE );
+    return wine_server_client_ptr( security->ContextHandle );
+}
+
 /* The payload stays at message + 1. Its token prefix temporarily occupies
  * header bytes rebuilt on success, so waits need no additional heap buffer.
  * No variable reply bytes may be written on a short or failed operation. */
-C_ASSERT( sizeof(ALPC_PORT_MESSAGE) >= sizeof(struct token_identity) + sizeof(ULONGLONG) );
+C_ASSERT( sizeof(ALPC_PORT_MESSAGE) >= sizeof(struct token_identity) + sizeof(ULONGLONG) + sizeof(unsigned int) );
 static unsigned int receive_attributes( const ALPC_MESSAGE_ATTRIBUTES *attributes )
 {
     return attributes ? attributes->AllocatedAttributes &
-                        (ALPC_MESSAGE_TOKEN_ATTRIBUTE | ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE) : 0;
+                        (ALPC_MESSAGE_TOKEN_ATTRIBUTE | ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE |
+                         ALPC_MESSAGE_SECURITY_ATTRIBUTE) : 0;
 }
 
 static data_size_t receipt_size( unsigned int attributes )
@@ -102,6 +119,7 @@ static data_size_t receipt_size( unsigned int attributes )
     data_size_t size = 0;
     if (attributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE) size += sizeof(struct token_identity);
     if (attributes & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE) size += sizeof(ULONGLONG);
+    if (attributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE) size += sizeof(unsigned int);
     return size;
 }
 
@@ -128,9 +146,11 @@ static void receive_message_info( NTSTATUS status, const struct alpc_message_inf
     struct token_identity identity;
     ALPC_TOKEN_ATTR *token;
     ALPC_WORK_ON_BEHALF_ATTR *work;
+    ALPC_SECURITY_ATTR *security;
     unsigned int requested = receive_attributes( attributes );
     const unsigned char *receipt_bytes = receipt;
     ULONGLONG work_ticket = 0;
+    unsigned int security_context = 0;
     void *work_slot;
     if (status && status != STATUS_BUFFER_TOO_SMALL) return;
     if (message && size && (actual_size || status == STATUS_BUFFER_TOO_SMALL))
@@ -140,9 +160,20 @@ static void receive_message_info( NTSTATUS status, const struct alpc_message_inf
     if (requested & ALPC_MESSAGE_TOKEN_ATTRIBUTE) receipt_bytes += sizeof(identity);
     if (!status && (info->attributes_valid & requested & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE))
         memcpy( &work_ticket, receipt_bytes, sizeof(work_ticket) );
+    if (requested & ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE) receipt_bytes += sizeof(work_ticket);
+    if (!status && (info->attributes_valid & requested & ALPC_MESSAGE_SECURITY_ATTRIBUTE))
+        memcpy( &security_context, receipt_bytes, sizeof(security_context) );
     if (attributes && info->sequence)
     {
         attributes->ValidAttributes = info->attributes_valid & attributes->AllocatedAttributes;
+        if (status) attributes->ValidAttributes &= ~ALPC_MESSAGE_SECURITY_ATTRIBUTE;
+        if (attributes->ValidAttributes & ALPC_MESSAGE_SECURITY_ATTRIBUTE)
+        {
+            security = wine_alpc_get_attribute( attributes, ALPC_MESSAGE_SECURITY_ATTRIBUTE );
+            security->Flags = 0;
+            security->QoS = NULL;
+            security->ContextHandle = UlongToHandle( security_context );
+        }
         if (status) attributes->ValidAttributes &= ~(ALPC_MESSAGE_TOKEN_ATTRIBUTE |
                                                        ALPC_MESSAGE_WORK_ON_BEHALF_ATTRIBUTE);
         if (attributes->ValidAttributes & ALPC_MESSAGE_TOKEN_ATTRIBUTE)
@@ -232,7 +263,7 @@ static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,
     const struct security_descriptor *server_sd = NULL;
     data_size_t server_objattr_size = 0, server_sd_size = 0;
     ULONG sid_size = 0;
-    unsigned char receipt[sizeof(struct token_identity) + sizeof(ULONGLONG)];
+    unsigned char receipt[sizeof(struct token_identity) + sizeof(ULONGLONG) + sizeof(unsigned int)];
     unsigned int recv_attributes = receive_attributes( recv_msg_attr );
 
     if (!port_handle || !port_name) return STATUS_ACCESS_VIOLATION;
@@ -649,6 +680,58 @@ NTSTATUS WINAPI NtAlpcDeleteResourceReserve( HANDLE port, ULONG flags, ULONG id 
     return status;
 }
 
+NTSTATUS WINAPI NtAlpcCreateSecurityContext( HANDLE port, ULONG flags, ALPC_SECURITY_ATTR *attributes )
+{
+    ALPC_SECURITY_ATTR captured;
+    SECURITY_QUALITY_OF_SERVICE qos;
+    HANDLE context = NULL;
+    NTSTATUS status;
+
+    TRACE( "%p, %#x, %p.\n", port, (unsigned int)flags, attributes );
+    if (flags) return STATUS_INVALID_PARAMETER;
+    if ((ULONG_PTR)attributes & (sizeof(void *) - 1)) return STATUS_DATATYPE_MISALIGNMENT;
+    if (virtual_uninterrupted_read_memory( attributes, &captured, sizeof(captured) ) != sizeof(captured) ||
+        virtual_uninterrupted_write_memory( attributes, &captured, sizeof(captured) ))
+        return STATUS_ACCESS_VIOLATION;
+    if (captured.QoS && virtual_uninterrupted_read_memory( captured.QoS, &qos, sizeof(qos) ) != sizeof(qos))
+        return STATUS_ACCESS_VIOLATION;
+    SERVER_START_REQ( alpc_create_security_context )
+    {
+        req->handle = wine_server_obj_handle( port );
+        req->qos_present = !!captured.QoS;
+        if (captured.QoS)
+        {
+            req->impersonation_level = qos.ImpersonationLevel;
+            req->tracking_mode = qos.ContextTrackingMode;
+            req->effective_only = qos.EffectiveOnly;
+        }
+        status = wine_server_call( req );
+        if (!status) context = UlongToHandle( reply->id );
+    }
+    SERVER_END_REQ;
+    if (!status && virtual_uninterrupted_write_memory( &attributes->ContextHandle, &context, sizeof(context) ))
+    {
+        NtAlpcDeleteSecurityContext( port, 0, context );
+        status = STATUS_ACCESS_VIOLATION;
+    }
+    return status;
+}
+
+NTSTATUS WINAPI NtAlpcDeleteSecurityContext( HANDLE port, ULONG flags, HANDLE context )
+{
+    NTSTATUS status;
+    TRACE( "%p, %#x, %p.\n", port, (unsigned int)flags, context );
+    if (flags) return STATUS_INVALID_PARAMETER;
+    SERVER_START_REQ( alpc_delete_security_context )
+    {
+        req->handle = wine_server_obj_handle( port );
+        req->id = wine_server_client_ptr( context );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
                                            ALPC_PORT_MESSAGE *send_msg,
                                            ALPC_MESSAGE_ATTRIBUTES *send_msg_attr,
@@ -662,7 +745,7 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
     SIZE_T header_size = packed32 ? sizeof(ALPC_PORT_MESSAGE32) : sizeof(*send_msg);
     ULONG message_id = 0;
     HANDLE wait_handle = NULL;
-    unsigned char receipt[sizeof(struct token_identity) + sizeof(ULONGLONG)];
+    unsigned char receipt[sizeof(struct token_identity) + sizeof(ULONGLONG) + sizeof(unsigned int)];
     unsigned int recv_attributes = recv_msg ? receive_attributes( recv_msg_attr ) : 0;
 
     TRACE( "%p, %#x, %p, %p, %p, %p, %p, %p.\n", port_handle, (unsigned int)flags,
@@ -698,13 +781,14 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
         req->callback_id = !send_msg ? 0 : packed32 ? ((ALPC_PORT_MESSAGE32 *)send_msg)->ClientViewSize :
                                                    send_msg->ClientViewSize;
         req->message_type = send_msg ? send_msg->Type : 0;
-        req->send = !!send_msg;
-        req->receive = !!recv_msg;
+        req->operation = (send_msg ? ALPC_OPERATION_SEND : 0) |
+                         (recv_msg ? ALPC_OPERATION_RECEIVE : 0) |
+                         (is_wow64() ? ALPC_OPERATION_WOW64 : 0) |
+                         (timeout && !timeout->QuadPart ? ALPC_OPERATION_NO_WAIT : 0);
         req->receive_attributes = recv_attributes;
-        req->wow64 = is_wow64();
         req->send_attributes = send_msg_attr ? send_msg_attr->ValidAttributes : 0;
         req->message_context = get_message_context( send_msg_attr );
-        req->no_wait = timeout && !timeout->QuadPart;
+        req->security_context = get_security_context( send_msg_attr );
         if (send_msg) wine_server_add_data( req, (const char *)send_msg + header_size, send_msg->DataLength );
         if (recv_msg) wine_server_set_reply( req, receive_buffer( recv_msg, recv_attributes, &receipt ),
                                             receive_capacity( recv_msg, capacity, recv_attributes ) );

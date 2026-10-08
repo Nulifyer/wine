@@ -6942,6 +6942,34 @@ struct alpc_security_qos
 };
 
 
+struct alpc_create_security_context_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    int qos_present;
+    int impersonation_level;
+    int tracking_mode;
+    int effective_only;
+};
+struct alpc_create_security_context_reply
+{
+    struct reply_header __header;
+    unsigned int id;
+    char __pad_12[4];
+};
+
+struct alpc_delete_security_context_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    client_ptr_t id;
+};
+struct alpc_delete_security_context_reply
+{
+    struct reply_header __header;
+};
+
+
 struct alpc_message_info
 {
     client_ptr_t port_context;
@@ -6956,6 +6984,11 @@ struct alpc_message_info
     unsigned int attributes_valid;
 };
 
+#define ALPC_OPERATION_SEND    0x01
+#define ALPC_OPERATION_RECEIVE 0x02
+#define ALPC_OPERATION_WOW64   0x04
+#define ALPC_OPERATION_NO_WAIT 0x08
+
 
 struct alpc_send_receive_request
 {
@@ -6966,12 +6999,11 @@ struct alpc_send_receive_request
     unsigned int message_id;
     unsigned int callback_id;
     unsigned int message_type;
-    int send;
-    int receive;
-    int wow64;
-    int no_wait;
+    unsigned int operation;
     unsigned int send_attributes;
+    char __pad_44[4];
     client_ptr_t message_context;
+    client_ptr_t security_context;
     /* VARARG(message,bytes); */
 };
 struct alpc_send_receive_reply
@@ -8875,6 +8907,8 @@ enum request
     REQ_alpc_create_port,
     REQ_alpc_create_resource_reserve,
     REQ_alpc_delete_resource_reserve,
+    REQ_alpc_create_security_context,
+    REQ_alpc_delete_security_context,
     REQ_alpc_send_receive,
     REQ_alpc_get_message_result,
     REQ_alpc_connect_port,
@@ -9338,6 +9372,8 @@ union generic_request
     struct alpc_create_port_request alpc_create_port_request;
     struct alpc_create_resource_reserve_request alpc_create_resource_reserve_request;
     struct alpc_delete_resource_reserve_request alpc_delete_resource_reserve_request;
+    struct alpc_create_security_context_request alpc_create_security_context_request;
+    struct alpc_delete_security_context_request alpc_delete_security_context_request;
     struct alpc_send_receive_request alpc_send_receive_request;
     struct alpc_get_message_result_request alpc_get_message_result_request;
     struct alpc_connect_port_request alpc_connect_port_request;
@@ -9799,6 +9835,8 @@ union generic_reply
     struct alpc_create_port_reply alpc_create_port_reply;
     struct alpc_create_resource_reserve_reply alpc_create_resource_reserve_reply;
     struct alpc_delete_resource_reserve_reply alpc_delete_resource_reserve_reply;
+    struct alpc_create_security_context_reply alpc_create_security_context_reply;
+    struct alpc_delete_security_context_reply alpc_delete_security_context_reply;
     struct alpc_send_receive_reply alpc_send_receive_reply;
     struct alpc_get_message_result_reply alpc_get_message_result_reply;
     struct alpc_connect_port_reply alpc_connect_port_reply;
@@ -9908,6 +9946,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1097
+#define SERVER_PROTOCOL_VERSION 1098
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

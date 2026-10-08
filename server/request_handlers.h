@@ -356,6 +356,8 @@ DECL_HANDLER(alpc_set_completion);
 DECL_HANDLER(alpc_create_port);
 DECL_HANDLER(alpc_create_resource_reserve);
 DECL_HANDLER(alpc_delete_resource_reserve);
+DECL_HANDLER(alpc_create_security_context);
+DECL_HANDLER(alpc_delete_security_context);
 DECL_HANDLER(alpc_send_receive);
 DECL_HANDLER(alpc_get_message_result);
 DECL_HANDLER(alpc_connect_port);
@@ -816,6 +818,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_alpc_create_port,
     (req_handler)req_alpc_create_resource_reserve,
     (req_handler)req_alpc_delete_resource_reserve,
+    (req_handler)req_alpc_create_security_context,
+    (req_handler)req_alpc_delete_security_context,
     (req_handler)req_alpc_send_receive,
     (req_handler)req_alpc_get_message_result,
     (req_handler)req_alpc_connect_port,
@@ -2912,18 +2916,27 @@ C_ASSERT( sizeof(struct alpc_create_resource_reserve_reply) == 16 );
 C_ASSERT( offsetof(struct alpc_delete_resource_reserve_request, handle) == 12 );
 C_ASSERT( offsetof(struct alpc_delete_resource_reserve_request, id) == 16 );
 C_ASSERT( sizeof(struct alpc_delete_resource_reserve_request) == 24 );
+C_ASSERT( offsetof(struct alpc_create_security_context_request, handle) == 12 );
+C_ASSERT( offsetof(struct alpc_create_security_context_request, qos_present) == 16 );
+C_ASSERT( offsetof(struct alpc_create_security_context_request, impersonation_level) == 20 );
+C_ASSERT( offsetof(struct alpc_create_security_context_request, tracking_mode) == 24 );
+C_ASSERT( offsetof(struct alpc_create_security_context_request, effective_only) == 28 );
+C_ASSERT( sizeof(struct alpc_create_security_context_request) == 32 );
+C_ASSERT( offsetof(struct alpc_create_security_context_reply, id) == 8 );
+C_ASSERT( sizeof(struct alpc_create_security_context_reply) == 16 );
+C_ASSERT( offsetof(struct alpc_delete_security_context_request, handle) == 12 );
+C_ASSERT( offsetof(struct alpc_delete_security_context_request, id) == 16 );
+C_ASSERT( sizeof(struct alpc_delete_security_context_request) == 24 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, receive_attributes) == 12 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, handle) == 16 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, flags) == 20 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, message_id) == 24 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, callback_id) == 28 );
 C_ASSERT( offsetof(struct alpc_send_receive_request, message_type) == 32 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, send) == 36 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, receive) == 40 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, wow64) == 44 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, no_wait) == 48 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, send_attributes) == 52 );
-C_ASSERT( offsetof(struct alpc_send_receive_request, message_context) == 56 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, operation) == 36 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, send_attributes) == 40 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, message_context) == 48 );
+C_ASSERT( offsetof(struct alpc_send_receive_request, security_context) == 56 );
 C_ASSERT( sizeof(struct alpc_send_receive_request) == 64 );
 C_ASSERT( offsetof(struct alpc_send_receive_reply, wait_handle) == 8 );
 C_ASSERT( offsetof(struct alpc_send_receive_reply, info) == 16 );

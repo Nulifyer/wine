@@ -4766,6 +4766,22 @@ struct alpc_security_qos
     int effective_only;
 };
 
+/* Capture the current effective token into an endpoint-owned context. */
+@REQ(alpc_create_security_context)
+    obj_handle_t handle;
+    int qos_present;
+    int impersonation_level;
+    int tracking_mode;
+    int effective_only;
+@REPLY
+    unsigned int id;
+@END
+
+@REQ(alpc_delete_security_context)
+    obj_handle_t handle;
+    client_ptr_t id;
+@END
+
 /* Shared ALPC result, including metadata returned for an undersized buffer. */
 struct alpc_message_info
 {
@@ -4781,6 +4797,11 @@ struct alpc_message_info
     unsigned int attributes_valid;
 };
 
+#define ALPC_OPERATION_SEND    0x01
+#define ALPC_OPERATION_RECEIVE 0x02
+#define ALPC_OPERATION_WOW64   0x04
+#define ALPC_OPERATION_NO_WAIT 0x08
+
 /* Send to or receive from a listening ALPC port queue. */
 @REQ(alpc_send_receive)
     unsigned int receive_attributes;
@@ -4789,12 +4810,10 @@ struct alpc_message_info
     unsigned int message_id;
     unsigned int callback_id;
     unsigned int message_type;
-    int send;
-    int receive;
-    int wow64;
-    int no_wait;
+    unsigned int operation; /* SEND, RECEIVE, WOW64 and NO_WAIT */
     unsigned int send_attributes;
     client_ptr_t message_context;
+    client_ptr_t security_context;
     VARARG(message,bytes);
 @REPLY
     obj_handle_t wait_handle;

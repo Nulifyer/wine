@@ -761,7 +761,7 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
         {
             dacl = token_get_default_dacl( token );
             new_sd.control |= SE_DACL_PRESENT;
-            new_sd.dacl_len = dacl->size;
+            new_sd.dacl_len = dacl ? dacl->size : 0;
         }
         else new_sd.dacl_len = 0;
     }

@@ -656,6 +656,50 @@ NTSTATUS WINAPI wow64_NtAlpcDeleteResourceReserve( UINT *args )
     return NtAlpcDeleteResourceReserve( port, flags, id );
 }
 
+NTSTATUS WINAPI wow64_NtAlpcCreateSecurityContext( UINT *args )
+{
+    HANDLE port = get_handle( &args );
+    ULONG flags = get_ulong( &args );
+    ALPC_SECURITY_ATTR32 *attributes = get_ptr( &args ), captured;
+    ALPC_SECURITY_ATTR native;
+    SECURITY_QUALITY_OF_SERVICE qos;
+    ULONG result;
+    NTSTATUS status;
+
+    /* Attribute capture precedes syscall flags on WoW64. Unaligned inputs
+     * are accepted, and failed output remains unchanged. */
+    if (NtReadVirtualMemory( GetCurrentProcess(), attributes, &captured, sizeof(captured), NULL ))
+        return STATUS_ACCESS_VIOLATION;
+    if (flags) return STATUS_INVALID_PARAMETER;
+    if (NtWriteVirtualMemory( GetCurrentProcess(), attributes, &captured, sizeof(captured), NULL ))
+        return STATUS_ACCESS_VIOLATION;
+    native.Flags = captured.Flags;
+    native.ContextHandle = UlongToHandle( captured.ContextHandle );
+    native.QoS = NULL;
+    if (captured.QoSPointer)
+    {
+        if (NtReadVirtualMemory( GetCurrentProcess(), UlongToPtr( captured.QoSPointer ),
+                                 &qos, sizeof(qos), NULL )) return STATUS_ACCESS_VIOLATION;
+        native.QoS = &qos;
+    }
+    if ((status = NtAlpcCreateSecurityContext( port, 0, &native ))) return status;
+    result = HandleToUlong( native.ContextHandle );
+    if (NtWriteVirtualMemory( GetCurrentProcess(), &attributes->ContextHandle, &result, sizeof(result), NULL ))
+    {
+        NtAlpcDeleteSecurityContext( port, 0, native.ContextHandle );
+        return STATUS_ACCESS_VIOLATION;
+    }
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI wow64_NtAlpcDeleteSecurityContext( UINT *args )
+{
+    HANDLE port = get_handle( &args );
+    ULONG flags = get_ulong( &args );
+    HANDLE context = UlongToHandle( get_ulong( &args ) );
+    return NtAlpcDeleteSecurityContext( port, flags, context );
+}
+
 /**********************************************************************
  *           wow64_NtAlpcSetInformation
  */
