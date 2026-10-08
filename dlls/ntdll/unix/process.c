@@ -2030,7 +2030,8 @@ NTSTATUS WINAPI NtOpenProcess( HANDLE *handle, ACCESS_MASK access,
 {
     unsigned int status;
 
-    *handle = 0;
+    /* Probe without clearing: native access denial preserves the output. */
+    *(volatile HANDLE *)handle = *(volatile HANDLE *)handle;
 
     SERVER_START_REQ( open_process )
     {
@@ -2038,7 +2039,7 @@ NTSTATUS WINAPI NtOpenProcess( HANDLE *handle, ACCESS_MASK access,
         req->access     = access;
         req->attributes = attr ? attr->Attributes : 0;
         status = wine_server_call( req );
-        if (!status) *handle = wine_server_ptr_handle( reply->handle );
+        if (status != STATUS_ACCESS_DENIED) *handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
     return status;

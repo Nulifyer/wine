@@ -1704,7 +1704,8 @@ NTSTATUS WINAPI NtOpenThread( HANDLE *handle, ACCESS_MASK access,
 {
     unsigned int ret;
 
-    *handle = 0;
+    /* Probe without clearing: native access denial preserves the output. */
+    *(volatile HANDLE *)handle = *(volatile HANDLE *)handle;
 
     SERVER_START_REQ( open_thread )
     {
@@ -1712,7 +1713,7 @@ NTSTATUS WINAPI NtOpenThread( HANDLE *handle, ACCESS_MASK access,
         req->access     = access;
         req->attributes = attr ? attr->Attributes : 0;
         ret = wine_server_call( req );
-        *handle = wine_server_ptr_handle( reply->handle );
+        if (ret != STATUS_ACCESS_DENIED) *handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
     return ret;

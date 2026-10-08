@@ -118,6 +118,7 @@ extern struct thread *current;
 extern struct thread *create_thread( int fd, struct process *process,
                                      const struct security_descriptor *sd );
 extern struct thread *get_thread_from_id( thread_id_t id );
+extern obj_handle_t alloc_thread_handle( struct thread *thread, unsigned int access, unsigned int attributes );
 extern unsigned __int64 thread_get_work_ticket( struct thread *thread );
 extern struct thread *get_thread_from_handle( obj_handle_t handle, unsigned int access );
 extern struct thread *get_thread_from_tid( int tid );

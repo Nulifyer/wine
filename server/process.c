@@ -1668,27 +1668,32 @@ DECL_HANDLER(init_process_done)
     reply->suspend = (current->suspend || process->suspend);
 }
 
+/* Open an identified process through the effective token's privilege policy. */
+obj_handle_t alloc_process_handle( struct process *process, unsigned int access, unsigned int attributes )
+{
+    struct luid_attr debug = { SeDebugPrivilege, SE_PRIVILEGE_ENABLED };
+    struct token *token = current->token ? current->token : current->process->token;
+
+    if (!token_check_privileges( token, TRUE, &debug, 1, NULL ))
+        return alloc_handle( current->process, process, access, attributes );
+
+    access = map_obj_access( &process->obj, access );
+    /* Debug bypasses the DACL, but not the protected-process ceiling. */
+    if (!access) set_error( STATUS_ACCESS_DENIED );
+    else if (process_check_access( &process->obj, token, &access ))
+        return alloc_handle_no_access_check( current->process, process, access, attributes );
+    return 0;
+}
+
 /* open a handle to a process */
 DECL_HANDLER(open_process)
 {
-    struct luid_attr debug = { SeDebugPrivilege, SE_PRIVILEGE_ENABLED };
     struct process *process = get_process_from_id( req->pid );
-    struct token *token = current->token ? current->token : current->process->token;
+
     reply->handle = 0;
     if (process)
     {
-        if (token_check_privileges( token, TRUE, &debug, 1, NULL ))
-        {
-            unsigned int access = map_obj_access( &process->obj, req->access );
-
-            /* SeDebugPrivilege bypasses the process DACL, but not the
-             * protected-process access ceiling enforced by process_check_access(). */
-            if (!access) set_error( STATUS_ACCESS_DENIED );
-            else if (process_check_access( &process->obj, token, &access ))
-                reply->handle = alloc_handle_no_access_check( current->process, process,
-                                                              access, req->attributes );
-        }
-        else reply->handle = alloc_handle( current->process, process, req->access, req->attributes );
+        reply->handle = alloc_process_handle( process, req->access, req->attributes );
         release_object( process );
     }
 }

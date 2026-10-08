@@ -3047,10 +3047,10 @@ DECL_HANDLER(alpc_open_sender)
     if (!thread && process->id != req->sender_pid)
     { set_error( STATUS_ACCESS_DENIED ); goto done; }
     if (req->named) { set_error( STATUS_INVALID_PARAMETER_MIX ); goto done; }
-    /* Delivered authority establishes which object may be opened. Ordinary
-     * object access still enforces the target's DACL and protected ceiling. */
-    reply->handle = alloc_handle( current->process, req->open_thread ? (void *)thread : (void *)process,
-                                  req->access, req->attributes );
+    /* Delivered authority selects the object before the ordinary open owner's
+     * effective-token privilege and protected-access policy is applied. */
+    reply->handle = req->open_thread ? alloc_thread_handle( thread, req->access, req->attributes ) :
+                                      alloc_process_handle( process, req->access, req->attributes );
 done:
     release_object( port );
 }

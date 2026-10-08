@@ -1861,6 +1861,23 @@ DECL_HANDLER(terminate_thread)
     }
 }
 
+/* Open an identified thread through the effective token's privilege policy. */
+obj_handle_t alloc_thread_handle( struct thread *thread, unsigned int access, unsigned int attributes )
+{
+    struct luid_attr debug = { SeDebugPrivilege, SE_PRIVILEGE_ENABLED };
+    struct token *token = current->token ? current->token : current->process->token;
+
+    if (!token_check_privileges( token, TRUE, &debug, 1, NULL ))
+        return alloc_handle( current->process, thread, access, attributes );
+
+    access = map_obj_access( &thread->obj, access );
+    /* Debug bypasses the DACL, but not the protected-thread ceiling. */
+    if (!access) set_error( STATUS_ACCESS_DENIED );
+    else if (thread_check_access( &thread->obj, token, &access ))
+        return alloc_handle_no_access_check( current->process, thread, access, attributes );
+    return 0;
+}
+
 /* open a handle to a thread */
 DECL_HANDLER(open_thread)
 {
@@ -1869,7 +1886,7 @@ DECL_HANDLER(open_thread)
     reply->handle = 0;
     if (thread)
     {
-        reply->handle = alloc_handle( current->process, thread, req->access, req->attributes );
+        reply->handle = alloc_thread_handle( thread, req->access, req->attributes );
         release_object( thread );
     }
 }

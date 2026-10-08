@@ -128,6 +128,7 @@ extern struct process *create_process( int fd, struct process *parent, unsigned 
 extern data_size_t get_process_startup_info_size( struct process *process );
 extern struct thread *get_process_first_thread( struct process *process );
 extern struct process *get_process_from_id( process_id_t id );
+extern obj_handle_t alloc_process_handle( struct process *process, unsigned int access, unsigned int attributes );
 extern struct process *get_process_from_handle( obj_handle_t handle, unsigned int access );
 extern struct debug_obj *get_debug_obj( struct process *process, obj_handle_t handle, unsigned int access );
 extern int process_set_debugger( struct process *process, struct thread *thread );
