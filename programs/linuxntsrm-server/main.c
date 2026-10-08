@@ -102,7 +102,7 @@ static NTSTATUS send_status_reply( HANDLE port, const ALPC_PORT_MESSAGE *request
     reply.header.TotalLength = sizeof(reply.header) + reply.header.DataLength;
     reply.header.MessageId = request->MessageId;
     for (i = 0; i < sizeof(command_status); i++) reply.data[i] = ((BYTE *)&command_status)[i];
-    return NtAlpcSendWaitReceivePort( port, ALPC_MSGFLG_REPLY_MESSAGE, &reply.header, NULL,
+    return NtAlpcSendWaitReceivePort( port, ALPC_MSGFLG_RELEASE_MESSAGE, &reply.header, NULL,
                                       NULL, NULL, NULL, NULL );
 }
 

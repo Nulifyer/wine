@@ -865,7 +865,7 @@ static void test_empty_view_reply(void)
     memset(view, 0, sizeof(*view));
     view->Flags = 0x10000;
     message.data[0] = 0x24;
-    status = pNtAlpcSendWaitReceivePort(listener, ALPC_MSGFLG_REPLY_MESSAGE,
+    status = pNtAlpcSendWaitReceivePort(listener, ALPC_MSGFLG_RELEASE_MESSAGE,
                                         &message.header, attributes, NULL, NULL, NULL, NULL);
     ok(status == STATUS_SUCCESS, "Empty-view reply returned %#lx.\n", status);
     ok(WaitForSingleObject(thread, 5000) == WAIT_OBJECT_0, "Sender did not receive reply.\n");

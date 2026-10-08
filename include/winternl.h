@@ -4722,7 +4722,8 @@ typedef struct _KCONTINUE_ARGUMENT
 
 /* Message flags */
 #define ALPC_MSGFLG_NONE                        0x00000000
-#define ALPC_MSGFLG_REPLY_MESSAGE               0x00010000 /* Message is a reply */
+#define ALPC_MSGFLG_REPLY_MESSAGE               0x00000001 /* Message is a reply */
+#define ALPC_MSGFLG_RELEASE_MESSAGE             0x00010000 /* Release the continuation */
 #define ALPC_MSGFLG_SYNC_REQUEST                0x00020000 /* Synchronously send and receive message */
 
 /* Message attribute flags */

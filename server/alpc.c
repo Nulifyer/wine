@@ -2404,7 +2404,10 @@ DECL_HANDLER(alpc_send_receive)
         if (handle_dwm_session_message( port, req, reply, capacity )) goto done;
     }
     if (handle_coremsg_registrar_message( port, req, reply, capacity )) goto done;
-    if (req->flags & ~(1 | 0x10000 | 0x20000) ||
+    /* The native RPC 0x400000 modifier preserves plain-message ownership.
+     * It does not bypass endpoint authorization or resource validation. */
+    if (req->flags & ~(ALPC_MSGFLG_REPLY_MESSAGE | ALPC_MSGFLG_RELEASE_MESSAGE |
+                       ALPC_MSGFLG_SYNC_REQUEST | 0x400000) ||
         ((req->flags & 0x20000) && (!req->receive || port->type == CONNECTION_PORT)))
     {
         set_error( STATUS_NOT_IMPLEMENTED );

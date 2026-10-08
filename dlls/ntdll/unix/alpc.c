@@ -540,7 +540,11 @@ NTSTATUS WINAPI NtAlpcSendWaitReceivePort( HANDLE port_handle, ULONG flags,
 
     TRACE( "%p, %#x, %p, %p, %p, %p, %p, %p.\n", port_handle, (unsigned int)flags,
            send_msg, send_msg_attr, recv_msg, recv_buffer_size, recv_msg_attr, timeout );
-    if (flags & ~(1 | 0x10000 | 0x20000)) return STATUS_NOT_IMPLEMENTED;
+    /* Native RPC adds 0x400000 to ordinary sends and released replies.
+     * Plain messages retain the same delivery and continuation semantics;
+     * transferred resources still pass the attribute validator below. */
+    if (flags & ~(ALPC_MSGFLG_REPLY_MESSAGE | ALPC_MSGFLG_RELEASE_MESSAGE |
+                  ALPC_MSGFLG_SYNC_REQUEST | 0x400000)) return STATUS_NOT_IMPLEMENTED;
     if ((status = validate_message_attributes( send_msg_attr, recv_msg_attr, FALSE ))) return status;
     /* Native servers combine a reply with a synchronous receive to return the
      * current result and wait for the next request in one call. */
