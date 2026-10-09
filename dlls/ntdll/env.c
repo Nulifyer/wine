@@ -518,6 +518,7 @@ PRTL_USER_PROCESS_PARAMETERS WINAPI RtlNormalizeProcessParams( RTL_USER_PROCESS_
         normalize( params, &params->Desktop.Buffer );
         normalize( params, &params->ShellInfo.Buffer );
         normalize( params, &params->RuntimeInfo.Buffer );
+        normalize( params, &params->RedirectionDllName.Buffer );
         params->Flags |= PROCESS_PARAMS_FLAG_NORMALIZED;
     }
     return params;
@@ -544,6 +545,7 @@ PRTL_USER_PROCESS_PARAMETERS WINAPI RtlDeNormalizeProcessParams( RTL_USER_PROCES
         denormalize( params, &params->Desktop.Buffer );
         denormalize( params, &params->ShellInfo.Buffer );
         denormalize( params, &params->RuntimeInfo.Buffer );
+        denormalize( params, &params->RedirectionDllName.Buffer );
         params->Flags &= ~PROCESS_PARAMS_FLAG_NORMALIZED;
     }
     return params;
@@ -576,7 +578,9 @@ static RTL_USER_PROCESS_PARAMETERS *alloc_process_params( size_t align,
                                                           const UNICODE_STRING *title,
                                                           const UNICODE_STRING *desktop,
                                                           const UNICODE_STRING *shell,
-                                                          const UNICODE_STRING *runtime )
+                                                          const UNICODE_STRING *runtime,
+                                                          const UNICODE_STRING *redirection,
+                                                          BOOL reserve_command_terminator )
 {
     RTL_USER_PROCESS_PARAMETERS *params;
     SIZE_T size, env_size = 0;
@@ -588,11 +592,14 @@ static RTL_USER_PROCESS_PARAMETERS *alloc_process_params( size_t align,
             + ROUND_SIZE( image->MaximumLength, align )
             + ROUND_SIZE( dllpath->MaximumLength, align )
             + ROUND_SIZE( curdir->MaximumLength, align )
-            + ROUND_SIZE( cmdline->MaximumLength, align )
+            + ROUND_SIZE( cmdline->MaximumLength +
+                          (reserve_command_terminator && cmdline->Length == cmdline->MaximumLength ?
+                           sizeof(WCHAR) : 0), align )
             + ROUND_SIZE( title->MaximumLength, align )
             + ROUND_SIZE( desktop->MaximumLength, align )
             + ROUND_SIZE( shell->MaximumLength, align )
-            + ROUND_SIZE( runtime->MaximumLength, align ));
+            + ROUND_SIZE( runtime->MaximumLength, align )
+            + (redirection ? ROUND_SIZE( redirection->MaximumLength, align ) : 0));
 
     if (!(ptr = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, size + ROUND_SIZE( env_size, align ))))
         return NULL;
@@ -607,13 +614,14 @@ static RTL_USER_PROCESS_PARAMETERS *alloc_process_params( size_t align,
     ptr = params + 1;
     append_unicode_string( &ptr, curdir, &params->CurrentDirectory.DosPath, align );
     append_unicode_string( &ptr, dllpath, &params->DllPath, align );
+    if (redirection) append_unicode_string( &ptr, redirection, &params->RedirectionDllName, align );
     append_unicode_string( &ptr, image, &params->ImagePathName, align );
     append_unicode_string( &ptr, cmdline, &params->CommandLine, align );
     append_unicode_string( &ptr, title, &params->WindowTitle, align );
     append_unicode_string( &ptr, desktop, &params->Desktop, align );
     append_unicode_string( &ptr, shell, &params->ShellInfo, align );
     append_unicode_string( &ptr, runtime, &params->RuntimeInfo, align );
-    if (env) params->Environment = memcpy( ptr, env, env_size );
+    if (env) params->Environment = memcpy( (char *)params + size, env, env_size );
     return params;
 }
 
@@ -658,7 +666,7 @@ NTSTATUS WINAPI RtlCreateProcessParametersEx( RTL_USER_PROCESS_PARAMETERS **resu
     if (!RuntimeInfo) RuntimeInfo = &null_str;
 
     if ((*result = alloc_process_params( sizeof(void *), ImagePathName, DllPath, &curdir, CommandLine,
-                                         Environment, WindowTitle, Desktop, ShellInfo, RuntimeInfo )))
+                                         Environment, WindowTitle, Desktop, ShellInfo, RuntimeInfo, NULL, FALSE )))
     {
         if (cur_params) (*result)->ConsoleFlags = cur_params->ConsoleFlags;
         if (!(flags & PROCESS_PARAMS_FLAG_NORMALIZED)) RtlDeNormalizeProcessParams( *result );
@@ -667,6 +675,80 @@ NTSTATUS WINAPI RtlCreateProcessParametersEx( RTL_USER_PROCESS_PARAMETERS **resu
 
     RtlReleasePebLock();
     return status;
+}
+
+static BOOL valid_process_string( const UNICODE_STRING *str )
+{
+    return str->Length <= str->MaximumLength && (!str->Length || str->Buffer);
+}
+
+/******************************************************************************
+ *  RtlCreateProcessParametersWithTemplate  [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlCreateProcessParametersWithTemplate( RTL_USER_PROCESS_PARAMETERS **result,
+                                                       const RTL_USER_PROCESS_PARAMETERS *template,
+                                                       ULONG flags )
+{
+    const UNICODE_STRING *dllpath = &template->DllPath, *cmdline = &template->CommandLine;
+    const UNICODE_STRING *title = &template->WindowTitle, *desktop = &template->Desktop;
+    const UNICODE_STRING *shell = &template->ShellInfo, *runtime = &template->RuntimeInfo;
+    const UNICODE_STRING *redirection = &template->RedirectionDllName;
+    const RTL_USER_PROCESS_PARAMETERS *current;
+    RTL_USER_PROCESS_PARAMETERS *params;
+    UNICODE_STRING image = template->ImagePathName, command, directory;
+    BOOL append_separator = FALSE;
+    const WCHAR *environment;
+
+    if ((flags & ~PROCESS_PARAMS_FLAG_NORMALIZED) || !valid_process_string( &image ))
+        return STATUS_INVALID_PARAMETER;
+    if (!dllpath->Buffer) dllpath = &null_str;
+    if (!cmdline->Buffer) cmdline = &image;
+    if (!title->Buffer) title = &empty_str;
+    if (!desktop->Buffer) desktop = &empty_str;
+    if (!shell->Buffer) shell = &empty_str;
+    if (!runtime->Buffer) runtime = &null_str;
+    if (!redirection->Buffer) redirection = NULL;
+    if (!valid_process_string( dllpath ) || !valid_process_string( cmdline ) ||
+        !valid_process_string( title ) || !valid_process_string( desktop ) ||
+        !valid_process_string( shell ) || !valid_process_string( runtime ) ||
+        (redirection && !valid_process_string( redirection )))
+        return STATUS_INVALID_PARAMETER;
+    directory = template->CurrentDirectory.DosPath;
+    if (directory.Buffer)
+    {
+        if (!valid_process_string( &directory ) || !directory.Length)
+            return STATUS_INVALID_PARAMETER;
+        append_separator = directory.Buffer[directory.Length / sizeof(WCHAR) - 1] != '\\';
+        if (directory.Length + (append_separator ? sizeof(WCHAR) : 0) >= MAX_PATH * sizeof(WCHAR))
+            return STATUS_INVALID_PARAMETER;
+    }
+    if (image.Length > 0xfffc || (cmdline->Length != cmdline->MaximumLength && cmdline->Length > 0xfffc))
+        return STATUS_NAME_TOO_LONG;
+    image.MaximumLength = image.Length + sizeof(WCHAR);
+    command = *cmdline;
+    if (command.Length != command.MaximumLength) command.MaximumLength = command.Length + sizeof(WCHAR);
+    if (!runtime->Length) runtime = &null_str;
+
+    RtlAcquirePebLock();
+    current = NtCurrentTeb()->Peb->ProcessParameters;
+    if (!directory.Buffer) directory = current->CurrentDirectory.DosPath;
+    directory.MaximumLength = MAX_PATH * sizeof(WCHAR);
+    environment = template->Environment ? template->Environment : current->Environment;
+    params = alloc_process_params( sizeof(void *), &image, dllpath, &directory, &command,
+                                  environment, title, desktop, shell, runtime, redirection, TRUE );
+    if (params)
+    {
+        params->ConsoleFlags = current->ConsoleFlags & 1;
+        if (append_separator)
+        {
+            params->CurrentDirectory.DosPath.Buffer[directory.Length / sizeof(WCHAR)] = '\\';
+            params->CurrentDirectory.DosPath.Length += sizeof(WCHAR);
+        }
+        if (!(flags & PROCESS_PARAMS_FLAG_NORMALIZED)) RtlDeNormalizeProcessParams( params );
+        *result = params;
+    }
+    RtlReleasePebLock();
+    return params ? STATUS_SUCCESS : STATUS_INSUFFICIENT_RESOURCES;
 }
 
 
@@ -722,7 +804,8 @@ void init_user_process_params(void)
     if (!(new_params = alloc_process_params( 1, &params->ImagePathName, &params->DllPath,
                                              &curdir, &params->CommandLine,
                                              NULL, &params->WindowTitle, &params->Desktop,
-                                             &params->ShellInfo, &params->RuntimeInfo )))
+                                             &params->ShellInfo, &params->RuntimeInfo,
+                                             &params->RedirectionDllName, FALSE )))
         return;
 
     new_params->Environment     = env;

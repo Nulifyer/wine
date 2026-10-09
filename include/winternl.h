@@ -209,6 +209,12 @@ typedef struct _RTL_USER_PROCESS_PARAMETERS
     PVOID               PackageDependencyData;
     ULONG               ProcessGroupId;
     ULONG               LoaderThreads;
+    UNICODE_STRING      RedirectionDllName;
+    UNICODE_STRING      HeapPartitionName;
+    ULONGLONG          *DefaultThreadpoolCpuSetMasks;
+    ULONG               DefaultThreadpoolCpuSetMaskCount;
+    ULONG               DefaultThreadpoolThreadMaximum;
+    ULONG               HeapMemoryTypeMask;
 } RTL_USER_PROCESS_PARAMETERS, *PRTL_USER_PROCESS_PARAMETERS;
 
 /* value for Flags field (FIXME: not the correct names) */
@@ -775,6 +781,12 @@ typedef struct _RTL_USER_PROCESS_PARAMETERS32
     ULONG               PackageDependencyData;
     ULONG               ProcessGroupId;
     ULONG               LoaderThreads;
+    UNICODE_STRING32    RedirectionDllName;
+    UNICODE_STRING32    HeapPartitionName;
+    ULONG               DefaultThreadpoolCpuSetMasks;
+    ULONG               DefaultThreadpoolCpuSetMaskCount;
+    ULONG               DefaultThreadpoolThreadMaximum;
+    ULONG               HeapMemoryTypeMask;
 } RTL_USER_PROCESS_PARAMETERS32;
 
 typedef struct _RTL_USER_PROCESS_PARAMETERS64
@@ -812,6 +824,12 @@ typedef struct _RTL_USER_PROCESS_PARAMETERS64
     ULONG64             PackageDependencyData;
     ULONG               ProcessGroupId;
     ULONG               LoaderThreads;
+    UNICODE_STRING64    RedirectionDllName;
+    UNICODE_STRING64    HeapPartitionName;
+    ULONG64             DefaultThreadpoolCpuSetMasks;
+    ULONG               DefaultThreadpoolCpuSetMaskCount;
+    ULONG               DefaultThreadpoolThreadMaximum;
+    ULONG               HeapMemoryTypeMask;
 } RTL_USER_PROCESS_PARAMETERS64;
 
 typedef struct _PEB_LDR_DATA32
@@ -5419,6 +5437,7 @@ NTSYSAPI BOOLEAN   WINAPI RtlCreateHashTable(PRTL_DYNAMIC_HASH_TABLE*,ULONG,ULON
 NTSYSAPI BOOLEAN   WINAPI RtlCreateHashTableEx(PRTL_DYNAMIC_HASH_TABLE*,ULONG,ULONG,ULONG);
 NTSYSAPI NTSTATUS  WINAPI RtlCreateProcessParameters(RTL_USER_PROCESS_PARAMETERS**,const UNICODE_STRING*,const UNICODE_STRING*,const UNICODE_STRING*,const UNICODE_STRING*,PWSTR,const UNICODE_STRING*,const UNICODE_STRING*,const UNICODE_STRING*,const UNICODE_STRING*);
 NTSYSAPI NTSTATUS  WINAPI RtlCreateProcessParametersEx(RTL_USER_PROCESS_PARAMETERS**,const UNICODE_STRING*,const UNICODE_STRING*,const UNICODE_STRING*,const UNICODE_STRING*,PWSTR,const UNICODE_STRING*,const UNICODE_STRING*,const UNICODE_STRING*,const UNICODE_STRING*,ULONG);
+NTSYSAPI NTSTATUS  WINAPI RtlCreateProcessParametersWithTemplate(RTL_USER_PROCESS_PARAMETERS**,const RTL_USER_PROCESS_PARAMETERS*,ULONG);
 NTSYSAPI PDEBUG_BUFFER WINAPI RtlCreateQueryDebugBuffer(ULONG,BOOLEAN);
 NTSYSAPI NTSTATUS  WINAPI RtlCreateRegistryKey(ULONG,PWSTR);
 NTSYSAPI NTSTATUS  WINAPI RtlCreateSecurityDescriptor(PSECURITY_DESCRIPTOR,DWORD);
