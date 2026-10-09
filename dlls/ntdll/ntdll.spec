@@ -87,6 +87,7 @@
 # @ stub LdrAccessOutOfProcessResource
 @ stdcall LdrAccessResource(long ptr ptr ptr)
 @ stdcall LdrAddDllDirectory(ptr ptr)
+@ stdcall LdrAddLoadAsDataTable(ptr wstr long ptr ptr)
 @ stdcall LdrAddRefDll(long ptr)
 # @ stub LdrAlternateResourcesEnabled
 # @ stub LdrCreateOutOfProcessImage
@@ -107,6 +108,7 @@
 @ stdcall LdrGetDllHandleByName(ptr ptr ptr)
 @ stdcall LdrGetDllHandleEx(long ptr ptr ptr ptr)
 @ stdcall LdrGetDllPath(wstr long ptr ptr)
+@ stdcall LdrGetFileNameFromLoadAsDataTable(ptr ptr)
 @ stdcall LdrGetProcedureAddress(ptr ptr long ptr)
 @ stdcall LdrGetProcedureAddressForCaller(ptr ptr long ptr long ptr)
 # @ stub LdrHotPatchRoutine
@@ -126,6 +128,7 @@
 @ stdcall LdrResFindResourceDirectory(ptr ptr ptr ptr ptr ptr long)
 @ stdcall LdrResSearchResource(ptr ptr long long ptr ptr ptr ptr)
 @ stdcall LdrRemoveDllDirectory(ptr)
+@ stdcall LdrRemoveLoadAsDataTable(ptr ptr ptr long)
 @ stdcall LdrResolveDelayLoadedAPI(ptr ptr ptr ptr ptr long)
 @ stub LdrSetAppCompatDllRedirectionCallback
 @ stdcall LdrSetDefaultDllDirectories(long)

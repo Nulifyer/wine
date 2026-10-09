@@ -88,9 +88,13 @@ FARPROC WINAPI get_proc_address( HMODULE module, LPCSTR function )
 static BOOL load_library_as_datafile( LPCWSTR load_path, DWORD flags, LPCWSTR name, HMODULE *mod_ret )
 {
     WCHAR filenameW[MAX_PATH];
+    struct exclusive_datafile *datafile = NULL;
+    struct _ACTIVATION_CONTEXT *context = NULL;
+    MEMORY_REGION_INFORMATION info;
     HANDLE mapping, file = INVALID_HANDLE_VALUE;
     HMODULE module = 0;
     DWORD protect = PAGE_READONLY;
+    NTSTATUS status;
 
     *mod_ret = 0;
 
@@ -122,25 +126,37 @@ static BOOL load_library_as_datafile( LPCWSTR load_path, DWORD flags, LPCWSTR na
 
         if (flags & LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE)
         {
-            struct exclusive_datafile *datafile = HeapAlloc( GetProcessHeap(), 0, sizeof(*datafile) );
+            datafile = HeapAlloc( GetProcessHeap(), 0, sizeof(*datafile) );
             if (!datafile) goto failed;
             datafile->module = *mod_ret;
             datafile->file   = file;
-            RtlEnterCriticalSection( &exclusive_datafile_list_section );
-            list_add_head( &exclusive_datafile_list, &datafile->entry );
-            RtlLeaveCriticalSection( &exclusive_datafile_list_section );
-            TRACE( "delaying close %p for module %p\n", datafile->file, datafile->module );
-            return TRUE;
         }
     }
     else *mod_ret = (HMODULE)((char *)module + 2); /* set bit 1 for image resource module */
 
+    if (!set_ntstatus( NtQueryVirtualMemory( GetCurrentProcess(), module, MemoryRegionInformation,
+                                          &info, sizeof(info), NULL ) )) goto failed;
+    if (!set_ntstatus( RtlGetActiveActivationContext( &context ) )) goto failed;
+    status = LdrAddLoadAsDataTable( *mod_ret, filenameW, info.RegionSize, 0, context );
+    if (!set_ntstatus( status )) goto failed;
+    context = NULL; /* the metadata owner consumes the acquired reference */
+    if (datafile)
+    {
+        RtlEnterCriticalSection( &exclusive_datafile_list_section );
+        list_add_head( &exclusive_datafile_list, &datafile->entry );
+        RtlLeaveCriticalSection( &exclusive_datafile_list_section );
+        TRACE( "delaying close %p for module %p\n", datafile->file, datafile->module );
+        return TRUE;
+    }
     CloseHandle( file );
     return TRUE;
 
 failed:
+    RtlReleaseActivationContext( context );
+    HeapFree( GetProcessHeap(), 0, datafile );
     if (module) UnmapViewOfFile( module );
     CloseHandle( file );
+    *mod_ret = 0;
     return FALSE;
 }
 
@@ -315,6 +331,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH FreeLibrary( HINSTANCE module )
             SetLastError( ERROR_BAD_EXE_FORMAT );
             return FALSE;
         }
+        LdrRemoveLoadAsDataTable( module, NULL, NULL, 0 );
         if ((ULONG_PTR)module & 1)
         {
             struct exclusive_datafile *file;

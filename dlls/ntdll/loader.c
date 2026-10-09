@@ -150,6 +150,24 @@ typedef struct _wine_modref
 static UINT tls_module_count = 32;     /* number of modules with TLS directory */
 static IMAGE_TLS_DIRECTORY *tls_dirs;  /* array of TLS directories */
 
+struct load_as_data_entry
+{
+    void *module;
+    WCHAR *filename;
+    SIZE_T size;
+    HANDLE file;
+    LONG refs;
+    struct _ACTIVATION_CONTEXT *context;
+};
+static struct load_as_data_entry *load_as_data;
+static unsigned int load_as_data_count, load_as_data_capacity;
+
+#define LOAD_AS_DATA_BY_MODULE  0x00000200
+#define LOAD_AS_DATA_BY_NAME    0x00000400
+#define LOAD_AS_DATA_BY_FILE    0x00000800
+#define LOAD_AS_DATA_ADDREF     0x00040000
+#define LOAD_AS_DATA_QUERY      0x00200000
+
 static RTL_CRITICAL_SECTION loader_section;
 static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 {
@@ -4762,6 +4780,153 @@ NTSTATUS WINAPI LdrUnloadDll( HMODULE hModule )
     RtlLeaveCriticalSection( &loader_section );
 
     return retv;
+}
+
+/* The loader_section protects metadata. File handles and views are borrowed. */
+static void remove_load_as_data_entry( unsigned int index )
+{
+    struct load_as_data_entry *entry = &load_as_data[index];
+
+    if (entry->filename) RtlFreeHeap( GetProcessHeap(), 0, entry->filename );
+    if (entry->context && entry->context != (void *)~(ULONG_PTR)0)
+        RtlReleaseActivationContext( entry->context );
+    load_as_data[index] = load_as_data[--load_as_data_count];
+}
+
+/***********************************************************************
+ *           LdrAddLoadAsDataTable   (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrAddLoadAsDataTable( void *module, const WCHAR *filename, SIZE_T size,
+                                     HANDLE file, struct _ACTIVATION_CONTEXT *context )
+{
+    struct load_as_data_entry *entries;
+    WCHAR *copy = NULL;
+    SIZE_T bytes;
+    unsigned int i, capacity;
+    NTSTATUS status = STATUS_NO_MEMORY;
+
+    if (!module) return STATUS_INVALID_PARAMETER;
+    TRACE( "%p %s %Iu %p %p\n", module, debugstr_w(filename), size, file, context );
+
+    RtlEnterCriticalSection( &loader_section );
+    for (i = load_as_data_count; i--;)
+        if (load_as_data[i].module == module) remove_load_as_data_entry( i );
+
+    if (load_as_data_count == load_as_data_capacity)
+    {
+        capacity = load_as_data_capacity + 32;
+        if (capacity < load_as_data_capacity) goto done;
+        bytes = (SIZE_T)capacity * sizeof(*entries);
+        if (bytes / sizeof(*entries) != capacity) goto done;
+        if (load_as_data)
+            entries = RtlReAllocateHeap( GetProcessHeap(), 0, load_as_data, bytes );
+        else
+            entries = RtlAllocateHeap( GetProcessHeap(), 0, bytes );
+        if (!entries) goto done;
+        load_as_data = entries;
+        load_as_data_capacity = capacity;
+    }
+    if (filename)
+    {
+        bytes = (wcslen(filename) + 1) * sizeof(WCHAR);
+        if (!(copy = RtlAllocateHeap( GetProcessHeap(), 0, bytes ))) goto done;
+        memcpy( copy, filename, bytes );
+    }
+    load_as_data[load_as_data_count++] = (struct load_as_data_entry)
+        { module, copy, size, file, 1, context };
+    status = STATUS_SUCCESS;
+done:
+    RtlLeaveCriticalSection( &loader_section );
+    return status;
+}
+
+/***********************************************************************
+ *           LdrGetFileNameFromLoadAsDataTable   (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrGetFileNameFromLoadAsDataTable( void *module, WCHAR **filename )
+{
+    unsigned int i;
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
+
+    if (!module || !filename) return STATUS_INVALID_PARAMETER;
+    RtlEnterCriticalSection( &loader_section );
+    for (i = load_as_data_count; i--;)
+    {
+        if (load_as_data[i].module != module || !load_as_data[i].filename) continue;
+        *filename = load_as_data[i].filename;
+        status = STATUS_SUCCESS;
+        break;
+    }
+    RtlLeaveCriticalSection( &loader_section );
+    return status;
+}
+
+/***********************************************************************
+ *           LdrRemoveLoadAsDataTable   (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrRemoveLoadAsDataTable( void *key, void **module, SIZE_T *size, ULONG flags )
+{
+    struct load_as_data_entry *entry;
+    unsigned int i;
+    NTSTATUS status = STATUS_ENTRYPOINT_NOT_FOUND;
+    void *remove = key;
+
+    if (!key) return STATUS_INVALID_PARAMETER;
+    RtlEnterCriticalSection( &loader_section );
+    if (!load_as_data_count) goto done;
+    if (flags & (LOAD_AS_DATA_BY_MODULE | LOAD_AS_DATA_BY_NAME | LOAD_AS_DATA_BY_FILE))
+    {
+        if (!module)
+        {
+            status = STATUS_INVALID_PARAMETER;
+            goto done;
+        }
+        *module = NULL;
+        for (i = load_as_data_count; i--;)
+        {
+            entry = &load_as_data[i];
+            if (flags & LOAD_AS_DATA_BY_FILE)
+            {
+                if (entry->file != key) continue;
+            }
+            else if ((flags & LOAD_AS_DATA_BY_NAME) && entry->filename)
+            {
+                if (wcsicmp( entry->filename, key )) continue;
+            }
+            else if (!(flags & LOAD_AS_DATA_BY_MODULE) || entry->module != key) continue;
+            *module = entry->module;
+            break;
+        }
+        if (flags & LOAD_AS_DATA_QUERY)
+        {
+            if (*module && size)
+            {
+                *size = load_as_data[i].size;
+                if (flags & LOAD_AS_DATA_ADDREF) ++load_as_data[i].refs;
+                status = STATUS_SUCCESS;
+            }
+            goto done;
+        }
+        if (*module)
+        {
+            if (--load_as_data[i].refs > 0)
+            {
+                status = STATUS_RESOURCE_IN_USE;
+                goto done;
+            }
+            remove = *module;
+        }
+    }
+    for (i = load_as_data_count; i--;)
+    {
+        if (load_as_data[i].module != remove) continue;
+        remove_load_as_data_entry( i );
+        status = STATUS_SUCCESS;
+        break;
+    }
+done:
+    RtlLeaveCriticalSection( &loader_section );
+    return status;
 }
 
 static LONG WINAPI image_nt_header_exception_filter( EXCEPTION_POINTERS *ep, void *flags )
