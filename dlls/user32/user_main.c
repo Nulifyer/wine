@@ -279,6 +279,7 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
         thread_detach();
         break;
     case DLL_PROCESS_DETACH:
+        winevent_hook_process_detach( reserved != NULL );
         user_api_hook_process_detach( reserved != NULL );
         window_services_process_detach( reserved != NULL );
         FreeLibrary(imm32_module);

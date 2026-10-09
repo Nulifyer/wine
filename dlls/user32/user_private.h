@@ -62,6 +62,7 @@ extern void CLIPBOARD_ReleaseOwner( HWND hwnd );
 extern HDC get_display_dc(void);
 extern void release_display_dc( HDC hdc );
 extern void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module );
+extern void winevent_hook_process_detach( BOOL process_terminating );
 extern DWORD get_input_codepage( void );
 extern BOOL map_wparam_AtoW( UINT message, WPARAM *wparam, enum wm_char_mapping mapping );
 extern HPEN SYSCOLOR_GetPen( INT index );

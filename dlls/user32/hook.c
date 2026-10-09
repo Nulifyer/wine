@@ -755,6 +755,72 @@ void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module )
     return (char *)mod + (ULONG_PTR)proc;
 }
 
+struct winevent_hook_module
+{
+    struct winevent_hook_module *next;
+    HMODULE module;
+};
+
+static SRWLOCK winevent_module_lock = SRWLOCK_INIT;
+static struct winevent_hook_module *winevent_modules;
+static BOOL winevent_modules_unloading;
+
+static void *get_winevent_hook_proc( void *proc, const WCHAR *module )
+{
+    struct winevent_hook_module *entry, *allocated;
+    HMODULE mod;
+    BOOL retained = FALSE, release_reference = TRUE;
+
+    /* Acquire outside the cache lock: loading can reenter USER32 from DllMain.
+     * One ordinary reference per module survives unhook and owner-thread exit. */
+    if (!GetModuleHandleExW( 0, module, &mod ) &&
+        !(mod = LoadLibraryExW( module, NULL, LOAD_WITH_ALTERED_SEARCH_PATH ))) return NULL;
+    allocated = HeapAlloc( GetProcessHeap(), 0, sizeof(*allocated) );
+
+    AcquireSRWLockExclusive( &winevent_module_lock );
+    if (!winevent_modules_unloading)
+    {
+        for (entry = winevent_modules; entry; entry = entry->next)
+            if (entry->module == mod) break;
+        if (entry) retained = TRUE;
+        else if (allocated)
+        {
+            allocated->module = mod;
+            allocated->next = winevent_modules;
+            winevent_modules = allocated;
+            allocated = NULL;
+            release_reference = FALSE; /* The cache now owns this reference. */
+            retained = TRUE;
+        }
+    }
+    ReleaseSRWLockExclusive( &winevent_module_lock );
+
+    HeapFree( GetProcessHeap(), 0, allocated );
+    if (release_reference) FreeLibrary( mod );
+    if (!retained) return NULL;
+    /* A cache reference prevents this module from being unloaded or reused. */
+    return (char *)mod + (ULONG_PTR)proc;
+}
+
+void winevent_hook_process_detach( BOOL process_terminating )
+{
+    struct winevent_hook_module *entry, *next;
+
+    if (process_terminating) return;
+    AcquireSRWLockExclusive( &winevent_module_lock );
+    winevent_modules_unloading = TRUE;
+    entry = winevent_modules;
+    winevent_modules = NULL;
+    ReleaseSRWLockExclusive( &winevent_module_lock );
+
+    for (; entry; entry = next)
+    {
+        next = entry->next;
+        FreeLibrary( entry->module );
+        HeapFree( GetProcessHeap(), 0, entry );
+    }
+}
+
 
 /***********************************************************************
  *		SetWindowsHookA (USER32.@)
@@ -834,9 +900,8 @@ NTSTATUS WINAPI User32CallWinEventHook( void *args, ULONG size )
 {
     const struct win_event_hook_params *params = args;
     WINEVENTPROC proc = params->proc;
-    HMODULE free_module = 0;
 
-    if (params->module[0] && !(proc = get_hook_proc( proc, params->module, &free_module )))
+    if (params->module[0] && !(proc = get_winevent_hook_proc( proc, params->module )))
         return STATUS_INVALID_PARAMETER;
 
     TRACE_(relay)( "\1Call winevent hook proc %p (hhook=%p,event=%lx,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04lx,time=%lx)\n",
@@ -850,7 +915,6 @@ NTSTATUS WINAPI User32CallWinEventHook( void *args, ULONG size )
                    proc, params->handle, params->event, params->hwnd, params->object_id,
                    params->child_id, params->tid, params->time );
 
-    if (free_module) FreeLibrary( free_module );
     return STATUS_SUCCESS;
 }
 
