@@ -99,6 +99,10 @@ static UNICODE_STRING system_dll_path; /* path to search for system dependency d
 static DWORD default_search_flags;  /* default flags set by LdrSetDefaultDllDirectories */
 static WCHAR *default_load_path;    /* default dll search path */
 static HANDLE known_dlls_ntdir;  /* NT directory containing known dlls sections */
+static NTSTATUS (WINAPI *manifest_prober)( HMODULE, LPCWSTR, struct _ACTIVATION_CONTEXT ** );
+static NTSTATUS (WINAPI *create_actctx_language)( struct _ACTIVATION_CONTEXT *, LANGID,
+                                                struct _ACTIVATION_CONTEXT ** );
+static void (WINAPI *release_actctx)( struct _ACTIVATION_CONTEXT * );
 
 struct dll_dir_entry
 {
@@ -193,6 +197,7 @@ static LDR_DDAG_NODE *node_ntdll, *node_kernel32;
 
 static NTSTATUS load_dll( const WCHAR *load_path, const WCHAR *libname, DWORD flags, WINE_MODREF** pwm, BOOL system );
 static NTSTATUS process_attach( LDR_DDAG_NODE *node, LPVOID lpReserved );
+static void free_modref( WINE_MODREF *wm );
 static FARPROC find_ordinal_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY *exports,
                                     DWORD exp_size, DWORD ordinal, LPCWSTR load_path,
                                     WINE_MODREF *importer, BOOL is_dynamic );
@@ -1319,21 +1324,46 @@ static NTSTATUS create_module_activation_context( LDR_DATA_TABLE_ENTRY *module )
     NTSTATUS status;
     LDR_RESOURCE_INFO info;
     const IMAGE_RESOURCE_DATA_ENTRY *entry;
+    struct _ACTIVATION_CONTEXT *context = NULL;
 
-    info.Type = RT_MANIFEST;
-    info.Name = ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
-    info.Language = 0;
-    if (!(status = LdrFindResource_U( module->DllBase, &info, 3, &entry )))
+    if (manifest_prober)
     {
-        ACTCTXW ctx;
-        ctx.cbSize   = sizeof(ctx);
-        ctx.lpSource = NULL;
-        ctx.dwFlags  = ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID;
-        ctx.hModule  = module->DllBase;
-        ctx.lpResourceName = (LPCWSTR)ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
-        status = RtlCreateActivationContext( &module->ActivationContext, &ctx );
+        status = manifest_prober( module->DllBase, module->FullDllName.Buffer, &context );
+        if (context)
+        {
+            RtlReleaseActivationContext( module->ActivationContext );
+            module->ActivationContext = context;
+        }
     }
-    return status;
+    else
+    {
+        info.Type = RT_MANIFEST;
+        info.Name = ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
+        info.Language = 0;
+        if (!(status = LdrFindResource_U( module->DllBase, &info, 3, &entry )))
+        {
+            ACTCTXW ctx;
+            ctx.cbSize   = sizeof(ctx);
+            ctx.lpSource = NULL;
+            ctx.dwFlags  = ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID;
+            ctx.hModule  = module->DllBase;
+            ctx.lpResourceName = (LPCWSTR)ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
+            status = RtlCreateActivationContext( &module->ActivationContext, &ctx );
+        }
+    }
+    switch (status)
+    {
+    case STATUS_NO_SUCH_FILE:
+    case STATUS_RESOURCE_DATA_NOT_FOUND:
+    case STATUS_RESOURCE_TYPE_NOT_FOUND:
+    case STATUS_RESOURCE_NAME_NOT_FOUND:
+    case STATUS_RESOURCE_LANG_NOT_FOUND:
+    case STATUS_NOT_SUPPORTED:
+    case STATUS_NOT_IMPLEMENTED:
+        return STATUS_SUCCESS;
+    default:
+        return status < 0 ? status : STATUS_SUCCESS;
+    }
 }
 
 
@@ -1538,6 +1568,8 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
 
     if (alloc_tls_slot( &wm->ldr )) wm->ldr.TlsIndex = -1;
 
+    if ((status = create_module_activation_context( &wm->ldr ))) return status;
+
     if (!(imports = RtlImageDirectoryEntryToData( wm->ldr.DllBase, TRUE,
                                                   IMAGE_DIRECTORY_ENTRY_IMPORT, &size )))
         return STATUS_SUCCESS;
@@ -1547,7 +1579,7 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
 
     if (!nb_imports) return STATUS_SUCCESS;  /* no imports */
 
-    if (!create_module_activation_context( &wm->ldr ))
+    if (wm->ldr.ActivationContext)
         RtlActivateActivationContext( 0, wm->ldr.ActivationContext, &cookie );
 
     /* load the imported modules. They are automatically
@@ -2009,6 +2041,16 @@ NTSTATUS WINAPI LdrEnumerateLoadedModules( void *unknown, LDRENUMPROC callback, 
 }
 
 /******************************************************************
+ *              LdrSetDllManifestProber (NTDLL.@)
+ */
+void WINAPI LdrSetDllManifestProber( void *probe, void *create_language, void *release )
+{
+    manifest_prober = probe;
+    create_actctx_language = create_language;
+    release_actctx = release;
+}
+
+/******************************************************************
  *              LdrRegisterDllNotification (NTDLL.@)
  */
 NTSTATUS WINAPI LdrRegisterDllNotification(ULONG flags, PLDR_DLL_NOTIFICATION_FUNCTION callback,
@@ -2414,6 +2456,16 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
             status = fixup_imports( wm, load_path );
         if (status != STATUS_SUCCESS)
         {
+            /* A rejected manifest probe has not loaded dependencies. Use the
+             * normal owner to release its context, TLS slot and mapped image. */
+            if (!wm->ldr.DdagNode->Dependencies.Tail && !wm->ldr.DdagNode->IncomingDependencies.Tail)
+            {
+                free_modref( wm );
+                *module = NULL;
+                return status;
+            }
+            RtlReleaseActivationContext( wm->ldr.ActivationContext );
+            wm->ldr.ActivationContext = NULL;
             /* the module has only be inserted in the load & memory order lists */
             RemoveEntryList(&wm->ldr.InLoadOrderLinks);
             RemoveEntryList(&wm->ldr.InMemoryOrderLinks);

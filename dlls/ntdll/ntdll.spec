@@ -126,7 +126,7 @@
 @ stub LdrSetAppCompatDllRedirectionCallback
 @ stdcall LdrSetDefaultDllDirectories(long)
 @ stdcall LdrSetDllDirectory(ptr)
-@ stub LdrSetDllManifestProber
+@ stdcall LdrSetDllManifestProber(ptr ptr ptr)
 @ stdcall LdrShutdownProcess()
 @ stdcall LdrShutdownThread()
 @ extern LdrSystemDllInitBlock
