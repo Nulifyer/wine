@@ -121,11 +121,27 @@ struct threadpool
     TP_POOL_STACK_INFORMATION stack_info;
 };
 
+/* Caller tracing is the measured prefix of native TEB.ThreadPoolData.
+ * Other native worker fields are reserved here, not modeled. */
+#define TP_CALLER_TRACE_OFFSET (sizeof(void *) == 8 ? 0x60 : 0x48)
+struct threadpool_caller_trace
+{
+    BYTE reserved[TP_CALLER_TRACE_OFFSET];
+    struct
+    {
+        void *caller;
+        ULONG type;
+    } slots[2];
+    ULONG index;
+};
+C_ASSERT(offsetof(struct threadpool_caller_trace, index) == (sizeof(void *) == 8 ? 0x80 : 0x58));
+
 struct threadpool_worker
 {
     struct list entry;
     struct threadpool *pool;
     HANDLE thread;
+    struct threadpool_caller_trace caller_trace;
 };
 
 enum threadpool_objtype
@@ -2622,6 +2638,7 @@ static void CALLBACK threadpool_worker_proc( void *param )
 
     TRACE( "starting worker thread for pool %p\n", pool );
     set_thread_name(L"wine_threadpool_worker");
+    NtCurrentTeb()->ThreadPoolData = &worker->caller_trace;
 
     RtlEnterCriticalSection( &pool->cs );
     for (;;)
@@ -2671,6 +2688,7 @@ static void CALLBACK threadpool_worker_proc( void *param )
 done:
     pool->num_workers--;
     list_remove( &worker->entry );
+    NtCurrentTeb()->ThreadPoolData = NULL;
     NtClose( worker->thread );
     RtlFreeHeap( GetProcessHeap(), 0, worker );
     RtlLeaveCriticalSection( &pool->cs );
@@ -2678,6 +2696,21 @@ done:
     TRACE( "terminating worker thread for pool %p\n", pool );
     tp_threadpool_release( pool );
     RtlExitUserThread( 0 );
+}
+
+/***********************************************************************
+ *           TpCaptureCaller    (NTDLL.@)
+ */
+void WINAPI TpCaptureCaller( ULONG type )
+{
+    struct threadpool_caller_trace *trace = NtCurrentTeb()->ThreadPoolData;
+    ULONG index;
+
+    if (!trace || type - 1 >= 2) return;
+    index = (trace->index - 1) & 1;
+    trace->index = index;
+    trace->slots[index].type = type;
+    trace->slots[index].caller = __builtin_return_address(0);
 }
 
 /***********************************************************************
@@ -3453,7 +3486,7 @@ VOID WINAPI TpSetPoolMaxThreads( TP_POOL *pool, DWORD maximum )
 /***********************************************************************
  *           TpSetPoolMinThreads    (NTDLL.@)
  */
-BOOL WINAPI TpSetPoolMinThreads( TP_POOL *pool, DWORD minimum )
+NTSTATUS WINAPI TpSetPoolMinThreads( TP_POOL *pool, DWORD minimum )
 {
     struct threadpool *this = impl_from_TP_POOL( pool );
     NTSTATUS status = STATUS_SUCCESS;
@@ -3476,7 +3509,7 @@ BOOL WINAPI TpSetPoolMinThreads( TP_POOL *pool, DWORD minimum )
     }
 
     RtlLeaveCriticalSection( &this->cs );
-    return !status;
+    return status;
 }
 
 static BOOL tp_set_timer( TP_TIMER *timer, LARGE_INTEGER *timeout, LONG period, LONG window_length )

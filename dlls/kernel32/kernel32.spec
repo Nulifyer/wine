@@ -1529,7 +1529,7 @@
 @ stdcall -import SetThreadUILanguage(long)
 @ stdcall -import SetThreadpoolStackInformation(ptr ptr)
 @ stdcall SetThreadpoolThreadMaximum(ptr long) NTDLL.TpSetPoolMaxThreads
-@ stdcall SetThreadpoolThreadMinimum(ptr long) NTDLL.TpSetPoolMinThreads
+@ stdcall SetThreadpoolThreadMinimum(ptr long) KERNELBASE.SetThreadpoolThreadMinimum
 @ stdcall SetThreadpoolTimer(ptr ptr long long) NTDLL.TpSetTimer
 @ stdcall SetThreadpoolTimerEx(ptr ptr long long) NTDLL.TpSetTimerEx
 @ stdcall SetThreadpoolWait(ptr long ptr) NTDLL.TpSetWait

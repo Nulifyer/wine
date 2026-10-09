@@ -1360,6 +1360,15 @@ PTP_WORK WINAPI DECLSPEC_HOTPATCH CreateThreadpoolWork( PTP_WORK_CALLBACK callba
 
 
 /***********************************************************************
+ *           SetThreadpoolThreadMinimum   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetThreadpoolThreadMinimum( PTP_POOL pool, DWORD minimum )
+{
+    return set_ntstatus( TpSetPoolMinThreads( pool, minimum ));
+}
+
+
+/***********************************************************************
  *           TrySubmitThreadpoolCallback   (kernelbase.@)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH TrySubmitThreadpoolCallback( PTP_SIMPLE_CALLBACK callback, PVOID userdata,

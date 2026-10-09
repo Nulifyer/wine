@@ -1575,7 +1575,7 @@
 @ stdcall SetThreadUILanguage(long)
 @ stdcall SetThreadpoolStackInformation(ptr ptr)
 @ stdcall SetThreadpoolThreadMaximum(ptr long) ntdll.TpSetPoolMaxThreads
-@ stdcall SetThreadpoolThreadMinimum(ptr long) ntdll.TpSetPoolMinThreads
+@ stdcall SetThreadpoolThreadMinimum(ptr long)
 @ stdcall SetThreadpoolTimer(ptr ptr long long) ntdll.TpSetTimer
 @ stdcall SetThreadpoolTimerEx(ptr ptr long long) ntdll.TpSetTimerEx
 @ stdcall SetThreadpoolWait(ptr long ptr) ntdll.TpSetWait

@@ -1312,6 +1312,7 @@
 @ stdcall TpCallbackSendPendingAlpcMessage(ptr)
 @ stdcall TpCallbackSetEventOnCompletion(ptr long)
 @ stdcall TpCallbackUnloadDllOnCompletion(ptr ptr)
+@ stdcall TpCaptureCaller(long)
 @ stdcall TpCancelAsyncIoOperation(ptr)
 @ stdcall TpDisassociateCallback(ptr)
 @ stdcall TpIsTimerSet(ptr)
