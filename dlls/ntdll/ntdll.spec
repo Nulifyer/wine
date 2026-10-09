@@ -718,7 +718,7 @@
 @ stdcall RtlDllShutdownInProgress()
 # @ stub RtlDnsHostNameToComputerName
 @ stdcall RtlDoesFileExists_U(wstr)
-# @ stub RtlDosApplyFileIsolationRedirection_Ustr
+@ stdcall RtlDosApplyFileIsolationRedirection_Ustr(long ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RtlDosPathNameToNtPathName_U(wstr ptr ptr ptr)
 @ stdcall RtlDosPathNameToNtPathName_U_WithStatus(wstr ptr ptr ptr)
 @ stdcall RtlDosPathNameToRelativeNtPathName_U(wstr ptr ptr ptr)

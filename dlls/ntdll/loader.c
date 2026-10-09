@@ -3244,6 +3244,177 @@ done:
 }
 
 
+/* The executable marker selects either its own directory or a .Local directory. */
+static NTSTATUS get_dot_local_path( WCHAR **path, BOOL *directory )
+{
+    static const WCHAR suffix[] = L".Local";
+    const UNICODE_STRING *image = &NtCurrentTeb()->Peb->ProcessParameters->ImagePathName;
+    FILE_BASIC_INFORMATION info;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING name;
+    WCHAR *buffer;
+    NTSTATUS status;
+    SIZE_T size = image->Length + sizeof(suffix);
+
+    if (size > 0xfffe) return STATUS_NAME_TOO_LONG;
+    if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
+    memcpy( buffer, image->Buffer, image->Length );
+    memcpy( buffer + image->Length / sizeof(WCHAR), suffix, sizeof(suffix) );
+    status = RtlDosPathNameToNtPathName_U_WithStatus( buffer, &name, NULL, NULL );
+    if (!status)
+    {
+        InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+        status = NtQueryAttributesFile( &attr, &info );
+        RtlFreeUnicodeString( &name );
+    }
+    if (!status)
+    {
+        *directory = !!(info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+        *path = buffer;
+    }
+    else RtlFreeHeap( GetProcessHeap(), 0, buffer );
+    return status;
+}
+
+static NTSTATUS find_dot_local_dll( const WCHAR *libname, WCHAR **fullname )
+{
+    WCHAR *marker, *buffer, *p;
+    SIZE_T prefix, size;
+    NTSTATUS status;
+    BOOL directory;
+
+    if ((status = get_dot_local_path( &marker, &directory )))
+    {
+        if (status == STATUS_OBJECT_NAME_NOT_FOUND || status == STATUS_OBJECT_PATH_NOT_FOUND)
+            status = STATUS_SXS_KEY_NOT_FOUND;
+        return status;
+    }
+    if (directory) prefix = wcslen( marker );
+    else
+    {
+        p = wcsrchr( marker, '\\' );
+        prefix = p ? p - marker : 0;
+    }
+    size = (prefix + wcslen(libname) + 2) * sizeof(WCHAR);
+    if (size > 0xfffe) status = STATUS_NAME_TOO_LONG;
+    else if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, size ))) status = STATUS_NO_MEMORY;
+    else
+    {
+        memcpy( buffer, marker, prefix * sizeof(WCHAR) );
+        buffer[prefix] = '\\';
+        wcscpy( buffer + prefix + 1, libname );
+        if (RtlDoesFileExists_U( buffer ))
+        {
+            *fullname = buffer;
+            status = STATUS_SUCCESS;
+        }
+        else
+        {
+            RtlFreeHeap( GetProcessHeap(), 0, buffer );
+            status = STATUS_SXS_KEY_NOT_FOUND;
+        }
+    }
+    RtlFreeHeap( GetProcessHeap(), 0, marker );
+    return status;
+}
+
+/***********************************************************************
+ *           RtlDosApplyFileIsolationRedirection_Ustr   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlDosApplyFileIsolationRedirection_Ustr( ULONG flags, const UNICODE_STRING *original,
+                                                        const UNICODE_STRING *extension,
+                                                        UNICODE_STRING *fixed, UNICODE_STRING *dynamic,
+                                                        UNICODE_STRING **used, ULONG *new_flags,
+                                                        SIZE_T *file_part, SIZE_T *required )
+{
+    static const UNICODE_STRING default_extension = RTL_CONSTANT_STRING( L".DLL" );
+    WCHAR *name, *basename, *fullname = NULL, *p;
+    SIZE_T length, extension_length = extension ? extension->Length : 0, size;
+    BOOL has_extension = FALSE, dot_local = FALSE;
+    NTSTATUS status = STATUS_SXS_KEY_NOT_FOUND;
+
+    if (new_flags) *new_flags = 0;
+    if (file_part) *file_part = 0;
+    if (required) *required = MAX_PATH * sizeof(WCHAR);
+    if (dynamic) memset( dynamic, 0, sizeof(*dynamic) );
+    if (fixed && fixed->Buffer && fixed->MaximumLength >= sizeof(WCHAR)) fixed->Buffer[0] = 0;
+    if ((flags & ~1) || !original || (fixed && dynamic && !used) || (!fixed && !dynamic && file_part))
+        return STATUS_INVALID_PARAMETER;
+
+    length = original->Length;
+    if ((length & 1) || (length && !original->Buffer)) return STATUS_INVALID_PARAMETER;
+    if (length + extension_length + sizeof(WCHAR) > 0xfffe) return STATUS_NAME_TOO_LONG;
+    if (!(name = RtlAllocateHeap( GetProcessHeap(), 0, length + max(extension_length, 8) + sizeof(WCHAR) )))
+        return STATUS_NO_MEMORY;
+    memcpy( name, original->Buffer, length );
+    name[length / sizeof(WCHAR)] = 0;
+    basename = name;
+    for (p = name; *p; p++)
+    {
+        if (*p == '\\' || *p == '/') basename = p + 1;
+        if (*p == '.') has_extension = TRUE;
+    }
+    if (!has_extension && extension_length)
+    {
+        memcpy( name + length / sizeof(WCHAR), extension->Buffer, extension_length );
+        length += extension_length;
+        name[length / sizeof(WCHAR)] = 0;
+    }
+    if ((flags & 1) &&
+        (NtCurrentTeb()->Peb->ProcessParameters->Flags & RTL_USER_PROC_DLL_REDIRECTION_LOCAL))
+    {
+        if (!has_extension && !extension_length)
+            memcpy( name + length / sizeof(WCHAR), default_extension.Buffer,
+                    default_extension.Length + sizeof(WCHAR) );
+        status = find_dot_local_dll( basename, &fullname );
+        if (!status) dot_local = TRUE;
+        else if (status != STATUS_SXS_KEY_NOT_FOUND) goto done;
+        name[length / sizeof(WCHAR)] = 0;
+    }
+    if (!dot_local)
+    {
+        status = find_actctx_dll( name, &fullname );
+        if (status == STATUS_SXS_SECTION_NOT_FOUND) status = STATUS_SXS_KEY_NOT_FOUND;
+        if (status) goto done;
+    }
+
+    size = (wcslen(fullname) + 1) * sizeof(WCHAR);
+    if (size > 0xfffe) status = STATUS_NAME_TOO_LONG;
+    else if (!fixed && !dynamic)
+    {
+        if (new_flags) *new_flags = dot_local;
+    }
+    else if (fixed && fixed->Buffer && size <= fixed->MaximumLength)
+    {
+        memcpy( fixed->Buffer, fullname, size );
+        fixed->Length = size - sizeof(WCHAR);
+        if (used) *used = fixed;
+    }
+    else if (dynamic)
+    {
+        dynamic->Buffer = fullname;
+        dynamic->Length = size - sizeof(WCHAR);
+        dynamic->MaximumLength = size;
+        if (used) *used = dynamic;
+        fullname = NULL;
+    }
+    else
+    {
+        if (new_flags && !dot_local) *new_flags = 2;
+        status = STATUS_BUFFER_TOO_SMALL;
+    }
+    if (!status && (fixed || dynamic))
+    {
+        const WCHAR *path = fullname ? fullname : dynamic->Buffer;
+        if (file_part && (p = wcsrchr( path, '\\' ))) *file_part = p - path + 1;
+        if (new_flags) *new_flags = dot_local;
+    }
+done:
+    RtlFreeHeap( GetProcessHeap(), 0, fullname );
+    RtlFreeHeap( GetProcessHeap(), 0, name );
+    return status;
+}
+
 
 /******************************************************************************
  *	find_apiset_dll
@@ -4870,6 +5041,17 @@ void loader_init( CONTEXT *context, void **entry )
             ERR( "Importing dlls for %s failed, status %lx\n",
                  debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer), status );
             NtTerminateProcess( GetCurrentProcess(), status );
+        }
+        {
+            WCHAR *marker;
+            BOOL directory;
+
+            peb->ProcessParameters->Flags &= ~RTL_USER_PROC_DLL_REDIRECTION_LOCAL;
+            if (!wm->ldr.ActivationContext && !get_dot_local_path( &marker, &directory ))
+            {
+                peb->ProcessParameters->Flags |= RTL_USER_PROC_DLL_REDIRECTION_LOCAL;
+                RtlFreeHeap( GetProcessHeap(), 0, marker );
+            }
         }
         imports_fixup_done = TRUE;
     }
