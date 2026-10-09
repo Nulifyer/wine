@@ -121,6 +121,9 @@
 @ stdcall LdrQueryImageFileKeyOption(ptr wstr long ptr long ptr)
 @ stdcall LdrQueryProcessModuleInformation(ptr long ptr)
 @ stdcall LdrRegisterDllNotification(long ptr ptr ptr)
+@ stdcall LdrResFindResource(ptr ptr ptr ptr ptr ptr ptr ptr long)
+@ stdcall LdrResFindResourceDirectory(ptr ptr ptr ptr ptr ptr long)
+@ stdcall LdrResSearchResource(ptr ptr long long ptr ptr ptr ptr)
 @ stdcall LdrRemoveDllDirectory(ptr)
 @ stdcall LdrResolveDelayLoadedAPI(ptr ptr ptr ptr ptr long)
 @ stub LdrSetAppCompatDllRedirectionCallback

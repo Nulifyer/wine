@@ -105,7 +105,7 @@ static inline BOOL is_data_file_module( HMODULE hmod )
  * Find the first suitable entry in a resource directory
  */
 static const IMAGE_RESOURCE_DIRECTORY *find_first_entry( const IMAGE_RESOURCE_DIRECTORY *dir,
-                                                         const void *root, int want_dir )
+                                                         const void *root, int want_dir, LANGID *language )
 {
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *entry = (const IMAGE_RESOURCE_DIRECTORY_ENTRY *)(dir + 1);
     int pos;
@@ -113,7 +113,10 @@ static const IMAGE_RESOURCE_DIRECTORY *find_first_entry( const IMAGE_RESOURCE_DI
     for (pos = 0; pos < dir->NumberOfNamedEntries + dir->NumberOfIdEntries; pos++)
     {
         if (!entry[pos].DataIsDirectory == !want_dir)
+        {
+            if (language) *language = entry[pos].Id;
             return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].OffsetToDirectory);
+        }
     }
     return NULL;
 }
@@ -201,7 +204,7 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_by_name( const IMAGE_RESOURCE_
  * Find a resource entry
  */
 static NTSTATUS find_entry( HMODULE hmod, const LDR_RESOURCE_INFO *info,
-                            ULONG level, const void **ret, int want_dir )
+                            ULONG level, const void **ret, int want_dir, LANGID *language )
 {
     ULONG size;
     const void *root;
@@ -228,12 +231,16 @@ static NTSTATUS find_entry( HMODULE hmod, const LDR_RESOURCE_INFO *info,
     resdirptr = *ret;
     count = get_resource_lcids( list, ARRAY_SIZE(list), info->Language );
     for (i = 0; i < count; i++)
-        if ((*ret = find_entry_by_id( resdirptr, list[i], root, want_dir ))) return STATUS_SUCCESS;
+        if ((*ret = find_entry_by_id( resdirptr, list[i], root, want_dir )))
+        {
+            if (language) *language = list[i];
+            return STATUS_SUCCESS;
+        }
 
     /* if no explicitly specified language, return the first entry */
     if (PRIMARYLANGID(info->Language) == LANG_NEUTRAL)
     {
-        if ((*ret = find_first_entry( resdirptr, root, want_dir ))) return STATUS_SUCCESS;
+        if ((*ret = find_first_entry( resdirptr, root, want_dir, language ))) return STATUS_SUCCESS;
     }
     return STATUS_RESOURCE_LANG_NOT_FOUND;
 
@@ -307,7 +314,7 @@ static const struct mui_resource *get_mui_resource( HMODULE module, ULONG *size 
     const IMAGE_RESOURCE_DATA_ENTRY *entry;
     const struct mui_resource *mui;
 
-    if (find_entry( module, &info, 3, (const void **)&entry, FALSE )) return NULL;
+    if (find_entry( module, &info, 3, (const void **)&entry, FALSE, NULL )) return NULL;
     if (access_resource_from_module( module, entry, (void **)&mui, size )) return NULL;
     return validate_mui_resource( mui, *size ) ? mui : NULL;
 }
@@ -537,7 +544,7 @@ static NTSTATUS find_file_resource( HMODULE module, const struct mui_resource *m
         {
             LDR_RESOURCE_INFO lookup = *info;
             if (!*locale) lookup.Language = 0;
-            status = find_entry( alternate->resource_module, &lookup, level, ret, FALSE );
+            status = find_entry( alternate->resource_module, &lookup, level, ret, FALSE, NULL );
         }
         else status = STATUS_RESOURCE_TYPE_NOT_FOUND;
     done:
@@ -603,6 +610,123 @@ static NTSTATUS find_alternate_resource( HMODULE module, const LDR_RESOURCE_INFO
 
 
 /**********************************************************************
+ *  LdrResSearchResource (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrResSearchResource( HMODULE module, const ULONG_PTR *path, ULONG count, ULONG flags,
+                                    void **buffer, SIZE_T *size, WCHAR *culture, ULONG *culture_length )
+{
+    LDR_RESOURCE_INFO info = {0};
+    const void *entry;
+    LANGID language = 0;
+    NTSTATUS status;
+    ULONG mode;
+
+    if (!module || !path || (culture && !culture_length)) return STATUS_INVALID_PARAMETER;
+    if (!(flags & 0xf00)) flags |= 0x100;
+    if (!(flags & 0x2000)) flags |= 0x1000;
+    if (flags & 0xfff00000) return STATUS_INVALID_PARAMETER_4;
+    if (count >= 5 || (count < 3 && !(flags & 2))) return STATUS_INVALID_PARAMETER_3;
+    if ((flags & 0x41) && count != 4) return STATUS_INVALID_PARAMETER_3;
+    if (!(flags & 0x41) && count == 4) return STATUS_INVALID_PARAMETER_4;
+    mode = flags & 0xf00;
+    if (mode != 0x100 && mode != 0x200 && mode != 0x400 && mode != 0x800)
+        return STATUS_INVALID_PARAMETER_4;
+    if ((flags & 0x3000) == 0x3000 || (flags & 0x18) == 0x18)
+        return STATUS_INVALID_PARAMETER_4;
+    if ((flags & 0x8000) && (flags & 0x810) != 0x810) return STATUS_INVALID_PARAMETER_4;
+
+    /* File/handle mappings, four-key alternate types and MUI cache inputs need
+     * their own contract. Mapped PE lookup keeps the existing resource owner. */
+    if (count == 4 || mode == 0x400 || mode == 0x800 || (flags & 0xfc000))
+        return STATUS_NOT_IMPLEMENTED;
+    if (mode == 0x200) module = (HMODULE)((ULONG_PTR)module | 1);
+
+    __TRY
+    {
+        if (count) info.Type = path[0];
+        if (count > 1) info.Name = path[1];
+        if (count > 2)
+        {
+            if (IS_INTRESOURCE(path[2])) info.Language = path[2];
+            else
+            {
+                LCID lcid;
+                if (!(status = RtlLocaleNameToLcid( (const WCHAR *)path[2], &lcid, 0 )))
+                    info.Language = LANGIDFROMLCID( lcid );
+                else status = STATUS_INVALID_PARAMETER;
+                if (status) goto done;
+            }
+        }
+        status = find_entry( module, &info, count, &entry, !!(flags & 2), &language );
+        if (status) goto done;
+        if (!count)
+        {
+            status = STATUS_INVALID_PARAMETER;
+            goto done;
+        }
+        if (flags & 2)
+        {
+            if (buffer) *buffer = (void *)entry;
+        }
+        else
+        {
+            ULONG resource_size;
+            status = access_resource_from_module( module, entry, buffer, size ? &resource_size : NULL );
+            if (status) goto done;
+            if (size) *size = resource_size;
+        }
+        if (culture_length)
+        {
+            WCHAR name[LOCALE_NAME_MAX_LENGTH];
+            UNICODE_STRING locale = {0, sizeof(name), name};
+            ULONG capacity = *culture_length, required;
+            name[0] = 0;
+            if (language && (status = RtlLcidToLocaleName( MAKELCID(language, SORT_DEFAULT), &locale, 2, FALSE )))
+                goto done;
+            required = locale.Length / sizeof(WCHAR) + 1;
+            *culture_length = required;
+            if (!culture || capacity < required) status = STATUS_BUFFER_TOO_SMALL;
+            else memcpy( culture, name, required * sizeof(WCHAR) );
+        }
+    done:;
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        return GetExceptionCode();
+    }
+    __ENDTRY;
+    return status;
+}
+
+/**********************************************************************
+ *  LdrResFindResourceDirectory (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrResFindResourceDirectory( HMODULE module, const WCHAR *type, const WCHAR *name,
+                                           const IMAGE_RESOURCE_DIRECTORY **directory,
+                                           WCHAR *culture, ULONG *culture_length, ULONG flags )
+{
+    ULONG_PTR path[2] = {(ULONG_PTR)type, (ULONG_PTR)name};
+    ULONG count = name ? 2 : type ? 1 : 0;
+
+    if (flags & 0xc00) return STATUS_INVALID_PARAMETER;
+    return LdrResSearchResource( module, path, count, flags | 2, (void **)directory,
+                                NULL, culture, culture_length );
+}
+
+/**********************************************************************
+ *  LdrResFindResource (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrResFindResource( HMODULE module, const WCHAR *type, const WCHAR *name,
+                                  const WCHAR *language, void **buffer, SIZE_T *size,
+                                  WCHAR *culture, ULONG *culture_length, ULONG flags )
+{
+    ULONG_PTR path[3] = {(ULONG_PTR)type, (ULONG_PTR)name, (ULONG_PTR)language};
+
+    if (flags & 0xc02) return STATUS_INVALID_PARAMETER;
+    return LdrResSearchResource( module, path, 3, flags, buffer, size, culture, culture_length );
+}
+
+/**********************************************************************
  *	LdrFindResourceDirectory_U  (NTDLL.@)
  */
 NTSTATUS WINAPI DECLSPEC_HOTPATCH LdrFindResourceDirectory_U( HMODULE hmod, const LDR_RESOURCE_INFO *info,
@@ -618,7 +742,7 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH LdrFindResourceDirectory_U( HMODULE hmod, cons
                      level > 1 ? debugstr_w((LPCWSTR)info->Name) : "",
                      level > 2 ? info->Language : 0, level );
 
-        status = find_entry( hmod, info, level, &res, TRUE );
+        status = find_entry( hmod, info, level, &res, TRUE, NULL );
         if (status == STATUS_SUCCESS) *dir = res;
     }
     __EXCEPT_PAGE_FAULT
@@ -646,7 +770,7 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH LdrFindResource_U( HMODULE hmod, const LDR_RES
                      level > 1 ? debugstr_w((LPCWSTR)info->Name) : "",
                      level > 2 ? info->Language : 0, level );
 
-        status = find_entry( hmod, info, level, &res, FALSE );
+        status = find_entry( hmod, info, level, &res, FALSE, NULL );
         if (status != STATUS_SUCCESS)
         {
             NTSTATUS alternate_status = find_alternate_resource( hmod, info, level, &res, status );
