@@ -40,6 +40,7 @@ struct process
     struct list          entry;           /* entry in system-wide process list */
     process_id_t         parent_id;       /* parent process id (at the time of creation) */
     client_ptr_t         owner;           /* encoded creator/console owner, retained through exit */
+    unsigned __int64     sequence;        /* immutable creation order, retained through exit */
     struct list          wnf_subscriptions; /* process-owned WNF subscriptions */
     struct event        *wnf_event;         /* retained notification event */
     struct list          wnf_states;      /* owned temporary WNF names */

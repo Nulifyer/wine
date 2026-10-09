@@ -17,7 +17,7 @@ DECL_HANDLER(init_thread);
 DECL_HANDLER(terminate_process);
 DECL_HANDLER(terminate_thread);
 DECL_HANDLER(get_process_info);
-DECL_HANDLER(get_process_owner);
+DECL_HANDLER(get_process_identity);
 DECL_HANDLER(init_process_ui_context);
 DECL_HANDLER(get_process_ui_context);
 DECL_HANDLER(get_process_debug_info);
@@ -485,7 +485,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_terminate_process,
     (req_handler)req_terminate_thread,
     (req_handler)req_get_process_info,
-    (req_handler)req_get_process_owner,
+    (req_handler)req_get_process_identity,
     (req_handler)req_init_process_ui_context,
     (req_handler)req_get_process_ui_context,
     (req_handler)req_get_process_debug_info,
@@ -1089,10 +1089,11 @@ C_ASSERT( offsetof(struct get_process_info_reply, disable_boost) == 58 );
 C_ASSERT( offsetof(struct get_process_info_reply, handle_checking_mode) == 59 );
 C_ASSERT( offsetof(struct get_process_info_reply, machine) == 60 );
 C_ASSERT( sizeof(struct get_process_info_reply) == 64 );
-C_ASSERT( offsetof(struct get_process_owner_request, handle) == 12 );
-C_ASSERT( sizeof(struct get_process_owner_request) == 16 );
-C_ASSERT( offsetof(struct get_process_owner_reply, owner) == 8 );
-C_ASSERT( sizeof(struct get_process_owner_reply) == 16 );
+C_ASSERT( offsetof(struct get_process_identity_request, handle) == 12 );
+C_ASSERT( sizeof(struct get_process_identity_request) == 16 );
+C_ASSERT( offsetof(struct get_process_identity_reply, owner) == 8 );
+C_ASSERT( offsetof(struct get_process_identity_reply, sequence) == 16 );
+C_ASSERT( sizeof(struct get_process_identity_reply) == 24 );
 C_ASSERT( sizeof(struct init_process_ui_context_request) == 16 );
 C_ASSERT( offsetof(struct get_process_ui_context_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_process_ui_context_request) == 16 );

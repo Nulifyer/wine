@@ -1307,11 +1307,12 @@ typedef volatile struct
 @END
 
 
-/* Retrieve the encoded creator/console owner of a process */
-@REQ(get_process_owner)
+/* Retrieve the retained identity of a process */
+@REQ(get_process_identity)
     obj_handle_t handle;           /* process handle */
 @REPLY
     client_ptr_t owner;            /* encoded process owner */
+    unsigned __int64 sequence;     /* immutable process creation order */
 @END
 
 

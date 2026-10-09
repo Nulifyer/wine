@@ -223,14 +223,15 @@ static void dump_get_process_info_reply( const struct get_process_info_reply *re
     dump_varargs_pe_image_info( ", image=", cur_size );
 }
 
-static void dump_get_process_owner_request( const struct get_process_owner_request *req )
+static void dump_get_process_identity_request( const struct get_process_identity_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
-static void dump_get_process_owner_reply( const struct get_process_owner_reply *req )
+static void dump_get_process_identity_reply( const struct get_process_identity_reply *req )
 {
     dump_uint64( " owner=", &req->owner );
+    dump_uint64( ", sequence=", &req->sequence );
 }
 
 static void dump_init_process_ui_context_request( const struct init_process_ui_context_request *req )
@@ -5116,7 +5117,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_terminate_process_request,
     (dump_func)dump_terminate_thread_request,
     (dump_func)dump_get_process_info_request,
-    (dump_func)dump_get_process_owner_request,
+    (dump_func)dump_get_process_identity_request,
     (dump_func)dump_init_process_ui_context_request,
     (dump_func)dump_get_process_ui_context_request,
     (dump_func)dump_get_process_debug_info_request,
@@ -5584,7 +5585,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_terminate_process_reply,
     (dump_func)dump_terminate_thread_reply,
     (dump_func)dump_get_process_info_reply,
-    (dump_func)dump_get_process_owner_reply,
+    (dump_func)dump_get_process_identity_reply,
     NULL,
     (dump_func)dump_get_process_ui_context_reply,
     (dump_func)dump_get_process_debug_info_reply,
@@ -6052,7 +6053,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "terminate_process",
     "terminate_thread",
     "get_process_info",
-    "get_process_owner",
+    "get_process_identity",
     "init_process_ui_context",
     "get_process_ui_context",
     "get_process_debug_info",

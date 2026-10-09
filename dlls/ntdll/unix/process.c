@@ -1181,19 +1181,20 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
         return ret;
 
     case ProcessConsoleHostProcess:
+    case ProcessSequenceNumber:
 #ifdef _WIN64
-        if (size != sizeof(ULONG_PTR)) return STATUS_INFO_LENGTH_MISMATCH;
-        SERVER_START_REQ( get_process_owner )
+        if (size != sizeof(ULONGLONG)) return STATUS_INFO_LENGTH_MISMATCH;
+        SERVER_START_REQ( get_process_identity )
         {
             req->handle = wine_server_obj_handle( handle );
             if (!(ret = wine_server_call( req )))
             {
                 if (!info) ret = STATUS_ACCESS_VIOLATION;
-                else *(ULONG_PTR *)info = reply->owner;
+                else *(ULONGLONG *)info = class == ProcessSequenceNumber ? reply->sequence : reply->owner;
             }
         }
         SERVER_END_REQ;
-        if (!ret && ret_len) *ret_len = sizeof(ULONG_PTR);
+        if (!ret && ret_len) *ret_len = sizeof(ULONGLONG);
         return ret;
 #else
         return STATUS_INVALID_INFO_CLASS;
@@ -1790,6 +1791,9 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
 
     switch (class)
     {
+    case ProcessSequenceNumber:
+        return STATUS_INVALID_INFO_CLASS;
+
     case ProcessConsoleHostProcess:
 #ifdef _WIN64
         if (size != sizeof(ULONG_PTR)) return STATUS_INFO_LENGTH_MISMATCH;

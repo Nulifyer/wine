@@ -583,6 +583,7 @@ NTSTATUS WINAPI wow64_NtQueryInformationProcess( UINT *args )
     switch (class)
     {
     case ProcessConsoleHostProcess:
+    case ProcessSequenceNumber:
         return STATUS_INVALID_INFO_CLASS;
 
     case ProcessBasicInformation:  /* PROCESS_BASIC_INFORMATION */

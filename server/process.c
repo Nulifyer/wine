@@ -70,6 +70,7 @@
 
 static struct list process_list = LIST_INIT(process_list);
 static int running_processes, user_processes;
+static unsigned __int64 process_sequence;
 static unsigned int next_native_session_id;
 static struct event *shutdown_event;           /* signaled when shutdown starts */
 static struct timeout_user *shutdown_timeout;  /* timeout for server shutdown */
@@ -611,6 +612,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->sync            = NULL;
     process->parent_id       = 0;
     process->owner           = 0;
+    process->sequence        = ++process_sequence;
     process->debug_obj       = NULL;
     process->debug_event     = NULL;
     process->handles         = NULL;
@@ -1747,14 +1749,15 @@ DECL_HANDLER(get_process_info)
     }
 }
 
-/* retrieve the encoded creator/console owner of a process */
-DECL_HANDLER(get_process_owner)
+/* retrieve the retained identity of a process */
+DECL_HANDLER(get_process_identity)
 {
     struct process *process;
 
     if ((process = get_process_from_handle( req->handle, PROCESS_QUERY_LIMITED_INFORMATION )))
     {
         reply->owner = process->owner;
+        reply->sequence = process->sequence;
         release_object( process );
     }
 }
