@@ -11,19 +11,19 @@
 @ stdcall AlpcGetMessageAttribute(ptr long)
 @ stdcall ApiSetQueryApiSetPresence(ptr ptr)
 @ stdcall ApiSetQueryApiSetPresenceEx(ptr ptr ptr)
-@ stub CsrAllocateCaptureBuffer
+@ stdcall CsrAllocateCaptureBuffer(long long)
 @ stub CsrAllocateCapturePointer
-@ stub CsrAllocateMessagePointer
-@ stub CsrCaptureMessageBuffer
+@ stdcall CsrAllocateMessagePointer(ptr long ptr)
+@ stdcall CsrCaptureMessageBuffer(ptr ptr long ptr)
 # @ stub CsrCaptureMessageMultiUnicodeStringsInPlace
 @ stub CsrCaptureMessageString
 @ stub CsrCaptureTimeout
-@ stub CsrClientCallServer
+@ stdcall CsrClientCallServer(ptr ptr long long)
 @ stdcall CsrClientConnectToServer(ptr long ptr long ptr)
 @ stub CsrClientMaxMessage
 @ stub CsrClientSendMessage
 @ stub CsrClientThreadConnect
-@ stub CsrFreeCaptureBuffer
+@ stdcall CsrFreeCaptureBuffer(ptr)
 # @ stub CsrGetProcessId
 @ stub CsrIdentifyAlertableThread
 @ stub CsrNewThread
@@ -503,6 +503,11 @@
 # @ stub NtWaitLowEventPair
 @ stdcall -syscall=0x0001 NtWorkerFactoryWorkerReady(ptr)
 @ stdcall -syscall -arch=win32 NtWow64AllocateVirtualMemory64(long ptr long long ptr long long)
+@ stdcall -syscall -arch=win32 NtWow64CsrAllocateCaptureBuffer(long long)
+@ stdcall -syscall -arch=win32 NtWow64CsrAllocateMessagePointer(ptr long ptr)
+@ stdcall -syscall -arch=win32 NtWow64CsrCaptureMessageBuffer(ptr ptr long ptr)
+@ stdcall -syscall -arch=win32 NtWow64CsrClientCallServer(ptr ptr long long)
+@ stdcall -syscall -arch=win32 NtWow64CsrFreeCaptureBuffer(ptr)
 @ stdcall -syscall -arch=win32 NtWow64CsrClientConnectToServer(ptr long ptr long ptr)
 @ stdcall -syscall -arch=win32 NtWow64GetNativeSystemInformation(long ptr long ptr)
 @ stdcall -syscall -arch=win32 NtWow64IsProcessorFeaturePresent(long)
@@ -1703,6 +1708,11 @@
 # @ stub ZwWaitLowEventPair
 @ stdcall -private ZwWorkerFactoryWorkerReady(ptr) NtWorkerFactoryWorkerReady
 @ stdcall -private -arch=win32 ZwWow64AllocateVirtualMemory64(long ptr long long ptr long long) NtWow64AllocateVirtualMemory64
+@ stdcall -private -arch=win32 ZwWow64CsrAllocateCaptureBuffer(long long) NtWow64CsrAllocateCaptureBuffer
+@ stdcall -private -arch=win32 ZwWow64CsrAllocateMessagePointer(ptr long ptr) NtWow64CsrAllocateMessagePointer
+@ stdcall -private -arch=win32 ZwWow64CsrCaptureMessageBuffer(ptr ptr long ptr) NtWow64CsrCaptureMessageBuffer
+@ stdcall -private -arch=win32 ZwWow64CsrClientCallServer(ptr ptr long long) NtWow64CsrClientCallServer
+@ stdcall -private -arch=win32 ZwWow64CsrFreeCaptureBuffer(ptr) NtWow64CsrFreeCaptureBuffer
 @ stdcall -private -arch=win32 ZwWow64CsrClientConnectToServer(ptr long ptr long ptr) NtWow64CsrClientConnectToServer
 @ stdcall -private -arch=win32 ZwWow64GetNativeSystemInformation(long ptr long ptr) NtWow64GetNativeSystemInformation
 @ stdcall -private -arch=win32 ZwWow64IsProcessorFeaturePresent(long) NtWow64IsProcessorFeaturePresent

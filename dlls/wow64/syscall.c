@@ -1134,6 +1134,71 @@ NTSTATUS WINAPI wow64_NtSetDefaultUILanguage( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtWow64CsrAllocateCaptureBuffer
+ */
+NTSTATUS WINAPI wow64_NtWow64CsrAllocateCaptureBuffer( UINT *args )
+{
+    ULONG count = get_ulong( &args );
+    ULONG size = get_ulong( &args );
+
+    return PtrToUlong( CsrAllocateCaptureBuffer( count, size ) );
+}
+
+
+/**********************************************************************
+ *           wow64_NtWow64CsrAllocateMessagePointer
+ */
+NTSTATUS WINAPI wow64_NtWow64CsrAllocateMessagePointer( UINT *args )
+{
+    void *capture = get_ptr( &args );
+    ULONG size = get_ulong( &args );
+    void **pointer = get_ptr( &args );
+
+    /* CSR delegates native 64-bit wire objects, including pointer output slots. */
+    return CsrAllocateMessagePointer( capture, size, pointer );
+}
+
+
+/**********************************************************************
+ *           wow64_NtWow64CsrCaptureMessageBuffer
+ */
+NTSTATUS WINAPI wow64_NtWow64CsrCaptureMessageBuffer( UINT *args )
+{
+    void *capture = get_ptr( &args );
+    const void *source = get_ptr( &args );
+    ULONG size = get_ulong( &args );
+    void **pointer = get_ptr( &args );
+
+    CsrCaptureMessageBuffer( capture, source, size, pointer );
+    return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
+ *           wow64_NtWow64CsrClientCallServer
+ */
+NTSTATUS WINAPI wow64_NtWow64CsrClientCallServer( UINT *args )
+{
+    void *message = get_ptr( &args );
+    void *capture = get_ptr( &args );
+    ULONG api = get_ulong( &args );
+    ULONG length = get_ulong( &args );
+
+    return CsrClientCallServer( message, capture, api, length );
+}
+
+
+/**********************************************************************
+ *           wow64_NtWow64CsrFreeCaptureBuffer
+ */
+NTSTATUS WINAPI wow64_NtWow64CsrFreeCaptureBuffer( UINT *args )
+{
+    CsrFreeCaptureBuffer( get_ptr( &args ) );
+    return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
  *           wow64_NtWow64CsrClientConnectToServer
  */
 NTSTATUS WINAPI wow64_NtWow64CsrClientConnectToServer( UINT *args )

@@ -42,13 +42,18 @@ struct csr_capture
     ULONG_PTR offsets[1];
 };
 
-struct csr_connect_request
+struct csr_message
 {
     ALPC_PORT_MESSAGE header;
     struct csr_capture *capture;
     ULONG api;
     NTSTATUS status;
     ULONG reserved[2];
+    BYTE data[888];
+};
+
+struct csr_module_data
+{
     ULONG index;
     void *info;
     ULONG length;
@@ -57,9 +62,10 @@ struct csr_connect_request
 C_ASSERT( sizeof(struct csr_connection) == 48 );
 #ifdef _WIN64
 C_ASSERT( FIELD_OFFSET(struct csr_capture, offsets) == 32 );
-C_ASSERT( FIELD_OFFSET(struct csr_connect_request, index) == 64 );
-C_ASSERT( FIELD_OFFSET(struct csr_connect_request, info) == 72 );
-C_ASSERT( sizeof(struct csr_connect_request) == 88 );
+C_ASSERT( FIELD_OFFSET(struct csr_message, data) == 64 );
+C_ASSERT( sizeof(struct csr_message) == 0x3b8 );
+C_ASSERT( FIELD_OFFSET(struct csr_module_data, info) == 8 );
+C_ASSERT( sizeof(struct csr_module_data) == 24 );
 #endif
 
 /* Establish transport and storage before publishing process-local state. */
@@ -153,50 +159,264 @@ done:
     return status;
 }
 
-/* One captured pointer is sufficient for the module connection request.
- * Its storage belongs to the actual port view, never the ordinary process heap. */
-static NTSTATUS connect_module( ULONG index, void *info, ULONG length )
+/***********************************************************************
+ *           CsrAllocateCaptureBuffer (NTDLL.@)
+ */
+void *WINAPI CsrAllocateCaptureBuffer( ULONG count, ULONG size )
 {
-    struct csr_connect_request request = {0};
-    struct csr_capture *capture;
-    ULONG allocation_size;
-    SIZE_T size = sizeof(request), offset;
-    void *data, *remote_data;
+    struct csr_capture *capture = NULL;
+
+#ifdef __i386__
+    if (NtCurrentTeb()->WowTebOffset)
+        return ULongToPtr( NtWow64CsrAllocateCaptureBuffer( count, size ) );
+#endif
+#ifdef _WIN64
+    ULONG available, allocation_size;
+
+    if (size >= 0x7fffffdc || count >= 0x10000000) return NULL;
+    available = 0x7fffffdc - size;
+    if (count * 8 >= available || count + 1 >= (available - count * 8) / 3) return NULL;
+    allocation_size = (count * 11 + size + 35) & ~3;
+    if (client_heap && (capture = RtlAllocateHeap( client_heap, HEAP_ZERO_MEMORY, allocation_size )))
+    {
+        capture->length = allocation_size;
+        capture->free = capture->offsets + count;
+    }
+#endif
+    return capture;
+}
+
+/***********************************************************************
+ *           CsrFreeCaptureBuffer (NTDLL.@)
+ */
+void WINAPI CsrFreeCaptureBuffer( void *capture )
+{
+#ifdef __i386__
+    if (NtCurrentTeb()->WowTebOffset)
+    {
+        NtWow64CsrFreeCaptureBuffer( capture );
+        return;
+    }
+#endif
+    RtlFreeHeap( client_heap, 0, capture );
+}
+
+/***********************************************************************
+ *           CsrAllocateMessagePointer (NTDLL.@)
+ */
+ULONG WINAPI CsrAllocateMessagePointer( void *buffer, ULONG size, void **pointer )
+{
+#ifdef __i386__
+    if (NtCurrentTeb()->WowTebOffset)
+        return NtWow64CsrAllocateMessagePointer( buffer, size, pointer );
+#endif
+#ifdef _WIN64
+    struct csr_capture *capture = buffer;
+    ULONG aligned;
+    SIZE_T offset, free_offset;
+
+    if (!capture || !pointer || !client_heap || !RtlValidateHeap( client_heap, 0, capture )) return 0;
+    if (capture->length < FIELD_OFFSET(struct csr_capture, offsets) ||
+        capture->length > RtlSizeHeap( client_heap, 0, capture )) return 0;
+    offset = FIELD_OFFSET(struct csr_capture, offsets) + (SIZE_T)capture->count * sizeof(ULONG_PTR);
+    free_offset = (ULONG_PTR)capture->free - (ULONG_PTR)capture;
+    if (offset > capture->length || sizeof(ULONG_PTR) > capture->length - offset ||
+        free_offset < offset + sizeof(ULONG_PTR) || free_offset > capture->length || size > 0x7ffffffe)
+        return 0;
+    aligned = (size + 3) & ~3;
+    if (aligned > capture->length - free_offset) return 0;
+    *pointer = size ? capture->free : NULL;
+    capture->free = (char *)capture->free + aligned;
+    capture->offsets[capture->count++] = size ? (ULONG_PTR)pointer : 0;
+    return aligned;
+#else
+    return 0;
+#endif
+}
+
+/***********************************************************************
+ *           CsrCaptureMessageBuffer (NTDLL.@)
+ */
+void WINAPI CsrCaptureMessageBuffer( void *capture, const void *source, ULONG size, void **pointer )
+{
+#ifdef __i386__
+    if (NtCurrentTeb()->WowTebOffset)
+    {
+        NtWow64CsrCaptureMessageBuffer( capture, source, size, pointer );
+        return;
+    }
+#endif
+    if (CsrAllocateMessagePointer( capture, size, pointer ) && source && size)
+        memcpy( *pointer, source, size );
+}
+
+#ifdef _WIN64
+struct csr_pointer_state
+{
+    ULONG_PTR slot, pointer;
+};
+
+/* Snapshot mutable shared metadata before dispatch. Restore through validated
+ * original slots, never through offsets supplied by the peer. */
+static NTSTATUS call_server( struct csr_message *message, struct csr_capture *capture,
+                             ULONG api, ULONG length, SIZE_T *reply_size )
+{
+    struct csr_pointer_state *pointers = NULL;
+    struct csr_capture *remote_capture = NULL;
+    ULONG count = 0, capture_length = 0, i;
+    ULONG_PTR delta = (ULONG_PTR)peer_view - (ULONG_PTR)client_view;
+    SIZE_T size = sizeof(*message), offset;
     NTSTATUS status;
 
-    if (length > 0x7fffffc8) return STATUS_NO_MEMORY;
-    allocation_size = (length + 46) & ~3;
-    if (!(capture = RtlAllocateHeap( client_heap, HEAP_ZERO_MEMORY, allocation_size )))
-        return STATUS_NO_MEMORY;
-    offset = (char *)capture - (char *)client_view;
-    if (offset >= client_view_size || allocation_size > client_view_size - offset)
-    { status = STATUS_INVALID_PARAMETER; goto done; }
-    data = capture + 1;
-    remote_data = (char *)peer_view + offset + sizeof(*capture);
-    capture->length = allocation_size;
-    capture->count = 1;
-    capture->offsets[0] = FIELD_OFFSET(struct csr_connect_request, info);
-    memcpy( data, info, length );
-    request.header.DataLength = sizeof(request) - sizeof(request.header);
-    request.header.TotalLength = sizeof(request);
-    request.capture = (struct csr_capture *)((char *)peer_view + offset);
-    request.index = index;
-    request.info = remote_data;
-    request.length = length;
-    status = NtAlpcSendWaitReceivePort( client_port, ALPC_MSGFLG_SYNC_REQUEST,
-                                       &request.header, NULL, &request.header, &size, NULL, NULL );
-    if (!status)
+    if ((LONG)length < 0)
     {
-        if (size < sizeof(request) || request.header.DataLength < sizeof(request) - sizeof(request.header) ||
-            request.capture != (struct csr_capture *)((char *)peer_view + offset) ||
-            request.info != remote_data || request.length != length)
-            status = STATUS_INVALID_PARAMETER;
-        else status = request.status;
+        length = -length;
+        message->header.Type = 0;
     }
-    if (status >= 0) memcpy( info, data, length );
-done:
-    RtlFreeHeap( client_heap, 0, capture );
+    else message->header.Type = message->header.DataInfoOffset = 0;
+    message->capture = NULL;
+    message->api = api & ~0x10000000;
+    if (length > sizeof(message->data)) return message->status = STATUS_INVALID_PARAMETER;
+    message->header.DataLength = length + FIELD_OFFSET(struct csr_message, data) - sizeof(message->header);
+    message->header.TotalLength = length + FIELD_OFFSET(struct csr_message, data);
+
+    if (server_dispatch)
+    {
+        message->header.ClientId = NtCurrentTeb()->ClientId;
+        status = server_dispatch( message, message );
+        if (status < 0) message->status = status;
+        return message->status;
+    }
+    if (!client_port) return message->status = STATUS_PORT_DISCONNECTED;
+    if (capture)
+    {
+        offset = (ULONG_PTR)capture - (ULONG_PTR)client_view;
+        if (offset >= client_view_size || client_view_size - offset < FIELD_OFFSET(struct csr_capture, offsets) ||
+            !RtlValidateHeap( client_heap, 0, capture ))
+            return message->status = STATUS_INVALID_PARAMETER;
+        capture_length = capture->length;
+        count = capture->count;
+        if (capture_length < FIELD_OFFSET(struct csr_capture, offsets) ||
+            capture_length > client_view_size - offset || capture_length > RtlSizeHeap( client_heap, 0, capture ) ||
+            count > (capture_length - FIELD_OFFSET(struct csr_capture, offsets)) / sizeof(ULONG_PTR))
+            return message->status = STATUS_INVALID_PARAMETER;
+        if (count && !(pointers = RtlAllocateHeap( NtCurrentTeb()->Peb->ProcessHeap, 0,
+                                                  count * sizeof(*pointers) )))
+            return message->status = STATUS_NO_MEMORY;
+        for (i = 0; i < count; i++)
+        {
+            pointers[i].slot = capture->offsets[i];
+            pointers[i].pointer = 0;
+            if (!pointers[i].slot) continue;
+            offset = pointers[i].slot - (ULONG_PTR)message;
+            if (offset < FIELD_OFFSET(struct csr_message, data) || offset > message->header.TotalLength ||
+                sizeof(ULONG_PTR) > message->header.TotalLength - offset) goto invalid;
+            memcpy( &pointers[i].pointer, (char *)message + offset, sizeof(ULONG_PTR) );
+            offset = pointers[i].pointer - (ULONG_PTR)capture;
+            if (offset < FIELD_OFFSET(struct csr_capture, offsets) + count * sizeof(ULONG_PTR) ||
+                offset >= capture_length) goto invalid;
+        }
+        remote_capture = (struct csr_capture *)((ULONG_PTR)capture + delta);
+        message->capture = remote_capture;
+        capture->free = NULL;
+        for (i = 0; i < count; i++)
+        {
+            if (!pointers[i].slot) continue;
+            offset = pointers[i].pointer + delta;
+            memcpy( (void *)pointers[i].slot, &offset, sizeof(ULONG_PTR) );
+            capture->offsets[i] = pointers[i].slot - (ULONG_PTR)message;
+        }
+    }
+    TRACE( "CSR request api %#lx length %#lx capture %p\n", message->api, length, capture );
+    status = NtAlpcSendWaitReceivePort( client_port, ALPC_MSGFLG_SYNC_REQUEST,
+                                       &message->header, NULL, &message->header, &size, NULL, NULL );
+    if (reply_size) *reply_size = size;
+    if (status >= 0 && (size < FIELD_OFFSET(struct csr_message, data) + length ||
+        message->header.DataLength < length + FIELD_OFFSET(struct csr_message, data) - sizeof(message->header) ||
+        message->capture != remote_capture)) status = STATUS_INVALID_PARAMETER;
+    if (capture)
+    {
+        message->capture = capture;
+        if (capture->count != count || capture->length != capture_length) status = STATUS_INVALID_PARAMETER;
+        capture->count = count;
+        capture->length = capture_length;
+        for (i = 0; i < count; i++)
+        {
+            ULONG_PTR pointer;
+
+            if (capture->offsets[i] != (pointers[i].slot ? pointers[i].slot - (ULONG_PTR)message : 0))
+                status = STATUS_INVALID_PARAMETER;
+            capture->offsets[i] = pointers[i].slot;
+            if (!pointers[i].slot) continue;
+            memcpy( &pointer, (void *)pointers[i].slot, sizeof(pointer) );
+            offset = pointer - (ULONG_PTR)remote_capture;
+            if (offset < FIELD_OFFSET(struct csr_capture, offsets) + count * sizeof(ULONG_PTR) ||
+                offset >= capture_length)
+            {
+                status = STATUS_INVALID_PARAMETER;
+                pointer = pointers[i].pointer;
+            }
+            else pointer -= delta;
+            memcpy( (void *)pointers[i].slot, &pointer, sizeof(pointer) );
+        }
+        capture->free = NULL;
+    }
+    RtlFreeHeap( NtCurrentTeb()->Peb->ProcessHeap, 0, pointers );
+    if (status < 0) message->status = status;
+    TRACE( "CSR reply api %#lx transport %#lx status %#lx\n", message->api, status, message->status );
+    return message->status;
+
+invalid:
+    RtlFreeHeap( NtCurrentTeb()->Peb->ProcessHeap, 0, pointers );
+    return message->status = STATUS_INVALID_PARAMETER;
+}
+#endif
+
+/***********************************************************************
+ *           CsrClientCallServer (NTDLL.@)
+ */
+NTSTATUS WINAPI CsrClientCallServer( void *message, void *capture, ULONG api, ULONG length )
+{
+#ifdef __i386__
+    if (NtCurrentTeb()->WowTebOffset)
+        return NtWow64CsrClientCallServer( message, capture, api, length );
+#endif
+#ifdef _WIN64
+    return call_server( message, capture, api, length, NULL );
+#else
+    return STATUS_NOT_SUPPORTED;
+#endif
+}
+
+/* Cached module requests share public capture and dispatch ownership. Copy back
+ * only a nonnegative, structurally valid reply, including the original length. */
+static NTSTATUS connect_module( ULONG index, void *info, ULONG length )
+{
+#ifdef _WIN64
+    struct csr_message message = {0};
+    struct csr_module_data *data = (struct csr_module_data *)message.data;
+    struct csr_capture *capture;
+    void *local_data;
+    SIZE_T size = 0;
+    NTSTATUS status;
+
+    if (length > 0x7fffffc8 || !(capture = CsrAllocateCaptureBuffer( 1, length ))) return STATUS_NO_MEMORY;
+    data->index = index;
+    data->length = length;
+    CsrCaptureMessageBuffer( capture, info, length, &data->info );
+    local_data = data->info;
+    status = call_server( &message, capture, 0, sizeof(*data), &size );
+    if (status >= 0)
+    {
+        if (size < FIELD_OFFSET(struct csr_message, data) + sizeof(*data) ||
+            data->info != local_data || data->length != length) status = STATUS_INVALID_PARAMETER;
+        else memcpy( info, local_data, length );
+    }
+    CsrFreeCaptureBuffer( capture );
     return status;
+#else
+    return STATUS_NOT_SUPPORTED;
+#endif
 }
 
 /***********************************************************************

@@ -4963,6 +4963,11 @@ NTSYSAPI void *    WINAPI AlpcGetMessageAttribute(ALPC_MESSAGE_ATTRIBUTES *,ULON
 NTSYSAPI NTSTATUS  WINAPI AlpcInitializeMessageAttribute(ULONG,ALPC_MESSAGE_ATTRIBUTES *,SIZE_T,SIZE_T *);
 NTSYSAPI NTSTATUS  WINAPI ApiSetQueryApiSetPresence(const UNICODE_STRING*,BOOLEAN*);
 NTSYSAPI NTSTATUS  WINAPI ApiSetQueryApiSetPresenceEx(const UNICODE_STRING*,BOOLEAN*,BOOLEAN*);
+NTSYSAPI void *    WINAPI CsrAllocateCaptureBuffer(ULONG,ULONG);
+NTSYSAPI ULONG     WINAPI CsrAllocateMessagePointer(void*,ULONG,void**);
+NTSYSAPI void      WINAPI CsrCaptureMessageBuffer(void*,const void*,ULONG,void**);
+NTSYSAPI NTSTATUS  WINAPI CsrClientCallServer(void*,void*,ULONG,ULONG);
+NTSYSAPI void      WINAPI CsrFreeCaptureBuffer(void*);
 NTSYSAPI NTSTATUS  WINAPI CsrClientConnectToServer(const WCHAR*,ULONG,void*,ULONG,BOOLEAN*);
 NTSYSAPI void      WINAPI DbgBreakPoint(void);
 NTSYSAPI NTSTATUS WINAPIV DbgPrint(LPCSTR fmt, ...);
@@ -5922,6 +5927,11 @@ NTSYSAPI BOOLEAN   WINAPI RtlWow64RequestCrossProcessHeavyFlush(CROSS_PROCESS_WO
 NTSYSAPI NTSTATUS  WINAPI RtlWow64SetThreadContext(HANDLE,const WOW64_CONTEXT*);
 #else
 NTSYSAPI NTSTATUS  WINAPI NtWow64AllocateVirtualMemory64(HANDLE,ULONG64*,ULONG64,ULONG64*,ULONG,ULONG);
+NTSYSAPI NTSTATUS  WINAPI NtWow64CsrAllocateCaptureBuffer(ULONG,ULONG);
+NTSYSAPI NTSTATUS  WINAPI NtWow64CsrAllocateMessagePointer(void*,ULONG,void**);
+NTSYSAPI NTSTATUS  WINAPI NtWow64CsrCaptureMessageBuffer(void*,const void*,ULONG,void**);
+NTSYSAPI NTSTATUS  WINAPI NtWow64CsrClientCallServer(void*,void*,ULONG,ULONG);
+NTSYSAPI NTSTATUS  WINAPI NtWow64CsrFreeCaptureBuffer(void*);
 NTSYSAPI NTSTATUS  WINAPI NtWow64CsrClientConnectToServer(const WCHAR*,ULONG,void*,ULONG,BOOLEAN*);
 NTSYSAPI NTSTATUS  WINAPI NtWow64GetNativeSystemInformation(SYSTEM_INFORMATION_CLASS,void*,ULONG,ULONG*);
 NTSYSAPI NTSTATUS  WINAPI NtWow64IsProcessorFeaturePresent(UINT);

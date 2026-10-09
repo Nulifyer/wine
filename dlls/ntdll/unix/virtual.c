@@ -7377,6 +7377,34 @@ NTSTATUS WINAPI NtWow64GetNativeSystemInformation( SYSTEM_INFORMATION_CLASS clas
 }
 
 /***********************************************************************
+ *             NtWow64CsrAllocateCaptureBuffer    (NTDLL.@)
+ */
+NTSTATUS WINAPI NtWow64CsrAllocateCaptureBuffer( ULONG count, ULONG size )
+{
+    return 0;  /* No native 64-bit CSR heap in a classic 32-bit runtime. */
+}
+
+NTSTATUS WINAPI NtWow64CsrAllocateMessagePointer( void *capture, ULONG size, void **pointer )
+{
+    return 0;
+}
+
+NTSTATUS WINAPI NtWow64CsrCaptureMessageBuffer( void *capture, const void *source, ULONG size, void **pointer )
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+NTSTATUS WINAPI NtWow64CsrClientCallServer( void *message, void *capture, ULONG api, ULONG length )
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+NTSTATUS WINAPI NtWow64CsrFreeCaptureBuffer( void *capture )
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+/***********************************************************************
  *             NtWow64CsrClientConnectToServer    (NTDLL.@)
  *             ZwWow64CsrClientConnectToServer    (NTDLL.@)
  */
