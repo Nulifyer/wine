@@ -41,6 +41,9 @@ extern obj_handle_t alloc_handle_no_access_check( struct process *process, void 
 extern unsigned int close_handle( struct process *process, obj_handle_t handle );
 extern struct object *get_handle_obj( struct process *process, obj_handle_t handle,
                                       unsigned int access, const struct object_ops *ops );
+/* Borrow the context of a validated handle; assignment retains its own reference. */
+extern struct object *get_handle_context( struct process *process, obj_handle_t handle );
+extern void set_handle_context( struct process *process, obj_handle_t handle, struct object *context );
 extern unsigned int get_handle_access( struct process *process, obj_handle_t handle );
 extern obj_handle_t duplicate_handle( struct process *src, obj_handle_t src_handle, struct process *dst,
                                       unsigned int access, unsigned int attr, unsigned int options );

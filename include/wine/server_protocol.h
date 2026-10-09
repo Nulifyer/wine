@@ -2788,9 +2788,9 @@ struct enum_key_reply
     unsigned int wow64_flags;
     unsigned int key_flags;
     unsigned int control_flags;
+    unsigned int handle_tags;
     /* VARARG(name,unicode_str,namelen); */
     /* VARARG(class,unicode_str); */
-    char __pad_60[4];
 };
 
 
@@ -10047,6 +10047,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1100
+#define SERVER_PROTOCOL_VERSION 1101
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

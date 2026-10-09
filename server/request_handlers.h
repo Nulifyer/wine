@@ -1568,6 +1568,7 @@ C_ASSERT( offsetof(struct enum_key_reply, namelen) == 44 );
 C_ASSERT( offsetof(struct enum_key_reply, wow64_flags) == 48 );
 C_ASSERT( offsetof(struct enum_key_reply, key_flags) == 52 );
 C_ASSERT( offsetof(struct enum_key_reply, control_flags) == 56 );
+C_ASSERT( offsetof(struct enum_key_reply, handle_tags) == 60 );
 C_ASSERT( sizeof(struct enum_key_reply) == 64 );
 C_ASSERT( offsetof(struct set_key_flags_request, hkey) == 12 );
 C_ASSERT( offsetof(struct set_key_flags_request, info_class) == 16 );

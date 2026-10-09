@@ -97,6 +97,46 @@ struct key
     struct list       notify_list; /* list of notifications */
 };
 
+/* Per-open metadata stays separate from the named registry key. */
+struct key_handle_context
+{
+    struct object obj;
+    unsigned int tags;
+};
+
+static void key_handle_context_dump( struct object *obj, int verbose )
+{
+    struct key_handle_context *context = (struct key_handle_context *)obj;
+    fprintf( stderr, "Key handle tags=%04x\n", context->tags );
+}
+
+static const struct object_ops key_handle_context_ops =
+{
+    .size = sizeof(struct key_handle_context),
+    .type = &no_type,
+    .dump = key_handle_context_dump,
+};
+
+static obj_handle_t alloc_key_handle( struct key *key, unsigned int access,
+                                    unsigned int attributes, unsigned int tags, int check_access )
+{
+    struct key_handle_context *context;
+    obj_handle_t handle;
+
+    if (!(context = alloc_object( &key_handle_context_ops ))) return 0;
+    context->tags = tags;
+    handle = check_access ? alloc_handle( current->process, key, access, attributes ) :
+                           alloc_handle_no_access_check( current->process, key, access, attributes );
+    if (handle) set_handle_context( current->process, handle, &context->obj );
+    release_object( context );
+    return handle;
+}
+
+static unsigned int initial_key_handle_tags( unsigned int access )
+{
+    return is_wow64_process( current->process ) ? 0x400 | (access & (KEY_WOW64_32KEY | KEY_WOW64_64KEY)) : 0;
+}
+
 /* key flags */
 #define KEY_VOLATILE 0x0001  /* key is volatile (not saved to disk) */
 #define KEY_DELETED  0x0002  /* key has been deleted */
@@ -2143,6 +2183,12 @@ DECL_HANDLER(create_key)
     if (params.root) release_object( params.root );
     data.class = get_req_data_after_objattr( &params, &data.classlen );
 
+    if (is_wow64_process( current->process ) &&
+        (access & (KEY_WOW64_32KEY | KEY_WOW64_64KEY)) == (KEY_WOW64_32KEY | KEY_WOW64_64KEY))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
     if (!is_wow64_process( current->process )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
     if (!(access & KEY_WOW64_64KEY)) params.attr |= OBJ_KEY_WOW64;
     if (req->options & REG_OPTION_CREATE_LINK) params.attr = (params.attr & ~OBJ_OPENIF) | OBJ_OPENLINK;
@@ -2159,12 +2205,11 @@ DECL_HANDLER(create_key)
         {
             if (key->flags & KEY_PREDEF) set_error( STATUS_PREDEFINED_HANDLE );
             if (!(access & KEY_WOW64_64KEY)) key = grab_wow6432node( key );
-            reply->hkey = alloc_handle( current->process, key, access, params.attr );
+            reply->hkey = alloc_key_handle( key, access, params.attr, initial_key_handle_tags( req->access ), 1 );
         }
         else
         {
-            reply->hkey = alloc_handle_no_access_check( current->process, key,
-                                                        access, params.attr );
+            reply->hkey = alloc_key_handle( key, access, params.attr, initial_key_handle_tags( req->access ), 0 );
             if (parent) touch_key( get_parent( key ), REG_NOTIFY_CHANGE_NAME );
             if (debug_level > 1) dump_operation( key, NULL, "Create" );
         }
@@ -2182,6 +2227,12 @@ DECL_HANDLER(open_key)
     struct object_params params = { .ops = &key_ops, .name = get_req_unicode_str(),
                                     .attr = req->attributes };
 
+    if (is_wow64_process( current->process ) &&
+        (access & (KEY_WOW64_32KEY | KEY_WOW64_64KEY)) == (KEY_WOW64_32KEY | KEY_WOW64_64KEY))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
     if (!is_wow64_process( current->process )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
     if (!(access & KEY_WOW64_64KEY)) params.attr |= OBJ_KEY_WOW64;
 
@@ -2195,7 +2246,7 @@ DECL_HANDLER(open_key)
     {
         if (!(access & KEY_WOW64_64KEY)) key = grab_wow6432node( key );
         if (key->flags & KEY_PREDEF) set_error( STATUS_PREDEFINED_HANDLE );
-        reply->hkey = alloc_handle( current->process, key, access, req->attributes );
+        reply->hkey = alloc_key_handle( key, access, req->attributes, initial_key_handle_tags( req->access ), 1 );
         if (debug_level > 1) dump_operation( key, NULL, "Open" );
         release_object( key );
     }
@@ -2232,6 +2283,28 @@ DECL_HANDLER(enum_key)
 
     unsigned int access = req->index == -1 ? 0 : KEY_ENUMERATE_SUB_KEYS;
 
+    if (req->info_class == KeyHandleTagsInformation)
+    {
+        struct key_handle_context *context;
+
+        if (req->index != -1)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
+        /* Tags survive deletion. Validate the handle and type without querying key contents. */
+        if (!(key = (struct key *)get_handle_obj( current->process, req->hkey, 0, &key_ops ))) return;
+        if (!get_handle_access( current->process, req->hkey ))
+            set_error( STATUS_ACCESS_DENIED );
+        else
+        {
+            context = (struct key_handle_context *)get_handle_context( current->process, req->hkey );
+            assert( context && context->obj.ops == &key_handle_context_ops );
+            reply->handle_tags = context->tags;
+        }
+        release_object( key );
+        return;
+    }
     if (req->info_class == KeyFlagsInformation)
     {
         if (req->index != -1)
@@ -2248,11 +2321,22 @@ DECL_HANDLER(enum_key)
     }
 }
 
-/* Set key-owned WOW64 and control information. */
+/* Set key-owned WOW64/control information or shared per-open tags. */
 DECL_HANDLER(set_key_flags)
 {
     struct key *key;
 
+    if (req->info_class == 5)
+    {
+        struct key_handle_context *context;
+
+        if (!(key = (struct key *)get_handle_obj( current->process, req->hkey, 0, &key_ops ))) return;
+        context = (struct key_handle_context *)get_handle_context( current->process, req->hkey );
+        assert( context && context->obj.ops == &key_handle_context_ops );
+        context->tags = req->flags & 0xffff;
+        release_object( key );
+        return;
+    }
     if (req->info_class != 1 && req->info_class != 2)
     {
         set_error( STATUS_INVALID_PARAMETER );

@@ -41,6 +41,7 @@
 struct handle_entry
 {
     struct object *ptr;       /* object */
+    struct object *context;   /* optional per-open state shared by duplicates */
     unsigned int   access;    /* access rights */
 };
 
@@ -166,6 +167,7 @@ static void handle_table_destroy( struct object *obj )
             if (table->process && obj->ops->close_handle)
                 obj->ops->close_handle( obj, table->process, index_to_handle(i) );
             release_object_from_handle( obj );
+            if (entry->context) release_object( entry->context );
         }
     }
     free( table->entries );
@@ -231,6 +233,7 @@ static obj_handle_t alloc_entry( struct handle_table *table, void *obj, unsigned
     table->free = i + 1;
     entry->ptr    = grab_object_for_handle( obj );
     entry->access = access;
+    entry->context = NULL;
     return index_to_handle(i);
 }
 
@@ -352,6 +355,7 @@ static void inherit_handle( struct process *parent, const obj_handle_t handle, s
     index = handle_to_index( handle );
     if (dst[index].ptr) return;
     grab_object_for_handle( src->ptr );
+    if (src->context) grab_object( src->context );
     dst[index] = *src;
     table->last = max( table->last, index );
 }
@@ -395,8 +399,16 @@ struct handle_table *copy_handle_table( struct process *process, struct process 
             for (i = 0; i <= table->last; i++, ptr++)
             {
                 if (!ptr->ptr) continue;
-                if (ptr->access & RESERVED_INHERIT) grab_object_for_handle( ptr->ptr );
-                else ptr->ptr = NULL; /* don't inherit this entry */
+                if (ptr->access & RESERVED_INHERIT)
+                {
+                    grab_object_for_handle( ptr->ptr );
+                    if (ptr->context) grab_object( ptr->context );
+                }
+                else  /* don't inherit this entry */
+                {
+                    ptr->ptr = NULL;
+                    ptr->context = NULL;
+                }
             }
         }
     }
@@ -421,10 +433,30 @@ unsigned int close_handle( struct process *process, obj_handle_t handle )
 
     table = handle_is_global(handle) ? global_table : process->handles;
     table->entries[index].ptr = NULL;
+    if (table->entries[index].context) release_object( table->entries[index].context );
+    table->entries[index].context = NULL;
     if (index < table->free) table->free = index;
     if (index == table->last) shrink_handle_table( table );
     release_object_from_handle( obj );
     return STATUS_SUCCESS;
+}
+
+/* Context is owned by each handle reference, independently of its named object. */
+struct object *get_handle_context( struct process *process, obj_handle_t handle )
+{
+    struct handle_entry *entry = get_handle( process, handle );
+    return entry ? entry->context : NULL;
+}
+
+void set_handle_context( struct process *process, obj_handle_t handle, struct object *context )
+{
+    struct handle_entry *entry = get_handle( process, handle );
+    struct object *previous;
+
+    assert( entry );
+    previous = entry->context;
+    entry->context = context ? grab_object( context ) : NULL;
+    if (previous) release_object( previous );
 }
 
 /* retrieve the object corresponding to one of the magic pseudo-handles */
@@ -559,6 +591,7 @@ obj_handle_t duplicate_handle( struct process *src, obj_handle_t src_handle, str
     obj_handle_t res;
     struct handle_entry *entry;
     unsigned int src_access, src_flags;
+    struct object *context;
     struct object *obj = get_handle_obj( src, src_handle, 0, NULL );
 
     if (!obj) return 0;
@@ -566,6 +599,7 @@ obj_handle_t duplicate_handle( struct process *src, obj_handle_t src_handle, str
         src_access = entry->access;
     else  /* pseudo-handle, give it full access */
         src_access = map_obj_access( obj, GENERIC_ALL );
+    context = entry && entry->context ? grab_object( entry->context ) : NULL;
     src_flags = (src_access & RESERVED_ALL) >> RESERVED_SHIFT;
     src_access &= ~RESERVED_ALL;
 
@@ -580,6 +614,7 @@ obj_handle_t duplicate_handle( struct process *src, obj_handle_t src_handle, str
         if ((current->token && !check_object_access( current->token, obj, &access )) ||
             !check_object_access( dst->token, obj, &access ))
         {
+            if (context) release_object( context );
             release_object( obj );
             return 0;
         }
@@ -603,6 +638,9 @@ obj_handle_t duplicate_handle( struct process *src, obj_handle_t src_handle, str
         else
             res = alloc_handle_entry( dst, obj, access, attr );
     }
+
+    if (res && context) set_handle_context( dst, res, context );
+    if (context) release_object( context );
 
     if (res && (options & DUPLICATE_SAME_ATTRIBUTES))
         set_handle_flags( dst, res, ~0u, src_flags );

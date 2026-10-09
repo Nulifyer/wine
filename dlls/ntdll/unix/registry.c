@@ -285,6 +285,10 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
     case KeyNodeInformation:   data_ptr = ((KEY_NODE_INFORMATION *)info)->Name;  break;
     case KeyNameInformation:   data_ptr = ((KEY_NAME_INFORMATION *)info)->Name;  break;
     case KeyCachedInformation: data_ptr = ((KEY_CACHED_INFORMATION *)info)+1;    break;
+    case KeyHandleTagsInformation:
+        if (index != -1) return STATUS_INVALID_PARAMETER;
+        data_ptr = ((KEY_HANDLE_TAGS_INFORMATION *)info) + 1;
+        break;
     case KeyFlagsInformation:
         if (index != -1) return STATUS_INVALID_PARAMETER;
         data_ptr = ((KEY_FLAGS_INFORMATION *)info) + 1;
@@ -360,6 +364,13 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
                 break;
             }
 
+            case KeyHandleTagsInformation:
+            {
+                KEY_HANDLE_TAGS_INFORMATION keyinfo = { reply->handle_tags };
+                if (length >= sizeof(keyinfo)) memcpy( info, &keyinfo, sizeof(keyinfo) );
+                break;
+            }
+
             case KeyFlagsInformation:
             {
                 KEY_FLAGS_INFORMATION keyinfo;
@@ -427,7 +438,7 @@ NTSTATUS WINAPI NtSetInformationKey( HANDLE key, int class, void *info, ULONG le
 {
     unsigned int ret;
 
-    if (class != 1 && class != 2)
+    if (class != 1 && class != 2 && class != 5)
     {
         FIXME( "(%p,0x%08x,%p,0x%08x) stub\n", key, class, info, length );
         return STATUS_SUCCESS;

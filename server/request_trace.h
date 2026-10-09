@@ -1194,6 +1194,7 @@ static void dump_enum_key_reply( const struct enum_key_reply *req )
     fprintf( stderr, ", wow64_flags=%08x", req->wow64_flags );
     fprintf( stderr, ", key_flags=%08x", req->key_flags );
     fprintf( stderr, ", control_flags=%08x", req->control_flags );
+    fprintf( stderr, ", handle_tags=%08x", req->handle_tags );
     dump_varargs_unicode_str( ", name=", min( cur_size, req->namelen ));
     dump_varargs_unicode_str( ", class=", cur_size );
 }
