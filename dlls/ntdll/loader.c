@@ -1007,7 +1007,8 @@ static FARPROC find_forwarded_export( HMODULE module, const char *forward, LPCWS
     BOOL wm_loaded = FALSE;
 
     if (!end) return NULL;
-    if (build_import_name( importer, mod_name, forward, end - forward )) return NULL;
+    /* Each forward is an import by the module containing that export. */
+    if (build_import_name( get_modref( module ), mod_name, forward, end - forward )) return NULL;
 
     if (!(wm = find_basename_module( mod_name )))
     {
