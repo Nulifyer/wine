@@ -1944,6 +1944,7 @@
 
 # Version
 @ cdecl wine_get_version()
+@ cdecl wine_get_version_info(ptr)
 @ cdecl wine_get_build_id()
 @ cdecl wine_get_host_version(ptr ptr)
 
@@ -1968,6 +1969,7 @@
 @ stdcall -syscall NtGetCompleteWnfStateSubscription(ptr ptr long long ptr long)
 @ stdcall -private ZwGetCompleteWnfStateSubscription(ptr ptr long long ptr long) NtGetCompleteWnfStateSubscription
 @ stdcall RtlSubscribeWnfStateChangeNotification(ptr int64 long ptr ptr ptr long long)
+@ stdcall RtlSwitchedVVI(ptr long int64)
 @ stdcall RtlUnsubscribeWnfNotificationWaitForCompletion(ptr)
 @ stdcall RtlUnsubscribeWnfStateChangeNotification(ptr)
 @ stdcall RtlWaitForWnfMetaNotification(int64 long long long ptr)

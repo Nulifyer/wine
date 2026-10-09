@@ -63,13 +63,6 @@ typedef struct
     DWORD resloader;
 } NE_TYPEINFO;
 
-struct version_info
-{
-    DWORD major;
-    DWORD minor;
-    DWORD build;
-};
-
 /***********************************************************************
  * Version Info Structure
  */
@@ -124,143 +117,6 @@ typedef struct
     (VS_VERSION_INFO_STRUCT16 *)( (LPBYTE)ver + (((ver)->wLength + 3) & ~3) )
 #define VersionInfo32_Next( ver ) \
     (VS_VERSION_INFO_STRUCT32 *)( (LPBYTE)ver + (((ver)->wLength + 3) & ~3) )
-
-
-/***********************************************************************
- * Win8 info, reported if the app doesn't provide compat GUID in the manifest and
- * doesn't have higher OS version in PE header.
- */
-static const struct version_info windows8_version_info = { 6, 2, 9200 };
-
-/***********************************************************************
- * Win8.1 info, reported if the app doesn't provide compat GUID in the manifest and
- * OS version in PE header is 8.1 or higher but below 10.
- */
-static const struct version_info windows8_1_version_info = { 6, 3, 9600 };
-
-
-/***********************************************************************
- * Windows versions that need compatibility GUID specified in manifest
- * in order to be reported by the APIs.
- */
-static const struct
-{
-    struct version_info info;
-    GUID guid;
-} version_data[] =
-{
-    /* Windows 8.1 */
-    {
-        { 6, 3, 9600 },
-        {0x1f676c76,0x80e1,0x4239,{0x95,0xbb,0x83,0xd0,0xf6,0xd0,0xda,0x78}}
-    },
-    /* Windows 10 */
-    {
-        { 10, 0, 19045 },
-        {0x8e0f7a12,0xbfb3,0x4fe8,{0xb9,0xa5,0x48,0xfd,0x50,0xa1,0x5a,0x9a}}
-    }
-};
-
-
-/******************************************************************************
- *  init_current_version
- *
- * Initialize the current_version variable.
- *
- * For compatibility, Windows 8.1 and later report Win8 version unless the app
- * has a manifest or higher OS version in the PE optional header
- * that confirms its compatibility with newer versions of Windows.
- *
- */
-static RTL_OSVERSIONINFOEXW current_version;
-
-static BOOL CALLBACK init_current_version(PINIT_ONCE init_once, PVOID parameter, PVOID *context)
-{
-    struct acci
-    {
-        DWORD ElementCount;
-        COMPATIBILITY_CONTEXT_ELEMENT Elements[1];
-    } *acci;
-    BOOL have_os_compat_elements = FALSE;
-    const struct version_info *ver;
-    IMAGE_NT_HEADERS *nt;
-    SIZE_T req;
-    int idx;
-
-    current_version.dwOSVersionInfoSize = sizeof(current_version);
-    if (!set_ntstatus( RtlGetVersion(&current_version) )) return FALSE;
-
-    for (idx = ARRAY_SIZE(version_data); idx--;)
-        if ( current_version.dwMajorVersion >  version_data[idx].info.major ||
-            (current_version.dwMajorVersion == version_data[idx].info.major &&
-             current_version.dwMinorVersion >= version_data[idx].info.minor))
-            break;
-
-    if (idx < 0) return TRUE;
-    ver = &windows8_version_info;
-
-    if (RtlQueryInformationActivationContext(0, NtCurrentTeb()->Peb->ActivationContextData, NULL,
-            CompatibilityInformationInActivationContext, NULL, 0, &req) != STATUS_BUFFER_TOO_SMALL
-        || !req)
-        goto done;
-
-    if (!(acci = HeapAlloc(GetProcessHeap(), 0, req)))
-    {
-        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-        return FALSE;
-    }
-
-    if (RtlQueryInformationActivationContext(0, NtCurrentTeb()->Peb->ActivationContextData, NULL,
-            CompatibilityInformationInActivationContext, acci, req, &req) == STATUS_SUCCESS)
-    {
-        do
-        {
-            DWORD i;
-
-            for (i = 0; i < acci->ElementCount; i++)
-            {
-                if (acci->Elements[i].Type != ACTCTX_COMPATIBILITY_ELEMENT_TYPE_OS)
-                    continue;
-
-                have_os_compat_elements = TRUE;
-
-                if (IsEqualGUID(&acci->Elements[i].Id, &version_data[idx].guid))
-                {
-                    ver = &version_data[idx].info;
-
-                    if (ver->major == current_version.dwMajorVersion &&
-                        ver->minor == current_version.dwMinorVersion)
-                        ver = NULL;
-
-                    idx = 0;  /* break from outer loop */
-                    break;
-                }
-            }
-        } while (idx--);
-    }
-    HeapFree(GetProcessHeap(), 0, acci);
-
-done:
-    if (!have_os_compat_elements && current_version.dwMajorVersion >= 10
-            && (nt = RtlImageNtHeader(NtCurrentTeb()->Peb->ImageBaseAddress))
-            && (nt->OptionalHeader.MajorOperatingSystemVersion > 6
-            || (nt->OptionalHeader.MajorOperatingSystemVersion == 6
-            && nt->OptionalHeader.MinorOperatingSystemVersion >= 3)))
-    {
-        if (current_version.dwMajorVersion > 10)
-            FIXME("Unsupported current_version.dwMajorVersion %lu.\n", current_version.dwMajorVersion);
-
-        ver = nt->OptionalHeader.MajorOperatingSystemVersion >= 10 ? NULL : &windows8_1_version_info;
-    }
-
-    if (ver)
-    {
-        current_version.dwMajorVersion = ver->major;
-        current_version.dwMinorVersion = ver->minor;
-        current_version.dwBuildNumber  = ver->build;
-    }
-    return TRUE;
-}
 
 
 /**********************************************************************
@@ -1521,7 +1377,7 @@ BOOL WINAPI GetVersionExA( OSVERSIONINFOA *info )
  */
 BOOL WINAPI GetVersionExW( OSVERSIONINFOW *info )
 {
-    static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
+    RTL_OSVERSIONINFOEXW version;
 
     if (info->dwOSVersionInfoSize != sizeof(OSVERSIONINFOW) &&
         info->dwOSVersionInfoSize != sizeof(OSVERSIONINFOEXW))
@@ -1530,21 +1386,21 @@ BOOL WINAPI GetVersionExW( OSVERSIONINFOW *info )
         return FALSE;
     }
 
-    if (!InitOnceExecuteOnce(&init_once, init_current_version, NULL, NULL)) return FALSE;
+    if (!set_ntstatus( wine_get_version_info( &version ) )) return FALSE;
 
-    info->dwMajorVersion = current_version.dwMajorVersion;
-    info->dwMinorVersion = current_version.dwMinorVersion;
-    info->dwBuildNumber  = current_version.dwBuildNumber;
-    info->dwPlatformId   = current_version.dwPlatformId;
-    wcscpy( info->szCSDVersion, current_version.szCSDVersion );
+    info->dwMajorVersion = version.dwMajorVersion;
+    info->dwMinorVersion = version.dwMinorVersion;
+    info->dwBuildNumber  = version.dwBuildNumber;
+    info->dwPlatformId   = version.dwPlatformId;
+    wcscpy( info->szCSDVersion, version.szCSDVersion );
 
     if (info->dwOSVersionInfoSize == sizeof(OSVERSIONINFOEXW))
     {
         OSVERSIONINFOEXW *vex = (OSVERSIONINFOEXW *)info;
-        vex->wServicePackMajor = current_version.wServicePackMajor;
-        vex->wServicePackMinor = current_version.wServicePackMinor;
-        vex->wSuiteMask        = current_version.wSuiteMask;
-        vex->wProductType      = current_version.wProductType;
+        vex->wServicePackMajor = version.wServicePackMajor;
+        vex->wServicePackMinor = version.wServicePackMinor;
+        vex->wSuiteMask        = version.wSuiteMask;
+        vex->wProductType      = version.wProductType;
     }
     return TRUE;
 }

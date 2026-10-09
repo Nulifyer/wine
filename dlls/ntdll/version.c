@@ -720,161 +720,309 @@ WCHAR * WINAPI RtlGetNtSystemRoot(void)
     return user_shared_data->NtSystemRoot;
 }
 
-static inline UCHAR version_update_condition(UCHAR *last_condition, UCHAR condition)
+struct version_info
 {
-    switch (*last_condition)
+    DWORD major;
+    DWORD minor;
+    DWORD build;
+};
+
+/***********************************************************************
+ * Win8 info, reported if the app doesn't provide compat GUID in the manifest and
+ * doesn't have higher OS version in PE header.
+ */
+static const struct version_info windows8_version_info = { 6, 2, 9200 };
+
+/***********************************************************************
+ * Win8.1 info, reported if the app doesn't provide compat GUID in the manifest and
+ * OS version in PE header is 8.1 or higher but below 10.
+ */
+static const struct version_info windows8_1_version_info = { 6, 3, 9600 };
+
+
+/***********************************************************************
+ * Windows versions that need compatibility GUID specified in manifest
+ * in order to be reported by the APIs.
+ */
+static const struct
+{
+    struct version_info info;
+    GUID guid;
+} version_data[] =
+{
+    /* Windows 8.1 */
     {
-        case 0:
-            *last_condition = condition;
-            break;
-        case VER_EQUAL:
-            if (condition >= VER_EQUAL && condition <= VER_LESS_EQUAL)
-            {
-                *last_condition = condition;
-                return condition;
-            }
-            break;
-        case VER_GREATER:
-        case VER_GREATER_EQUAL:
-            if (condition >= VER_EQUAL && condition <= VER_GREATER_EQUAL)
-                return condition;
-            break;
-        case VER_LESS:
-        case VER_LESS_EQUAL:
-            if (condition == VER_EQUAL || (condition >= VER_LESS && condition <= VER_LESS_EQUAL))
-                return condition;
-            break;
+        { 6, 3, 9600 },
+        {0x1f676c76,0x80e1,0x4239,{0x95,0xbb,0x83,0xd0,0xf6,0xd0,0xda,0x78}}
+    },
+    /* Windows 10 */
+    {
+        { 10, 0, 19045 },
+        {0x8e0f7a12,0xbfb3,0x4fe8,{0xb9,0xa5,0x48,0xfd,0x50,0xa1,0x5a,0x9a}}
     }
-    if (!condition) *last_condition |= 0x10;
-    return *last_condition & 0xf;
+};
+
+
+/******************************************************************************
+ *  init_apparent_version
+ *
+ * Initialize the apparent_version variable.
+ *
+ * For compatibility, Windows 8.1 and later report Win8 version unless the app
+ * has a manifest or higher OS version in the PE optional header
+ * that confirms its compatibility with newer versions of Windows.
+ *
+ */
+static RTL_OSVERSIONINFOEXW apparent_version;
+
+static DWORD WINAPI init_apparent_version(PRTL_RUN_ONCE init_once, PVOID parameter, PVOID *context)
+{
+    struct acci
+    {
+        DWORD ElementCount;
+        COMPATIBILITY_CONTEXT_ELEMENT Elements[1];
+    } *acci;
+    BOOL have_os_compat_elements = FALSE;
+    const struct version_info *ver;
+    IMAGE_NT_HEADERS *nt;
+    SIZE_T req;
+    int idx;
+
+    apparent_version.dwOSVersionInfoSize = sizeof(apparent_version);
+    if ((*(NTSTATUS *)parameter = RtlGetVersion(&apparent_version))) return FALSE;
+
+    for (idx = ARRAY_SIZE(version_data); idx--;)
+        if ( apparent_version.dwMajorVersion >  version_data[idx].info.major ||
+            (apparent_version.dwMajorVersion == version_data[idx].info.major &&
+             apparent_version.dwMinorVersion >= version_data[idx].info.minor))
+            break;
+
+    if (idx < 0) return TRUE;
+    ver = &windows8_version_info;
+
+    if (RtlQueryInformationActivationContext(0, NtCurrentTeb()->Peb->ActivationContextData, NULL,
+            CompatibilityInformationInActivationContext, NULL, 0, &req) != STATUS_BUFFER_TOO_SMALL
+        || !req)
+        goto done;
+
+    if (!(acci = RtlAllocateHeap(NtCurrentTeb()->Peb->ProcessHeap, 0, req)))
+    {
+        *(NTSTATUS *)parameter = STATUS_NO_MEMORY;
+        return FALSE;
+    }
+
+    if (RtlQueryInformationActivationContext(0, NtCurrentTeb()->Peb->ActivationContextData, NULL,
+            CompatibilityInformationInActivationContext, acci, req, &req) == STATUS_SUCCESS)
+    {
+        do
+        {
+            DWORD i;
+
+            for (i = 0; i < acci->ElementCount; i++)
+            {
+                if (acci->Elements[i].Type != ACTCTX_COMPATIBILITY_ELEMENT_TYPE_OS)
+                    continue;
+
+                have_os_compat_elements = TRUE;
+
+                if (IsEqualGUID(&acci->Elements[i].Id, &version_data[idx].guid))
+                {
+                    ver = &version_data[idx].info;
+
+                    if (ver->major == apparent_version.dwMajorVersion &&
+                        ver->minor == apparent_version.dwMinorVersion)
+                        ver = NULL;
+
+                    idx = 0;  /* break from outer loop */
+                    break;
+                }
+            }
+        } while (idx--);
+    }
+    RtlFreeHeap(NtCurrentTeb()->Peb->ProcessHeap, 0, acci);
+
+done:
+    if (!have_os_compat_elements && apparent_version.dwMajorVersion >= 10
+            && (nt = RtlImageNtHeader(NtCurrentTeb()->Peb->ImageBaseAddress))
+            && (nt->OptionalHeader.MajorOperatingSystemVersion > 6
+            || (nt->OptionalHeader.MajorOperatingSystemVersion == 6
+            && nt->OptionalHeader.MinorOperatingSystemVersion >= 3)))
+    {
+        if (apparent_version.dwMajorVersion > 10)
+            FIXME("Unsupported apparent_version.dwMajorVersion %lu.\n", apparent_version.dwMajorVersion);
+
+        ver = nt->OptionalHeader.MajorOperatingSystemVersion >= 10 ? NULL : &windows8_1_version_info;
+    }
+
+    if (ver)
+    {
+        apparent_version.dwMajorVersion = ver->major;
+        apparent_version.dwMinorVersion = ver->minor;
+        apparent_version.dwBuildNumber  = ver->build;
+    }
+    return TRUE;
 }
 
-static inline NTSTATUS version_compare_values(ULONG left, ULONG right, UCHAR condition)
+
+/* Share the process compatibility policy with Win32 version queries. */
+NTSTATUS CDECL wine_get_version_info( RTL_OSVERSIONINFOEXW *info )
 {
-    switch (condition) {
-        case VER_EQUAL:
-            if (left != right) return STATUS_REVISION_MISMATCH;
-            break;
-        case VER_GREATER:
-            if (left <= right) return STATUS_REVISION_MISMATCH;
-            break;
-        case VER_GREATER_EQUAL:
-            if (left < right) return STATUS_REVISION_MISMATCH;
-            break;
-        case VER_LESS:
-            if (left >= right) return STATUS_REVISION_MISMATCH;
-            break;
-        case VER_LESS_EQUAL:
-            if (left > right) return STATUS_REVISION_MISMATCH;
-            break;
-        default:
-            return STATUS_REVISION_MISMATCH;
+    static RTL_RUN_ONCE init_once = RTL_RUN_ONCE_INIT;
+    NTSTATUS status = STATUS_UNSUCCESSFUL, ret;
+
+    if ((ret = RtlRunOnceExecuteOnce( &init_once, init_apparent_version, &status, NULL )))
+        return status ? status : ret;
+    *info = apparent_version;
+    return STATUS_SUCCESS;
+}
+
+
+/* Modern masks have three bits per field. Older masks only encode major,
+ * minor and build conditions, at their historical offsets. */
+static UCHAR version_condition( ULONGLONG mask, ULONG type )
+{
+    unsigned shift = 0;
+
+    if (mask & ((ULONGLONG)1 << 63))
+    {
+        while (type >>= 1) shift += 3;
+        return (mask >> shift) & 7;
     }
+    switch (type)
+    {
+    case VER_MAJORVERSION: return (mask >> 4) & 0xff;
+    case VER_MINORVERSION: return (mask >> 2) & 0xff;
+    case VER_BUILDNUMBER: return (mask >> 16) & 0xff;
+    default: return 0;
+    }
+}
+
+static BOOL version_compare_values( ULONG current, ULONG requested, UCHAR condition, BOOL lexical )
+{
+    int comparison;
+
+    if (lexical)
+    {
+        char left[12], right[12];
+        sprintf( left, "%ld", (LONG)current );
+        sprintf( right, "%ld", (LONG)requested );
+        comparison = strcmp( left, right );
+    }
+    else comparison = (LONG)current < (LONG)requested ? -1 : (LONG)current != (LONG)requested;
+
+    switch (condition)
+    {
+    case VER_EQUAL: return !comparison;
+    case VER_GREATER: return comparison > 0;
+    case VER_GREATER_EQUAL: return comparison >= 0;
+    case VER_LESS: return comparison < 0;
+    case VER_LESS_EQUAL: return comparison <= 0;
+    default: return FALSE;
+    }
+}
+
+static NTSTATUS verify_version_info( const RTL_OSVERSIONINFOEXW *info, ULONG type,
+                                    ULONGLONG mask, const RTL_OSVERSIONINFOEXW *version )
+{
+    static const ULONG hierarchy[] = { VER_MAJORVERSION, VER_MINORVERSION,
+                                      VER_SERVICEPACKMAJOR, VER_SERVICEPACKMINOR };
+    UCHAR condition = VER_EQUAL;
+    ULONG current, requested;
+    unsigned i;
+
+    if ((type & VER_SUITENAME) && info->wSuiteMask)
+    {
+        condition = version_condition( mask, VER_SUITENAME );
+        if (!(mask & ((ULONGLONG)1 << 63))) return STATUS_INVALID_PARAMETER;
+        if (condition == VER_AND)
+        {
+            if ((info->wSuiteMask & version->wSuiteMask) != info->wSuiteMask)
+                return STATUS_REVISION_MISMATCH;
+        }
+        else if (condition == VER_OR)
+        {
+            if (!(info->wSuiteMask & version->wSuiteMask)) return STATUS_REVISION_MISMATCH;
+        }
+        else return STATUS_INVALID_PARAMETER;
+    }
+
+    condition = VER_EQUAL;
+    for (i = 0; i < ARRAY_SIZE(hierarchy); i++)
+    {
+        if (!(type & hierarchy[i])) continue;
+        if (condition == VER_EQUAL) condition = version_condition( mask, hierarchy[i] );
+        switch (hierarchy[i])
+        {
+        case VER_MAJORVERSION:
+            current = version->dwMajorVersion; requested = info->dwMajorVersion; break;
+        case VER_MINORVERSION:
+            current = version->dwMinorVersion; requested = info->dwMinorVersion; break;
+        case VER_SERVICEPACKMAJOR:
+            current = version->wServicePackMajor; requested = info->wServicePackMajor; break;
+        default:
+            current = version->wServicePackMinor; requested = info->wServicePackMinor; break;
+        }
+        if (!version_compare_values( current, requested, condition, i == 1 || i == 3 ) &&
+            (current != requested || i == 3)) return STATUS_REVISION_MISMATCH;
+        if (current != requested) break;
+    }
+
+    if ((type & VER_BUILDNUMBER) &&
+        !version_compare_values( version->dwBuildNumber, info->dwBuildNumber,
+                                 version_condition( mask, VER_BUILDNUMBER ), FALSE ))
+        return STATUS_REVISION_MISMATCH;
+    if ((type & VER_PLATFORMID) &&
+        !version_compare_values( version->dwPlatformId, info->dwPlatformId,
+                                 version_condition( mask, VER_PLATFORMID ), FALSE ))
+        return STATUS_REVISION_MISMATCH;
+    if ((type & VER_PRODUCT_TYPE) &&
+        !version_compare_values( version->wProductType, info->wProductType,
+                                 version_condition( mask, VER_PRODUCT_TYPE ), FALSE ))
+        return STATUS_REVISION_MISMATCH;
     return STATUS_SUCCESS;
 }
 
 /******************************************************************************
  *        RtlVerifyVersionInfo   (NTDLL.@)
  */
-NTSTATUS WINAPI RtlVerifyVersionInfo( const RTL_OSVERSIONINFOEXW *info,
-                                      DWORD dwTypeMask, DWORDLONG dwlConditionMask )
+NTSTATUS WINAPI RtlVerifyVersionInfo( const RTL_OSVERSIONINFOEXW *info, DWORD type, DWORDLONG mask )
 {
-    RTL_OSVERSIONINFOEXW ver;
+    RTL_OSVERSIONINFOEXW version;
     NTSTATUS status;
 
-    TRACE("(%p,0x%lx,0x%s)\n", info, dwTypeMask, wine_dbgstr_longlong(dwlConditionMask));
-
-    ver.dwOSVersionInfoSize = sizeof(ver);
-    if ((status = RtlGetVersion( &ver )) != STATUS_SUCCESS) return status;
-
-    if(!(dwTypeMask && dwlConditionMask)) return STATUS_INVALID_PARAMETER;
-
-    if(dwTypeMask & VER_PRODUCT_TYPE)
-    {
-        status = version_compare_values(ver.wProductType, info->wProductType, dwlConditionMask >> 7*3 & 0x07);
-        if (status != STATUS_SUCCESS)
-            return status;
-    }
-    if(dwTypeMask & VER_SUITENAME)
-        switch(dwlConditionMask >> 6*3 & 0x07)
-        {
-            case VER_AND:
-                if((info->wSuiteMask & ver.wSuiteMask) != info->wSuiteMask)
-                    return STATUS_REVISION_MISMATCH;
-                break;
-            case VER_OR:
-                if(!(info->wSuiteMask & ver.wSuiteMask) && info->wSuiteMask)
-                    return STATUS_REVISION_MISMATCH;
-                break;
-            default:
-                return STATUS_INVALID_PARAMETER;
-        }
-    if(dwTypeMask & VER_PLATFORMID)
-    {
-        status = version_compare_values(ver.dwPlatformId, info->dwPlatformId, dwlConditionMask >> 3*3 & 0x07);
-        if (status != STATUS_SUCCESS)
-            return status;
-    }
-    if(dwTypeMask & VER_BUILDNUMBER)
-    {
-        status = version_compare_values(ver.dwBuildNumber, info->dwBuildNumber, dwlConditionMask >> 2*3 & 0x07);
-        if (status != STATUS_SUCCESS)
-            return status;
-    }
-
-    if(dwTypeMask & (VER_MAJORVERSION|VER_MINORVERSION|VER_SERVICEPACKMAJOR|VER_SERVICEPACKMINOR))
-    {
-        unsigned char condition, last_condition = 0;
-        BOOLEAN do_next_check = TRUE;
-
-        if(dwTypeMask & VER_MAJORVERSION)
-        {
-            condition = version_update_condition(&last_condition, dwlConditionMask >> 1*3 & 0x07);
-            status = version_compare_values(ver.dwMajorVersion, info->dwMajorVersion, condition);
-            do_next_check = (ver.dwMajorVersion == info->dwMajorVersion) &&
-                ((condition >= VER_EQUAL) && (condition <= VER_LESS_EQUAL));
-        }
-        if((dwTypeMask & VER_MINORVERSION) && do_next_check)
-        {
-            condition = version_update_condition(&last_condition, dwlConditionMask >> 0*3 & 0x07);
-            status = version_compare_values(ver.dwMinorVersion, info->dwMinorVersion, condition);
-            do_next_check = (ver.dwMinorVersion == info->dwMinorVersion) &&
-                ((condition >= VER_EQUAL) && (condition <= VER_LESS_EQUAL));
-        }
-        if((dwTypeMask & VER_SERVICEPACKMAJOR) && do_next_check)
-        {
-            condition = version_update_condition(&last_condition, dwlConditionMask >> 5*3 & 0x07);
-            status = version_compare_values(ver.wServicePackMajor, info->wServicePackMajor, condition);
-            do_next_check = (ver.wServicePackMajor == info->wServicePackMajor) &&
-                ((condition >= VER_EQUAL) && (condition <= VER_LESS_EQUAL));
-        }
-        if((dwTypeMask & VER_SERVICEPACKMINOR) && do_next_check)
-        {
-            condition = version_update_condition(&last_condition, dwlConditionMask >> 4*3 & 0x07);
-            status = version_compare_values(ver.wServicePackMinor, info->wServicePackMinor, condition);
-        }
-
-        if (status != STATUS_SUCCESS)
-            return status;
-    }
-
-    return STATUS_SUCCESS;
+    TRACE("(%p,0x%lx,0x%s)\n", info, type, wine_dbgstr_longlong(mask));
+    if (!type) return STATUS_INVALID_PARAMETER;
+    version.dwOSVersionInfoSize = sizeof(version);
+    if ((status = RtlGetVersion( &version ))) return status;
+    return verify_version_info( info, type, mask, &version );
 }
 
+/******************************************************************************
+ *        RtlSwitchedVVI   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSwitchedVVI( const RTL_OSVERSIONINFOEXW *info, DWORD type, DWORDLONG mask )
+{
+    RTL_OSVERSIONINFOEXW version;
+    NTSTATUS status;
+
+    TRACE("(%p,0x%lx,0x%s)\n", info, type, wine_dbgstr_longlong(mask));
+    if (!type) return STATUS_INVALID_PARAMETER;
+    if ((status = wine_get_version_info( &version ))) return status;
+    return verify_version_info( info, type, mask, &version );
+}
 
 /******************************************************************************
  *        VerSetConditionMask   (NTDLL.@)
  */
-ULONGLONG WINAPI VerSetConditionMask( ULONGLONG condition_mask, DWORD type_mask, BYTE condition )
+ULONGLONG WINAPI VerSetConditionMask( ULONGLONG mask, DWORD type, BYTE condition )
 {
-    condition &= 0x07;
-    if (type_mask & VER_PRODUCT_TYPE) condition_mask |= condition << 7*3;
-    else if (type_mask & VER_SUITENAME) condition_mask |= condition << 6*3;
-    else if (type_mask & VER_SERVICEPACKMAJOR) condition_mask |= condition << 5*3;
-    else if (type_mask & VER_SERVICEPACKMINOR) condition_mask |= condition << 4*3;
-    else if (type_mask & VER_PLATFORMID) condition_mask |= condition << 3*3;
-    else if (type_mask & VER_BUILDNUMBER) condition_mask |= condition << 2*3;
-    else if (type_mask & VER_MAJORVERSION) condition_mask |= condition << 1*3;
-    else if (type_mask & VER_MINORVERSION) condition_mask |= condition << 0*3;
-    return condition_mask;
+    unsigned shift = 0;
+
+    if (!type) return 0;
+    while (type >>= 1) shift += 3;
+#ifdef __i386__
+    /* The x86 64-bit shift helper returns zero for shifts beyond the width. */
+    if (shift >= 64) return mask | ((ULONGLONG)1 << 63);
+#endif
+    return mask | ((ULONGLONG)(condition & 7) << (shift & 63)) | ((ULONGLONG)1 << 63);
 }

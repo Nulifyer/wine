@@ -5831,6 +5831,7 @@ NTSYSAPI BOOLEAN   WINAPI RtlValidRelativeSecurityDescriptor(PSECURITY_DESCRIPTO
 NTSYSAPI BOOLEAN   WINAPI RtlValidSecurityDescriptor(PSECURITY_DESCRIPTOR);
 NTSYSAPI BOOLEAN   WINAPI RtlValidSid(PSID);
 NTSYSAPI BOOLEAN   WINAPI RtlValidateHeap(HANDLE,ULONG,LPCVOID);
+NTSYSAPI NTSTATUS  WINAPI RtlSwitchedVVI(const RTL_OSVERSIONINFOEXW*,DWORD,DWORDLONG);
 NTSYSAPI NTSTATUS  WINAPI RtlVerifyVersionInfo(const RTL_OSVERSIONINFOEXW*,DWORD,DWORDLONG);
 NTSYSAPI NTSTATUS  WINAPI RtlWaitOnAddress(const void *,const void *,SIZE_T,const LARGE_INTEGER *);
 NTSYSAPI void      WINAPI RtlWakeAddressAll(const void *);
@@ -6027,6 +6028,8 @@ static inline PLIST_ENTRY RemoveTailList(PLIST_ENTRY le)
 #ifdef __WINESRC__
 
 /* Wine internal functions */
+
+NTSYSAPI NTSTATUS CDECL wine_get_version_info( RTL_OSVERSIONINFOEXW *info );
 
 NTSYSAPI NTSTATUS WINAPI __wine_unix_spawnvp( char * const argv[], int wait );
 
