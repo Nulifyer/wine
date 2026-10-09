@@ -1981,6 +1981,23 @@ DECL_HANDLER(set_process_info)
             release_object( process );
             return;
         }
+        if ((req->mask & (SET_PROCESS_INFO_PRIORITY_EX | SET_PROCESS_INFO_PRIORITY)) ==
+            (SET_PROCESS_INFO_PRIORITY_EX | SET_PROCESS_INFO_PRIORITY))
+        {
+            if (req->priority < 0 || req->priority > PROCESS_PRIOCLASS_ABOVE_NORMAL)
+            {
+                set_error( STATUS_INVALID_PARAMETER );
+                release_object( process );
+                return;
+            }
+            if (req->priority == PROCESS_PRIOCLASS_REALTIME &&
+                !thread_single_check_privilege( current, SeIncreaseBasePriorityPrivilege ))
+            {
+                set_error( STATUS_PRIVILEGE_NOT_HELD );
+                release_object( process );
+                return;
+            }
+        }
         if (req->mask & SET_PROCESS_INFO_CRITICAL) process->critical = !!req->critical;
         if (req->mask & SET_PROCESS_INFO_SUBSYSTEM) process->subsystem_process = 1;
         if (req->mask & SET_PROCESS_INFO_PRIORITY) set_process_priority( process, req->priority );

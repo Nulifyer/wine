@@ -2894,6 +2894,21 @@ typedef struct _PROCESS_PRIORITY_CLASS {
     UCHAR       PriorityClass;
 } PROCESS_PRIORITY_CLASS, *PPROCESS_PRIORITY_CLASS;
 
+typedef struct _PROCESS_PRIORITY_CLASS_EX {
+    union
+    {
+        struct
+        {
+            USHORT ForegroundValid : 1;
+            USHORT PriorityClassValid : 1;
+            USHORT Reserved : 14;
+        };
+        USHORT AllFlags;
+    };
+    UCHAR PriorityClass;
+    BOOLEAN Foreground;
+} PROCESS_PRIORITY_CLASS_EX, *PPROCESS_PRIORITY_CLASS_EX;
+
 typedef struct _PROCESS_CYCLE_TIME_INFORMATION {
     ULONGLONG   AccumulatedCycles;
     ULONGLONG   CurrentCycleCount;

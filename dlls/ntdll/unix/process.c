@@ -1136,6 +1136,9 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
 
     switch (class)
     {
+    case ProcessPriorityClassEx:
+        return STATUS_INVALID_INFO_CLASS;  /* set-only; preserve output and return length */
+
     UNIMPLEMENTED_INFO_CLASS(ProcessBasePriority);
     UNIMPLEMENTED_INFO_CLASS(ProcessRaisePriority);
     UNIMPLEMENTED_INFO_CLASS(ProcessExceptionPort);
@@ -1838,6 +1841,30 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
             SERVER_END_REQ;
         }
         break;
+
+    case ProcessPriorityClassEx:
+    {
+        const PROCESS_PRIORITY_CLASS_EX *ppc = info;
+
+        C_ASSERT(sizeof(PROCESS_PRIORITY_CLASS_EX) == 4);
+        if (size != sizeof(*ppc)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!ppc) return STATUS_ACCESS_VIOLATION;
+        if (!ppc->AllFlags || (ppc->AllFlags & ~3)) return STATUS_INVALID_PARAMETER;
+        SERVER_START_REQ( set_process_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            req->mask = SET_PROCESS_INFO_PRIORITY_EX;
+            if (ppc->PriorityClassValid)
+            {
+                req->priority = ppc->PriorityClass;
+                req->mask |= SET_PROCESS_INFO_PRIORITY;
+            }
+            /* Foreground affects scheduling quantum, not queried priority state. */
+            ret = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        break;
+    }
 
     case ProcessBasePriority:
         if (size != sizeof(KPRIORITY)) return STATUS_INVALID_PARAMETER;

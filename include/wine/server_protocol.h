@@ -1458,6 +1458,7 @@ struct set_process_info_reply
 #define SET_PROCESS_INFO_HANDLE_CHECKING 0x20
 #define SET_PROCESS_INFO_CRITICAL      0x40
 #define SET_PROCESS_INFO_SUBSYSTEM     0x80
+#define SET_PROCESS_INFO_PRIORITY_EX   0x100
 
 
 
@@ -10047,6 +10048,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1101
+#define SERVER_PROTOCOL_VERSION 1102
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

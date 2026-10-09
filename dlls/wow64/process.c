@@ -942,6 +942,7 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
     {
     case ProcessDefaultHardErrorMode:   /* ULONG */
     case ProcessPriorityClass:   /* PROCESS_PRIORITY_CLASS */
+    case ProcessPriorityClassEx: /* PROCESS_PRIORITY_CLASS_EX */
     case ProcessBasePriority:   /* ULONG */
     case ProcessBreakOnTermination:  /* ULONG */
     case ProcessPriorityBoost:  /* ULONG */
