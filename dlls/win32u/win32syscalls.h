@@ -1217,7 +1217,7 @@
     SYSCALL_ENTRY( 0x14bd, NtUserNlsKbdSendIMENotification, 0 ) \
     SYSCALL_ENTRY( 0x14be, NtUserNotifyIMEStatus, 8 ) \
     SYSCALL_ENTRY( 0x14bf, NtUserNotifyOverlayWindow, 0 ) \
-    SYSCALL_ENTRY( 0x14c0, NtUserNotifyProcessCreate, 0 ) \
+    SYSCALL_ENTRY( 0x14c0, NtUserNotifyProcessCreate, 16 ) \
     SYSCALL_ENTRY( 0x14c1, NtUserNotifyWinEvent, 16 ) \
     SYSCALL_ENTRY( 0x14c2, NtUserOpenClipboard, 8 ) \
     SYSCALL_ENTRY( 0x14c3, NtUserOpenDesktop, 12 ) \
@@ -2759,7 +2759,7 @@
     SYSCALL_ENTRY( 0x14bd, NtUserNlsKbdSendIMENotification, 0 ) \
     SYSCALL_ENTRY( 0x14be, NtUserNotifyIMEStatus, 16 ) \
     SYSCALL_ENTRY( 0x14bf, NtUserNotifyOverlayWindow, 0 ) \
-    SYSCALL_ENTRY( 0x14c0, NtUserNotifyProcessCreate, 0 ) \
+    SYSCALL_ENTRY( 0x14c0, NtUserNotifyProcessCreate, 32 ) \
     SYSCALL_ENTRY( 0x14c1, NtUserNotifyWinEvent, 32 ) \
     SYSCALL_ENTRY( 0x14c2, NtUserOpenClipboard, 16 ) \
     SYSCALL_ENTRY( 0x14c3, NtUserOpenDesktop, 24 ) \
@@ -3817,7 +3817,6 @@
     SYSCALL_STUB( NtUserNavigateFocus ) \
     SYSCALL_STUB( NtUserNlsKbdSendIMENotification ) \
     SYSCALL_STUB( NtUserNotifyOverlayWindow ) \
-    SYSCALL_STUB( NtUserNotifyProcessCreate ) \
     SYSCALL_STUB( NtUserOpenThreadDesktop ) \
     SYSCALL_STUB( NtUserPaintDesktop ) \
     SYSCALL_STUB( NtUserPaintMenuBar ) \

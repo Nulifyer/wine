@@ -2076,6 +2076,12 @@ NTSTATUS SYSCALL_API NtUserInitialize( HANDLE power_request_event, HANDLE media_
     SYSCALL_FUNC( NtUserInitialize );
 }
 
+NTSTATUS SYSCALL_API NtUserNotifyProcessCreate( ULONG process_id, ULONG_PTR source_thread_id,
+                                               ULONG_PTR reserved, ULONG hints )
+{
+    SYSCALL_FUNC( NtUserNotifyProcessCreate );
+}
+
 NTSTATUS SYSCALL_API NtUserInitializeClientPfnArrays( const ntuser_client_func_ptr *client_procsA,
                                                       const ntuser_client_func_ptr *client_procsW,
                                                       const ntuser_client_func_ptr *client_workers, HINSTANCE user_module )

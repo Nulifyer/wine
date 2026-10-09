@@ -1316,8 +1316,21 @@ typedef volatile struct
 @END
 
 
-/* Mark the current process as connected to the USER subsystem */
+/* Mark the current process, or its newly created GUI child, as connected to USER */
 @REQ(init_process_ui_context)
+    obj_handle_t handle;          /* zero for current process, otherwise an owned GUI child */
+@END
+
+/* Register the admitted native USER session server and retain its events */
+@REQ(initialize_user_session)
+    obj_handle_t power_event;
+    obj_handle_t media_event;
+@END
+
+/* Notify process startup through the registered USER session server */
+@REQ(notify_user_process_create)
+    process_id_t pid;
+    unsigned int hints;
 @END
 
 

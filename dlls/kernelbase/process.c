@@ -32,6 +32,7 @@
 #include "kernelbase.h"
 #include "wine/debug.h"
 #include "wine/condrv.h"
+#include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
 
@@ -727,6 +728,15 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         info->hThread     = rtl_info.Thread;
         info->dwProcessId = HandleToUlong( rtl_info.ClientId.UniqueProcess );
         info->dwThreadId  = HandleToUlong( rtl_info.ClientId.UniqueThread );
+        if (rtl_info.ImageInformation.SubSystemType == IMAGE_SUBSYSTEM_WINDOWS_GUI)
+        {
+            SERVER_START_REQ( init_process_ui_context )
+            {
+                req->handle = wine_server_obj_handle( rtl_info.Process );
+                wine_server_call( req );
+            }
+            SERVER_END_REQ;
+        }
         if (!(flags & CREATE_SUSPENDED)) NtResumeThread( rtl_info.Thread, NULL );
         TRACE( "started process pid %04lx tid %04lx\n", info->dwProcessId, info->dwThreadId );
     }
@@ -1458,6 +1468,14 @@ void init_startup_info( RTL_USER_PROCESS_PARAMETERS *params )
 
     command_lineW = params->CommandLine.Buffer;
     if (!RtlUnicodeStringToAnsiString( &ansi, &params->CommandLine, TRUE )) command_lineA = ansi.Buffer;
+    if (RtlImageNtHeader( NtCurrentTeb()->Peb->ImageBaseAddress )->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_NATIVE)
+    {
+        SERVER_START_REQ( init_process_ui_context )
+        {
+            wine_server_call( req );
+        }
+        SERVER_END_REQ;
+    }
 }
 
 

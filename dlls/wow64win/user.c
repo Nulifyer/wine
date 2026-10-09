@@ -3814,6 +3814,12 @@ NTSTATUS WINAPI wow64_NtUserInitialize( UINT *args )
     return NtUserInitialize( power_request_event, media_request_event );
 }
 
+NTSTATUS WINAPI wow64_NtUserNotifyProcessCreate( UINT *args )
+{
+    set_last_error32( ERROR_INVALID_FUNCTION );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 NTSTATUS WINAPI wow64_NtUserInitializeClientPfnArrays( UINT *args )
 {
     const ntuser_client_func_ptr *procsA = get_ptr( &args );

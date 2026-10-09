@@ -236,6 +236,19 @@ static void dump_get_process_identity_reply( const struct get_process_identity_r
 
 static void dump_init_process_ui_context_request( const struct init_process_ui_context_request *req )
 {
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_initialize_user_session_request( const struct initialize_user_session_request *req )
+{
+    fprintf( stderr, " power_event=%04x", req->power_event );
+    fprintf( stderr, ", media_event=%04x", req->media_event );
+}
+
+static void dump_notify_user_process_create_request( const struct notify_user_process_create_request *req )
+{
+    fprintf( stderr, " pid=%04x", req->pid );
+    fprintf( stderr, ", hints=%08x", req->hints );
 }
 
 static void dump_get_process_ui_context_request( const struct get_process_ui_context_request *req )
@@ -5125,6 +5138,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_get_process_info_request,
     (dump_func)dump_get_process_identity_request,
     (dump_func)dump_init_process_ui_context_request,
+    (dump_func)dump_initialize_user_session_request,
+    (dump_func)dump_notify_user_process_create_request,
     (dump_func)dump_get_process_ui_context_request,
     (dump_func)dump_get_process_debug_info_request,
     (dump_func)dump_get_process_image_name_request,
@@ -5592,6 +5607,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_terminate_thread_reply,
     (dump_func)dump_get_process_info_reply,
     (dump_func)dump_get_process_identity_reply,
+    NULL,
+    NULL,
     NULL,
     (dump_func)dump_get_process_ui_context_reply,
     (dump_func)dump_get_process_debug_info_reply,
@@ -6061,6 +6078,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "get_process_info",
     "get_process_identity",
     "init_process_ui_context",
+    "initialize_user_session",
+    "notify_user_process_create",
     "get_process_ui_context",
     "get_process_debug_info",
     "get_process_image_name",

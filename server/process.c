@@ -635,6 +635,8 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->handle_checking_mode = 0;
     process->native_session_owner = 0;
     process->native_session_delegate = 0;
+    process->native_user_server = 0;
+    process->user_session_registered = 0;
     process->native_dwm_owner = 0;
     process->mit_input_callbacks = 0;
     process->subsystem_process = 0;
@@ -655,6 +657,8 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->startup_state   = STARTUP_IN_PROGRESS;
     process->startup_info    = NULL;
     process->idle_event      = NULL;
+    process->user_power_event = NULL;
+    process->user_media_event = NULL;
     process->peb             = 0;
     process->dir_cache       = NULL;
     process->winstation      = 0;
@@ -833,6 +837,8 @@ static void process_destroy( struct object *obj )
     if (process->console) release_object( process->console );
     if (process->msg_fd) release_object( process->msg_fd );
     if (process->idle_event) release_object( process->idle_event );
+    if (process->user_power_event) release_object( process->user_power_event );
+    if (process->user_media_event) release_object( process->user_media_event );
     if (process->id) free_ptid( process->id );
     if (process->token) release_object( process->token );
     if (process->exception_port) release_object( process->exception_port );
@@ -1103,6 +1109,10 @@ static void process_killed( struct process *process )
     close_process_handles( process );
     if (process->idle_event) release_object( process->idle_event );
     process->idle_event = NULL;
+    process->user_session_registered = 0;
+    if (process->user_power_event) release_object( process->user_power_event );
+    if (process->user_media_event) release_object( process->user_media_event );
+    process->user_power_event = process->user_media_event = NULL;
     assert( !process->console );
 
     destroy_process_classes( process );
@@ -1471,6 +1481,7 @@ DECL_HANDLER(new_process)
         goto done;
     process->native_session_owner = native_session_owner;
     process->native_session_delegate = native_session_delegate;
+    process->native_user_server = req->native_session && preserve_trust && parent->native_session_owner;
     if (req->flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS)
     {
         if (!is_native_machine() ||
@@ -1763,12 +1774,77 @@ DECL_HANDLER(get_process_identity)
     }
 }
 
-/* mark the current process as connected to the USER subsystem */
+static void init_process_ui_context( struct process *process )
+{
+    if (process->ui_context_initialized) return;
+    process->ui_context = 0;
+    process->ui_context_flags = 0;
+    process->ui_context_initialized = 1;
+}
+
+/* mark the current process, or its newly created GUI child, as connected to USER */
 DECL_HANDLER(init_process_ui_context)
 {
-    current->process->ui_context = 0;
-    current->process->ui_context_flags = 0;
-    current->process->ui_context_initialized = 1;
+    struct process *process;
+
+    if (!req->handle)
+    {
+        init_process_ui_context( current->process );
+        return;
+    }
+    if (!(process = get_process_from_handle( req->handle, PROCESS_SUSPEND_RESUME ))) return;
+    if ((process->owner & ~(client_ptr_t)3) != current->process->id ||
+        process->image_info.subsystem != IMAGE_SUBSYSTEM_WINDOWS_GUI || !process->running_threads)
+        set_error( STATUS_ACCESS_DENIED );
+    else
+        init_process_ui_context( process );
+    release_object( process );
+}
+
+/* The existing live process list owns USER session registration identity. */
+static struct process *get_user_session_process( unsigned int session_id )
+{
+    struct process *process;
+
+    LIST_FOR_EACH_ENTRY( process, &process_list, struct process, entry )
+        if (process->session_id == session_id && process->user_session_registered) return process;
+    return NULL;
+}
+
+DECL_HANDLER(initialize_user_session)
+{
+    struct process *process = current->process;
+
+    /* Occupied sessions reject before inspecting caller events. Only the
+     * host-admitted native session startup lineage can register an empty one. */
+    if (get_user_session_process( process->session_id ) || !is_native_machine() ||
+        !process->native_user_server || !token_has_process_trust( process->token ) ||
+        !equal_sid( token_get_user( process->token ), &local_system_sid ))
+    {
+        set_error( STATUS_UNSUCCESSFUL );
+        return;
+    }
+    process->user_session_registered = 1;
+    if (!(process->user_power_event = get_event_obj( process, req->power_event, 0 ))) return;
+    if (!(process->user_media_event = get_event_obj( process, req->media_event, 0 ))) return;
+}
+
+DECL_HANDLER(notify_user_process_create)
+{
+    struct process *process;
+
+    if (!(req->hints & ~0x30)) return;
+    if (get_user_session_process( current->process->session_id ) != current->process)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!(process = get_process_from_id( req->pid ))) return;
+    if (process->session_id != current->process->session_id || !process->running_threads)
+        set_error( STATUS_INVALID_CID );
+    else if (!(req->hints & 0x10))
+        init_process_ui_context( process );
+    release_object( process );
 }
 
 /* fetch USER subsystem information about a process */
@@ -1781,7 +1857,9 @@ DECL_HANDLER(get_process_ui_context)
         set_error( STATUS_INVALID_PARAMETER );
         return;
     }
-    if (!process->ui_context_initialized || !process->running_threads)
+    if (process->session_id != current->process->session_id)
+        set_error( STATUS_INVALID_PARAMETER );
+    else if (!process->ui_context_initialized || !process->running_threads)
         set_error( STATUS_NOT_GUI_PROCESS );
     else
     {

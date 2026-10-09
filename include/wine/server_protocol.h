@@ -1373,9 +1373,35 @@ struct get_process_identity_reply
 struct init_process_ui_context_request
 {
     struct request_header __header;
-    char __pad_12[4];
+    obj_handle_t handle;
 };
 struct init_process_ui_context_reply
+{
+    struct reply_header __header;
+};
+
+
+struct initialize_user_session_request
+{
+    struct request_header __header;
+    obj_handle_t power_event;
+    obj_handle_t media_event;
+    char __pad_20[4];
+};
+struct initialize_user_session_reply
+{
+    struct reply_header __header;
+};
+
+
+struct notify_user_process_create_request
+{
+    struct request_header __header;
+    process_id_t pid;
+    unsigned int hints;
+    char __pad_20[4];
+};
+struct notify_user_process_create_reply
 {
     struct reply_header __header;
 };
@@ -8675,6 +8701,8 @@ enum request
     REQ_get_process_info,
     REQ_get_process_identity,
     REQ_init_process_ui_context,
+    REQ_initialize_user_session,
+    REQ_notify_user_process_create,
     REQ_get_process_ui_context,
     REQ_get_process_debug_info,
     REQ_get_process_image_name,
@@ -9146,6 +9174,8 @@ union generic_request
     struct get_process_info_request get_process_info_request;
     struct get_process_identity_request get_process_identity_request;
     struct init_process_ui_context_request init_process_ui_context_request;
+    struct initialize_user_session_request initialize_user_session_request;
+    struct notify_user_process_create_request notify_user_process_create_request;
     struct get_process_ui_context_request get_process_ui_context_request;
     struct get_process_debug_info_request get_process_debug_info_request;
     struct get_process_image_name_request get_process_image_name_request;
@@ -9615,6 +9645,8 @@ union generic_reply
     struct get_process_info_reply get_process_info_reply;
     struct get_process_identity_reply get_process_identity_reply;
     struct init_process_ui_context_reply init_process_ui_context_reply;
+    struct initialize_user_session_reply initialize_user_session_reply;
+    struct notify_user_process_create_reply notify_user_process_create_reply;
     struct get_process_ui_context_reply get_process_ui_context_reply;
     struct get_process_debug_info_reply get_process_debug_info_reply;
     struct get_process_image_name_reply get_process_image_name_reply;
@@ -10069,6 +10101,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1105
+#define SERVER_PROTOCOL_VERSION 1106
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

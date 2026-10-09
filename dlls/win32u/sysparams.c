@@ -7827,7 +7827,11 @@ BOOL WINAPI NtUserGetProcessUIContextInformation(
 
     if (status)
     {
-        RtlSetLastWin32Error( RtlNtStatusToDosError( status ) );
+        ULONG last_status = NtCurrentTeb()->LastStatusValue;
+        ULONG error = RtlNtStatusToDosError( status );
+
+        NtCurrentTeb()->LastStatusValue = last_status;
+        RtlSetLastWin32Error( error );
         return FALSE;
     }
     *information = result;

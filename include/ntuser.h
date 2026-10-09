@@ -1222,6 +1222,8 @@ W32KAPI BOOL    WINAPI NtUserHideCaret( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserHiliteMenuItem( HWND hwnd, HMENU handle, UINT item, UINT hilite );
 W32KAPI BOOL    WINAPI NtUserInheritWindowMonitor( HWND hwnd, HWND source );
 W32KAPI NTSTATUS WINAPI NtUserInitialize( HANDLE power_request_event, HANDLE media_request_event );
+W32KAPI NTSTATUS WINAPI NtUserNotifyProcessCreate( ULONG process_id, ULONG_PTR source_thread_id,
+                                                  ULONG_PTR reserved, ULONG hints );
 W32KAPI NTSTATUS WINAPI NtUserRemoteConnect( void *connect_info, ULONG operation, void *output );
 W32KAPI UINT    WINAPI NtUserRemoteConnectState(void);
 W32KAPI NTSTATUS WINAPI NtUserRemoteDisconnect(void);

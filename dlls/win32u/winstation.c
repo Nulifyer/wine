@@ -118,11 +118,41 @@ static struct session_thread_data *get_session_thread_data(void)
  */
 NTSTATUS WINAPI NtUserInitialize( HANDLE power_request_event, HANDLE media_request_event )
 {
-    /* Native win32k retains these CSRSS-created events for its power and media
-     * request threads. Wine has no kernel-side USER subsystem to attach here. */
+    NTSTATUS status;
+
     TRACE( "power request event %p, media request event %p\n",
            power_request_event, media_request_event );
-    return STATUS_SUCCESS;
+    SERVER_START_REQ( initialize_user_session )
+    {
+        req->power_event = wine_server_obj_handle( power_request_event );
+        req->media_event = wine_server_obj_handle( media_request_event );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+/***********************************************************************
+ *           NtUserNotifyProcessCreate   (win32u.@)
+ */
+NTSTATUS WINAPI NtUserNotifyProcessCreate( ULONG process_id, ULONG_PTR source_thread_id,
+                                         ULONG_PTR reserved, ULONG hints )
+{
+    NTSTATUS status;
+
+    status = STATUS_SUCCESS;
+    if (hints & ~0x30)
+    {
+        SERVER_START_REQ( notify_user_process_create )
+        {
+            req->pid = process_id;
+            req->hints = hints;
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+    }
+    TRACE( "pid %04lx, hints %#lx, status %#lx\n", process_id, hints, status );
+    return status;
 }
 
 /***********************************************************************

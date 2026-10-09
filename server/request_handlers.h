@@ -19,6 +19,8 @@ DECL_HANDLER(terminate_thread);
 DECL_HANDLER(get_process_info);
 DECL_HANDLER(get_process_identity);
 DECL_HANDLER(init_process_ui_context);
+DECL_HANDLER(initialize_user_session);
+DECL_HANDLER(notify_user_process_create);
 DECL_HANDLER(get_process_ui_context);
 DECL_HANDLER(get_process_debug_info);
 DECL_HANDLER(get_process_image_name);
@@ -487,6 +489,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_process_info,
     (req_handler)req_get_process_identity,
     (req_handler)req_init_process_ui_context,
+    (req_handler)req_initialize_user_session,
+    (req_handler)req_notify_user_process_create,
     (req_handler)req_get_process_ui_context,
     (req_handler)req_get_process_debug_info,
     (req_handler)req_get_process_image_name,
@@ -1094,7 +1098,14 @@ C_ASSERT( sizeof(struct get_process_identity_request) == 16 );
 C_ASSERT( offsetof(struct get_process_identity_reply, owner) == 8 );
 C_ASSERT( offsetof(struct get_process_identity_reply, sequence) == 16 );
 C_ASSERT( sizeof(struct get_process_identity_reply) == 24 );
+C_ASSERT( offsetof(struct init_process_ui_context_request, handle) == 12 );
 C_ASSERT( sizeof(struct init_process_ui_context_request) == 16 );
+C_ASSERT( offsetof(struct initialize_user_session_request, power_event) == 12 );
+C_ASSERT( offsetof(struct initialize_user_session_request, media_event) == 16 );
+C_ASSERT( sizeof(struct initialize_user_session_request) == 24 );
+C_ASSERT( offsetof(struct notify_user_process_create_request, pid) == 12 );
+C_ASSERT( offsetof(struct notify_user_process_create_request, hints) == 16 );
+C_ASSERT( sizeof(struct notify_user_process_create_request) == 24 );
 C_ASSERT( offsetof(struct get_process_ui_context_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_process_ui_context_request) == 16 );
 C_ASSERT( offsetof(struct get_process_ui_context_reply, context) == 8 );

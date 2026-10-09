@@ -78,6 +78,8 @@ struct process
     unsigned int         handle_checking_mode; /* process handle checking policy */
     unsigned int         native_session_owner:1; /* admitted per-session native startup owner */
     unsigned int         native_session_delegate:1; /* authenticated descendant of the admitted session owner */
+    unsigned int         native_user_server:1; /* admitted native child of the session startup owner */
+    unsigned int         user_session_registered:1; /* registered USER session server */
     unsigned int         native_dwm_owner:1; /* owner of the admitted per-session DWM endpoint */
     unsigned int         mit_input_callbacks:1; /* process registered private input callbacks */
     unsigned int         subsystem_process:1; /* registered native subsystem owner */
@@ -97,6 +99,8 @@ struct process
     enum startup_state   startup_state;   /* startup state */
     struct startup_info *startup_info;    /* startup info while init is in progress */
     struct event        *idle_event;      /* event for input idle */
+    struct event        *user_power_event; /* retained USER session power event */
+    struct event        *user_media_event; /* retained USER session media event */
     obj_handle_t         winstation;      /* main handle to process window station */
     obj_handle_t         desktop;         /* handle to desktop to use for new threads */
     struct token        *token;           /* security token associated with this process */

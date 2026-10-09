@@ -1215,7 +1215,7 @@
 @ stub -syscall NtUserNlsKbdSendIMENotification
 @ stdcall -syscall NtUserNotifyIMEStatus(long long)
 @ stub -syscall NtUserNotifyOverlayWindow
-@ stub -syscall NtUserNotifyProcessCreate
+@ stdcall -syscall NtUserNotifyProcessCreate(long ptr ptr long)
 @ stdcall -syscall NtUserNotifyWinEvent(long long long long)
 @ stdcall -syscall NtUserOpenClipboard(long long)
 @ stdcall -syscall NtUserOpenDesktop(ptr long long)
