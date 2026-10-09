@@ -103,8 +103,9 @@
 @ stdcall LdrGetDllDirectory(ptr)
 @ stdcall LdrGetDllFullName(long ptr)
 @ stdcall LdrGetDllHandle(wstr long ptr ptr)
+@ stdcall LdrGetDllHandleByMapping(ptr ptr)
+@ stdcall LdrGetDllHandleByName(ptr ptr ptr)
 @ stdcall LdrGetDllHandleEx(long ptr ptr ptr ptr)
-# @ stub LdrGetDllHandleEx
 @ stdcall LdrGetDllPath(wstr long ptr ptr)
 @ stdcall LdrGetProcedureAddress(ptr ptr long ptr)
 @ stdcall LdrGetProcedureAddressForCaller(ptr ptr long ptr long ptr)

@@ -3928,6 +3928,89 @@ NTSTATUS WINAPI LdrGetDllHandleEx( ULONG flags, LPCWSTR load_path, ULONG *dll_ch
 
 
 /******************************************************************
+ *           LdrGetDllHandleByName (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrGetDllHandleByName( const UNICODE_STRING *base_name,
+                                     const UNICODE_STRING *full_name, HMODULE *module )
+{
+    UNICODE_STRING basename;
+    LIST_ENTRY *mark, *entry;
+    ULONG hash, candidate_hash;
+    NTSTATUS status = STATUS_DLL_NOT_FOUND;
+
+    TRACE( "base_name %p, full_name %p, module %p.\n", base_name, full_name, module );
+
+    RtlEnterCriticalSection( &loader_section );
+    __TRY
+    {
+        if (!base_name)
+        {
+            unsigned int start = full_name->Length / sizeof(WCHAR);
+
+            while (start && full_name->Buffer[start - 1] != '\\' && full_name->Buffer[start - 1] != '/') start--;
+            basename.Buffer = full_name->Buffer + start;
+            basename.Length = full_name->Length - start * sizeof(WCHAR);
+            basename.MaximumLength = basename.Length;
+            base_name = &basename;
+        }
+        RtlHashUnicodeString( base_name, TRUE, HASH_STRING_ALGORITHM_DEFAULT, &hash );
+        mark = &hash_table[hash % HASH_MAP_SIZE];
+        for (entry = mark->Flink; entry != mark; entry = entry->Flink)
+        {
+            WINE_MODREF *wm = CONTAINING_RECORD( entry, WINE_MODREF, ldr.HashLinks );
+
+            if (full_name)
+            {
+                RtlHashUnicodeString( &wm->ldr.BaseDllName, TRUE, HASH_STRING_ALGORITHM_DEFAULT, &candidate_hash );
+                if (hash != candidate_hash || !RtlEqualUnicodeString( full_name, &wm->ldr.FullDllName, TRUE )) continue;
+            }
+            else if ((wm->ldr.Flags & LDR_REDIRECTED) ||
+                     !RtlEqualUnicodeString( base_name, &wm->ldr.BaseDllName, TRUE )) continue;
+
+            if (!(status = LdrAddRefDll( 0, wm->ldr.DllBase ))) *module = wm->ldr.DllBase;
+            break;
+        }
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        status = STATUS_ACCESS_VIOLATION;
+    }
+    __ENDTRY
+    RtlLeaveCriticalSection( &loader_section );
+    return status;
+}
+
+
+/******************************************************************
+ *           LdrGetDllHandleByMapping (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrGetDllHandleByMapping( void *address, HMODULE *module )
+{
+    WINE_MODREF *wm;
+    NTSTATUS status;
+
+    TRACE( "address %p, module %p.\n", address, module );
+
+    if (!address) return STATUS_INVALID_PARAMETER;
+    if (!RtlImageNtHeader( address )) return STATUS_INVALID_IMAGE_FORMAT;
+    status = STATUS_DLL_NOT_FOUND;
+    RtlEnterCriticalSection( &loader_section );
+    __TRY
+    {
+        if ((wm = find_existing_module( address )))
+            if (!(status = LdrAddRefDll( 0, wm->ldr.DllBase ))) *module = wm->ldr.DllBase;
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        status = STATUS_ACCESS_VIOLATION;
+    }
+    __ENDTRY
+    RtlLeaveCriticalSection( &loader_section );
+    return status;
+}
+
+
+/******************************************************************
  *		LdrGetDllHandle (NTDLL.@)
  */
 NTSTATUS WINAPI LdrGetDllHandle( LPCWSTR load_path, ULONG flags, const UNICODE_STRING *name, HMODULE *base )
