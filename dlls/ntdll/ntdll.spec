@@ -1161,7 +1161,7 @@
 @ stdcall RtlSetThreadPreferredUILanguages(long ptr ptr)
 @ stdcall RtlSetThreadSubProcessTag(ptr)
 @ stdcall RtlSetThreadWorkOnBehalfTicket(ptr)
-# @ stub RtlSetThreadPoolStartFunc
+@ stdcall RtlSetThreadPoolStartFunc(ptr ptr)
 @ stdcall RtlSetTimeZoneInformation(ptr)
 # @ stub RtlSetTimer
 @ stdcall RtlSetUnhandledExceptionFilter(ptr)

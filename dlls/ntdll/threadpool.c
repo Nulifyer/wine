@@ -480,6 +480,15 @@ static void CALLBACK process_rtl_work_item( TP_CALLBACK_INSTANCE *instance, void
 }
 
 /***********************************************************************
+ *              RtlSetThreadPoolStartFunc   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSetThreadPoolStartFunc( void *start_func, void *exit_func )
+{
+    /* The modern thread pool ignores this legacy callback registration. */
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
  *              RtlQueueWorkItem   (NTDLL.@)
  *
  * Queues a work item into a thread in the thread pool.
