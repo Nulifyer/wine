@@ -1814,16 +1814,28 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
         return ret;
 
     case ProcessExceptionPort:
-        if (size != sizeof(HANDLE)) return STATUS_INFO_LENGTH_MISMATCH;
+    {
+        PROCESS_EXCEPTION_PORT *exception_port = info;
+        ULONG state = 0;
+
+        if (size != sizeof(HANDLE) && size != sizeof(*exception_port)) return STATUS_INFO_LENGTH_MISMATCH;
         if (!info) return STATUS_ACCESS_VIOLATION;
+        if (size == sizeof(*exception_port))
+        {
+            state = exception_port->StateFlags;
+            if (state & ~7) return STATUS_INVALID_PARAMETER;
+        }
         SERVER_START_REQ( set_process_exception_port )
         {
             req->process = wine_server_obj_handle( handle );
-            req->port = wine_server_obj_handle( *(HANDLE *)info );
+            req->port = wine_server_obj_handle( exception_port->ExceptionPortHandle );
+            req->state = state;
             ret = wine_server_call( req );
+            if (!ret && size == sizeof(*exception_port)) exception_port->StateFlags = reply->state;
         }
         SERVER_END_REQ;
         break;
+    }
 
     case ProcessAccessToken:
     {

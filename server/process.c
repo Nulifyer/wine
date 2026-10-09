@@ -661,6 +661,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->desktop         = 0;
     process->token           = NULL;
     process->exception_port  = NULL;
+    process->exception_port_state = 0;
     process->trace_data      = 0;
     process->rawinput_devices = NULL;
     process->rawinput_device_count = 0;

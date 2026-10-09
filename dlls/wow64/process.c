@@ -944,6 +944,16 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
 
     switch (class)
     {
+    case ProcessExceptionPort:
+        {
+            HANDLE port;
+
+            if (len < sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+            if (!ptr) return STATUS_ACCESS_VIOLATION;
+            port = ULongToHandle( *(ULONG *)ptr );
+            return NtSetInformationProcess( handle, class, &port, sizeof(port) );
+        }
+
     case ProcessConsoleHostProcess:
         {
             ULONG_PTR owner;

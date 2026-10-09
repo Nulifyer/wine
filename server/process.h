@@ -101,6 +101,7 @@ struct process
     obj_handle_t         desktop;         /* handle to desktop to use for new threads */
     struct token        *token;           /* security token associated with this process */
     struct object       *exception_port;  /* ALPC port receiving process exceptions */
+    unsigned int         exception_port_state; /* low three exception-port state bits */
     struct list          views;           /* list of memory views */
     client_ptr_t         peb;             /* PEB address in client address space */
     struct dir_cache    *dir_cache;       /* map of client-side directory cache */

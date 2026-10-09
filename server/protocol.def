@@ -4994,6 +4994,9 @@ struct alpc_message_info
 @REQ(set_process_exception_port)
     obj_handle_t process;
     obj_handle_t port;
+    unsigned int state;
+@REPLY
+    unsigned int state;
 @END
 
 /* Retrieve process break-on-termination state. */

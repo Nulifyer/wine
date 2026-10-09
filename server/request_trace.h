@@ -4189,6 +4189,12 @@ static void dump_set_process_exception_port_request( const struct set_process_ex
 {
     fprintf( stderr, " process=%04x", req->process );
     fprintf( stderr, ", port=%04x", req->port );
+    fprintf( stderr, ", state=%08x", req->state );
+}
+
+static void dump_set_process_exception_port_reply( const struct set_process_exception_port_reply *req )
+{
+    fprintf( stderr, " state=%08x", req->state );
 }
 
 static void dump_get_process_critical_state_request( const struct get_process_critical_state_request *req )
@@ -5942,7 +5948,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     NULL,
-    NULL,
+    (dump_func)dump_set_process_exception_port_reply,
     (dump_func)dump_get_process_critical_state_reply,
     (dump_func)dump_get_process_protection_reply,
     NULL,

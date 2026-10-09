@@ -7282,11 +7282,13 @@ struct set_process_exception_port_request
     struct request_header __header;
     obj_handle_t process;
     obj_handle_t port;
-    char __pad_20[4];
+    unsigned int state;
 };
 struct set_process_exception_port_reply
 {
     struct reply_header __header;
+    unsigned int state;
+    char __pad_12[4];
 };
 
 
@@ -10067,6 +10069,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1104
+#define SERVER_PROTOCOL_VERSION 1105
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

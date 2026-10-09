@@ -3934,15 +3934,23 @@ DECL_HANDLER(set_process_exception_port)
     struct alpc_port *port;
     struct process *process;
 
-    if (!(process = get_process_from_handle( req->process, PROCESS_SET_INFORMATION ))) return;
-    if (process->exception_port)
+    if (req->state & ~7)
     {
-        set_error( STATUS_PORT_ALREADY_SET );
-        release_object( process );
+        set_error( STATUS_INVALID_PARAMETER );
         return;
     }
-    if ((port = (struct alpc_port *)get_handle_obj( current->process, req->port,
-                                                    ALPC_PORT_ALL_ACCESS, &alpc_port_ops )))
+    if (!thread_single_check_privilege( current, SeTcbPrivilege ))
+    {
+        set_error( STATUS_PRIVILEGE_NOT_HELD );
+        return;
+    }
+    if (!(process = get_process_from_handle( req->process, PROCESS_SUSPEND_RESUME ))) return;
+    if ((port = (struct alpc_port *)get_handle_obj( current->process, req->port, 0, &alpc_port_ops )))
+    {
+        reply->state = process->exception_port_state;
+        if (process->exception_port) release_object( process->exception_port );
         process->exception_port = &port->obj;
+        process->exception_port_state = req->state;
+    }
     release_object( process );
 }
