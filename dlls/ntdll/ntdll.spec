@@ -711,7 +711,7 @@
 @ stdcall RtlDosPathNameToRelativeNtPathName_U(wstr ptr ptr ptr)
 @ stdcall RtlDosPathNameToRelativeNtPathName_U_WithStatus(wstr ptr ptr ptr)
 @ stdcall RtlDosSearchPath_U(wstr wstr wstr long ptr ptr)
-# @ stub RtlDosSearchPath_Ustr
+@ stdcall RtlDosSearchPath_Ustr(long ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RtlDowncaseUnicodeChar(long)
 @ stdcall RtlDowncaseUnicodeString(ptr ptr long)
 @ stdcall RtlDumpResource(ptr)
@@ -824,6 +824,7 @@
 @ stdcall RtlGetFrame()
 @ stdcall RtlGetFullPathName_U(wstr long ptr ptr)
 @ stdcall RtlGetFullPathName_UEx(wstr long ptr ptr ptr)
+@ stdcall RtlGetFullPathName_UstrEx(ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RtlGetGroupSecurityDescriptor(ptr ptr ptr)
 @ stdcall RtlGetLastNtStatus()
 @ stdcall RtlGetLastWin32Error()

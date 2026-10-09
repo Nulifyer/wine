@@ -421,7 +421,7 @@ ULONG WINAPI RtlDosSearchPath_U(LPCWSTR paths, LPCWSTR search, LPCWSTR ext,
 /******************************************************************
  *		collapse_path
  *
- * Helper for RtlGetFullPathName_UEx.
+ * Helper for full-path resolution.
  * Get rid of . and .. components in the path.
  */
 static inline void collapse_path( WCHAR *path, UINT mark )
@@ -512,7 +512,7 @@ static const WCHAR *skip_unc_prefix( const WCHAR *ptr )
 /******************************************************************
  *		get_unix_full_path
  *
- * Get a full path for a Unix path name. Helper for RtlGetFullPathName_UEx.
+ * Get a full path for a Unix path name. Helper for full-path resolution.
  */
 static BOOL get_unix_full_path( LPCWSTR name, LPWSTR buffer, ULONG size, ULONG *reqsize )
 {
@@ -593,7 +593,7 @@ static BOOL get_unix_full_path( LPCWSTR name, LPWSTR buffer, ULONG size, ULONG *
 /******************************************************************
  *		get_full_path_helper
  *
- * Helper for RtlGetFullPathName_UEx.
+ * Helper for full-path resolution.
  * Note: name and buffer are allowed to point to the same memory spot
  */
 static ULONG get_full_path_helper(LPCWSTR name, LPWSTR buffer, ULONG size, RTL_PATH_TYPE type)
@@ -767,17 +767,20 @@ done:
  * DOS device name, in which case file_in_buf is NULL)
  *
  */
+static ULONG get_full_path_name( const WCHAR *name, ULONG size, WCHAR *buffer,
+                                 WCHAR **file_part, RTL_PATH_TYPE *type );
+
 DWORD WINAPI RtlGetFullPathName_U(const WCHAR* name, ULONG size, WCHAR* buffer,
                                   WCHAR** file_part)
 {
     TRACE("(%s %lu %p %p)\n", debugstr_w(name), size, buffer, file_part);
 
-    return RtlGetFullPathName_UEx(name, size, buffer, file_part, NULL);
+    return get_full_path_name(name, size, buffer, file_part, NULL);
 }
 
 
 /******************************************************************
- *		RtlGetFullPathName_UEx  (NTDLL.@)
+ *		get_full_path_name
  *
  * Returns the number of bytes written to buffer (not including the
  * terminating NULL) if the function succeeds, or the required number of bytes
@@ -789,8 +792,8 @@ DWORD WINAPI RtlGetFullPathName_U(const WCHAR* name, ULONG size, WCHAR* buffer,
  * type is an optional parameter that will receive the type of the path
  *
  */
-ULONG WINAPI RtlGetFullPathName_UEx(const WCHAR* name, ULONG size, WCHAR* buffer,
-                                    WCHAR** file_part, RTL_PATH_TYPE* type)
+static ULONG get_full_path_name( const WCHAR *name, ULONG size, WCHAR *buffer,
+                                 WCHAR **file_part, RTL_PATH_TYPE *type )
 {
     WCHAR*          ptr;
     DWORD           dosdev;
@@ -840,6 +843,260 @@ ULONG WINAPI RtlGetFullPathName_UEx(const WCHAR* name, ULONG size, WCHAR* buffer
     if (file_part && (ptr = wcsrchr(buffer, '\\')) != NULL && ptr >= buffer + 2 && *++ptr)
         *file_part = ptr;
     return reqsize;
+}
+
+static WCHAR *dup_counted_path( const UNICODE_STRING *name )
+{
+    WCHAR *copy = RtlAllocateHeap( GetProcessHeap(), 0, name->Length + sizeof(WCHAR) );
+
+    if (!copy) return NULL;
+    if (name->Length) memcpy( copy, name->Buffer, name->Length );
+    copy[name->Length / sizeof(WCHAR)] = 0;
+    return copy;
+}
+
+/* The modern interfaces clear the supplied capacity. The classic byte-count
+ * interface keeps its existing buffer behavior through get_full_path_name. */
+static ULONG get_native_full_path( const WCHAR *name, ULONG size, WCHAR *buffer, WCHAR **file_part )
+{
+    const UNICODE_STRING *directory;
+    ULONG length;
+
+    RtlAcquirePebLock();
+    if (size) memset( buffer, 0, size );
+    length = get_full_path_name( name, size, buffer, file_part, NULL );
+    if (length && length < size)
+    {
+        /* Path collapse must not leave the original suffix in unused capacity. */
+        memset( (BYTE *)buffer + length, 0, size - length );
+    }
+    else if (length >= size && size >= sizeof(WCHAR))
+    {
+        /* Native relative resolution copies the current-directory prefix before
+         * discovering the short buffer, then clears the first character. */
+        if (RtlDetermineDosPathNameType_U( name ) == RtlPathTypeRelative)
+        {
+            directory = &NtCurrentTeb()->Peb->ProcessParameters->CurrentDirectory.DosPath;
+            memcpy( buffer, directory->Buffer, min( size & ~1, directory->Length ));
+        }
+        buffer[0] = 0;
+    }
+    RtlReleasePebLock();
+    return length;
+}
+
+/***********************************************************************
+ *           RtlGetFullPathName_UEx    (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlGetFullPathName_UEx( const WCHAR *name, ULONG size, WCHAR *buffer,
+                                      WCHAR **file_part, ULONG *required )
+{
+    UNICODE_STRING input;
+    WCHAR *copy;
+    NTSTATUS status;
+    ULONG length;
+
+    if (required) *required = 0;
+    if (file_part) *file_part = NULL;
+    if ((status = RtlInitUnicodeStringEx( &input, name ))) return status;
+    if (!input.Length) return STATUS_OBJECT_NAME_INVALID;
+    if (!(copy = dup_counted_path( &input ))) return STATUS_NO_MEMORY;
+    length = get_native_full_path( copy, size, buffer, file_part );
+    RtlFreeHeap( GetProcessHeap(), 0, copy );
+    if (!length) return STATUS_OBJECT_NAME_INVALID;
+    if (required) *required = length;
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           RtlGetFullPathName_UstrEx    (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlGetFullPathName_UstrEx( const UNICODE_STRING *name, UNICODE_STRING *fixed,
+                                        UNICODE_STRING *dynamic, UNICODE_STRING **used,
+                                        SIZE_T *file_part, BOOLEAN *invalid, RTL_PATH_TYPE *type,
+                                        SIZE_T *required )
+{
+    WCHAR *copy, *buffer = NULL, *part = NULL;
+    ULONG capacity, length;
+    NTSTATUS status = STATUS_OBJECT_NAME_INVALID;
+
+    if (used) *used = NULL;
+    if (file_part) *file_part = 0;
+    if (required) *required = 0;
+    if (invalid) *invalid = FALSE;
+    if (fixed && dynamic && !used) return STATUS_INVALID_PARAMETER;
+    *type = RtlPathTypeUnknown;
+    if (!name->Length || (name->Length & 1)) return STATUS_OBJECT_NAME_INVALID;
+    if (!(copy = dup_counted_path( name ))) return STATUS_NO_MEMORY;
+    *type = RtlDetermineDosPathNameType_U( copy );
+
+    RtlAcquirePebLock();
+    capacity = fixed ? fixed->MaximumLength : 260 * sizeof(WCHAR);
+    if (!fixed && !(buffer = RtlAllocateHeap( GetProcessHeap(), 0, capacity )))
+    {
+        status = STATUS_NO_MEMORY;
+        goto done;
+    }
+    length = get_native_full_path( copy, capacity, fixed ? fixed->Buffer : buffer, &part );
+    if (!length) goto done;
+    if (fixed && length < capacity)
+    {
+        fixed->Length = length;
+        if (used) *used = fixed;
+        if (file_part && part) *file_part = part - fixed->Buffer;
+        status = STATUS_SUCCESS;
+        goto done;
+    }
+    if (!dynamic)
+    {
+        if (required) *required = length;
+        status = STATUS_BUFFER_TOO_SMALL;
+        goto done;
+    }
+    if (!fixed && length < capacity) goto dynamic_result;
+
+    RtlFreeHeap( GetProcessHeap(), 0, buffer );
+    buffer = NULL;
+    for (;;)
+    {
+        if (length + sizeof(WCHAR) > 0xfffe)
+        {
+            status = STATUS_NAME_TOO_LONG;
+            goto done;
+        }
+        capacity = length + sizeof(WCHAR);
+        if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, capacity )))
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        length = get_native_full_path( copy, capacity - sizeof(WCHAR), buffer, &part );
+        if (!length) goto done;
+        if (length <= capacity - sizeof(WCHAR)) break;
+        RtlFreeHeap( GetProcessHeap(), 0, buffer );
+        buffer = NULL;
+    }
+dynamic_result:
+    dynamic->Buffer = buffer;
+    dynamic->Length = length;
+    dynamic->MaximumLength = capacity;
+    buffer[length / sizeof(WCHAR)] = 0;
+    if (used) *used = dynamic;
+    if (file_part && part) *file_part = part - buffer;
+    buffer = NULL;
+    status = STATUS_SUCCESS;
+done:
+    RtlFreeHeap( GetProcessHeap(), 0, buffer );
+    RtlReleasePebLock();
+    RtlFreeHeap( GetProcessHeap(), 0, copy );
+    return status;
+}
+
+static NTSTATUS return_search_path( const WCHAR *name, UNICODE_STRING *fixed,
+                                   UNICODE_STRING *dynamic, const UNICODE_STRING **used,
+                                   SIZE_T *file_part, SIZE_T *required )
+{
+    UNICODE_STRING input, *result = NULL;
+    RTL_PATH_TYPE type;
+    NTSTATUS status;
+
+    RtlInitUnicodeString( &input, name );
+    status = RtlGetFullPathName_UstrEx( &input, fixed, dynamic, &result, file_part, NULL, &type, required );
+    if (used) *used = result;
+    return status;
+}
+
+/***********************************************************************
+ *           RtlDosSearchPath_Ustr    (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlDosSearchPath_Ustr( ULONG flags, const UNICODE_STRING *paths,
+                                     const UNICODE_STRING *name, const UNICODE_STRING *extension,
+                                     UNICODE_STRING *fixed, UNICODE_STRING *dynamic,
+                                     const UNICODE_STRING **used, SIZE_T *file_part, SIZE_T *required )
+{
+    WCHAR *path = NULL, *file = NULL, *candidate = NULL, *ptr, *end;
+    SIZE_T segment, length, extension_length = extension ? extension->Length / sizeof(WCHAR) : 0;
+    RTL_PATH_TYPE type;
+    NTSTATUS status = STATUS_NO_SUCH_FILE;
+    BOOL has_extension = FALSE;
+
+    if (used) *used = NULL;
+    if (file_part) *file_part = 0;
+    if (required) *required = 0;
+    if (dynamic) memset( dynamic, 0, sizeof(*dynamic) );
+    if ((flags & ~7) || !paths || !name || (fixed && dynamic && !used)) return STATUS_INVALID_PARAMETER;
+    if (!(file = dup_counted_path( name ))) return STATUS_NO_MEMORY;
+    type = RtlDetermineDosPathNameType_U( file );
+    if ((flags & 2) && file[0] == '.' &&
+        (IS_SEPARATOR(file[1]) || (file[1] == '.' && IS_SEPARATOR(file[2])))) type = RtlPathTypeUnknown;
+    for (ptr = file + name->Length / sizeof(WCHAR); ptr > file;)
+    {
+        --ptr;
+        if (IS_SEPARATOR(*ptr)) break;
+        if (*ptr == '.') { has_extension = TRUE; break; }
+    }
+    if (type == RtlPathTypeRelative && (flags & 1))
+    {
+        FIXME( "Relative isolation redirection is not implemented.\n" );
+        status = STATUS_NOT_IMPLEMENTED;
+        goto done;
+    }
+    if (type != RtlPathTypeRelative && RtlDoesFileExists_U( file ))
+    {
+        status = return_search_path( file, fixed, dynamic, used, file_part, required );
+        goto done;
+    }
+    if (has_extension && (type == RtlPathTypeRelative || !(flags & 4))) extension_length = 0;
+    if (type != RtlPathTypeRelative)
+    {
+        if (!extension_length) goto done;
+        length = name->Length / sizeof(WCHAR) + extension_length;
+        if ((length + 1) * sizeof(WCHAR) > 0xfffe) { status = STATUS_NAME_TOO_LONG; goto done; }
+        if (!(candidate = RtlAllocateHeap( GetProcessHeap(), 0, (length + 1) * sizeof(WCHAR) )))
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        memcpy( candidate, file, name->Length );
+        memcpy( candidate + name->Length / sizeof(WCHAR), extension->Buffer, extension_length * sizeof(WCHAR) );
+        candidate[length] = 0;
+        if (RtlDoesFileExists_U( candidate ))
+            status = return_search_path( candidate, fixed, dynamic, used, file_part, required );
+        goto done;
+    }
+    if (!(path = dup_counted_path( paths ))) { status = STATUS_NO_MEMORY; goto done; }
+    for (ptr = path; *ptr; ptr = *end ? end + 1 : end)
+    {
+        for (end = ptr; *end && *end != ';'; end++);
+        segment = end - ptr;
+        length = segment + (segment && !IS_SEPARATOR(ptr[segment - 1])) +
+                 name->Length / sizeof(WCHAR) + extension_length;
+        if ((length + 1) * sizeof(WCHAR) > 0xfffe) { status = STATUS_NAME_TOO_LONG; goto done; }
+        if (!(candidate = RtlAllocateHeap( GetProcessHeap(), 0, (length + 1) * sizeof(WCHAR) )))
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        memcpy( candidate, ptr, segment * sizeof(WCHAR) );
+        if (segment && !IS_SEPARATOR(candidate[segment - 1])) candidate[segment++] = '\\';
+        memcpy( candidate + segment, file, name->Length );
+        if (extension_length)
+            memcpy( candidate + segment + name->Length / sizeof(WCHAR), extension->Buffer,
+                    extension_length * sizeof(WCHAR) );
+        candidate[length] = 0;
+        if (RtlDoesFileExists_U( candidate ))
+        {
+            status = return_search_path( candidate, fixed, dynamic, used, file_part, required );
+            goto done;
+        }
+        RtlFreeHeap( GetProcessHeap(), 0, candidate );
+        candidate = NULL;
+    }
+done:
+    RtlFreeHeap( GetProcessHeap(), 0, candidate );
+    RtlFreeHeap( GetProcessHeap(), 0, path );
+    RtlFreeHeap( GetProcessHeap(), 0, file );
+    return status;
 }
 
 /*************************************************************************
