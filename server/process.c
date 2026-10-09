@@ -610,6 +610,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     }
     process->sync            = NULL;
     process->parent_id       = 0;
+    process->owner           = 0;
     process->debug_obj       = NULL;
     process->debug_event     = NULL;
     process->handles         = NULL;
@@ -707,6 +708,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
         std_handles[2] = info->hstderr;
 
         process->parent_id = parent->id;
+        process->owner = (current ? current->process->id : parent->id) | 2;
         if (flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES)
             process->handles = copy_handle_table( process, parent, handles, handle_count, std_handles );
         else
@@ -1745,6 +1747,18 @@ DECL_HANDLER(get_process_info)
     }
 }
 
+/* retrieve the encoded creator/console owner of a process */
+DECL_HANDLER(get_process_owner)
+{
+    struct process *process;
+
+    if ((process = get_process_from_handle( req->handle, PROCESS_QUERY_LIMITED_INFORMATION )))
+    {
+        reply->owner = process->owner;
+        release_object( process );
+    }
+}
+
 /* mark the current process as connected to the USER subsystem */
 DECL_HANDLER(init_process_ui_context)
 {
@@ -1964,6 +1978,17 @@ static void set_process_affinity( struct process *process, affinity_t affinity )
 DECL_HANDLER(set_process_info)
 {
     struct process *process;
+
+    if (req->mask & SET_PROCESS_INFO_OWNER)
+    {
+        /* The pseudo-handle is part of this contract, even for a real handle
+         * naming the caller's own process. Validate at the state owner too. */
+        if (req->mask != SET_PROCESS_INFO_OWNER || req->handle != (obj_handle_t)-1 ||
+            (req->owner & 3) != 1)
+            set_error( STATUS_INVALID_PARAMETER );
+        else current->process->owner = req->owner;
+        return;
+    }
 
     if ((process = get_process_from_handle( req->handle, PROCESS_SET_INFORMATION )))
     {

@@ -1356,6 +1356,19 @@ struct get_process_info_reply
 
 
 
+struct get_process_owner_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_process_owner_reply
+{
+    struct reply_header __header;
+    client_ptr_t owner;
+};
+
+
+
 struct init_process_ui_context_request
 {
     struct request_header __header;
@@ -1437,6 +1450,7 @@ struct set_process_info_request
     struct request_header __header;
     obj_handle_t handle;
     affinity_t   affinity;
+    client_ptr_t owner;
     int          priority;
     int          base_priority;
     int          disable_boost;
@@ -1444,7 +1458,7 @@ struct set_process_info_request
     int          mask;
     unsigned int handle_checking_mode;
     int          critical;
-    char __pad_52[4];
+    char __pad_60[4];
 };
 struct set_process_info_reply
 {
@@ -1459,6 +1473,7 @@ struct set_process_info_reply
 #define SET_PROCESS_INFO_CRITICAL      0x40
 #define SET_PROCESS_INFO_SUBSYSTEM     0x80
 #define SET_PROCESS_INFO_PRIORITY_EX   0x100
+#define SET_PROCESS_INFO_OWNER         0x200
 
 
 
@@ -8655,6 +8670,7 @@ enum request
     REQ_terminate_process,
     REQ_terminate_thread,
     REQ_get_process_info,
+    REQ_get_process_owner,
     REQ_init_process_ui_context,
     REQ_get_process_ui_context,
     REQ_get_process_debug_info,
@@ -9125,6 +9141,7 @@ union generic_request
     struct terminate_process_request terminate_process_request;
     struct terminate_thread_request terminate_thread_request;
     struct get_process_info_request get_process_info_request;
+    struct get_process_owner_request get_process_owner_request;
     struct init_process_ui_context_request init_process_ui_context_request;
     struct get_process_ui_context_request get_process_ui_context_request;
     struct get_process_debug_info_request get_process_debug_info_request;
@@ -9593,6 +9610,7 @@ union generic_reply
     struct terminate_process_reply terminate_process_reply;
     struct terminate_thread_reply terminate_thread_reply;
     struct get_process_info_reply get_process_info_reply;
+    struct get_process_owner_reply get_process_owner_reply;
     struct init_process_ui_context_reply init_process_ui_context_reply;
     struct get_process_ui_context_reply get_process_ui_context_reply;
     struct get_process_debug_info_reply get_process_debug_info_reply;
@@ -10048,6 +10066,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1102
+#define SERVER_PROTOCOL_VERSION 1103
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

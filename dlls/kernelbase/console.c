@@ -476,7 +476,13 @@ static BOOL alloc_console( BOOL headless )
                           NULL, system_dir, &console_si.StartupInfo, &pi );
     Wow64RevertWow64FsRedirection( redir );
 
-    if (!ret || !create_console_connection( console)) goto error;
+    if (!ret) goto error;
+    {
+        struct condrv_bind_host bind = {condrv_handle( pi.hProcess ), condrv_handle( server )};
+
+        if (!console_ioctl( server, IOCTL_CONDRV_BIND_HOST, &bind, sizeof(bind), NULL, 0, NULL )) goto error;
+    }
+    if (!create_console_connection( console)) goto error;
     if (!init_console_std_handles( !(app_si.dwFlags & STARTF_USESTDHANDLES) )) goto error;
 
     RtlGetCurrentPeb()->ProcessParameters->ConsoleHandle = console;
@@ -674,6 +680,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH FillConsoleOutputCharacterW( HANDLE handle, WCHAR 
  */
 BOOL WINAPI DECLSPEC_HOTPATCH FreeConsole(void)
 {
+    ULONG_PTR owner = 1;
+
     RtlEnterCriticalSection( &console_section );
 
     if (RtlGetCurrentPeb()->ProcessParameters->ConsoleHandle != CONSOLE_HANDLE_SHELL_NO_WINDOW)
@@ -689,6 +697,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH FreeConsole(void)
     if (console_flags & CONSOLE_OUTPUT_HANDLE) NtClose( GetStdHandle( STD_OUTPUT_HANDLE ));
     if (console_flags & CONSOLE_ERROR_HANDLE)  NtClose( GetStdHandle( STD_ERROR_HANDLE ));
     console_flags = 0;
+    NtSetInformationProcess( GetCurrentProcess(), ProcessConsoleHostProcess, &owner, sizeof(owner) );
 
     RtlLeaveCriticalSection( &console_section );
     return TRUE;

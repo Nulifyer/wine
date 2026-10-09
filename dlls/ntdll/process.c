@@ -490,6 +490,8 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
     ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[6] ) / sizeof(ULONG_PTR)];
     PS_ATTRIBUTE_LIST *attr = (PS_ATTRIBUTE_LIST *)buffer;
     UINT pos = 0;
+    HANDLE console;
+    NTSTATUS status;
 
     RtlNormalizeProcessParams( params );
 
@@ -537,11 +539,17 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
     InitializeObjectAttributes( &process_attr, NULL, 0, NULL, process_descr );
     InitializeObjectAttributes( &thread_attr, NULL, 0, NULL, thread_descr );
 
-    return NtCreateUserProcess( &info->Process, &info->Thread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
-                                &process_attr, &thread_attr,
-                                inherit ? PROCESS_CREATE_FLAGS_INHERIT_HANDLES : 0,
-                                THREAD_CREATE_FLAGS_CREATE_SUSPENDED, params,
-                                &create_info, attr );
+    /* Raw NT creation has no Win32 DETACHED_PROCESS option. Let the child loader
+     * attach the inherited console, without changing the caller's parameters. */
+    console = params->ConsoleHandle;
+    if (!console) params->ConsoleHandle = NtCurrentTeb()->Peb->ProcessParameters->ConsoleHandle;
+    status = NtCreateUserProcess( &info->Process, &info->Thread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
+                                 &process_attr, &thread_attr,
+                                 inherit ? PROCESS_CREATE_FLAGS_INHERIT_HANDLES : 0,
+                                 THREAD_CREATE_FLAGS_CREATE_SUSPENDED, params,
+                                 &create_info, attr );
+    params->ConsoleHandle = console;
+    return status;
 }
 
 /**********************************************************************

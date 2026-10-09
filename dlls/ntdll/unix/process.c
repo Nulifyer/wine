@@ -1180,6 +1180,25 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
         if (!ret && ret_len) *ret_len = sizeof(ULONG);
         return ret;
 
+    case ProcessConsoleHostProcess:
+#ifdef _WIN64
+        if (size != sizeof(ULONG_PTR)) return STATUS_INFO_LENGTH_MISMATCH;
+        SERVER_START_REQ( get_process_owner )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            if (!(ret = wine_server_call( req )))
+            {
+                if (!info) ret = STATUS_ACCESS_VIOLATION;
+                else *(ULONG_PTR *)info = reply->owner;
+            }
+        }
+        SERVER_END_REQ;
+        if (!ret && ret_len) *ret_len = sizeof(ULONG_PTR);
+        return ret;
+#else
+        return STATUS_INVALID_INFO_CLASS;
+#endif
+
     case ProcessBasicInformation:
         {
             struct process_extended_basic_information *extended = info;
@@ -1771,6 +1790,25 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
 
     switch (class)
     {
+    case ProcessConsoleHostProcess:
+#ifdef _WIN64
+        if (size != sizeof(ULONG_PTR)) return STATUS_INFO_LENGTH_MISMATCH;
+#else
+        if (size < sizeof(ULONG_PTR)) return STATUS_INFO_LENGTH_MISMATCH;
+#endif
+        if (handle != GetCurrentProcess()) return STATUS_INVALID_PARAMETER;
+        if (!info) return STATUS_ACCESS_VIOLATION;
+        if ((*(ULONG_PTR *)info & 3) != 1) return STATUS_INVALID_PARAMETER;
+        SERVER_START_REQ( set_process_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            req->mask = SET_PROCESS_INFO_OWNER;
+            req->owner = *(ULONG_PTR *)info;
+            ret = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        return ret;
+
     case ProcessExceptionPort:
         if (size != sizeof(HANDLE)) return STATUS_INFO_LENGTH_MISMATCH;
         if (!info) return STATUS_ACCESS_VIOLATION;

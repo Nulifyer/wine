@@ -62,6 +62,7 @@
 #define IOCTL_CONDRV_BIND_PID              CTL_CODE(FILE_DEVICE_CONSOLE, 51, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 /* console server ioctls */
+#define IOCTL_CONDRV_BIND_HOST             CTL_CODE(FILE_DEVICE_CONSOLE, 52, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_CONDRV_SETUP_INPUT           CTL_CODE(FILE_DEVICE_CONSOLE, 60, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 /* ioctls used for communication between driver and host */
@@ -70,6 +71,13 @@
 
 /* console handle type */
 typedef unsigned int condrv_handle_t;
+
+/* Internal creation handoff. Both handles refer to the same inherited server. */
+struct condrv_bind_host
+{
+    condrv_handle_t process;
+    condrv_handle_t server;
+};
 
 /* convert an object handle to a server handle */
 static inline condrv_handle_t condrv_handle( HANDLE handle )

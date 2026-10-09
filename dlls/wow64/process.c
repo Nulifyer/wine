@@ -582,6 +582,9 @@ NTSTATUS WINAPI wow64_NtQueryInformationProcess( UINT *args )
 
     switch (class)
     {
+    case ProcessConsoleHostProcess:
+        return STATUS_INVALID_INFO_CLASS;
+
     case ProcessBasicInformation:  /* PROCESS_BASIC_INFORMATION */
         if (len == sizeof(PROCESS_BASIC_INFORMATION32))
         {
@@ -940,6 +943,17 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
 
     switch (class)
     {
+    case ProcessConsoleHostProcess:
+        {
+            ULONG_PTR owner;
+
+            if (len < sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+            if (handle != NtCurrentProcess()) return STATUS_INVALID_PARAMETER;
+            if (!ptr) return STATUS_ACCESS_VIOLATION;
+            owner = *(ULONG *)ptr;
+            return NtSetInformationProcess( handle, class, &owner, sizeof(owner) );
+        }
+
     case ProcessDefaultHardErrorMode:   /* ULONG */
     case ProcessPriorityClass:   /* PROCESS_PRIORITY_CLASS */
     case ProcessPriorityClassEx: /* PROCESS_PRIORITY_CLASS_EX */

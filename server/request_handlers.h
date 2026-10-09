@@ -17,6 +17,7 @@ DECL_HANDLER(init_thread);
 DECL_HANDLER(terminate_process);
 DECL_HANDLER(terminate_thread);
 DECL_HANDLER(get_process_info);
+DECL_HANDLER(get_process_owner);
 DECL_HANDLER(init_process_ui_context);
 DECL_HANDLER(get_process_ui_context);
 DECL_HANDLER(get_process_debug_info);
@@ -484,6 +485,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_terminate_process,
     (req_handler)req_terminate_thread,
     (req_handler)req_get_process_info,
+    (req_handler)req_get_process_owner,
     (req_handler)req_init_process_ui_context,
     (req_handler)req_get_process_ui_context,
     (req_handler)req_get_process_debug_info,
@@ -1087,6 +1089,10 @@ C_ASSERT( offsetof(struct get_process_info_reply, disable_boost) == 58 );
 C_ASSERT( offsetof(struct get_process_info_reply, handle_checking_mode) == 59 );
 C_ASSERT( offsetof(struct get_process_info_reply, machine) == 60 );
 C_ASSERT( sizeof(struct get_process_info_reply) == 64 );
+C_ASSERT( offsetof(struct get_process_owner_request, handle) == 12 );
+C_ASSERT( sizeof(struct get_process_owner_request) == 16 );
+C_ASSERT( offsetof(struct get_process_owner_reply, owner) == 8 );
+C_ASSERT( sizeof(struct get_process_owner_reply) == 16 );
 C_ASSERT( sizeof(struct init_process_ui_context_request) == 16 );
 C_ASSERT( offsetof(struct get_process_ui_context_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_process_ui_context_request) == 16 );
@@ -1115,14 +1121,15 @@ C_ASSERT( offsetof(struct get_process_vm_counters_reply, peak_pagefile_usage) ==
 C_ASSERT( sizeof(struct get_process_vm_counters_reply) == 56 );
 C_ASSERT( offsetof(struct set_process_info_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_process_info_request, affinity) == 16 );
-C_ASSERT( offsetof(struct set_process_info_request, priority) == 24 );
-C_ASSERT( offsetof(struct set_process_info_request, base_priority) == 28 );
-C_ASSERT( offsetof(struct set_process_info_request, disable_boost) == 32 );
-C_ASSERT( offsetof(struct set_process_info_request, token) == 36 );
-C_ASSERT( offsetof(struct set_process_info_request, mask) == 40 );
-C_ASSERT( offsetof(struct set_process_info_request, handle_checking_mode) == 44 );
-C_ASSERT( offsetof(struct set_process_info_request, critical) == 48 );
-C_ASSERT( sizeof(struct set_process_info_request) == 56 );
+C_ASSERT( offsetof(struct set_process_info_request, owner) == 24 );
+C_ASSERT( offsetof(struct set_process_info_request, priority) == 32 );
+C_ASSERT( offsetof(struct set_process_info_request, base_priority) == 36 );
+C_ASSERT( offsetof(struct set_process_info_request, disable_boost) == 40 );
+C_ASSERT( offsetof(struct set_process_info_request, token) == 44 );
+C_ASSERT( offsetof(struct set_process_info_request, mask) == 48 );
+C_ASSERT( offsetof(struct set_process_info_request, handle_checking_mode) == 52 );
+C_ASSERT( offsetof(struct set_process_info_request, critical) == 56 );
+C_ASSERT( sizeof(struct set_process_info_request) == 64 );
 C_ASSERT( offsetof(struct get_thread_info_request, handle) == 12 );
 C_ASSERT( offsetof(struct get_thread_info_request, access) == 16 );
 C_ASSERT( sizeof(struct get_thread_info_request) == 24 );

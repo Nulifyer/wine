@@ -54,6 +54,7 @@ struct console
     struct object                obj;           /* object header */
     struct object               *sync;          /* sync object for wait/signal */
     struct thread               *renderer;      /* console renderer thread */
+    process_id_t                 host_id;       /* host identity before renderer startup */
     struct screen_buffer        *active;        /* active screen buffer */
     struct console_server       *server;        /* console server object */
     unsigned int                 last_id;       /* id of last created console buffer */
@@ -406,6 +407,7 @@ static struct object *create_console(void)
     if (!(console = alloc_object( &console_ops ))) return NULL;
     console->sync          = NULL;
     console->renderer      = NULL;
+    console->host_id       = 0;
     console->active        = NULL;
     console->server        = NULL;
     console->fd            = NULL;
@@ -651,6 +653,21 @@ static void console_destroy( struct object *obj )
         release_object( console->fd );
 }
 
+static int update_console_owner( struct process *process, void *user )
+{
+    struct console *console = user;
+
+    if (process->console == console && console->host_id)
+        process->owner = (client_ptr_t)console->host_id | 1;
+    return 0;
+}
+
+static void attach_process_console( struct process *process, struct console *console )
+{
+    process->console = (struct console *)grab_object( console );
+    update_console_owner( process, console );
+}
+
 static struct object *create_console_connection( struct console *console )
 {
     struct console_connection *connection;
@@ -668,8 +685,7 @@ static struct object *create_console_connection( struct console *console )
         return NULL;
     }
 
-    if (console)
-        current->process->console = (struct console *)grab_object( console );
+    if (console) attach_process_console( current->process, console );
 
     return &connection->obj;
 }
@@ -1017,7 +1033,7 @@ static void console_connection_ioctl( struct fd *fd, ioctl_code_t code, struct a
             if (!(process = get_process_from_id( pid ))) return;
 
             if (process->console)
-                current->process->console = (struct console *)grab_object( process->console );
+                attach_process_console( current->process, process->console );
             else set_error( STATUS_ACCESS_DENIED );
             release_object( process );
             return;
@@ -1034,6 +1050,35 @@ static void console_server_ioctl( struct fd *fd, ioctl_code_t code, struct async
 
     switch (code)
     {
+    case IOCTL_CONDRV_BIND_HOST:
+        {
+            const struct condrv_bind_host *bind = get_req_data();
+            struct console_server *inherited;
+            struct process *process;
+
+            if (get_req_data_size() != sizeof(*bind) || get_reply_max_size())
+            {
+                set_error( STATUS_INVALID_PARAMETER );
+                return;
+            }
+            if (!server->console)
+            {
+                set_error( STATUS_INVALID_HANDLE );
+                return;
+            }
+            if (!(process = get_process_from_handle( bind->process, PROCESS_QUERY_LIMITED_INFORMATION ))) return;
+            inherited = (struct console_server *)get_handle_obj( process, bind->server, 0, &console_server_ops );
+            if (inherited)
+            {
+                if (inherited != server || (server->console->host_id && server->console->host_id != process->id))
+                    set_error( STATUS_ACCESS_DENIED );
+                else server->console->host_id = process->id;
+                release_object( inherited );
+            }
+            release_object( process );
+            return;
+        }
+
     case IOCTL_CONDRV_CTRL_EVENT:
         {
             const struct condrv_ctrl_event *event = get_req_data();
@@ -1451,7 +1496,15 @@ DECL_HANDLER(get_next_console_request)
         return;
     }
 
-    if (!server->console->renderer) server->console->renderer = current;
+    if (!server->console->renderer)
+    {
+        server->console->renderer = current;
+        if (!server->console->host_id)
+        {
+            server->console->host_id = current->process->id;
+            enum_processes( update_console_owner, server->console );
+        }
+    }
 
     if (!req->signal) reset_sync( server->console->sync );
     else signal_sync( server->console->sync );

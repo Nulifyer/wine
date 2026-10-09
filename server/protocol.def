@@ -1307,6 +1307,14 @@ typedef volatile struct
 @END
 
 
+/* Retrieve the encoded creator/console owner of a process */
+@REQ(get_process_owner)
+    obj_handle_t handle;           /* process handle */
+@REPLY
+    client_ptr_t owner;            /* encoded process owner */
+@END
+
+
 /* Mark the current process as connected to the USER subsystem */
 @REQ(init_process_ui_context)
 @END
@@ -1359,6 +1367,7 @@ typedef volatile struct
 @REQ(set_process_info)
     obj_handle_t handle;       /* process handle */
     affinity_t   affinity;     /* affinity mask */
+    client_ptr_t owner;        /* encoded process owner */
     int          priority;     /* priority class */
     int          base_priority; /* process base priority */
     int          disable_boost; /* disable process priority boost */
@@ -1376,6 +1385,7 @@ typedef volatile struct
 #define SET_PROCESS_INFO_CRITICAL      0x40
 #define SET_PROCESS_INFO_SUBSYSTEM     0x80
 #define SET_PROCESS_INFO_PRIORITY_EX   0x100
+#define SET_PROCESS_INFO_OWNER         0x200
 
 
 /* Retrieve information about a thread */
