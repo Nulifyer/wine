@@ -884,6 +884,7 @@
 @ stdcall RtlIdnToUnicode(long wstr long ptr ptr)
 @ stdcall RtlImageDirectoryEntryToData(long long long ptr)
 @ stdcall RtlImageNtHeader(long)
+@ stdcall RtlImageNtHeaderEx(long ptr int64 ptr)
 @ stdcall RtlImageRvaToSection(ptr long long)
 @ stdcall RtlImageRvaToVa(ptr long long ptr)
 @ stdcall RtlImpersonateSelf(long)

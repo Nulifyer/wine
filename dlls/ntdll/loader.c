@@ -4764,30 +4764,60 @@ NTSTATUS WINAPI LdrUnloadDll( HMODULE hModule )
     return retv;
 }
 
-/***********************************************************************
- *           RtlImageNtHeader   (NTDLL.@)
- */
-PIMAGE_NT_HEADERS WINAPI RtlImageNtHeader(HMODULE hModule)
+static LONG WINAPI image_nt_header_exception_filter( EXCEPTION_POINTERS *ep, void *flags )
 {
-    IMAGE_NT_HEADERS *ret;
+    return (ULONG_PTR)flags & 2 ? EXCEPTION_CONTINUE_SEARCH : EXCEPTION_EXECUTE_HANDLER;
+}
+
+/***********************************************************************
+ *           RtlImageNtHeaderEx   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlImageNtHeaderEx( ULONG flags, void *base, ULONGLONG size, IMAGE_NT_HEADERS **out )
+{
+    IMAGE_DOS_HEADER *dos = base;
+    IMAGE_NT_HEADERS *nt = NULL;
+    NTSTATUS status = STATUS_INVALID_IMAGE_FORMAT;
+    ULONG offset;
+
+    if (!out) return STATUS_INVALID_PARAMETER;
+    *out = NULL;
+    if ((flags & ~3) || !base || base == (void *)~(ULONG_PTR)0) return STATUS_INVALID_PARAMETER;
+    if (!(flags & RTL_IMAGE_NT_HEADER_EX_FLAG_NO_RANGE_CHECK) && size < sizeof(*dos))
+        return STATUS_INVALID_IMAGE_FORMAT;
 
     __TRY
     {
-        IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)hModule;
-
-        ret = NULL;
         if (dos->e_magic == IMAGE_DOS_SIGNATURE)
         {
-            ret = (IMAGE_NT_HEADERS *)((char *)dos + dos->e_lfanew);
-            if (ret->Signature != IMAGE_NT_SIGNATURE) ret = NULL;
+            offset = dos->e_lfanew;
+            if (offset < 0x10000000 && (ULONG_PTR)base + offset >= (ULONG_PTR)base &&
+                ((flags & RTL_IMAGE_NT_HEADER_EX_FLAG_NO_RANGE_CHECK) ||
+                 (offset < size && offset <= 0xffffffe6 &&
+                  (ULONGLONG)offset + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) < size)))
+            {
+                nt = (IMAGE_NT_HEADERS *)((char *)base + offset);
+                if (nt->Signature == IMAGE_NT_SIGNATURE) status = STATUS_SUCCESS;
+            }
         }
     }
-    __EXCEPT_PAGE_FAULT
+    __EXCEPT_CTX(image_nt_header_exception_filter, (void *)(ULONG_PTR)flags)
     {
-        return NULL;
+        return STATUS_INVALID_IMAGE_FORMAT;
     }
     __ENDTRY
-    return ret;
+    if (!status) *out = nt;
+    return status;
+}
+
+/***********************************************************************
+ *           RtlImageNtHeader   (NTDLL.@)
+ */
+PIMAGE_NT_HEADERS WINAPI RtlImageNtHeader(HMODULE module)
+{
+    IMAGE_NT_HEADERS *nt;
+
+    RtlImageNtHeaderEx( RTL_IMAGE_NT_HEADER_EX_FLAG_NO_RANGE_CHECK, module, 0, &nt );
+    return nt;
 }
 
 /***********************************************************************
