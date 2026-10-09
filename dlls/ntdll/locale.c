@@ -422,6 +422,23 @@ ULONG get_resource_lcids( LANGID *langs, ULONG size, LCID lcid )
 
 
 /**************************************************************************
+ *      RtlCleanUpTEBLangLists   (NTDLL.@)
+ */
+void WINAPI RtlCleanUpTEBLangLists( void )
+{
+    TEB *teb = NtCurrentTeb();
+
+    RtlFreeHeap( GetProcessHeap(), 0, teb->PreferredLanguages );
+    teb->PreferredLanguages = NULL;
+    /* Wine does not create the native private language cache objects. */
+    teb->MergedPrefLanguages = NULL;
+    teb->UserPrefLanguages = NULL;
+    RtlFreeHeap( GetProcessHeap(), 0, teb->ResourceRetValue );
+    teb->ResourceRetValue = NULL;
+}
+
+
+/**************************************************************************
  *      RtlGetProcessPreferredUILanguages   (NTDLL.@)
  */
 NTSTATUS WINAPI RtlGetProcessPreferredUILanguages( DWORD flags, ULONG *count, WCHAR *buffer, ULONG *size )

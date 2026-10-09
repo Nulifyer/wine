@@ -597,6 +597,7 @@
 @ stdcall RtlCheckTokenCapability(long ptr ptr)
 @ stdcall RtlCheckTokenMembership(long ptr ptr)
 @ stdcall RtlCheckTokenMembershipEx(long ptr long ptr)
+@ stdcall RtlCleanUpTEBLangLists()
 @ stdcall RtlClearAllBits(ptr)
 @ stdcall RtlClearBit(ptr long)
 @ stdcall RtlClearBits(ptr long long)
