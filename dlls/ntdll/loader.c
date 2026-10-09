@@ -3879,68 +3879,222 @@ static NTSTATUS query_dword_option( HANDLE hkey, LPCWSTR name, LONG *value )
     return status;
 }
 
-static NTSTATUS query_string_option( HANDLE hkey, LPCWSTR name, ULONG type,
-                                     void *data, ULONG in_size, ULONG *out_size )
+/* Read the complete value before applying the loader's type and output rules. */
+static NTSTATUS read_image_option_value( HANDLE key, const WCHAR *value,
+                                         KEY_VALUE_PARTIAL_INFORMATION **info, ULONG size )
 {
+    KEY_VALUE_PARTIAL_INFORMATION *stack = *info, *buffer = stack;
+    UNICODE_STRING name;
     NTSTATUS status;
-    UNICODE_STRING str;
-    ULONG size;
-    char *buffer;
-    KEY_VALUE_PARTIAL_INFORMATION *info;
-    static const int info_size = FIELD_OFFSET( KEY_VALUE_PARTIAL_INFORMATION, Data );
+    ULONG needed;
 
-    RtlInitUnicodeString( &str, name );
-
-    size = info_size + in_size;
-    if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
-    info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
-    status = NtQueryValueKey( hkey, &str, KeyValuePartialInformation, buffer, size, &size );
-    if (!status || status == STATUS_BUFFER_OVERFLOW)
+    if ((status = RtlInitUnicodeStringEx( &name, value ))) return status;
+    for (;;)
     {
-        if (out_size) *out_size = info->DataLength;
-        if (data && !status) memcpy( data, info->Data, info->DataLength );
+        status = NtQueryValueKey( key, &name, KeyValuePartialInformation, buffer, size, &needed );
+        if (status != STATUS_BUFFER_OVERFLOW && status != STATUS_BUFFER_TOO_SMALL) break;
+        if (buffer != stack) RtlFreeHeap( GetProcessHeap(), 0, buffer );
+        if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, needed ))) return STATUS_NO_MEMORY;
+        size = needed;
     }
-    RtlFreeHeap( GetProcessHeap(), 0, buffer );
+    *info = buffer;
     return status;
 }
 
+/******************************************************************
+ *              LdrQueryImageFileKeyOption  (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrQueryImageFileKeyOption( HANDLE key, const WCHAR *value, ULONG type,
+                                           void *data, ULONG size, ULONG *returned )
+{
+    ULONG stack[256], length;
+    KEY_VALUE_PARTIAL_INFORMATION *info = (void *)stack;
+    UNICODE_STRING string;
+    NTSTATUS status;
+
+    if ((status = read_image_option_value( key, value, &info, sizeof(stack) ))) goto done;
+    length = info->DataLength;
+    if (!type)
+    {
+        if (length > size)
+        {
+            status = STATUS_BUFFER_OVERFLOW;
+            goto result;
+        }
+        type = info->Type;
+        size = length;
+    }
+    switch (info->Type)
+    {
+    case REG_BINARY:
+    case REG_MULTI_SZ:
+        if (type != info->Type) status = STATUS_OBJECT_TYPE_MISMATCH;
+        else if (!data || length > size) status = STATUS_BUFFER_OVERFLOW;
+        else if (length) memcpy( data, info->Data, length );
+        break;
+    case REG_DWORD:
+    case REG_QWORD:
+        if (type != info->Type) status = STATUS_OBJECT_TYPE_MISMATCH;
+        else if (size != (info->Type == REG_DWORD ? 4 : 8) || length != size)
+            status = STATUS_INFO_LENGTH_MISMATCH;
+        else if (!data) status = STATUS_BUFFER_OVERFLOW;
+        else memcpy( data, info->Data, length );
+        break;
+    case REG_SZ:
+        if (type == REG_DWORD)
+        {
+            if (size != sizeof(ULONG)) status = STATUS_INFO_LENGTH_MISMATCH;
+            else if ((ULONG_PTR)data & (sizeof(ULONG) - 1)) status = STATUS_DATATYPE_MISALIGNMENT;
+            else
+            {
+                length = sizeof(ULONG);
+                if (!data) status = STATUS_BUFFER_OVERFLOW;
+                else
+                {
+                    string.Buffer = (WCHAR *)info->Data;
+                    string.Length = string.MaximumLength = info->DataLength;
+                    status = RtlUnicodeStringToInteger( &string, 0, data );
+                }
+            }
+        }
+        else if (length > size) status = STATUS_BUFFER_OVERFLOW;
+        else if (length) memcpy( data, info->Data, length );
+        break;
+    default:
+        status = STATUS_OBJECT_TYPE_MISMATCH;
+        break;
+    }
+result:
+    if (returned && (status >= 0 || status == STATUS_BUFFER_OVERFLOW)) *returned = length;
+done:
+    if (info != (void *)stack) RtlFreeHeap( GetProcessHeap(), 0, info );
+    return status;
+}
+
+static NTSTATUS open_image_options_root( HANDLE *key )
+{
+    UNICODE_STRING name = RTL_CONSTANT_STRING( L"\\Registry\\Machine\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options" );
+    OBJECT_ATTRIBUTES attr;
+
+    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, 0, NULL );
+    return NtOpenKey( key, KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS, &attr );
+}
+
+/* A matching full-path filter transfers the child handle to the caller. */
+static NTSTATUS filter_image_options_key( HANDLE *key, const UNICODE_STRING *image )
+{
+    ULONG stack[256], used, index, use_filter;
+    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)stack;
+    KEY_BASIC_INFORMATION *entry = (void *)stack;
+    UNICODE_STRING name = RTL_CONSTANT_STRING( L"UseFilter" ), path = *image, filter;
+    const UNICODE_STRING prefix = RTL_CONSTANT_STRING( L"\\??\\" );
+    OBJECT_ATTRIBUTES attr;
+    HANDLE child;
+    NTSTATUS status;
+
+    status = NtQueryValueKey( *key, &name, KeyValuePartialInformation, stack, sizeof(stack), &used );
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND || status == STATUS_BUFFER_TOO_SMALL ||
+        status == STATUS_BUFFER_OVERFLOW) return STATUS_SUCCESS;
+    if (status) return status;
+    if (value->Type != REG_DWORD || value->DataLength != sizeof(use_filter)) return STATUS_SUCCESS;
+    memcpy( &use_filter, value->Data, sizeof(use_filter) );
+    if (!use_filter) return STATUS_SUCCESS;
+    if (RtlPrefixUnicodeString( &prefix, &path, TRUE ))
+    {
+        path.Buffer += prefix.Length / sizeof(WCHAR);
+        path.Length -= prefix.Length;
+        path.MaximumLength = path.Length;
+    }
+    for (index = 0;; index++)
+    {
+        entry = (void *)stack;
+        status = NtEnumerateKey( *key, index, KeyBasicInformation, entry, sizeof(stack), &used );
+        if (status == STATUS_BUFFER_OVERFLOW || status == STATUS_BUFFER_TOO_SMALL)
+        {
+            if (!(entry = RtlAllocateHeap( GetProcessHeap(), 0, used ))) return STATUS_NO_MEMORY;
+            status = NtEnumerateKey( *key, index, KeyBasicInformation, entry, used, &used );
+        }
+        if (!status)
+        {
+            name.Buffer = entry->Name;
+            name.Length = name.MaximumLength = entry->NameLength;
+            InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, *key, NULL );
+            status = NtOpenKey( &child, KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS, &attr );
+        }
+        if (entry != (void *)stack) RtlFreeHeap( GetProcessHeap(), 0, entry );
+        if (status == STATUS_NO_MORE_ENTRIES) return STATUS_SUCCESS;
+        if (status) return status;
+        value = (void *)stack;
+        status = read_image_option_value( child, L"FilterFullPath", &value, sizeof(stack) );
+        if (!status && value->Type == REG_SZ && value->DataLength >= sizeof(WCHAR) &&
+            value->DataLength < 0xffff)
+        {
+            filter.Buffer = (WCHAR *)value->Data;
+            filter.Length = filter.MaximumLength = value->DataLength - sizeof(WCHAR);
+            if (RtlEqualUnicodeString( &path, &filter, TRUE ))
+            {
+                if (value != (void *)stack) RtlFreeHeap( GetProcessHeap(), 0, value );
+                NtClose( *key );
+                *key = child;
+                return STATUS_SUCCESS;
+            }
+        }
+        if (value != (void *)stack) RtlFreeHeap( GetProcessHeap(), 0, value );
+        NtClose( child );
+        if (status && status != STATUS_OBJECT_NAME_NOT_FOUND) return status;
+    }
+}
 
 /******************************************************************
- *		LdrQueryImageFileExecutionOptions  (NTDLL.@)
+ *              LdrOpenImageFileOptionsKey  (NTDLL.@)
  */
-NTSTATUS WINAPI LdrQueryImageFileExecutionOptions( const UNICODE_STRING *key, LPCWSTR value, ULONG type,
-                                                   void *data, ULONG in_size, ULONG *out_size )
+NTSTATUS WINAPI LdrOpenImageFileOptionsKey( const UNICODE_STRING *image, BOOLEAN wow64, HANDLE *key )
 {
-    static const WCHAR optionsW[] = L"\\Registry\\Machine\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\";
-    WCHAR path[MAX_PATH + ARRAY_SIZE( optionsW )];
+    UNICODE_STRING name = *image;
     OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING name_str;
-    HANDLE hkey;
+    HANDLE root, opened;
+    WCHAR *start = image->Buffer + image->Length / sizeof(WCHAR);
     NTSTATUS status;
-    ULONG len;
-    WCHAR *p;
 
-    InitializeObjectAttributes( &attr, &name_str, OBJ_CASE_INSENSITIVE, 0, NULL );
-    p = key->Buffer + key->Length / sizeof(WCHAR);
-    while (p > key->Buffer && p[-1] != '\\') p--;
-    len = key->Length - (p - key->Buffer) * sizeof(WCHAR);
-    name_str.Buffer = path;
-    name_str.Length = sizeof(optionsW) - sizeof(WCHAR) + len;
-    name_str.MaximumLength = name_str.Length;
-    memcpy( path, optionsW, sizeof(optionsW) );
-    memcpy( path + ARRAY_SIZE( optionsW ) - 1, p, len );
-    if ((status = NtOpenKey( &hkey, KEY_QUERY_VALUE, &attr ))) return status;
-
-    if (type == REG_DWORD)
-    {
-        if (out_size) *out_size = sizeof(ULONG);
-        if (in_size >= sizeof(ULONG)) status = query_dword_option( hkey, value, data );
-        else status = STATUS_BUFFER_OVERFLOW;
-    }
-    else status = query_string_option( hkey, value, type, data, in_size, out_size );
-
-    NtClose( hkey );
+    *key = NULL;
+    while (start > image->Buffer && start[-1] != '\\') start--;
+    name.Length = name.MaximumLength = image->Length - (start - image->Buffer) * sizeof(WCHAR);
+    name.Buffer = start;
+    if ((status = open_image_options_root( &root ))) return status;
+    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, root, NULL );
+    status = NtOpenKey( &opened, KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS, &attr );
+    NtClose( root );
+    if (status) return status;
+    if ((status = filter_image_options_key( &opened, image ))) NtClose( opened );
+    else *key = opened;
     return status;
+}
+
+/******************************************************************
+ *              LdrQueryImageFileExecutionOptionsEx  (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrQueryImageFileExecutionOptionsEx( const UNICODE_STRING *image, const WCHAR *value,
+                                                   ULONG type, void *data, ULONG size,
+                                                   ULONG *returned, BOOLEAN wow64 )
+{
+    HANDLE key;
+    NTSTATUS status;
+
+    if (image) status = LdrOpenImageFileOptionsKey( image, wow64, &key );
+    else status = open_image_options_root( &key );
+    if (status) return status;
+    status = LdrQueryImageFileKeyOption( key, value, type, data, size, returned );
+    NtClose( key );
+    return status;
+}
+
+/******************************************************************
+ *              LdrQueryImageFileExecutionOptions  (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrQueryImageFileExecutionOptions( const UNICODE_STRING *image, LPCWSTR value,
+                                                 ULONG type, void *data, ULONG size, ULONG *returned )
+{
+    return LdrQueryImageFileExecutionOptionsEx( image, value, type, data, size, returned, FALSE );
 }
 
 
