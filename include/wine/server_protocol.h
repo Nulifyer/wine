@@ -1357,6 +1357,21 @@ struct get_process_info_reply
 
 
 
+struct get_process_mitigation_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int policy;
+    char __pad_20[4];
+};
+struct get_process_mitigation_reply
+{
+    struct reply_header __header;
+    unsigned int flags;
+    char __pad_12[4];
+};
+
+
 struct get_process_identity_request
 {
     struct request_header __header;
@@ -1504,6 +1519,7 @@ struct set_process_info_reply
 #define SET_PROCESS_INFO_OWNER         0x200
 #define SET_PROCESS_INFO_EXTENSION_POINT 0x400
 #define SET_PROCESS_INFO_SIGNATURE       0x800
+#define SET_PROCESS_INFO_FONT_DISABLE    0x1000
 
 
 
@@ -8702,6 +8718,7 @@ enum request
     REQ_terminate_process,
     REQ_terminate_thread,
     REQ_get_process_info,
+    REQ_get_process_mitigation,
     REQ_get_process_identity,
     REQ_init_process_ui_context,
     REQ_initialize_user_session,
@@ -9175,6 +9192,7 @@ union generic_request
     struct terminate_process_request terminate_process_request;
     struct terminate_thread_request terminate_thread_request;
     struct get_process_info_request get_process_info_request;
+    struct get_process_mitigation_request get_process_mitigation_request;
     struct get_process_identity_request get_process_identity_request;
     struct init_process_ui_context_request init_process_ui_context_request;
     struct initialize_user_session_request initialize_user_session_request;
@@ -9646,6 +9664,7 @@ union generic_reply
     struct terminate_process_reply terminate_process_reply;
     struct terminate_thread_reply terminate_thread_reply;
     struct get_process_info_reply get_process_info_reply;
+    struct get_process_mitigation_reply get_process_mitigation_reply;
     struct get_process_identity_reply get_process_identity_reply;
     struct init_process_ui_context_reply init_process_ui_context_reply;
     struct initialize_user_session_reply initialize_user_session_reply;
@@ -10104,6 +10123,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1108
+#define SERVER_PROTOCOL_VERSION 1109
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

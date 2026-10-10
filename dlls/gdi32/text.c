@@ -2597,6 +2597,7 @@ static int add_font_resource( const WCHAR *str, DWORD flags, void *dv )
  */
 INT WINAPI AddFontResourceExW( const WCHAR *str, DWORD flags, void *dv )
 {
+    PROCESS_MITIGATION_POLICY_INFORMATION policy = { .Policy = ProcessFontDisablePolicy };
     WCHAR *filename = NULL;
     BOOL hidden;
     INT ret;
@@ -2605,6 +2606,10 @@ INT WINAPI AddFontResourceExW( const WCHAR *str, DWORD flags, void *dv )
 
     if ((ret = add_font_resource( str, flags, dv ))) return ret;
 
+    /* A denied WIN32U load must not reopen an unadmitted scalable-font container. */
+    if (NtQueryInformationProcess( GetCurrentProcess(), ProcessMitigationPolicy,
+                                   &policy, sizeof(policy), NULL ) || policy.FontDisablePolicy.Flags & 1)
+        return 0;
     if (!(filename = get_scalable_filename( str, &hidden ))) return 0;
     if (hidden) flags |= FR_PRIVATE | FR_NOT_ENUM;
     ret = add_font_resource( filename, flags, dv );

@@ -1309,6 +1309,14 @@ typedef volatile struct
 @END
 
 
+/* Query authoritative supported process mitigation state */
+@REQ(get_process_mitigation)
+    obj_handle_t handle;
+    unsigned int policy;
+@REPLY
+    unsigned int flags;
+@END
+
 /* Retrieve the retained identity of a process */
 @REQ(get_process_identity)
     obj_handle_t handle;           /* process handle */
@@ -1405,6 +1413,7 @@ typedef volatile struct
 #define SET_PROCESS_INFO_OWNER         0x200
 #define SET_PROCESS_INFO_EXTENSION_POINT 0x400
 #define SET_PROCESS_INFO_SIGNATURE       0x800
+#define SET_PROCESS_INFO_FONT_DISABLE    0x1000
 
 
 /* Retrieve information about a thread */

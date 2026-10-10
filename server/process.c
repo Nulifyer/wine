@@ -636,6 +636,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->handle_checking_mode = 0;
     process->extension_point_disable = 0;
     process->signature_policy = 0;
+    process->font_disable_policy = 0;
     process->native_session_owner = 0;
     process->native_session_delegate = 0;
     process->native_user_server = 0;
@@ -2061,10 +2062,42 @@ static void set_process_affinity( struct process *process, affinity_t affinity )
     }
 }
 
+/* Query supported mitigation state without growing the fixed process-info reply. */
+DECL_HANDLER(get_process_mitigation)
+{
+    struct process *process;
+
+    if (req->policy != ProcessExtensionPointDisablePolicy &&
+        req->policy != ProcessSignaturePolicy && req->policy != ProcessFontDisablePolicy)
+    {
+        set_error( STATUS_NOT_SUPPORTED );
+        return;
+    }
+    if (!(process = get_process_from_handle( req->handle, PROCESS_QUERY_LIMITED_INFORMATION ))) return;
+    switch (req->policy)
+    {
+    case ProcessExtensionPointDisablePolicy: reply->flags = process->extension_point_disable; break;
+    case ProcessSignaturePolicy: reply->flags = process->signature_policy; break;
+    case ProcessFontDisablePolicy: reply->flags = process->font_disable_policy; break;
+    }
+    release_object( process );
+}
+
 /* set information about a process */
 DECL_HANDLER(set_process_info)
 {
     struct process *process;
+
+    if (req->mask & SET_PROCESS_INFO_FONT_DISABLE)
+    {
+        if (req->mask != SET_PROCESS_INFO_FONT_DISABLE || req->handle != (obj_handle_t)-1 ||
+            (req->mitigation_flags & ~1))
+            set_error( STATUS_INVALID_PARAMETER );
+        else if (current->process->font_disable_policy && !req->mitigation_flags)
+            set_error( STATUS_ACCESS_DENIED );
+        else current->process->font_disable_policy = req->mitigation_flags;
+        return;
+    }
 
     if (req->mask & SET_PROCESS_INFO_SIGNATURE)
     {

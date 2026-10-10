@@ -1163,15 +1163,19 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
             if (size != sizeof(*policy)) return STATUS_INFO_LENGTH_MISMATCH;
             if (!policy) return STATUS_ACCESS_VIOLATION;
             if (policy->Policy != ProcessExtensionPointDisablePolicy &&
-                policy->Policy != ProcessSignaturePolicy) return STATUS_NOT_SUPPORTED;
-            SERVER_START_REQ( get_process_info )
+                policy->Policy != ProcessSignaturePolicy &&
+                policy->Policy != ProcessFontDisablePolicy) return STATUS_NOT_SUPPORTED;
+            SERVER_START_REQ( get_process_mitigation )
             {
                 req->handle = wine_server_obj_handle( handle );
+                req->policy = policy->Policy;
                 if (!(ret = wine_server_call( req )))
                 {
                     if (policy->Policy == ProcessSignaturePolicy)
-                        policy->SignaturePolicy.Flags = reply->signature_policy;
-                    else policy->ExtensionPointDisablePolicy.Flags = reply->extension_point_disable;
+                        policy->SignaturePolicy.Flags = reply->flags;
+                    else if (policy->Policy == ProcessFontDisablePolicy)
+                        policy->FontDisablePolicy.Flags = reply->flags;
+                    else policy->ExtensionPointDisablePolicy.Flags = reply->flags;
                 }
             }
             SERVER_END_REQ;
@@ -1822,8 +1826,9 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
             if (handle != GetCurrentProcess()) return STATUS_INVALID_PARAMETER;
             if (!policy) return STATUS_ACCESS_VIOLATION;
             if (policy->Policy != ProcessExtensionPointDisablePolicy &&
-                policy->Policy != ProcessSignaturePolicy) return STATUS_NOT_SUPPORTED;
-            /* Both supported policies accept only input flags zero and one. */
+                policy->Policy != ProcessSignaturePolicy &&
+                policy->Policy != ProcessFontDisablePolicy) return STATUS_NOT_SUPPORTED;
+            /* Supported partitions accept only input flags zero and one. */
             if (policy->ExtensionPointDisablePolicy.Flags & ~1) return STATUS_INVALID_PARAMETER;
             SERVER_START_REQ( set_process_info )
             {
@@ -1832,6 +1837,11 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
                 {
                     req->mask = SET_PROCESS_INFO_SIGNATURE;
                     req->mitigation_flags = policy->SignaturePolicy.Flags;
+                }
+                else if (policy->Policy == ProcessFontDisablePolicy)
+                {
+                    req->mask = SET_PROCESS_INFO_FONT_DISABLE;
+                    req->mitigation_flags = policy->FontDisablePolicy.Flags;
                 }
                 else
                 {

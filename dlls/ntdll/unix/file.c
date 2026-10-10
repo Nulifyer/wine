@@ -2155,6 +2155,53 @@ static BOOL is_ntfs_reparse_index( HANDLE handle )
     return ret;
 }
 
+/* Classify the opened file, including host symlink resolution, at the host adapter.
+ * The caller owns the Windows directory policy; no pathname alone grants access. */
+NTSTATUS ntdll_is_file_below_directory( HANDLE file, const WCHAR *directory, BOOL *below )
+{
+    struct stat opened, named, root_before, root_after;
+    char *name = NULL, *root = NULL, *canonical_name = NULL, *canonical_root = NULL;
+    NTSTATUS status;
+    int fd, needs_close;
+    size_t length;
+
+    *below = FALSE;
+    if ((status = server_get_unix_fd( file, FILE_READ_DATA, &fd, &needs_close, NULL, NULL ))) return status;
+    if (fstat( fd, &opened ) == -1) status = errno_to_status( errno );
+    if (needs_close) close( fd );
+    if (status) return status;
+    if (!S_ISREG( opened.st_mode )) return STATUS_INVALID_PARAMETER;
+    if ((status = server_get_unix_name( file, &name ))) goto done;
+    if ((status = ntdll_get_unix_file_name( directory, &root, FILE_OPEN ))) goto done;
+    if (!(canonical_name = realpath( name, NULL )) || !(canonical_root = realpath( root, NULL )) ||
+        stat( canonical_name, &named ) == -1 || stat( canonical_root, &root_before ) == -1)
+    {
+        status = errno_to_status( errno );
+        goto done;
+    }
+    if (opened.st_dev != named.st_dev || opened.st_ino != named.st_ino ||
+        !S_ISDIR( root_before.st_mode ))
+    {
+        status = STATUS_ACCESS_DENIED;
+        goto done;
+    }
+    length = strlen( canonical_root );
+    if (!strncmp( canonical_name, canonical_root, length ) && canonical_name[length] == '/')
+    {
+        /* Do not accept a directory replacement during resolution. */
+        if (stat( canonical_root, &root_after ) == -1) status = errno_to_status( errno );
+        else if (root_before.st_dev != root_after.st_dev || root_before.st_ino != root_after.st_ino)
+            status = STATUS_ACCESS_DENIED;
+        else *below = TRUE;
+    }
+done:
+    free( canonical_root );
+    free( canonical_name );
+    free( root );
+    free( name );
+    return status;
+}
+
 static NTSTATUS server_get_name_info( HANDLE handle, FILE_NAME_INFORMATION *info, LONG *name_len )
 {
     data_size_t size = 1024;

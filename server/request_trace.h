@@ -225,6 +225,17 @@ static void dump_get_process_info_reply( const struct get_process_info_reply *re
     dump_varargs_pe_image_info( ", image=", cur_size );
 }
 
+static void dump_get_process_mitigation_request( const struct get_process_mitigation_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", policy=%08x", req->policy );
+}
+
+static void dump_get_process_mitigation_reply( const struct get_process_mitigation_reply *req )
+{
+    fprintf( stderr, " flags=%08x", req->flags );
+}
+
 static void dump_get_process_identity_request( const struct get_process_identity_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -5139,6 +5150,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_terminate_process_request,
     (dump_func)dump_terminate_thread_request,
     (dump_func)dump_get_process_info_request,
+    (dump_func)dump_get_process_mitigation_request,
     (dump_func)dump_get_process_identity_request,
     (dump_func)dump_init_process_ui_context_request,
     (dump_func)dump_initialize_user_session_request,
@@ -5609,6 +5621,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_terminate_process_reply,
     (dump_func)dump_terminate_thread_reply,
     (dump_func)dump_get_process_info_reply,
+    (dump_func)dump_get_process_mitigation_reply,
     (dump_func)dump_get_process_identity_reply,
     NULL,
     NULL,
@@ -6079,6 +6092,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "terminate_process",
     "terminate_thread",
     "get_process_info",
+    "get_process_mitigation",
     "get_process_identity",
     "init_process_ui_context",
     "initialize_user_session",

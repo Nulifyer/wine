@@ -26,6 +26,7 @@
 
 #include <limits.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -80,6 +81,7 @@ struct gdi_font_face
     WCHAR        *full_name;
     WCHAR        *file;
     void         *data_ptr;
+    struct font_data *resource_data;
     SIZE_T        data_size;
     UINT          face_index;
     FONTSIGNATURE fs;
@@ -95,6 +97,33 @@ struct gdi_font_face
 };
 
 static const struct font_backend_funcs *font_funcs;
+
+struct font_resource
+{
+    struct list entry;
+    WCHAR *file;
+    HANDLE file_handle;
+    HANDLE memory_handle;
+    struct font_data *data;
+    UINT flags;
+    UINT count;
+    UINT refcount;
+};
+
+static struct list font_resources = LIST_INIT(font_resources);
+static ULONGLONG font_table_generation;
+static ULONG_PTR next_memory_font_handle = 0x10000;
+
+static struct font_data *grab_font_data( struct font_data *data )
+{
+    if (data) InterlockedIncrement( &data->refcount );
+    return data;
+}
+
+void font_data_release( struct font_data *data )
+{
+    if (data && !InterlockedDecrement( &data->refcount )) free( data );
+}
 
 static const MAT2 identity = { {0,1}, {0,0}, {0,0}, {0,1} };
 
@@ -1055,46 +1084,35 @@ static void reorder_font_list(void)
 
 static void release_face( struct gdi_font_face *face )
 {
+    struct gdi_font_face *other;
+
     if (--face->refcount) return;
+    if (face_is_in_full_name_tree( face ))
+    {
+        wine_rb_remove( &face_full_name_tree, &face->full_name_entry );
+        if (face->family)
+        {
+            LIST_FOR_EACH_ENTRY( other, &face->family->faces, struct gdi_font_face, entry )
+            {
+                if (other == face || !other->scalable ||
+                    facename_compare( other->full_name, face->full_name, -1 )) continue;
+                wine_rb_put( &face_full_name_tree, other->full_name, &other->full_name_entry );
+                break;
+            }
+        }
+    }
     if (face->family)
     {
         if (face->flags & ADDFONT_ADD_TO_CACHE) remove_face_from_cache( face );
         list_remove( &face->entry );
         release_family( face->family );
     }
-    if (face_is_in_full_name_tree( face )) wine_rb_remove( &face_full_name_tree, &face->full_name_entry );
+    font_data_release( face->resource_data );
     free( face->file );
     free( face->style_name );
     free( face->full_name );
     free( face->cached_enum_data );
     free( face );
-}
-
-static int remove_font( const WCHAR *file, DWORD flags )
-{
-    struct gdi_font_family *family, *family_next;
-    struct gdi_font_face *face, *face_next;
-    int count = 0;
-
-    pthread_mutex_lock( &font_lock );
-    WINE_RB_FOR_EACH_ENTRY_DESTRUCTOR( family, family_next, &family_name_tree, struct gdi_font_family, name_entry )
-    {
-        family->refcount++;
-        LIST_FOR_EACH_ENTRY_SAFE( face, face_next, &family->faces, struct gdi_font_face, entry )
-        {
-            if (!face->file) continue;
-            if (LOWORD(face->flags) != LOWORD(flags)) continue;
-            if (!wcsicmp( face->file, file ))
-            {
-                TRACE( "removing matching face %s refcount %d\n", debugstr_w(face->file), face->refcount );
-                release_face( face );
-                count++;
-            }
-	}
-        release_family( family );
-    }
-    pthread_mutex_unlock( &font_lock );
-    return count;
 }
 
 static inline BOOL faces_equal( const struct gdi_font_face *f1, const struct gdi_font_face *f2 )
@@ -1132,13 +1150,29 @@ static BOOL insert_face_in_family_list( struct gdi_font_face *face, struct gdi_f
     {
         if (faces_equal( face, cursor ))
         {
+            /* Private resources shadow installed faces without destroying them. */
+            if (face->resource_data && (face->flags & ADDFONT_ADD_RESOURCE) &&
+                !(face->flags & ADDFONT_ADD_TO_CACHE) &&
+                face->resource_data != cursor->resource_data)
+            {
+                list_add_before( &cursor->entry, &face->entry );
+                face->family = family;
+                family->refcount++;
+                face->refcount++;
+                if (face_is_in_full_name_tree( cursor ))
+                {
+                    wine_rb_replace( &face_full_name_tree, &cursor->full_name_entry, &face->full_name_entry );
+                    memset( &cursor->full_name_entry, 0, sizeof(cursor->full_name_entry) );
+                }
+                return TRUE;
+            }
             TRACE( "Already loaded face %s in family %s, original version %x, new version %x\n",
                    debugstr_w(face->full_name), debugstr_w(family->family_name),
                    cursor->version, face->version );
 
             if (face->file && cursor->file && !wcsicmp( face->file, cursor->file ))
             {
-                cursor->refcount++;
+                if (!(face->flags & ADDFONT_ADD_RESOURCE)) cursor->refcount++;
                 TRACE("Font %s already in list, refcount now %d\n",
                       debugstr_w(face->file), cursor->refcount);
                 return FALSE;
@@ -1183,10 +1217,11 @@ static struct gdi_font_face *create_face( struct gdi_font_family *family, const 
                                           const WCHAR *fullname, const WCHAR *file,
                                           void *data_ptr, SIZE_T data_size, UINT index, FONTSIGNATURE fs,
                                           DWORD ntmflags, DWORD weight, DWORD version, DWORD flags,
-                                          const struct bitmap_font_size *size )
+                                          const struct bitmap_font_size *size, struct font_data *resource_data )
 {
     struct gdi_font_face *face = calloc( 1, sizeof(*face) );
 
+    if (!face) return NULL;
     face->refcount   = 1;
     face->style_name = wcsdup( style );
     face->full_name  = wcsdup( fullname );
@@ -1197,6 +1232,7 @@ static struct gdi_font_face *create_face( struct gdi_font_family *family, const 
     face->version    = version;
     face->flags      = flags;
     face->data_ptr   = data_ptr;
+    face->resource_data = grab_font_data( resource_data );
     face->data_size  = data_size;
     if (file) face->file = get_nt_path( file );
     if (size) face->size = *size;
@@ -1210,7 +1246,7 @@ int add_gdi_face( const WCHAR *family_name, const WCHAR *second_name,
                   const WCHAR *style, const WCHAR *fullname, const WCHAR *file,
                   void *data_ptr, SIZE_T data_size, UINT index, FONTSIGNATURE fs,
                   DWORD ntmflags, DWORD weight, DWORD version, DWORD flags,
-                  const struct bitmap_font_size *size )
+                  const struct bitmap_font_size *size, struct font_data *resource_data )
 {
     struct gdi_font_face *face;
     struct gdi_font_family *family;
@@ -1220,7 +1256,7 @@ int add_gdi_face( const WCHAR *family_name, const WCHAR *second_name,
     else if (!(family = create_family( family_name, second_name ))) return ret;
 
     if ((face = create_face( family, style, fullname, file, data_ptr, data_size,
-                             index, fs, ntmflags, weight, version, flags, size )))
+                             index, fs, ntmflags, weight, version, flags, size, resource_data )))
     {
         if (flags & ADDFONT_ADD_TO_CACHE) add_face_to_cache( face );
         release_face( face );
@@ -1253,7 +1289,7 @@ int add_gdi_face( const WCHAR *family_name, const WCHAR *second_name,
         else if (!(family = create_family( vert_family, vert_second ))) return ret;
 
         if ((face = create_face( family, style, fullname, file, data_ptr, data_size,
-                                 index, fs, ntmflags, weight, version, flags | ADDFONT_VERTICAL_FONT, size )))
+                                 index, fs, ntmflags, weight, version, flags | ADDFONT_VERTICAL_FONT, size, resource_data )))
         {
             if (flags & ADDFONT_ADD_TO_CACHE) add_face_to_cache( face );
             release_face( face );
@@ -1300,7 +1336,7 @@ static void load_face_from_cache( HKEY hkey_family, struct gdi_font_family *fami
             if ((face = create_face( family, name, cached->full_name,
                                      cached->full_name + lstrlenW(cached->full_name) + 1,
                                      NULL, 0, cached->index, cached->fs, cached->ntmflags, cached->weight,
-                                     cached->version, cached->flags, scalable ? NULL : &cached->size )))
+                                     cached->version, cached->flags, scalable ? NULL : &cached->size, NULL )))
             {
                 if (!scalable)
                     TRACE("Adding bitmap size h %d w %d size %d x_ppem %d y_ppem %d\n",
@@ -2387,13 +2423,20 @@ static struct gdi_font *alloc_gdi_font( const WCHAR *file, void *data_ptr, SIZE_
     UINT len = file ? lstrlenW(file) : 0;
     struct gdi_font *font = calloc( 1, offsetof( struct gdi_font, file[len + 1] ));
 
+    if (!font) return NULL;
     font->refcount = 1;
     font->matrix.eM11 = font->matrix.eM22 = 1.0;
     font->scale_y = 1;
     font->kern_count = -1;
     list_init( &font->child_fonts );
 
-    if (file)
+    if (data_ptr)
+    {
+        font->data_ptr = data_ptr;
+        font->data_size = data_size;
+        if (file) memcpy( font->file, file, len * sizeof(WCHAR) );
+    }
+    else if (file)
     {
         FILE_NETWORK_OPEN_INFORMATION info;
         UNICODE_STRING nt_name;
@@ -2447,6 +2490,7 @@ static void free_gdi_font( struct gdi_font *font )
     free( font->gm );
     free( font->kern_pairs );
     free( font->gsub_table );
+    font_data_release( font->resource_data );
     free( font );
 }
 
@@ -2461,6 +2505,8 @@ static struct gdi_font *create_gdi_font( const struct gdi_font_face *face, const
     struct gdi_font *font;
 
     if (!(font = alloc_gdi_font( face->file, face->data_ptr, face->data_size ))) return NULL;
+    font->resource_data = grab_font_data( face->resource_data );
+    if (font->resource_data) font->writetime = font->resource_data->writetime;
     font->fs = face->fs;
     font->lf = *lf;
     font->fake_italic = (lf->lfItalic && !(face->ntmFlags & NTM_ITALIC));
@@ -2852,6 +2898,7 @@ static void cache_gdi_font( struct gdi_font *font )
     static DWORD cache_num = 1;
 
     font->cache_num = cache_num++;
+    font->font_table_generation = font_table_generation;
     font->hash = hash_font( &font->lf, &font->matrix, font->can_use_bitmap );
     list_add_head( &gdi_font_list, &font->entry );
     TRACE( "font %p\n", font );
@@ -2865,6 +2912,7 @@ static struct gdi_font *find_cached_gdi_font( const LOGFONTW *lf, const FMAT2 *m
     /* try the in-use list */
     LIST_FOR_EACH_ENTRY( font, &gdi_font_list, struct gdi_font, entry )
     {
+        if (font->font_table_generation != font_table_generation) continue;
         if (fontcmp( font, hash, lf, matrix, can_use_bitmap )) continue;
         list_remove( &font->entry );
         list_add_head( &gdi_font_list, &font->entry );
@@ -6430,6 +6478,167 @@ DWORD WINAPI NtGdiGetGlyphIndicesW( HDC hdc, const WCHAR *str, INT count,
  ***********************************************************************/
 
 
+static NTSTATUS query_font_policy( BOOL *disabled )
+{
+    PROCESS_MITIGATION_POLICY_INFORMATION info = { .Policy = ProcessFontDisablePolicy };
+    NTSTATUS status = NtQueryInformationProcess( GetCurrentProcess(), ProcessMitigationPolicy,
+                                                 &info, sizeof(info), NULL );
+    *disabled = !status && (info.FontDisablePolicy.Flags & 1);
+    return status;
+}
+
+BOOL font_policy_is_enabled(void)
+{
+    BOOL disabled;
+    /* A failed policy query cannot authorize new font parsing. */
+    return query_font_policy( &disabled ) || disabled;
+}
+
+static struct font_data *alloc_font_data( SIZE_T size )
+{
+    struct font_data *data;
+
+    if (!size || size > UINT_MAX || size > SIZE_MAX - offsetof(struct font_data, bytes)) return NULL;
+    if (!(data = malloc( offsetof(struct font_data, bytes) + size ))) return NULL;
+    data->refcount = 1;
+    data->size = size;
+    data->writetime.dwLowDateTime = data->writetime.dwHighDateTime = 0;
+    return data;
+}
+
+/* Snapshot the opened NT file before handing any bytes to a font parser. */
+struct font_data *font_load_file_data( const WCHAR *file, HANDLE *retained_handle )
+{
+    FILE_STANDARD_INFORMATION standard;
+    FILE_BASIC_INFORMATION before, after;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING name;
+    IO_STATUS_BLOCK io;
+    LARGE_INTEGER offset;
+    struct font_data *data = NULL;
+    WCHAR directory[MAX_PATH], *nt_path;
+    HANDLE handle;
+    BOOL disabled, below;
+    SIZE_T consumed = 0;
+
+    if (retained_handle) *retained_handle = NULL;
+    if (query_font_policy( &disabled )) return NULL;
+    if (!(nt_path = get_nt_path( file ))) return NULL;
+    if (wcslen(nt_path) > USHRT_MAX / sizeof(WCHAR)) goto done;
+    name.Buffer = nt_path;
+    name.Length = name.MaximumLength = wcslen(nt_path) * sizeof(WCHAR);
+    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+    if (NtOpenFile( &handle, FILE_GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ,
+                    FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT )) goto done;
+    if (disabled)
+    {
+        get_fonts_win_dir_path( NULL, directory );
+        if (ntdll_is_file_below_directory( handle, directory, &below ) || !below) goto close;
+    }
+    if (NtQueryInformationFile( handle, &io, &standard, sizeof(standard), FileStandardInformation ) ||
+        standard.EndOfFile.QuadPart <= 0 || standard.EndOfFile.QuadPart > UINT_MAX ||
+        NtQueryInformationFile( handle, &io, &before, sizeof(before), FileBasicInformation )) goto close;
+    if (!(data = alloc_font_data( standard.EndOfFile.QuadPart ))) goto close;
+    while (consumed < data->size)
+    {
+        offset.QuadPart = consumed;
+        if (NtReadFile( handle, NULL, NULL, NULL, &io, data->bytes + consumed,
+                        data->size - consumed, &offset, NULL ) || !io.Information ||
+            io.Information > data->size - consumed) goto failed;
+        consumed += io.Information;
+    }
+    if (NtQueryInformationFile( handle, &io, &after, sizeof(after), FileBasicInformation ) ||
+        before.LastWriteTime.QuadPart != after.LastWriteTime.QuadPart ||
+        before.ChangeTime.QuadPart != after.ChangeTime.QuadPart ||
+        NtQueryInformationFile( handle, &io, &standard, sizeof(standard), FileStandardInformation ) ||
+        standard.EndOfFile.QuadPart != data->size) goto failed;
+    data->writetime.dwLowDateTime = before.LastWriteTime.LowPart;
+    data->writetime.dwHighDateTime = before.LastWriteTime.HighPart;
+    if (retained_handle)
+    {
+        *retained_handle = handle;
+        goto done;
+    }
+    goto close;
+failed:
+    font_data_release( data );
+    data = NULL;
+close:
+    NtClose( handle );
+done:
+    free( nt_path );
+    return data;
+}
+
+static void destroy_font_resource( struct font_resource *resource )
+{
+    struct gdi_font_family *family, *next_family;
+    struct gdi_font_face *face, *next_face;
+
+    /* Registration ends, but active or cached realized fonts retain their bytes. */
+    WINE_RB_FOR_EACH_ENTRY_DESTRUCTOR( family, next_family, &family_name_tree, struct gdi_font_family, name_entry )
+    {
+        family->refcount++;
+        LIST_FOR_EACH_ENTRY_SAFE( face, next_face, &family->faces, struct gdi_font_face, entry )
+            if (face->resource_data == resource->data) release_face( face );
+        release_family( family );
+    }
+    list_remove( &resource->entry );
+    font_table_generation++;
+    if (resource->file_handle) NtClose( resource->file_handle );
+    font_data_release( resource->data );
+    free( resource->file );
+    free( resource );
+}
+
+static int add_file_resource( const WCHAR *file, DWORD flags )
+{
+    struct font_resource *resource;
+    DWORD backend_flags = ADDFONT_ALLOW_BITMAP | ADDFONT_ADD_RESOURCE;
+
+    LIST_FOR_EACH_ENTRY( resource, &font_resources, struct font_resource, entry )
+    {
+        if (!resource->file || resource->flags != flags || wcsicmp( resource->file, file )) continue;
+        if (resource->refcount == UINT_MAX) return 0;
+        resource->refcount++;
+        return resource->count;
+    }
+    if (!(resource = calloc( 1, sizeof(*resource) ))) return 0;
+    if (!(resource->file = wcsdup( file ))) goto failed;
+    if (!(resource->data = font_load_file_data( file, &resource->file_handle ))) goto failed;
+    if (!(flags & FR_PRIVATE)) backend_flags |= ADDFONT_ADD_TO_CACHE;
+    resource->count = font_funcs->add_mem_font( file, resource->data, backend_flags );
+    if (!resource->count) goto failed;
+    resource->flags = flags;
+    resource->refcount = 1;
+    list_add_tail( &font_resources, &resource->entry );
+    font_table_generation++;
+    return resource->count;
+failed:
+    if (resource->file_handle) NtClose( resource->file_handle );
+    font_data_release( resource->data );
+    free( resource->file );
+    free( resource );
+    return 0;
+}
+
+static BOOL remove_file_resource( const WCHAR *file, DWORD flags )
+{
+    struct font_resource *resource;
+    BOOL ret = FALSE;
+
+    pthread_mutex_lock( &font_lock );
+    LIST_FOR_EACH_ENTRY( resource, &font_resources, struct font_resource, entry )
+    {
+        if (!resource->file || resource->flags != flags || wcsicmp( resource->file, file )) continue;
+        if (!--resource->refcount) destroy_font_resource( resource );
+        ret = TRUE;
+        break;
+    }
+    pthread_mutex_unlock( &font_lock );
+    return ret;
+}
+
 static int add_system_font_resource( const WCHAR *file, DWORD flags )
 {
     WCHAR path[MAX_PATH];
@@ -6451,53 +6660,45 @@ static int add_system_font_resource( const WCHAR *file, DWORD flags )
     return ret;
 }
 
-static BOOL remove_system_font_resource( LPCWSTR file, DWORD flags )
-{
-    WCHAR path[MAX_PATH];
-    int ret;
-
-    get_fonts_win_dir_path( file, path );
-    if (!(ret = remove_font( path, flags )))
-    {
-        get_fonts_data_dir_path( file, path );
-        ret = remove_font( path, flags );
-    }
-    return ret;
-}
-
 static int add_font_resource( LPCWSTR file, DWORD flags )
 {
+    WCHAR path[MAX_PATH];
     int ret = 0;
 
     if (*file == '\\')
     {
-        DWORD addfont_flags = ADDFONT_ALLOW_BITMAP | ADDFONT_ADD_RESOURCE;
-
-        if (!(flags & FR_PRIVATE)) addfont_flags |= ADDFONT_ADD_TO_CACHE;
         pthread_mutex_lock( &font_lock );
-        ret = font_funcs->add_font( file, addfont_flags );
+        ret = add_file_resource( file, flags );
         pthread_mutex_unlock( &font_lock );
     }
-    else if (!wcschr( file, '\\' ))
-        ret = add_system_font_resource( file, ADDFONT_ALLOW_BITMAP | ADDFONT_ADD_RESOURCE );
-
+    else if (!wcschr( file, '\\') && wcslen(file) + 32 < MAX_PATH)
+    {
+        get_fonts_win_dir_path( file, path );
+        ret = add_font_resource( path, flags );
+        if (!ret)
+        {
+            get_fonts_data_dir_path( file, path );
+            ret = add_font_resource( path, flags );
+        }
+    }
     return ret;
 }
 
 static BOOL remove_font_resource( LPCWSTR file, DWORD flags )
 {
+    WCHAR path[MAX_PATH];
     BOOL ret = FALSE;
 
-    if (*file == '\\')
+    if (*file == '\\') ret = remove_file_resource( file, flags );
+    else if (!wcschr( file, '\\') && wcslen(file) + 32 < MAX_PATH)
     {
-        DWORD addfont_flags = ADDFONT_ALLOW_BITMAP | ADDFONT_ADD_RESOURCE;
-
-        if (!(flags & FR_PRIVATE)) addfont_flags |= ADDFONT_ADD_TO_CACHE;
-        ret = remove_font( file, addfont_flags );
+        get_fonts_win_dir_path( file, path );
+        if (!(ret = remove_font_resource( path, flags )))
+        {
+            get_fonts_data_dir_path( file, path );
+            ret = remove_font_resource( path, flags );
+        }
     }
-    else if (!wcschr( file, '\\' ))
-        ret = remove_system_font_resource( file, ADDFONT_ALLOW_BITMAP | ADDFONT_ADD_RESOURCE );
-
     return ret;
 }
 
@@ -6843,7 +7044,7 @@ NTSTATUS WINAPI NtGdiAddInitialFonts(void)
 INT WINAPI NtGdiAddFontResourceW( const WCHAR *str, ULONG size, ULONG files, DWORD flags,
                                   DWORD tid, void *dv )
 {
-    if (!font_funcs) return 1;
+    if (!font_funcs) return font_policy_is_enabled() ? 0 : 1;
     return add_font_resource( str, flags );
 }
 
@@ -6853,46 +7054,54 @@ INT WINAPI NtGdiAddFontResourceW( const WCHAR *str, ULONG size, ULONG files, DWO
 HANDLE WINAPI NtGdiAddFontMemResourceEx( void *ptr, DWORD size, void *dv, ULONG dv_size,
                                          DWORD *count )
 {
-    HANDLE ret;
+    struct font_resource *resource;
+    HANDLE ret = NULL;
     DWORD num_fonts;
-    void *copy;
 
     if (!ptr || !size || !count)
     {
         RtlSetLastWin32Error(ERROR_INVALID_PARAMETER);
         return NULL;
     }
-    if (!font_funcs) return NULL;
-    if (!(copy = malloc( size ))) return NULL;
-    memcpy( copy, ptr, size );
-
-    pthread_mutex_lock( &font_lock );
-    num_fonts = font_funcs->add_mem_font( copy, size, ADDFONT_ALLOW_BITMAP | ADDFONT_ADD_RESOURCE );
-    pthread_mutex_unlock( &font_lock );
-
-    if (!num_fonts)
+    if (!font_funcs || font_policy_is_enabled()) return NULL;
+    if (!(resource = calloc( 1, sizeof(*resource) ))) return NULL;
+    if (!(resource->data = alloc_font_data( size )))
     {
-        free( copy );
+        free( resource );
         return NULL;
     }
-
-    /* FIXME: is the handle only for use in RemoveFontMemResourceEx or should it be a true handle?
-     * For now return something unique but quite random
-     */
-    ret = (HANDLE)((INT_PTR)copy ^ 0x87654321);
-
+    memcpy( resource->data->bytes, ptr, size );
+    pthread_mutex_lock( &font_lock );
+    if (next_memory_font_handle <= UINT_MAX - 4)
+        resource->count = font_funcs->add_mem_font( NULL, resource->data,
+                                                    ADDFONT_ALLOW_BITMAP | ADDFONT_ADD_RESOURCE );
+    if (resource->count)
+    {
+        resource->memory_handle = (HANDLE)next_memory_font_handle;
+        next_memory_font_handle += 4;
+        resource->refcount = 1;
+        list_add_tail( &font_resources, &resource->entry );
+        font_table_generation++;
+        ret = resource->memory_handle;
+    }
+    num_fonts = resource->count;
+    pthread_mutex_unlock( &font_lock );
+    if (!ret)
+    {
+        font_data_release( resource->data );
+        free( resource );
+        return NULL;
+    }
     __TRY
     {
         *count = num_fonts;
     }
     __EXCEPT
     {
-        WARN( "page fault while writing to *count (%p)\n", count );
         NtGdiRemoveFontMemResourceEx( ret );
-        ret = 0;
+        ret = NULL;
     }
     __ENDTRY
-    TRACE( "Returning handle %p\n", ret );
     return ret;
 }
 
@@ -6901,8 +7110,20 @@ HANDLE WINAPI NtGdiAddFontMemResourceEx( void *ptr, DWORD size, void *dv, ULONG 
  */
 BOOL WINAPI NtGdiRemoveFontMemResourceEx( HANDLE handle )
 {
-    FIXME( "(%p) stub\n", handle );
-    return TRUE;
+    struct font_resource *resource;
+    BOOL ret = FALSE;
+
+    if (!handle) return FALSE;
+    pthread_mutex_lock( &font_lock );
+    LIST_FOR_EACH_ENTRY( resource, &font_resources, struct font_resource, entry )
+    {
+        if (resource->file || resource->memory_handle != handle) continue;
+        destroy_font_resource( resource );
+        ret = TRUE;
+        break;
+    }
+    pthread_mutex_unlock( &font_lock );
+    return ret;
 }
 
 /***********************************************************************

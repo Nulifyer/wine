@@ -1017,20 +1017,47 @@ static void unix_face_destroy( struct unix_face *This )
 }
 
 static int add_unix_face( const char *unix_name, const WCHAR *file, void *data_ptr, SIZE_T data_size,
-                          DWORD face_index, DWORD flags, DWORD *num_faces )
+                          DWORD face_index, DWORD flags, DWORD *num_faces, struct font_data *resource_data )
 {
     struct unix_face *unix_face;
+    struct font_data *snapshot = NULL;
+    WCHAR *converted = NULL;
     int ret;
 
     if (num_faces) *num_faces = 0;
 
-    if (!(unix_face = unix_face_create( unix_name, data_ptr, data_size, face_index, flags )))
+    if (unix_name && font_policy_is_enabled())
+    {
+        if (!file)
+        {
+            if (ntdll_get_dos_file_name( unix_name, &converted, FILE_OPEN )) return 0;
+            file = converted;
+        }
+        snapshot = font_load_file_data( file, NULL );
+        if (!snapshot)
+        {
+            free( converted );
+            return 0;
+        }
+        unix_name = NULL;
+        data_ptr = snapshot->bytes;
+        data_size = snapshot->size;
+        resource_data = snapshot;
+    }
+    unix_face = unix_face_create( unix_name, data_ptr, data_size, face_index, flags );
+    if (!unix_face)
+    {
+        font_data_release( snapshot );
+        free( converted );
         return 0;
+    }
 
     if (unix_face->family_name[0] == '.') /* Ignore fonts with names beginning with a dot */
     {
         TRACE("Ignoring %s since its family name begins with a dot\n", debugstr_a(unix_name));
         unix_face_destroy( unix_face );
+        font_data_release( snapshot );
+        free( converted );
         return 0;
     }
 
@@ -1038,7 +1065,7 @@ static int add_unix_face( const char *unix_name, const WCHAR *file, void *data_p
 
     ret = add_gdi_face( unix_face->family_name, unix_face->second_name, unix_face->style_name, unix_face->full_name,
                         file, data_ptr, data_size, face_index, unix_face->fs, unix_face->ntm_flags, unix_face->weight,
-                        unix_face->font_version, flags, unix_face->scalable ? NULL : &unix_face->size );
+                        unix_face->font_version, flags, unix_face->scalable ? NULL : &unix_face->size, resource_data );
 
     TRACE("fsCsb = %08x %08x/%08x %08x %08x %08x\n",
           unix_face->fs.fsCsb[0], unix_face->fs.fsCsb[1],
@@ -1047,11 +1074,13 @@ static int add_unix_face( const char *unix_name, const WCHAR *file, void *data_p
 
     if (num_faces) *num_faces = unix_face->num_faces;
     unix_face_destroy( unix_face );
+    font_data_release( snapshot );
+    free( converted );
     return ret;
 }
 
 static INT AddFontToList(const WCHAR *dos_name, const char *unix_name, void *font_data_ptr,
-                         UINT font_data_size, UINT flags)
+                         UINT font_data_size, UINT flags, struct font_data *resource_data)
 {
     DWORD face_index = 0, num_faces;
     INT ret = 0;
@@ -1064,7 +1093,7 @@ static INT AddFontToList(const WCHAR *dos_name, const char *unix_name, void *fon
         dos_name = filename;
 
     do
-        ret += add_unix_face( unix_name, dos_name, font_data_ptr, font_data_size, face_index, flags, &num_faces );
+        ret += add_unix_face( unix_name, dos_name, font_data_ptr, font_data_size, face_index, flags, &num_faces, resource_data );
     while (num_faces > ++face_index);
 
     free( filename );
@@ -1082,7 +1111,7 @@ static INT freetype_add_font( const WCHAR *file, UINT flags )
     ntdll_get_unix_file_name( file, &unixname, FILE_OPEN_IF );
     if (unixname)
     {
-        ret = AddFontToList( file, unixname, NULL, 0, flags );
+        ret = AddFontToList( file, unixname, NULL, 0, flags, NULL );
         free( unixname );
     }
     return ret;
@@ -1091,9 +1120,9 @@ static INT freetype_add_font( const WCHAR *file, UINT flags )
 /*************************************************************
  * freetype_add_mem_font
  */
-static INT freetype_add_mem_font( void *ptr, SIZE_T size, UINT flags )
+static INT freetype_add_mem_font( const WCHAR *file, struct font_data *data, UINT flags )
 {
-    return AddFontToList( NULL, NULL, ptr, size, flags );
+    return AddFontToList( file, NULL, data->bytes, data->size, flags, data );
 }
 
 #ifdef __ANDROID__
@@ -1131,7 +1160,7 @@ static BOOL ReadFontDir(const char *dirname, BOOL external_fonts)
         {
             DWORD addfont_flags = 0;
             if(external_fonts) addfont_flags |= ADDFONT_EXTERNAL_FONT;
-            AddFontToList(NULL, path, NULL, 0, addfont_flags);
+            AddFontToList(NULL, path, NULL, 0, addfont_flags, NULL);
         }
     }
     closedir(dir);
@@ -1229,7 +1258,7 @@ static void fontconfig_add_font( FcPattern *pattern, UINT flags )
         face_index = 0;
 
     ntdll_get_dos_file_name( unix_name, &dos_name, FILE_OPEN );
-    add_unix_face( unix_name, dos_name, NULL, 0, face_index, flags, NULL );
+    add_unix_face( unix_name, dos_name, NULL, 0, face_index, flags, NULL, NULL );
     free( dos_name );
 }
 
@@ -1372,7 +1401,7 @@ static void load_mac_font_callback(const void *value, void *context)
     if (path && CFStringGetFileSystemRepresentation(pathStr, path, len))
     {
         TRACE("font file %s\n", path);
-        AddFontToList(NULL, path, NULL, 0, ADDFONT_EXTERNAL_FONT);
+        AddFontToList(NULL, path, NULL, 0, ADDFONT_EXTERNAL_FONT, NULL);
     }
     free( path );
     CFRelease(pathStr);
@@ -2058,7 +2087,14 @@ static BOOL freetype_load_font( struct gdi_font *font )
     if (!(data = calloc( 1, sizeof(*data) ))) return FALSE;
     font->private = data;
 
-    if (font->file[0])
+    if (!font->data_ptr && font->file[0] && font_policy_is_enabled())
+    {
+        if (!(font->resource_data = font_load_file_data( font->file, NULL ))) return FALSE;
+        font->data_ptr = font->resource_data->bytes;
+        font->data_size = font->resource_data->size;
+        font->writetime = font->resource_data->writetime;
+    }
+    if (!font->data_ptr && font->file[0])
     {
         char *filename;
         if (!ntdll_get_unix_file_name( font->file, &filename, FILE_OPEN ))

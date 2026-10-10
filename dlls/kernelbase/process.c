@@ -1016,7 +1016,8 @@ BOOL WINAPI /* DECLSPEC_HOTPATCH */ GetProcessMitigationPolicy( HANDLE process, 
     NTSTATUS status;
 
     TRACE( "(%p, %u, %p, %Iu)\n", process, policy, buffer, length );
-    if (policy != ProcessExtensionPointDisablePolicy && policy != ProcessSignaturePolicy)
+    if (policy != ProcessExtensionPointDisablePolicy && policy != ProcessSignaturePolicy &&
+        policy != ProcessFontDisablePolicy)
         return set_ntstatus( STATUS_NOT_SUPPORTED );
     if (length != sizeof(info.ExtensionPointDisablePolicy)) return set_ntstatus( STATUS_INVALID_PARAMETER );
     info.Policy = policy;
@@ -1025,6 +1026,8 @@ BOOL WINAPI /* DECLSPEC_HOTPATCH */ GetProcessMitigationPolicy( HANDLE process, 
     {
         if (policy == ProcessSignaturePolicy)
             *(PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY *)buffer = info.SignaturePolicy;
+        else if (policy == ProcessFontDisablePolicy)
+            *(PROCESS_MITIGATION_FONT_DISABLE_POLICY *)buffer = info.FontDisablePolicy;
         else *(PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY *)buffer = info.ExtensionPointDisablePolicy;
     }
     return set_ntstatus( status );
@@ -1418,12 +1421,15 @@ BOOL WINAPI /* DECLSPEC_HOTPATCH */ SetProcessMitigationPolicy( PROCESS_MITIGATI
     PROCESS_MITIGATION_POLICY_INFORMATION info;
 
     TRACE( "(%u, %p, %Iu)\n", policy, buffer, length );
-    if (policy != ProcessExtensionPointDisablePolicy && policy != ProcessSignaturePolicy)
+    if (policy != ProcessExtensionPointDisablePolicy && policy != ProcessSignaturePolicy &&
+        policy != ProcessFontDisablePolicy)
         return set_ntstatus( STATUS_NOT_SUPPORTED );
     if (length != sizeof(info.ExtensionPointDisablePolicy)) return set_ntstatus( STATUS_INVALID_PARAMETER );
     info.Policy = policy;
     if (policy == ProcessSignaturePolicy)
         info.SignaturePolicy = *(PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY *)buffer;
+    else if (policy == ProcessFontDisablePolicy)
+        info.FontDisablePolicy = *(PROCESS_MITIGATION_FONT_DISABLE_POLICY *)buffer;
     else info.ExtensionPointDisablePolicy = *(PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY *)buffer;
     return set_ntstatus( NtSetInformationProcess( GetCurrentProcess(), ProcessMitigationPolicy, &info, sizeof(info) ));
 }

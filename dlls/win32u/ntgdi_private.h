@@ -256,6 +256,15 @@ struct bitmap_font_size
     int  internal_leading;
 };
 
+/* Resource bytes outlive registration while a face or realized font retains them. */
+struct font_data
+{
+    LONG refcount;
+    SIZE_T size;
+    FILETIME writetime;
+    BYTE bytes[1];
+};
+
 struct gdi_font
 {
     struct list            entry;
@@ -272,6 +281,7 @@ struct gdi_font
     DWORD                  handle;
     DWORD                  cache_num;
     DWORD                  hash;
+    ULONGLONG              font_table_generation;
     UINT                   charset;
     UINT                   codepage;
     FONTSIGNATURE          fs;
@@ -296,6 +306,7 @@ struct gdi_font
     void                  *gsub_table;
     void                  *vert_feature;
     void                  *data_ptr;
+    struct font_data      *resource_data;
     SIZE_T                 data_size;
     FILETIME               writetime;
     WCHAR                  file[1];
@@ -325,7 +336,7 @@ struct font_backend_funcs
     void  (*load_fonts)(void);
     BOOL  (*enum_family_fallbacks)( UINT pitch_and_family, int index, WCHAR buffer[LF_FACESIZE] );
     INT   (*add_font)( const WCHAR *file, UINT flags );
-    INT   (*add_mem_font)( void *ptr, SIZE_T size, UINT flags );
+    INT   (*add_mem_font)( const WCHAR *file, struct font_data *data, UINT flags );
 
     BOOL  (*load_font)( struct gdi_font *gdi_font );
     UINT  (*get_font_data)( struct gdi_font *gdi_font, UINT table, UINT offset, void *buf, UINT count );
@@ -347,7 +358,10 @@ extern int add_gdi_face( const WCHAR *family_name, const WCHAR *second_name,
                          const WCHAR *style, const WCHAR *fullname, const WCHAR *file,
                          void *data_ptr, SIZE_T data_size, UINT index, FONTSIGNATURE fs,
                          DWORD ntmflags, DWORD weight, DWORD version, DWORD flags,
-                         const struct bitmap_font_size *size );
+                         const struct bitmap_font_size *size, struct font_data *resource_data );
+extern BOOL font_policy_is_enabled(void);
+extern struct font_data *font_load_file_data( const WCHAR *file, HANDLE *retained_handle );
+extern void font_data_release( struct font_data *data );
 extern UINT font_init(void);
 extern const struct font_backend_funcs *init_freetype_lib(void);
 
