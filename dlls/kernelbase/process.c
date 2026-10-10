@@ -1012,8 +1012,16 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetProcessId( HANDLE process )
 BOOL WINAPI /* DECLSPEC_HOTPATCH */ GetProcessMitigationPolicy( HANDLE process, PROCESS_MITIGATION_POLICY policy,
                                                           void *buffer, SIZE_T length )
 {
-    FIXME( "(%p, %u, %p, %Iu): stub\n", process, policy, buffer, length );
-    return TRUE;
+    PROCESS_MITIGATION_POLICY_INFORMATION info;
+    NTSTATUS status;
+
+    TRACE( "(%p, %u, %p, %Iu)\n", process, policy, buffer, length );
+    if (policy != ProcessExtensionPointDisablePolicy) return set_ntstatus( STATUS_NOT_SUPPORTED );
+    if (length != sizeof(info.ExtensionPointDisablePolicy)) return set_ntstatus( STATUS_INVALID_PARAMETER );
+    info.Policy = policy;
+    status = NtQueryInformationProcess( process, ProcessMitigationPolicy, &info, sizeof(info), NULL );
+    if (!status) *(PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY *)buffer = info.ExtensionPointDisablePolicy;
+    return set_ntstatus( status );
 }
 
 
@@ -1401,8 +1409,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetProcessGroupAffinity( HANDLE process, const GRO
 BOOL WINAPI /* DECLSPEC_HOTPATCH */ SetProcessMitigationPolicy( PROCESS_MITIGATION_POLICY policy,
                                                           void *buffer, SIZE_T length )
 {
-    FIXME( "(%d, %p, %Iu): stub\n", policy, buffer, length );
-    return TRUE;
+    PROCESS_MITIGATION_POLICY_INFORMATION info;
+
+    TRACE( "(%u, %p, %Iu)\n", policy, buffer, length );
+    if (policy != ProcessExtensionPointDisablePolicy) return set_ntstatus( STATUS_NOT_SUPPORTED );
+    if (length != sizeof(info.ExtensionPointDisablePolicy)) return set_ntstatus( STATUS_INVALID_PARAMETER );
+    info.Policy = policy;
+    info.ExtensionPointDisablePolicy = *(PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY *)buffer;
+    return set_ntstatus( NtSetInformationProcess( GetCurrentProcess(), ProcessMitigationPolicy, &info, sizeof(info) ));
 }
 
 

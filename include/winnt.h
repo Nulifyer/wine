@@ -7140,6 +7140,19 @@ typedef enum _PROCESS_MITIGATION_POLICY
     MaxProcessMitigationPolicy
 } PROCESS_MITIGATION_POLICY, *PPROCESS_MITIGATION_POLICY;
 
+typedef struct _PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY
+{
+    union
+    {
+        DWORD Flags;
+        struct
+        {
+            DWORD DisableExtensionPoints : 1;
+            DWORD ReservedFlags : 31;
+        } DUMMYSTRUCTNAME;
+    } DUMMYUNIONNAME;
+} PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY, *PPROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY;
+
 typedef enum _FIRMWARE_TYPE
 {
     FirmwareTypeUnknown,

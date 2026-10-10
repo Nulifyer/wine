@@ -633,6 +633,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->d3dkmt_scheduling_class = 2;
     process->disable_boost   = 0;
     process->handle_checking_mode = 0;
+    process->extension_point_disable = 0;
     process->native_session_owner = 0;
     process->native_session_delegate = 0;
     process->native_user_server = 0;
@@ -1746,6 +1747,7 @@ DECL_HANDLER(get_process_info)
         reply->base_priority    = process->base_priority;
         reply->disable_boost    = process->disable_boost;
         reply->handle_checking_mode = process->handle_checking_mode;
+        reply->extension_point_disable = process->extension_point_disable;
         reply->affinity         = process->affinity;
         reply->peb              = process->peb;
         reply->start_time       = process->start_time;
@@ -2060,6 +2062,19 @@ static void set_process_affinity( struct process *process, affinity_t affinity )
 DECL_HANDLER(set_process_info)
 {
     struct process *process;
+
+    if (req->mask & SET_PROCESS_INFO_EXTENSION_POINT)
+    {
+        /* Validate at the shared state owner too. A client may only tighten
+         * its own policy, and may not combine this update with another one. */
+        if (req->mask != SET_PROCESS_INFO_EXTENSION_POINT || req->handle != (obj_handle_t)-1 ||
+            (req->extension_point_disable & ~1))
+            set_error( STATUS_INVALID_PARAMETER );
+        else if (current->process->extension_point_disable && !req->extension_point_disable)
+            set_error( STATUS_ACCESS_DENIED );
+        else current->process->extension_point_disable = req->extension_point_disable;
+        return;
+    }
 
     if (req->mask & SET_PROCESS_INFO_OWNER)
     {

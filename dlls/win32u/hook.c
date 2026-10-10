@@ -721,9 +721,6 @@ HWINEVENTHOOK WINAPI NtUserSetWinEventHook( DWORD event_min, DWORD event_max, HM
         return 0;
     }
 
-    /* FIXME: what if the tid or pid belongs to another process? */
-    if (tid) inst = 0; /* thread-local hook */
-
     SERVER_START_REQ( set_hook )
     {
         req->id        = WH_WINEVENT;

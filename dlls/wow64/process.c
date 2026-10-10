@@ -623,6 +623,7 @@ NTSTATUS WINAPI wow64_NtQueryInformationProcess( UINT *args )
     case ProcessExecuteFlags:  /* ULONG */
     case ProcessCookie:  /* ULONG */
     case ProcessCycleTime:  /* PROCESS_CYCLE_TIME_INFORMATION */
+    case ProcessMitigationPolicy:  /* PROCESS_MITIGATION_POLICY_INFORMATION */
         /* FIXME: check buffer alignment */
         return NtQueryInformationProcess( handle, class, ptr, len, retlen );
 
@@ -975,6 +976,7 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
     case ProcessPowerThrottlingState:   /* PROCESS_POWER_THROTTLING_STATE */
     case ProcessLeapSecondInformation:   /* PROCESS_LEAP_SECOND_INFO */
     case ProcessWineGrantAdminToken:   /* NULL */
+    case ProcessMitigationPolicy:  /* PROCESS_MITIGATION_POLICY_INFORMATION */
         return NtSetInformationProcess( handle, class, ptr, len );
 
     case ProcessExecuteFlags:   /* ULONG */

@@ -1156,6 +1156,24 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
     UNIMPLEMENTED_INFO_CLASS(ProcessLUIDDeviceMapsEnabled);
     UNIMPLEMENTED_INFO_CLASS(ProcessHandleTracing);
 
+    case ProcessMitigationPolicy:
+        {
+            PROCESS_MITIGATION_POLICY_INFORMATION *policy = info;
+
+            if (size != sizeof(*policy)) return STATUS_INFO_LENGTH_MISMATCH;
+            if (!policy) return STATUS_ACCESS_VIOLATION;
+            if (policy->Policy != ProcessExtensionPointDisablePolicy) return STATUS_NOT_SUPPORTED;
+            SERVER_START_REQ( get_process_info )
+            {
+                req->handle = wine_server_obj_handle( handle );
+                if (!(ret = wine_server_call( req )))
+                    policy->ExtensionPointDisablePolicy.Flags = reply->extension_point_disable;
+            }
+            SERVER_END_REQ;
+            /* This information class leaves ReturnLength untouched. */
+            return ret;
+        }
+
     case ProcessProtectionInformation:
         if (size != sizeof(BYTE)) return STATUS_INFO_LENGTH_MISMATCH;
         if (!info) return STATUS_ACCESS_VIOLATION;
@@ -1791,6 +1809,26 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
 
     switch (class)
     {
+    case ProcessMitigationPolicy:
+        {
+            PROCESS_MITIGATION_POLICY_INFORMATION *policy = info;
+
+            if (size != sizeof(*policy)) return STATUS_INFO_LENGTH_MISMATCH;
+            if (handle != GetCurrentProcess()) return STATUS_INVALID_PARAMETER;
+            if (!policy) return STATUS_ACCESS_VIOLATION;
+            if (policy->Policy != ProcessExtensionPointDisablePolicy) return STATUS_NOT_SUPPORTED;
+            if (policy->ExtensionPointDisablePolicy.Flags & ~1) return STATUS_INVALID_PARAMETER;
+            SERVER_START_REQ( set_process_info )
+            {
+                req->handle = wine_server_obj_handle( handle );
+                req->mask = SET_PROCESS_INFO_EXTENSION_POINT;
+                req->extension_point_disable = policy->ExtensionPointDisablePolicy.Flags;
+                ret = wine_server_call( req );
+            }
+            SERVER_END_REQ;
+            return ret;
+        }
+
     case ProcessSequenceNumber:
         return STATUS_INVALID_INFO_CLASS;
 

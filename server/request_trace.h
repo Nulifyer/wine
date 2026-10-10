@@ -220,6 +220,7 @@ static void dump_get_process_info_reply( const struct get_process_info_reply *re
     fprintf( stderr, ", disable_boost=%02x", req->disable_boost );
     fprintf( stderr, ", handle_checking_mode=%02x", req->handle_checking_mode );
     fprintf( stderr, ", machine=%04x", req->machine );
+    fprintf( stderr, ", extension_point_disable=%02x", req->extension_point_disable );
     dump_varargs_pe_image_info( ", image=", cur_size );
 }
 
@@ -314,6 +315,7 @@ static void dump_set_process_info_request( const struct set_process_info_request
     fprintf( stderr, ", mask=%d", req->mask );
     fprintf( stderr, ", handle_checking_mode=%08x", req->handle_checking_mode );
     fprintf( stderr, ", critical=%d", req->critical );
+    fprintf( stderr, ", extension_point_disable=%08x", req->extension_point_disable );
 }
 
 static void dump_get_thread_info_request( const struct get_thread_info_request *req )

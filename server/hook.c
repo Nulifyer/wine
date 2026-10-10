@@ -108,6 +108,14 @@ static struct hook_table *get_global_hooks( struct thread *thread )
 /* check if a given hook should run in the given thread */
 static int run_hook_in_thread( struct hook *hook, struct thread *thread )
 {
+    /* A global Windows hook must not enter a protected process, even if its
+     * DLL was explicitly loaded. Thread-targeted and owner-thread hooks do
+     * not use this global injection mechanism. WinEvent delivery is below. */
+    if (thread->process->extension_point_disable && !hook->thread &&
+        hook->index + WH_MINHOOK != WH_WINEVENT &&
+        hook->index + WH_MINHOOK != WH_MOUSE_LL &&
+        hook->index + WH_MINHOOK != WH_KEYBOARD_LL)
+        return 0;
     if (hook->process && hook->process != thread->process) return 0;
     if ((hook->flags & WINEVENT_SKIPOWNPROCESS) && hook->process == thread->process) return 0;
     if (hook->thread && hook->thread != thread) return 0;
@@ -212,6 +220,15 @@ static inline int run_hook_in_current_thread( struct hook *hook )
     return 1;
 }
 
+/* Mitigation redirects WinEvent hooks that do not specify both target IDs. */
+static inline int run_hook_in_context( struct hook *hook )
+{
+    if (hook->index + WH_MINHOOK == WH_WINEVENT && (!hook->process || !hook->thread) &&
+        current->process->extension_point_disable)
+        return 0;
+    return hook->flags & WINEVENT_INCONTEXT;
+}
+
 /* find the first non-deleted hook in the chain */
 static inline struct hook *get_first_valid_hook( struct hook_table *table, int index,
                                                  int event, user_handle_t win,
@@ -225,7 +242,7 @@ static inline struct hook *get_first_valid_hook( struct hook_table *table, int i
         {
             if (event >= hook->event_min && event <= hook->event_max)
             {
-                if (hook->flags & WINEVENT_INCONTEXT) return hook;
+                if (run_hook_in_context( hook )) return hook;
 
                 /* only winevent hooks may be out of context */
                 assert(hook->index + WH_MINHOOK == WH_WINEVENT);
@@ -253,7 +270,7 @@ static struct hook *get_next_hook( struct thread *thread, struct hook *hook, int
         {
             if (event >= hook->event_min && event <= hook->event_max)
             {
-                if (hook->flags & WINEVENT_INCONTEXT) return hook;
+                if (run_hook_in_context( hook )) return hook;
 
                 /* only winevent hooks may be out of context */
                 assert(hook->index + WH_MINHOOK == WH_WINEVENT);

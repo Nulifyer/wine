@@ -526,6 +526,7 @@ BOOL WINAPI ImmFreeLayout( HKL hkl )
 BOOL WINAPI ImmLoadIME( HKL hkl )
 {
     WCHAR buffer[MAX_PATH] = {0};
+    PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY policy;
     BOOL use_default_ime;
     struct ime *ime;
 
@@ -538,7 +539,12 @@ BOOL WINAPI ImmLoadIME( HKL hkl )
         return !!ime;
     }
 
-    if (!ImmGetIMEFileNameW( hkl, buffer, MAX_PATH )) use_default_ime = TRUE;
+    /* Keep the builtin input method available, but never admit a configured
+     * legacy DLL when extension points are disabled or policy cannot be read. */
+    if (!ImmGetIMEFileNameW( hkl, buffer, MAX_PATH ) ||
+        !GetProcessMitigationPolicy( GetCurrentProcess(), ProcessExtensionPointDisablePolicy, &policy, sizeof(policy) ) ||
+        policy.DisableExtensionPoints)
+        use_default_ime = TRUE;
     else if (!(ime->module = LoadLibraryW( buffer ))) use_default_ime = TRUE;
     else use_default_ime = FALSE;
 
@@ -2031,24 +2037,43 @@ UINT WINAPI ImmGetIMEFileNameA( HKL hkl, char *bufferA, UINT lengthA )
  */
 UINT WINAPI ImmGetIMEFileNameW( HKL hkl, WCHAR *buffer, UINT length )
 {
+    PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY policy;
+    TEB *teb = NtCurrentTeb();
+    DWORD error = teb->LastErrorValue, status = teb->LastStatusValue;
     WCHAR path[MAX_PATH];
     HKEY hkey = 0;
     DWORD size;
+    UINT ret = 0;
 
     TRACE( "hkl %p, buffer %p, length %u\n", hkl, buffer, length );
 
+    if (!GetProcessMitigationPolicy( GetCurrentProcess(), ProcessExtensionPointDisablePolicy,
+                                    &policy, sizeof(policy) ) || policy.DisableExtensionPoints)
+    {
+        if (buffer && length) *buffer = 0;
+        goto done;
+    }
+
     swprintf( path, ARRAY_SIZE(path), layouts_formatW, (ULONG)(ULONG_PTR)hkl );
-    if (RegOpenKeyW( HKEY_LOCAL_MACHINE, path, &hkey )) return 0;
+    if (RegOpenKeyW( HKEY_LOCAL_MACHINE, path, &hkey )) goto done;
 
     size = ARRAY_SIZE(path) * sizeof(WCHAR);
     if (RegGetValueW( hkey, NULL, L"Ime File", RRF_RT_REG_SZ, NULL, path, &size )) *path = 0;
     RegCloseKey( hkey );
 
     size = wcslen( path );
-    if (!buffer) return size;
+    if (!buffer) ret = size;
+    else
+    {
+        lstrcpynW( buffer, path, length );
+        ret = wcslen( buffer );
+    }
 
-    lstrcpynW( buffer, path, length );
-    return wcslen( buffer );
+done:
+    /* Registry and process-state lookups are internal to this query. */
+    teb->LastErrorValue = error;
+    teb->LastStatusValue = status;
+    return ret;
 }
 
 /***********************************************************************
