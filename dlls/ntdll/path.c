@@ -33,6 +33,22 @@ WINE_DEFAULT_DEBUG_CHANNEL(file);
 #define IS_SEPARATOR(ch)  ((ch) == '\\' || (ch) == '/')
 
 /***********************************************************************
+ *             RtlGetLengthWithoutTrailingPathSeperators  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlGetLengthWithoutTrailingPathSeperators( ULONG flags, const UNICODE_STRING *string,
+                                                         ULONG *length )
+{
+    ULONG count;
+
+    if (length) *length = 0;
+    if (flags || !string || !length) return STATUS_INVALID_PARAMETER;
+    count = string->Length / sizeof(WCHAR);
+    while (count && IS_SEPARATOR(string->Buffer[count - 1])) count--;
+    *length = count;
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
  *             RtlAreLongPathsEnabled   (NTDLL.@)
  */
 BOOLEAN WINAPI RtlAreLongPathsEnabled(void)

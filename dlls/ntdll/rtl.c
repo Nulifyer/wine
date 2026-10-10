@@ -42,6 +42,28 @@ WINE_DECLARE_DEBUG_CHANNEL(debugstr);
 
 
 /***********************************************************************
+ *             RtlpApplyLengthFunction  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlpApplyLengthFunction( ULONG flags, SIZE_T type, void *buffer,
+                                       PRTL_LENGTH_FUNCTION function )
+{
+    UNICODE_STRING *string = buffer;
+    ULONG length = 0;
+    NTSTATUS status;
+
+    if (flags || !string || !function ||
+        (type != sizeof(UNICODE_STRING) && type != sizeof(RTL_UNICODE_STRING_BUFFER)))
+        return STATUS_INVALID_PARAMETER;
+
+    if ((status = function( flags, string, &length )) < 0) return status;
+    if (length > 0x7fff) return STATUS_NAME_TOO_LONG;
+    string->Length = length * sizeof(WCHAR);
+    if (type == sizeof(RTL_UNICODE_STRING_BUFFER)) string->Buffer[length] = 0;
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
  *             RtlpEnsureBufferSize  (NTDLL.@)
  */
 NTSTATUS WINAPI RtlpEnsureBufferSize( ULONG flags, RTL_BUFFER *buffer, SIZE_T size )

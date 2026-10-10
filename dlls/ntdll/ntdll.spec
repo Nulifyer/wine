@@ -854,7 +854,7 @@
 @ stdcall RtlGetLastWin32Error()
 # @ stub RtlGetLengthWithoutLastFullDosOrNtPathElement
 # Yes, Microsoft really misspelled this one!
-# @ stub RtlGetLengthWithoutTrailingPathSeperators
+@ stdcall RtlGetLengthWithoutTrailingPathSeperators(long ptr ptr)
 @ stdcall RtlGetLocaleFileMappingAddress(ptr ptr ptr)
 @ stdcall RtlGetLongestNtPathLength()
 @ stdcall RtlGetNativeSystemInformation(long ptr long ptr)
@@ -1303,7 +1303,7 @@
 @ stub RtlZeroHeap
 @ stdcall RtlZeroMemory(ptr long)
 @ stdcall RtlZombifyActivationContext(ptr)
-# @ stub RtlpApplyLengthFunction
+@ stdcall RtlpApplyLengthFunction(long long ptr ptr)
 @ stdcall RtlpEnsureBufferSize(long ptr long)
 # @ stub RtlpNotOwnerCriticalSection
 @ stdcall RtlpNtCreateKey(ptr long ptr long ptr ptr)
