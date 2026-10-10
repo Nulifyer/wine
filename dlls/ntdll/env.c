@@ -144,6 +144,59 @@ NTSTATUS WINAPI RtlCreateEnvironment(BOOLEAN inherit, PWSTR* env)
 }
 
 /******************************************************************************
+ *  RtlCreateEnvironmentEx       [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlCreateEnvironmentEx( void *source, WCHAR **environment, ULONG flags )
+{
+    WCHAR *env;
+    SIZE_T size;
+    NTSTATUS status;
+
+    TRACE("(%p,%p,%#lx)\n", source, environment, flags);
+
+    if ((flags & ~7) || ((flags & 5) & ((flags & 5) - 1)) || (flags & 3) == 2)
+        return STATUS_INVALID_PARAMETER_3;
+    if ((source && (flags & 4)) || (!source && (flags & 1)))
+        return STATUS_INVALID_PARAMETER_MIX;
+
+    if (!source)
+    {
+        if ((status = RtlCreateEnvironment( !(flags & 4), &env )))
+            return status == STATUS_NO_MEMORY ? STATUS_INSUFFICIENT_RESOURCES : status;
+    }
+    else
+    {
+        if (flags & 1)
+        {
+            const char *end = source;
+            while (*end) end += strlen( end ) + 1;
+            size = (SIZE_T)(end - (const char *)source) + 1;
+            if (size > UINT_MAX / sizeof(WCHAR)) return STATUS_BUFFER_OVERFLOW;
+            size *= sizeof(WCHAR);
+        }
+        else size = get_env_length( source ) * sizeof(WCHAR);
+
+        if (!(env = RtlAllocateHeap( GetProcessHeap(), 0, size )))
+            return STATUS_INSUFFICIENT_RESOURCES;
+        if (flags & 1)
+        {
+            if (flags & 2)
+                status = RtlOemToUnicodeN( env, size, NULL, source, size / sizeof(WCHAR) );
+            else
+                status = RtlMultiByteToUnicodeN( env, size, NULL, source, size / sizeof(WCHAR) );
+            if (status)
+            {
+                RtlDestroyEnvironment( env );
+                return status;
+            }
+        }
+        else memcpy( env, source, size );
+    }
+    *environment = env;
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
  *  RtlDestroyEnvironment		[NTDLL.@]
  */
 NTSTATUS WINAPI RtlDestroyEnvironment(PWSTR env) 

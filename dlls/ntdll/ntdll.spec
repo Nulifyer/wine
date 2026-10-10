@@ -660,6 +660,7 @@
 @ stdcall RtlCreateAtomTable(long ptr)
 # @ stub RtlCreateBootStatusDataFile
 @ stdcall RtlCreateEnvironment(long ptr)
+@ stdcall RtlCreateEnvironmentEx(ptr ptr long)
 @ stdcall RtlCreateHeap(long ptr long long ptr ptr)
 @ stdcall RtlCreateHashTable(ptr long long)
 @ stdcall RtlCreateHashTableEx(ptr long long long)
