@@ -19,6 +19,7 @@
  */
 
 #include "config.h"
+#include "wine/process_protection.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -655,6 +656,7 @@ static int thread_check_access( struct object *obj, struct token *token, unsigne
     int has_debug;
 
     if (!thread->process->protection || thread->process == current->process) return 1;
+    if (wine_protection_can_access( current->process->protection, thread->process->protection )) return 1;
     has_debug = token_check_privileges( token, TRUE, &debug, 1, NULL );
     if (has_debug) allowed |= THREAD_SET_LIMITED_INFORMATION;
     if (*access == MAXIMUM_ALLOWED && !has_debug)

@@ -19,6 +19,7 @@
  */
 
 #include "config.h"
+#include "wine/process_protection.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -888,8 +889,8 @@ static unsigned int process_map_access( struct object *obj, unsigned int access 
     return access;
 }
 
-/* Admission for the reserved native profile. This is additional to the DACL;
- * SeDebugPrivilege does not bypass the protected process boundary. */
+/* Admitted caller protection removes the additional target ceiling according
+ * to the shared scalar policy. Ordinary DACL and privilege rules still apply. */
 static int process_check_access( struct object *obj, struct token *token, unsigned int *access )
 {
     struct process *process = (struct process *)obj;
@@ -897,6 +898,7 @@ static int process_check_access( struct object *obj, struct token *token, unsign
     unsigned int allowed = PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE;
 
     if (!process->protection || process == current->process) return 1;
+    if (wine_protection_can_access( current->process->protection, process->protection )) return 1;
     if (token_check_privileges( token, TRUE, &debug, 1, NULL ))
         allowed |= PROCESS_SUSPEND_RESUME | PROCESS_SET_LIMITED_INFORMATION;
     if (*access & ~allowed)

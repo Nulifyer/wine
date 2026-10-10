@@ -34,28 +34,17 @@
 #include "symcrypt.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
+#include "wine/process_protection.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 WINE_DECLARE_DEBUG_CHANNEL(secdesc);
-
-static const USHORT protected_access_by_source_signer[] =
-{
-    0x000, 0x002, 0x004, 0x108, 0x110, 0x13e, 0x17e, 0x1fe, 0x000
-};
 
 /***********************************************************************
  *             RtlTestProtectedAccess  (NTDLL.@)
  */
 BOOLEAN WINAPI RtlTestProtectedAccess( UCHAR source, UCHAR target )
 {
-    unsigned int source_signer = source >> 4;
-    unsigned int target_signer = target >> 4;
-    unsigned int target_type = target & 7;
-
-    if (!target_type) return TRUE;
-    if ((source & 7) < target_type) return FALSE;
-    if (source_signer >= ARRAY_SIZE(protected_access_by_source_signer)) return FALSE;
-    return !!(protected_access_by_source_signer[source_signer] & (1u << target_signer));
+    return wine_protection_can_access( source, target );
 }
 
 /***********************************************************************
@@ -63,15 +52,7 @@ BOOLEAN WINAPI RtlTestProtectedAccess( UCHAR source, UCHAR target )
  */
 BOOLEAN WINAPI RtlValidProcessProtection( UCHAR protection )
 {
-    static const UCHAR valid[] =
-    {
-        0x00, 0x08, 0x12, 0x21, 0x31, 0x41, 0x51, 0x52, 0x61, 0x62, 0x72, 0x81
-    };
-    unsigned int i;
-
-    for (i = 0; i < ARRAY_SIZE(valid); ++i)
-        if (protection == valid[i]) return TRUE;
-    return FALSE;
+    return wine_protection_is_valid( protection );
 }
 
 /* wrappers for symcrypt */
