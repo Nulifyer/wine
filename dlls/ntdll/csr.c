@@ -387,11 +387,13 @@ static NTSTATUS call_server( struct csr_message *message, struct csr_capture *ca
                                        &message->header, NULL, &message->header, &size, NULL, NULL );
     if (reply_size) *reply_size = size;
     if (status >= 0 && (size < FIELD_OFFSET(struct csr_message, data) + length ||
-        message->header.DataLength < length + FIELD_OFFSET(struct csr_message, data) - sizeof(message->header) ||
-        message->capture != remote_capture)) status = STATUS_INVALID_PARAMETER;
+        message->header.DataLength < length + FIELD_OFFSET(struct csr_message, data) - sizeof(message->header)))
+        status = STATUS_INVALID_PARAMETER;
     if (capture)
     {
-        message->capture = capture;
+        /* CSRSRV leaves its released heap copy in this field. Translate the
+         * opaque value, but restore and validate through our original capture. */
+        message->capture = (struct csr_capture *)((ULONG_PTR)message->capture - delta);
         if (capture->count != count || capture->length != capture_length) status = STATUS_INVALID_PARAMETER;
         capture->count = count;
         capture->length = capture_length;
