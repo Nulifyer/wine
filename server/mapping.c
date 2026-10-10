@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -129,6 +130,7 @@ struct mapping
     mem_size_t           size;       /* mapping size */
     unsigned int         flags;      /* SEC_* flags */
     struct fd           *fd;         /* fd for mapped file */
+    struct fd           *image_fd;   /* immutable native image bytes; fd retains identity/sharing */
     struct pe_image_info image;      /* image info (for PE image mapping) */
     struct ranges       *committed;  /* list of committed ranges in this mapping */
     struct shared_map   *shared;     /* temp file for shared PE mapping */
@@ -355,6 +357,68 @@ static int create_temp_file( file_pos_t size )
 
     if (temp_dir_fd != server_dir_fd) fchdir( server_dir_fd );
     return fd;
+}
+
+/* Native-machine trust must be checked against the bytes clients will map.
+ * Keep the source fd for Windows identity/sharing; return immutable content
+ * separately. A mutable source can race this copy, so publisher admission must
+ * authenticate the sealed result. Never fall back to a mutable backing. */
+static int create_image_snapshot( int source, file_pos_t size )
+{
+#if defined(HAVE_MEMFD_CREATE) && defined(F_ADD_SEALS)
+    const int required = F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL;
+    unsigned int flags = MFD_CLOEXEC | MFD_ALLOW_SEALING;
+    char buffer[65536];
+    file_pos_t offset = 0;
+    int fd, seals;
+
+    if ((seals = fcntl( source, F_GET_SEALS )) != -1 && (seals & required) == required)
+    {
+        if ((fd = fcntl( source, F_DUPFD_CLOEXEC, 0 )) == -1) file_set_error();
+        return fd;
+    }
+#ifdef MFD_EXEC
+    flags |= MFD_EXEC;
+#endif
+    fd = memfd_create( "wine-native-image", flags );
+#ifdef MFD_EXEC
+    if (fd == -1 && errno == EINVAL) fd = memfd_create( "wine-native-image", flags & ~MFD_EXEC );
+#endif
+    if (fd == -1)
+    {
+        file_set_error();
+        return -1;
+    }
+    while (offset < size)
+    {
+        ssize_t count, written = 0;
+        size_t length = min( sizeof(buffer), size - offset );
+
+        do count = pread( source, buffer, length, offset ); while (count == -1 && errno == EINTR);
+        if (!count) errno = EIO;
+        if (count <= 0) goto error;
+        while (written < count)
+        {
+            ssize_t ret;
+            do ret = pwrite( fd, buffer + written, count - written, offset + written );
+            while (ret == -1 && errno == EINTR);
+            if (!ret) errno = EIO;
+            if (ret <= 0) goto error;
+            written += ret;
+        }
+        offset += count;
+    }
+    if (fchmod( fd, 0500 ) == -1 || fcntl( fd, F_ADD_SEALS, required ) == -1) goto error;
+    return fd;
+
+error:
+    file_set_error();
+    close( fd );
+    return -1;
+#else
+    set_error( STATUS_NOT_SUPPORTED );
+    return -1;
+#endif
 }
 
 /* find a memory view from its base address */
@@ -1153,6 +1217,7 @@ static bool mapping_init( struct object *obj, const void *init_data )
     mapping->size        = data->size;
     mapping->flags       = data->flags;
     mapping->fd          = NULL;
+    mapping->image_fd    = NULL;
     mapping->shared      = NULL;
     mapping->committed   = NULL;
     mapping->exp_name    = NULL;
@@ -1184,7 +1249,22 @@ static bool mapping_init( struct object *obj, const void *init_data )
         }
         if (data->flags & SEC_IMAGE)
         {
-            unsigned int err = get_image_params( mapping, st.st_size, unix_fd );
+            unsigned int err;
+
+            if (is_native_machine())
+            {
+                if (!S_ISREG(st.st_mode) || st.st_size < 0)
+                {
+                    set_error( STATUS_INVALID_FILE_FOR_SECTION );
+                    goto error;
+                }
+                if ((unix_fd = create_image_snapshot( unix_fd, st.st_size )) == -1) goto error;
+                if (!(mapping->image_fd = create_anonymous_fd( &mapping_fd_ops, unix_fd, NULL,
+                                                               FILE_SYNCHRONOUS_IO_NONALERT ))) goto error;
+                allow_fd_caching( mapping->image_fd );
+                unix_fd = get_unix_fd( mapping->image_fd );
+            }
+            err = get_image_params( mapping, st.st_size, unix_fd );
             if (!err) return true;
             set_error( err );
             goto error;
@@ -1225,6 +1305,7 @@ static bool mapping_init( struct object *obj, const void *init_data )
 
  error:
     if (mapping->fd) release_object( mapping->fd );
+    if (mapping->image_fd) release_object( mapping->image_fd );
     if (mapping->committed) release_object( mapping->committed );
     if (mapping->shared) release_object( mapping->shared );
     return false;
@@ -1320,7 +1401,7 @@ static void mapping_dump( struct object *obj, int verbose )
 static struct fd *mapping_get_fd( struct object *obj )
 {
     struct mapping *mapping = (struct mapping *)obj;
-    return (struct fd *)grab_object( mapping->fd );
+    return (struct fd *)grab_object( mapping->image_fd ? mapping->image_fd : mapping->fd );
 }
 
 static void mapping_destroy( struct object *obj )
@@ -1328,6 +1409,7 @@ static void mapping_destroy( struct object *obj )
     struct mapping *mapping = (struct mapping *)obj;
     assert( obj->ops == &mapping_ops );
     if (mapping->fd) release_object( mapping->fd );
+    if (mapping->image_fd) release_object( mapping->image_fd );
     if (mapping->committed) release_object( mapping->committed );
     if (mapping->shared) release_object( mapping->shared );
     free( mapping->exp_name );
