@@ -126,6 +126,8 @@ const char **system_dll_paths = NULL;
 const char *user_name = NULL;
 void *main_module = NULL;
 SECTION_IMAGE_INFORMATION main_image_info = { NULL };
+void *main_image_manifest;
+ULONG main_image_manifest_size;
 
 /* die on a fatal error; use only during initialization */
 static void fatal_error( const char *err, ... )

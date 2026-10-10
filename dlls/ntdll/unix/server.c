@@ -1763,6 +1763,13 @@ void server_init_process_done(void)
     {
         req->teb = wine_server_client_ptr( teb64 ? (void *)teb64 : (void *)data->teb );
         req->peb = teb64 ? teb64->Peb : wine_server_client_ptr( peb );
+        req->parameters = teb64 ? ((PEB64 *)wine_server_get_ptr( teb64->Peb ))->ProcessParameters :
+                                  wine_server_client_ptr( peb->ProcessParameters );
+        req->wow_peb = wow_peb ? wine_server_client_ptr( wow_peb ) : 0;
+        req->wow_parameters = wow_peb ? wow_peb->ProcessParameters : 0;
+        req->manifest = wine_server_client_ptr( main_image_manifest );
+        req->manifest_size = main_image_manifest_size;
+        req->parameter_flags = peb->ProcessParameters->Flags;
         status = wine_server_call( req );
         data->suspend = reply->suspend;
     }

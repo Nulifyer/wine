@@ -425,12 +425,15 @@ NTSTATUS WINAPI wow64_NtCreateUserProcess( UINT *args )
 
     struct object_attr64 process_attr, thread_attr;
     RTL_USER_PROCESS_PARAMETERS *params;
-    PS_CREATE_INFO info;
+    PS_CREATE_INFO info = { .Size = sizeof(info) };
     PS_ATTRIBUTE_LIST *attr;
     HANDLE process_handle = 0, thread_handle = 0;
 
     NTSTATUS status;
 
+    info.State = info32->State;
+    info.InitState.InitFlags = info32->InitState.InitFlags;
+    info.InitState.AdditionalFileAccess = info32->InitState.AdditionalFileAccess;
     *process_handle_ptr = *thread_handle_ptr = 0;
     status = NtCreateUserProcess( &process_handle, &thread_handle, process_access, thread_access,
                                   objattr_32to64( &process_attr, process_attr32 ),

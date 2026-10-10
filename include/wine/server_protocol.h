@@ -250,6 +250,7 @@ struct startup_info_data
     data_size_t  desktop_len;
     data_size_t  shellinfo_len;
     data_size_t  runtime_len;
+    unsigned int create_flags;
 
 
 
@@ -895,6 +896,8 @@ struct pe_image_info
     unsigned int   checksum;
     unsigned int   dbg_offset;
     unsigned int   dbg_size;
+    unsigned int   manifest_rva;
+    unsigned int   manifest_size;
 };
 #define IMAGE_FLAGS_ComPlusNativeReady        0x01
 #define IMAGE_FLAGS_ComPlusILOnly             0x02
@@ -1196,6 +1199,15 @@ struct get_new_process_info_reply
     struct reply_header __header;
     int          success;
     int          exit_code;
+    client_ptr_t peb;
+    client_ptr_t parameters;
+    client_ptr_t manifest;
+    unsigned int wow_parameters;
+    unsigned int wow_peb;
+    unsigned int manifest_size;
+    unsigned int parameter_flags;
+    unsigned int output_flags;
+    char __pad_60[4];
 };
 
 
@@ -1243,6 +1255,12 @@ struct init_process_done_request
     char __pad_12[4];
     client_ptr_t teb;
     client_ptr_t peb;
+    client_ptr_t parameters;
+    client_ptr_t manifest;
+    unsigned int wow_parameters;
+    unsigned int wow_peb;
+    unsigned int manifest_size;
+    unsigned int parameter_flags;
 };
 struct init_process_done_reply
 {
@@ -10193,6 +10211,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1110
+#define SERVER_PROTOCOL_VERSION 1111
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -263,34 +263,33 @@ static NTSTATUS get_non_pe_file_info( int fd, struct pe_image_info *info )
  *           get_pe_file_info
  */
 static unsigned int get_pe_file_info( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *nt_name,
-                                      char **unix_name, HANDLE *handle, struct pe_image_info *info )
+                                      char **unix_name, HANDLE *handle, HANDLE *mapping, ACCESS_MASK additional_access,
+                                      struct pe_image_info *info )
 {
     unsigned int status;
-    HANDLE mapping;
 
-    *handle = 0;
+    *handle = *mapping = 0;
     memset( info, 0, sizeof(*info) );
     if (!(status = get_nt_and_unix_names( attr, nt_name, unix_name, FILE_OPEN, FALSE )))
     {
-        status = open_unix_file( handle, *unix_name, GENERIC_READ | SYNCHRONIZE, attr, 0,
+        status = open_unix_file( handle, *unix_name, GENERIC_READ | SYNCHRONIZE | FILE_EXECUTE |
+                                 additional_access, attr, 0,
                                  FILE_SHARE_READ | FILE_SHARE_DELETE,
                                  FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0 );
     }
     if (status) goto done;
 
-    if (!(status = NtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_QUERY |
-                                    SECTION_MAP_READ | SECTION_MAP_EXECUTE,
+    if (!(status = NtCreateSection( mapping, SECTION_ALL_ACCESS,
                                     NULL, NULL, PAGE_EXECUTE_READ, SEC_IMAGE, *handle )))
     {
         SERVER_START_REQ( get_mapping_info )
         {
-            req->handle = wine_server_obj_handle( mapping );
+            req->handle = wine_server_obj_handle( *mapping );
             req->access = SECTION_QUERY;
             wine_server_set_reply( req, info, sizeof(*info) );
             status = wine_server_call( req );
         }
         SERVER_END_REQ;
-        NtClose( mapping );
         if (info->image_charact & IMAGE_FILE_DLL) return STATUS_INVALID_IMAGE_FORMAT;
     }
     else if (status == STATUS_INVALID_IMAGE_NOT_MZ || status == STATUS_INVALID_IMAGE_WIN_16)
@@ -692,20 +691,24 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
 {
     unsigned int status;
     BOOL success = FALSE;
-    HANDLE file_handle, process_info = 0, process_handle = 0, thread_handle = 0;
+    HANDLE file_handle = 0, section_handle = 0, output_file = 0;
+    HANDLE process_info = 0, process_handle = 0, thread_handle = 0;
+    ULONG create_flags = info->InitState.InitFlags;
+    ACCESS_MASK file_access = SYNCHRONIZE | FILE_EXECUTE | info->InitState.AdditionalFileAccess;
+    PS_CREATE_INFO creation = { .Size = sizeof(creation), .State = PsCreateSuccess };
     struct object_attributes *objattr;
     data_size_t attr_len;
     char *winedebug = NULL;
     char *unix_name = NULL;
     struct startup_info_data *startup_info = NULL;
     ULONG startup_info_size, env_size;
-    int unixdir, socketfd[2] = { -1, -1 };
+    int unixdir = -1, socketfd[2] = { -1, -1 };
     struct pe_image_info pe_info;
     ULONG process_id, thread_id;
     USHORT machine = 0;
     BYTE protection = 0;
     HANDLE parent = 0, debug = 0, token = 0;
-    UNICODE_STRING nt_name, path = {0};
+    UNICODE_STRING nt_name = {0}, path = {0};
     OBJECT_ATTRIBUTES attr, empty_attr = { sizeof(empty_attr) };
     SIZE_T i, attr_count = (ps_attr->TotalLength - sizeof(ps_attr->TotalLength)) / sizeof(PS_ATTRIBUTE);
     const PS_ATTRIBUTE *handles_attr = NULL, *jobs_attr = NULL;
@@ -772,7 +775,8 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
     unixdir = get_unix_curdir( params );
 
     InitializeObjectAttributes( &attr, &path, OBJ_CASE_INSENSITIVE, 0, 0 );
-    if ((status = get_pe_file_info( &attr, &nt_name, &unix_name, &file_handle, &pe_info )))
+    if ((status = get_pe_file_info( &attr, &nt_name, &unix_name, &file_handle, &section_handle,
+                                      info->InitState.AdditionalFileAccess, &pe_info )))
     {
         if (status == STATUS_INVALID_IMAGE_NOT_MZ && !fork_and_exec( &attr, unix_name, unixdir, params ))
         {
@@ -784,13 +788,17 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         }
         goto done;
     }
+    if ((create_flags & 1) && file_handle && section_handle &&
+        (status = NtDuplicateObject( NtCurrentProcess(), file_handle, NtCurrentProcess(),
+                                     &output_file, file_access, 0, 0 ))) goto done;
     if (!machine)
     {
         machine = pe_info.machine;
         if (is_arm64ec() && pe_info.is_hybrid && machine == IMAGE_FILE_MACHINE_ARM64)
             machine = main_image_info.Machine;
     }
-    if (!(startup_info = create_startup_info( attr.ObjectName, process_flags, params, &pe_info, &startup_info_size )))
+    if (!(startup_info = create_startup_info( attr.ObjectName, process_flags, create_flags, params,
+                                                &pe_info, &startup_info_size )))
         goto done;
     env_size = get_env_size( params, &winedebug );
 
@@ -910,9 +918,22 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
     SERVER_START_REQ( get_new_process_info )
     {
         req->info = wine_server_obj_handle( process_info );
-        wine_server_call( req );
-        success = reply->success;
-        status = reply->exit_code;
+        if (!(status = wine_server_call( req )))
+        {
+            success = reply->success;
+            status = reply->exit_code;
+            if (success && (create_flags & 1))
+            {
+                creation.SuccessState.OutputFlags = reply->output_flags;
+                creation.SuccessState.UserProcessParametersNative = reply->parameters;
+                creation.SuccessState.UserProcessParametersWow64 = reply->wow_parameters;
+                creation.SuccessState.CurrentParameterFlags = reply->parameter_flags;
+                creation.SuccessState.PebAddressNative = reply->peb;
+                creation.SuccessState.PebAddressWow64 = reply->wow_peb;
+                creation.SuccessState.ManifestAddress = reply->manifest;
+                creation.SuccessState.ManifestSize = reply->manifest_size;
+            }
+        }
     }
     SERVER_END_REQ;
 
@@ -955,12 +976,32 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
             break;
         }
     }
+    info->State = PsCreateSuccess;
+    if (create_flags & 1)
+    {
+        info->SuccessState.OutputFlags = creation.SuccessState.OutputFlags;
+        info->SuccessState.FileHandle = output_file;
+        info->SuccessState.SectionHandle = section_handle;
+        info->SuccessState.UserProcessParametersNative = creation.SuccessState.UserProcessParametersNative;
+        info->SuccessState.UserProcessParametersWow64 = creation.SuccessState.UserProcessParametersWow64;
+        info->SuccessState.CurrentParameterFlags = creation.SuccessState.CurrentParameterFlags;
+        info->SuccessState.PebAddressNative = creation.SuccessState.PebAddressNative;
+        info->SuccessState.PebAddressWow64 = creation.SuccessState.PebAddressWow64;
+        if (creation.SuccessState.ManifestDetected)
+        {
+            info->SuccessState.ManifestAddress = creation.SuccessState.ManifestAddress;
+            info->SuccessState.ManifestSize = creation.SuccessState.ManifestSize;
+        }
+        output_file = section_handle = 0;
+    }
     *process_handle_ptr = process_handle;
     *thread_handle_ptr = thread_handle;
     process_handle = thread_handle = 0;
     status = STATUS_SUCCESS;
 
 done:
+    if (output_file) NtClose( output_file );
+    if (section_handle) NtClose( section_handle );
     if (file_handle) NtClose( file_handle );
     if (process_info) NtClose( process_info );
     if (process_handle) NtClose( process_handle );

@@ -3869,6 +3869,11 @@ NTSTATUS virtual_map_main_module( HANDLE mapping, USHORT machine )
         status = virtual_map_image( mapping, &main_module, &size, 0, limit_high, 0,
                                     pe_mapping, machine, FALSE, 0 );
         virtual_fill_image_information( &pe_mapping->image, &main_image_info );
+        if (NT_SUCCESS(status) && pe_mapping->image.manifest_size)
+        {
+            main_image_manifest = (char *)main_module + pe_mapping->image.manifest_rva;
+            main_image_manifest_size = pe_mapping->image.manifest_size;
+        }
     }
     free_pe_mapping_info( pe_mapping );
     return status;

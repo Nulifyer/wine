@@ -77,6 +77,8 @@ extern WOW_PEB *wow_peb;
 extern ULONG_PTR user_space_wow_limit;
 extern void *main_module;
 extern SECTION_IMAGE_INFORMATION main_image_info;
+extern void *main_image_manifest;
+extern ULONG main_image_manifest_size;
 
 static inline WOW_TEB *get_wow_teb( TEB *teb )
 {
@@ -238,7 +240,7 @@ extern ULONG process_cookie;
 
 extern void init_environment(void);
 extern void init_startup_info(void);
-extern void *create_startup_info( const UNICODE_STRING *nt_image, ULONG process_flags,
+extern void *create_startup_info( const UNICODE_STRING *nt_image, ULONG process_flags, ULONG create_flags,
                                   const RTL_USER_PROCESS_PARAMETERS *params,
                                   const struct pe_image_info *pe_info, DWORD *info_size );
 extern char *get_alternate_wineloader( WORD machine );

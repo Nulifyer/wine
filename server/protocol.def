@@ -266,6 +266,7 @@ struct startup_info_data
     data_size_t  desktop_len;
     data_size_t  shellinfo_len;
     data_size_t  runtime_len;
+    unsigned int create_flags; /* PS_CREATE_INFO initialization flags */
     /* VARARG(imagepath,unicode_str,imagepath_len); */
     /* VARARG(curdir,unicode_str,curdir_len); */
     /* VARARG(dllpath,unicode_str,dllpath_len); */
@@ -911,6 +912,8 @@ struct pe_image_info
     unsigned int   checksum;
     unsigned int   dbg_offset;
     unsigned int   dbg_size;
+    unsigned int   manifest_rva;
+    unsigned int   manifest_size;
 };
 #define IMAGE_FLAGS_ComPlusNativeReady        0x01
 #define IMAGE_FLAGS_ComPlusILOnly             0x02
@@ -1199,6 +1202,14 @@ typedef volatile struct
 @REPLY
     int          success;      /* did the process start successfully? */
     int          exit_code;    /* process exit code if failed */
+    client_ptr_t peb;          /* native PEB */
+    client_ptr_t parameters;   /* native process parameters */
+    client_ptr_t manifest;     /* detected manifest in mapped main image */
+    unsigned int wow_parameters; /* WoW64 process parameters, or zero */
+    unsigned int wow_peb;      /* WoW64 PEB, or zero */
+    unsigned int manifest_size;
+    unsigned int parameter_flags;
+    unsigned int output_flags; /* server-admitted protection and manifest state */
 @END
 
 
@@ -1231,6 +1242,12 @@ typedef volatile struct
 @REQ(init_process_done)
     client_ptr_t teb;          /* TEB of new thread (in process address space) */
     client_ptr_t peb;          /* PEB of new process (in process address space) */
+    client_ptr_t parameters;   /* native process parameters */
+    client_ptr_t manifest;     /* detected manifest in mapped main image */
+    unsigned int wow_parameters; /* WoW64 process parameters, or zero */
+    unsigned int wow_peb;      /* WoW64 PEB, or zero */
+    unsigned int manifest_size;
+    unsigned int parameter_flags;
 @REPLY
     int          suspend;      /* is process suspended? */
 @END

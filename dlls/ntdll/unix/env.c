@@ -1551,7 +1551,7 @@ static void run_wineboot( WCHAR *env, SIZE_T size )
     RTL_USER_PROCESS_PARAMETERS params = { sizeof(params), sizeof(params) };
     ULONG_PTR attr_buffer[offsetof(PS_ATTRIBUTE_LIST,Attributes[2]) / sizeof(ULONG_PTR)];
     PS_ATTRIBUTE_LIST *ps_attr = (PS_ATTRIBUTE_LIST *)attr_buffer;
-    PS_CREATE_INFO create_info;
+    PS_CREATE_INFO create_info = { .Size = sizeof(create_info) };
     HANDLE process, thread, handles[2];
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
@@ -2113,6 +2113,12 @@ void init_startup_info(void)
     params->EnvironmentSize = env_pos * sizeof(WCHAR);
     memcpy( dst, env, env_pos * sizeof(WCHAR) );
     free( env );
+    if (!(info->create_flags & 2))
+    {
+        main_image_manifest = NULL;
+        main_image_manifest_size = 0;
+    }
+    if (main_image_manifest_size) params->Flags |= PROCESS_PARAMS_FLAG_MANIFEST_PRESENT;
     free( info );
 
     rebuild_argv();
@@ -2132,7 +2138,7 @@ static BOOL is_console_handle( HANDLE handle )
 /***********************************************************************
  *           create_startup_info
  */
-void *create_startup_info( const UNICODE_STRING *nt_image, ULONG process_flags,
+void *create_startup_info( const UNICODE_STRING *nt_image, ULONG process_flags, ULONG create_flags,
                            const RTL_USER_PROCESS_PARAMETERS *params,
                            const struct pe_image_info *pe_info, DWORD *info_size )
 {
@@ -2178,6 +2184,7 @@ void *create_startup_info( const UNICODE_STRING *nt_image, ULONG process_flags,
     info->flags         = params->dwFlags;
     info->show          = params->wShowWindow;
     info->process_group_id = params->ProcessGroupId;
+    info->create_flags = create_flags;
 
     ptr = info + 1;
     info->imagepath_len = append_string( &ptr, params, nt_image );

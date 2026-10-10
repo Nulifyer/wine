@@ -1443,6 +1443,29 @@ static size_t find_resource_entry( unsigned int id, IMAGE_DATA_DIRECTORY *data,
     return offset;
 }
 
+/* Bind an embedded process manifest to the retained image bytes. */
+static void load_manifest_resource( struct pe_image_info *image, IMAGE_DATA_DIRECTORY *data,
+                                    size_t align_mask, int unix_fd,
+                                    IMAGE_SECTION_HEADER *sec, unsigned int nb_sec )
+{
+    IMAGE_RESOURCE_DATA_ENTRY entry;
+    size_t offset;
+    char last;
+
+    if (!(offset = find_resource_entry( RT_MANIFEST, data, 0, align_mask, unix_fd, sec, nb_sec ))) return;
+    if (!(offset = find_resource_entry( 1, data, offset, align_mask, unix_fd, sec, nb_sec ))) return;
+    if (!(offset = find_resource_entry( 0, data, offset, align_mask, unix_fd, sec, nb_sec ))) return;
+    if (offset >= data->Size ||
+        load_data_dir( &entry, sizeof(entry), data->VirtualAddress + offset, data->Size - offset,
+                       align_mask, unix_fd, sec, nb_sec ) != sizeof(entry)) return;
+    if (!entry.Size || entry.OffsetToData >= image->map_size ||
+        entry.Size > image->map_size - entry.OffsetToData) return;
+    if (load_data_dir( &last, 1, entry.OffsetToData + entry.Size - 1, 1,
+                       align_mask, unix_fd, sec, nb_sec ) != 1) return;
+    image->manifest_rva = entry.OffsetToData;
+    image->manifest_size = entry.Size;
+}
+
 /* load the version resource */
 static int load_version_resource( void **ret_buf, IMAGE_DATA_DIRECTORY *data, size_t align_mask,
                                   int unix_fd, IMAGE_SECTION_HEADER *sec, unsigned int nb_sec,
@@ -1655,6 +1678,8 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
     mapping->image.file_size     = file_size;
     mapping->image.image_flags   = 0;
     mapping->image.loader_flags  = !!clr_dir;
+    mapping->image.manifest_rva  = 0;
+    mapping->image.manifest_size = 0;
     mapping->image.wine_builtin  = (mz_size == sizeof(mz) &&
                                     !memcmp( mz.buffer, builtin_signature, sizeof(builtin_signature) ));
     mapping->image.wine_fakedll  = (mz_size == sizeof(mz) &&
@@ -1687,6 +1712,10 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
         mapping->image.header_map_size = min( mapping->image.header_map_size, sec[i].VirtualAddress );
         if (sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) mapping->image.contains_code = 1;
     }
+
+    if (res_dir)
+        load_manifest_resource( &mapping->image, res_dir, align_mask, unix_fd,
+                                sec, nt.FileHeader.NumberOfSections );
 
     if (mapping->image.wine_builtin || mapping->image.wine_fakedll)
     {

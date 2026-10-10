@@ -1219,7 +1219,7 @@ HWND get_desktop_window(void)
         ULONG_PTR attr_buffer[offsetof(PS_ATTRIBUTE_LIST,Attributes[2]) / sizeof(ULONG_PTR)];
         SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
         PS_ATTRIBUTE_LIST *ps_attr = (PS_ATTRIBUTE_LIST *)attr_buffer;
-        PS_CREATE_INFO create_info;
+        PS_CREATE_INFO create_info = { .Size = sizeof(create_info) };
         WCHAR desktop[MAX_PATH];
         PEB *peb = RtlGetCurrentPeb();
         HANDLE process = 0, thread;

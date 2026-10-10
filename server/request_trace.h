@@ -100,6 +100,14 @@ static void dump_get_new_process_info_reply( const struct get_new_process_info_r
 {
     fprintf( stderr, " success=%d", req->success );
     fprintf( stderr, ", exit_code=%d", req->exit_code );
+    dump_uint64( ", peb=", &req->peb );
+    dump_uint64( ", parameters=", &req->parameters );
+    dump_uint64( ", manifest=", &req->manifest );
+    fprintf( stderr, ", wow_parameters=%08x", req->wow_parameters );
+    fprintf( stderr, ", wow_peb=%08x", req->wow_peb );
+    fprintf( stderr, ", manifest_size=%08x", req->manifest_size );
+    fprintf( stderr, ", parameter_flags=%08x", req->parameter_flags );
+    fprintf( stderr, ", output_flags=%08x", req->output_flags );
 }
 
 static void dump_new_thread_request( const struct new_thread_request *req )
@@ -135,6 +143,12 @@ static void dump_init_process_done_request( const struct init_process_done_reque
 {
     dump_uint64( " teb=", &req->teb );
     dump_uint64( ", peb=", &req->peb );
+    dump_uint64( ", parameters=", &req->parameters );
+    dump_uint64( ", manifest=", &req->manifest );
+    fprintf( stderr, ", wow_parameters=%08x", req->wow_parameters );
+    fprintf( stderr, ", wow_peb=%08x", req->wow_peb );
+    fprintf( stderr, ", manifest_size=%08x", req->manifest_size );
+    fprintf( stderr, ", parameter_flags=%08x", req->parameter_flags );
 }
 
 static void dump_init_process_done_reply( const struct init_process_done_reply *req )

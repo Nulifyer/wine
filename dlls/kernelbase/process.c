@@ -265,7 +265,7 @@ static NTSTATUS create_nt_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBUT
                                    BYTE protection)
 {
     OBJECT_ATTRIBUTES process_attr, thread_attr;
-    PS_CREATE_INFO create_info;
+    PS_CREATE_INFO create_info = { .Size = sizeof(create_info) };
     ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[10] ) / sizeof(ULONG_PTR)];
     PS_ATTRIBUTE_LIST *attr = (PS_ATTRIBUTE_LIST *)buffer;
     UNICODE_STRING nameW;

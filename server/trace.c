@@ -1049,10 +1049,10 @@ static void dump_varargs_startup_info( const char *prefix, data_size_t size )
     fprintf( stderr,
              "%s{debug_flags=%x,console_flags=%x,console=%04x,hstdin=%04x,hstdout=%04x,hstderr=%04x,"
              "x=%u,y=%u,xsize=%u,ysize=%u,xchars=%u,ychars=%u,attribute=%02x,flags=%x,show=%u,"
-             "process_group_id=%u",
+             "process_group_id=%u,create_flags=%x",
              prefix, info.debug_flags, info.console_flags, info.console,
              info.hstdin, info.hstdout, info.hstderr, info.x, info.y, info.xsize, info.ysize,
-             info.xchars, info.ychars, info.attribute, info.flags, info.show, info.process_group_id );
+             info.xchars, info.ychars, info.attribute, info.flags, info.show, info.process_group_id, info.create_flags );
     pos = dump_inline_unicode_string( ",imagepath=", pos, info.imagepath_len, size );
     pos = dump_inline_unicode_string( ",curdir=", pos, info.curdir_len, size );
     pos = dump_inline_unicode_string( ",dllpath=", pos, info.dllpath_len, size );
@@ -1427,11 +1427,11 @@ static void dump_varargs_pe_image_info( const char *prefix, data_size_t size )
     fprintf( stderr, ",entry_point=%08x,map_size=%08x,zerobits=%08x,subsystem=%08x,subsystem_minor=%04x,subsystem_major=%04x"
              ",osversion_major=%04x,osversion_minor=%04x,image_charact=%04x,dll_charact=%04x,machine=%04x"
              ",contains_code=%u,image_flags=%02x"
-             ",loader_flags=%08x,header_size=%08x,file_size=%08x,checksum=%08x}",
+             ",loader_flags=%08x,header_size=%08x,file_size=%08x,checksum=%08x,manifest_rva=%08x,manifest_size=%08x}",
              info.entry_point, info.map_size, info.zerobits, info.subsystem, info.subsystem_minor,
              info.subsystem_major, info.osversion_major, info.osversion_minor, info.image_charact,
              info.dll_charact, info.machine, info.contains_code, info.image_flags, info.loader_flags,
-             info.header_size, info.file_size, info.checksum );
+             info.header_size, info.file_size, info.checksum, info.manifest_rva, info.manifest_size );
     remove_data( min( size, sizeof(info) ));
 }
 

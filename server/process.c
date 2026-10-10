@@ -131,6 +131,12 @@ struct startup_info
     data_size_t                 info_size;      /* size of startup info */
     data_size_t                 data_size;      /* size of whole startup data */
     struct startup_info_data   *data;           /* data for startup info */
+    client_ptr_t                parameters;
+    client_ptr_t                wow_parameters;
+    client_ptr_t                wow_peb;
+    client_ptr_t                manifest;
+    unsigned int                manifest_size;
+    unsigned int                parameter_flags;
 };
 
 static void startup_info_dump( struct object *obj, int verbose );
@@ -1380,6 +1386,8 @@ DECL_HANDLER(new_process)
     info->sync     = NULL;
     info->process  = NULL;
     info->data     = NULL;
+    info->parameters = info->wow_parameters = info->wow_peb = info->manifest = 0;
+    info->manifest_size = info->parameter_flags = 0;
 
     if (!(info->sync = create_internal_sync( 1, 0 )))
     {
@@ -1600,6 +1608,19 @@ DECL_HANDLER(get_new_process_info)
     {
         reply->success = is_process_init_done( info->process );
         reply->exit_code = info->process->exit_code;
+        if (reply->success)
+        {
+            reply->peb = info->process->peb;
+            reply->parameters = info->parameters;
+            reply->wow_parameters = info->wow_parameters;
+            reply->wow_peb = info->wow_peb;
+            reply->manifest = info->manifest;
+            reply->manifest_size = info->manifest_size;
+            reply->parameter_flags = info->parameter_flags;
+            reply->output_flags = info->manifest_size ? 8 : 0;
+            if ((info->process->protection & 7) == 1) reply->output_flags |= 0x10;
+            if ((info->process->protection & 7) == 2) reply->output_flags |= 1;
+        }
         release_object( info );
     }
 }
@@ -1676,6 +1697,19 @@ DECL_HANDLER(init_process_done)
     }
     current->teb = req->teb;
     process->peb = req->peb;
+    if (process->startup_info)
+    {
+        struct startup_info *info = process->startup_info;
+
+        /* Keep the bootstrap snapshot on the creator's existing info object.
+         * It does not depend on query rights on the returned process handle. */
+        info->parameters = req->parameters;
+        info->wow_parameters = req->wow_parameters;
+        info->wow_peb = req->wow_peb;
+        info->manifest = req->manifest;
+        info->manifest_size = req->manifest_size;
+        info->parameter_flags = req->parameter_flags;
+    }
 
     process->start_time = current_time;
 
