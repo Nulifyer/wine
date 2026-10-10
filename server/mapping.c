@@ -46,6 +46,7 @@
 #include "process.h"
 #include "request.h"
 #include "security.h"
+#include "image_trust.h"
 
 /* list of memory ranges, used to store committed info */
 struct ranges
@@ -131,6 +132,8 @@ struct mapping
     unsigned int         flags;      /* SEC_* flags */
     struct fd           *fd;         /* fd for mapped file */
     struct fd           *image_fd;   /* immutable native image bytes; fd retains identity/sharing */
+    file_pos_t           snapshot_bytes; /* charged retained image backing */
+    unsigned int         image_class; /* authenticated bytes, independent of PE markers */
     struct pe_image_info image;      /* image info (for PE image mapping) */
     struct ranges       *committed;  /* list of committed ranges in this mapping */
     struct shared_map   *shared;     /* temp file for shared PE mapping */
@@ -358,6 +361,11 @@ static int create_temp_file( file_pos_t size )
     if (temp_dir_fd != server_dir_fd) fchdir( server_dir_fd );
     return fd;
 }
+
+/* Bound retained server copies independently of the offline catalog limits.
+ * Client mappings and swap policy remain host-account resource responsibilities. */
+#define MAX_RETAINED_IMAGE_BYTES (512ULL * 1024 * 1024)
+static file_pos_t retained_image_bytes;
 
 /* Native-machine trust must be checked against the bytes clients will map.
  * Keep the source fd for Windows identity/sharing; return immutable content
@@ -1218,6 +1226,8 @@ static bool mapping_init( struct object *obj, const void *init_data )
     mapping->flags       = data->flags;
     mapping->fd          = NULL;
     mapping->image_fd    = NULL;
+    mapping->snapshot_bytes = 0;
+    mapping->image_class = IMAGE_TRUST_UNTRUSTED;
     mapping->shared      = NULL;
     mapping->committed   = NULL;
     mapping->exp_name    = NULL;
@@ -1251,13 +1261,25 @@ static bool mapping_init( struct object *obj, const void *init_data )
         {
             unsigned int err;
 
-            if (is_native_machine())
+            if (is_native_machine() || image_trust_ready())
             {
                 if (!S_ISREG(st.st_mode) || st.st_size < 0)
                 {
                     set_error( STATUS_INVALID_FILE_FOR_SECTION );
                     goto error;
                 }
+                if ((unsigned long long)st.st_size > IMAGE_TRUST_MAX_IMAGE_BYTES)
+                {
+                    set_error( STATUS_SECTION_TOO_BIG );
+                    goto error;
+                }
+                if ((unsigned long long)st.st_size > MAX_RETAINED_IMAGE_BYTES - retained_image_bytes)
+                {
+                    set_error( STATUS_COMMITMENT_LIMIT );
+                    goto error;
+                }
+                mapping->snapshot_bytes = st.st_size;
+                retained_image_bytes += mapping->snapshot_bytes;
                 if ((unix_fd = create_image_snapshot( unix_fd, st.st_size )) == -1) goto error;
                 if (!(mapping->image_fd = create_anonymous_fd( &mapping_fd_ops, unix_fd, NULL,
                                                                FILE_SYNCHRONOUS_IO_NONALERT ))) goto error;
@@ -1265,7 +1287,14 @@ static bool mapping_init( struct object *obj, const void *init_data )
                 unix_fd = get_unix_fd( mapping->image_fd );
             }
             err = get_image_params( mapping, st.st_size, unix_fd );
-            if (!err) return true;
+            if (!err)
+            {
+                mapping->image_class = classify_image_fd( unix_fd, mapping->image.machine );
+                if (debug_level && image_trust_ready())
+                    fprintf( stderr, "image-trust: class=%u machine=%04x bytes=%llu\n",
+                             mapping->image_class, mapping->image.machine, (unsigned long long)st.st_size );
+                return true;
+            }
             set_error( err );
             goto error;
         }
@@ -1306,6 +1335,7 @@ static bool mapping_init( struct object *obj, const void *init_data )
  error:
     if (mapping->fd) release_object( mapping->fd );
     if (mapping->image_fd) release_object( mapping->image_fd );
+    retained_image_bytes -= mapping->snapshot_bytes;
     if (mapping->committed) release_object( mapping->committed );
     if (mapping->shared) release_object( mapping->shared );
     return false;
@@ -1410,6 +1440,7 @@ static void mapping_destroy( struct object *obj )
     assert( obj->ops == &mapping_ops );
     if (mapping->fd) release_object( mapping->fd );
     if (mapping->image_fd) release_object( mapping->image_fd );
+    retained_image_bytes -= mapping->snapshot_bytes;
     if (mapping->committed) release_object( mapping->committed );
     if (mapping->shared) release_object( mapping->shared );
     free( mapping->exp_name );

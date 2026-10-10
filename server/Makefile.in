@@ -22,6 +22,8 @@ SOURCES = \
 	handle.c \
 	hook.c \
 	inproc_sync.c \
+	image_trust.c \
+	image_trust.h \
 	ksec.c \
 	mach.c \
 	mailslot.c \
@@ -57,7 +59,7 @@ SOURCES = \
 	winstation.c \
 	wnf.c
 
-UNIX_CFLAGS = $(INOTIFY_CFLAGS)
+UNIX_CFLAGS = $(INOTIFY_CFLAGS) $(GNUTLS_CFLAGS)
 UNIX_LIBS   = $(LDEXECFLAGS) $(RT_LIBS) $(INOTIFY_LIBS) $(PROCSTAT_LIBS)
 
 unicode_EXTRADEFS = -DBINDIR="\"${bindir}\"" -DDATADIR="\"${datadir}\""

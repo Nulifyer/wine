@@ -22,6 +22,9 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <string.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -43,6 +46,7 @@
 #include "process.h"
 #include "request.h"
 #include "unicode.h"
+#include "image_trust.h"
 
 /* command-line options */
 int debug_level = 0;
@@ -50,6 +54,8 @@ int foreground = 0;
 timeout_t master_socket_timeout = 3 * -TICKS_PER_SEC;  /* master socket timeout, default is 3 seconds */
 const char *server_argv0;
 static int bootstrap_socket = -1, bootstrap_image = -1, bootstrap_pid;
+static int image_catalog_fd = -1;
+static char image_catalog_pin[65];
 
 static void parse_native_bootstrap( const char *arg )
 {
@@ -89,6 +95,7 @@ static void usage( FILE *fh )
     fprintf(fh, "Usage: %s [options]\n\n", server_argv0);
     fprintf(fh, "Options:\n");
     fprintf(fh, "         --native-bootstrap=SOCKET,IMAGE,PID  reserve a host-provided initial process\n");
+    fprintf(fh, "         --image-catalog=FD,SHA256  authenticate a host-pinned sealed catalog\n");
     fprintf(fh, "   -d[n], --debug[=n]       set debug level to n or +1 if n not specified\n");
     fprintf(fh, "   -f,    --foreground      remain in the foreground for debugging\n");
     fprintf(fh, "   -h,    --help            display this help message\n");
@@ -133,6 +140,20 @@ static void option_callback( int optc, char *optarg )
     case 'B':
         parse_native_bootstrap( optarg );
         break;
+    case 'C':
+        {
+            char *end;
+            long fd;
+            errno = 0;
+            fd = strtol( optarg, &end, 10 );
+            if (image_catalog_fd != -1 || errno || end == optarg || *end != ',' ||
+                fd < 3 || fd > INT_MAX || strlen( end + 1 ) != 64 ||
+                strspn( end + 1, "0123456789abcdef" ) != 64)
+                fatal_error( "invalid image catalog descriptor or digest\n" );
+            image_catalog_fd = fd;
+            memcpy( image_catalog_pin, end + 1, sizeof(image_catalog_pin) );
+        }
+        break;
     case 'v':
         fprintf( stderr, "%s\n", PACKAGE_STRING );
         exit(0);
@@ -153,6 +174,7 @@ static struct long_option
 } long_options[] =
 {
     {"native-bootstrap", 1, 'B'},
+    {"image-catalog", 1, 'C'},
     {"debug",       2, 'd'},
     {"foreground",  0, 'f'},
     {"help",        0, 'h'},
@@ -295,6 +317,13 @@ int main( int argc, char *argv[] )
     signal( SIGTERM, sigterm_handler );
     signal( SIGABRT, sigterm_handler );
     init_limits();
+    if (image_catalog_fd != -1)
+    {
+        if (image_catalog_fd == bootstrap_socket || image_catalog_fd == bootstrap_image ||
+            !init_image_trust( image_catalog_fd, image_catalog_pin ))
+            fatal_error( "image catalog authentication failed\n" );
+        close( image_catalog_fd );
+    }
 
     sock_init();
     open_master_socket();
