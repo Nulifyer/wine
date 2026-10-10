@@ -1911,7 +1911,7 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params(void)
     env[env_pos++] = 0;
 
     get_full_path( main_argv[1], curdir, &nt_name );
-    status = load_main_exe( &nt_name, 0 );
+    status = load_main_exe( &nt_name, 0, 0 );
     /* fail only if the file contained an explicit path */
     if (status == STATUS_DLL_NOT_FOUND &&
         (strpbrk( main_argv[1], "/\\" ) || (main_argv[1][0] && main_argv[1][1] == ':')))
@@ -2007,6 +2007,7 @@ void init_startup_info(void)
     struct startup_info_data *info;
     UNICODE_STRING nt_name;
     USHORT machine;
+    HANDLE image;
     BOOL debugged;
 
     if (!startup_info_size)
@@ -2023,6 +2024,7 @@ void init_startup_info(void)
         wine_server_set_reply( req, info, startup_info_size );
         status = wine_server_call( req );
         machine = reply->machine;
+        image = wine_server_ptr_handle( reply->image );
         debugged = reply->debugged;
         info_size = reply->info_size;
         env_size = (wine_server_reply_size( reply ) - info_size) / sizeof(WCHAR);
@@ -2039,7 +2041,7 @@ void init_startup_info(void)
 
     nt_name.Buffer = (WCHAR *)(info + 1);
     nt_name.Length = info->imagepath_len;
-    status = load_main_exe( &nt_name, machine );
+    status = load_main_exe( &nt_name, machine, image );
     if (!NT_SUCCESS(status))
     {
         MESSAGE( "wine: failed to start %s: %x\n", debugstr_us(&nt_name), status );

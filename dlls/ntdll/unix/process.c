@@ -850,6 +850,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         req->machine        = machine;
         req->native_session = is_native_machine && pe_info.subsystem == IMAGE_SUBSYSTEM_NATIVE;
         req->protection     = protection;
+        req->image          = wine_server_obj_handle( section_handle );
         req->info_size      = startup_info_size;
         req->handles_size   = handles_size;
         req->jobs_size      = jobs_size;

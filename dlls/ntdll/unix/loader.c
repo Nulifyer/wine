@@ -1437,7 +1437,7 @@ BOOL is_system_dir_path( const UNICODE_STRING *path, WORD *machine )
 /***********************************************************************
  *           load_main_exe
  */
-NTSTATUS load_main_exe( UNICODE_STRING *nt_name, USHORT load_machine )
+NTSTATUS load_main_exe( UNICODE_STRING *nt_name, USHORT load_machine, HANDLE image )
 {
     NTSTATUS status = STATUS_DLL_NOT_FOUND;
     OBJECT_ATTRIBUTES attr;
@@ -1448,6 +1448,13 @@ NTSTATUS load_main_exe( UNICODE_STRING *nt_name, USHORT load_machine )
     USHORT search_machine;
     BOOL is_system_dir = is_system_dir_path( nt_name, &search_machine );
     enum loadorder loadorder = get_load_order( nt_name, is_system_dir, NULL );
+
+    if (image)
+    {
+        status = virtual_map_main_module( image, load_machine );
+        NtClose( image );
+        return status;
+    }
 
     if (loadorder == LO_DISABLED) NtTerminateProcess( GetCurrentProcess(), status );
 

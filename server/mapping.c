@@ -1988,6 +1988,26 @@ static struct mapping *get_mapping_obj( struct process *process, obj_handle_t ha
     return (struct mapping *)get_handle_obj( process, handle, access, &mapping_ops );
 }
 
+/* Retain the exact authenticated executable section through process startup.
+ * Publisher authentication does not establish a Windows protection signer. */
+struct object *get_protected_process_image( struct process *process, obj_handle_t handle,
+                                            unsigned short machine )
+{
+    struct mapping *mapping = get_mapping_obj( process, handle, SECTION_QUERY | SECTION_MAP_READ );
+
+    if (!mapping) return NULL;
+    if ((mapping->flags & (SEC_IMAGE | SEC_NOCACHE)) != SEC_IMAGE ||
+        (mapping->image.image_charact & IMAGE_FILE_DLL) || !mapping->image_fd ||
+        mapping->image.machine != machine || !image_trust_ready() ||
+        mapping->image_class != IMAGE_TRUST_MICROSOFT)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        release_object( mapping );
+        return NULL;
+    }
+    return &mapping->obj;
+}
+
 /* open a new file for the file descriptor backing the view */
 struct file *get_view_file( const struct memory_view *view, unsigned int access, unsigned int sharing )
 {
@@ -2554,6 +2574,13 @@ DECL_HANDLER(map_image_view)
     if (!(mapping->flags & SEC_NOCACHE) && !(mapping->image.image_charact & IMAGE_FILE_DLL) &&
         !validate_native_bootstrap_image( current->process, get_unix_fd( mapping->fd ))) goto done;
 
+    if (!(mapping->flags & SEC_NOCACHE) && !(mapping->image.image_charact & IMAGE_FILE_DLL) &&
+        current->process->protected_image && current->process->protected_image != &mapping->obj)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto done;
+    }
+
     if ((view = mem_alloc( sizeof(*view) )))
     {
         view->base      = req->base;
@@ -2568,6 +2595,7 @@ DECL_HANDLER(map_image_view)
         if (add_process_view( current, view ))
         {
             if (current->process->native_bootstrap_pid) current->process->native_bootstrap_mapped = 1;
+            if (current->process->protected_image) current->process->protected_image_mapped = 1;
             current->entry_point = view->base + req->entry;
             if (view->image.image_flags & IMAGE_FLAGS_ComPlusNativeReady)
                 current->process->machine = is_machine_64bit( native_machine )
@@ -2612,8 +2640,15 @@ DECL_HANDLER(map_builtin_view)
         return;
     }
 
-    if (!(image->image_charact & IMAGE_FILE_DLL) &&
-        !validate_native_bootstrap_image( current->process, -1 )) return;
+    if (!(image->image_charact & IMAGE_FILE_DLL))
+    {
+        if (current->process->protected_image)
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            return;
+        }
+        if (!validate_native_bootstrap_image( current->process, -1 )) return;
+    }
 
     if ((view = mem_alloc( sizeof(struct memory_view) + namelen )))
     {

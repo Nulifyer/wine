@@ -1181,6 +1181,7 @@ typedef volatile struct
     unsigned short machine;      /* architecture that the new process will use */
     int          native_session; /* native-subsystem child in the admitted startup chain */
     unsigned int protection;     /* PS_PROTECTION value requested for the new process */
+    obj_handle_t image;          /* authoritative main-image section for protected creation */
     data_size_t  info_size;      /* size of startup info */
     data_size_t  handles_size;   /* length of explicit handles list */
     data_size_t  jobs_size;      /* length of jobs list */
@@ -1233,6 +1234,7 @@ typedef volatile struct
     data_size_t  info_size;    /* size of startup info */
     int          debugged;     /* being debugged? */
     unsigned short machine;    /* architecture for the new process */
+    obj_handle_t image;          /* retained main-image section for protected startup */
     VARARG(info,startup_info,info_size); /* startup information */
     VARARG(env,unicode_str);   /* environment */
 @END

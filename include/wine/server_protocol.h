@@ -1168,6 +1168,7 @@ struct new_process_request
     char __pad_38[2];
     int          native_session;
     unsigned int protection;
+    obj_handle_t image;
     data_size_t  info_size;
     data_size_t  handles_size;
     data_size_t  jobs_size;
@@ -1176,7 +1177,6 @@ struct new_process_request
     /* VARARG(jobs,uints,jobs_size); */
     /* VARARG(info,startup_info,info_size); */
     /* VARARG(env,unicode_str); */
-    char __pad_60[4];
 };
 struct new_process_reply
 {
@@ -1242,9 +1242,10 @@ struct get_startup_info_reply
     data_size_t  info_size;
     int          debugged;
     unsigned short machine;
+    char __pad_18[2];
+    obj_handle_t image;
     /* VARARG(info,startup_info,info_size); */
     /* VARARG(env,unicode_str); */
-    char __pad_18[6];
 };
 
 
@@ -10211,6 +10212,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1111
+#define SERVER_PROTOCOL_VERSION 1112
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

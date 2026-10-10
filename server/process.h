@@ -70,6 +70,8 @@ struct process
     int                  base_priority;   /* base priority to calculate thread priority */
     unsigned int         d3dkmt_scheduling_class; /* process GPU scheduling priority class */
     unsigned int         protection;      /* host-admitted process protection, zero for ordinary creation */
+    struct object       *protected_image; /* retained authenticated child main-image section */
+    int                  protected_image_mapped; /* authoritative main image reached mapping */
     unsigned int         ui_context;      /* USER process context */
     unsigned int         ui_context_flags;/* USER process context flags */
     unsigned int         shell_window_management_behavior; /* process-wide shell management flags */

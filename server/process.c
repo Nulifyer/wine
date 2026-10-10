@@ -653,6 +653,8 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->ui_context_initialized = 0;
     process->critical        = 0;
     process->protection      = 0;
+    process->protected_image = NULL;
+    process->protected_image_mapped = 0;
     process->ui_context      = 0;
     process->ui_context_flags = 0;
     process->shell_window_management_behavior = 0;
@@ -832,6 +834,7 @@ static void process_destroy( struct object *obj )
     assert( !process->sigkill_timeout );  /* timeout should hold a reference to the process */
 
     if (process->native_bootstrap_image != -1) close( process->native_bootstrap_image );
+    if (process->protected_image) release_object( process->protected_image );
     cleanup_process_gdi_objects( process );
     cleanup_process_coremsg_connections( process );
     cleanup_process_wnf_states( process );
@@ -1303,6 +1306,7 @@ DECL_HANDLER(new_process)
     int native_session_owner = 0;
     int native_session_delegate = 0;
     int preserve_trust = 0;
+    struct object *image = NULL;
     struct job *job;
 
     if (socket_fd == -1)
@@ -1487,6 +1491,29 @@ DECL_HANDLER(new_process)
         goto done;
     }
 
+    if (req->flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS)
+    {
+        struct process *issuer = current->process;
+        struct token *effective = current->token ? current->token : issuer->token;
+
+        /* This is the reserved native profile, not general Windows signing
+         * admission. SYSTEM identity and a requested byte are not authority. */
+        if (!is_native_machine() || parent != issuer || !issuer->protection ||
+            !(issuer->native_bootstrap_mapped || issuer->protected_image) ||
+            !token_has_process_trust( effective ) ||
+            !equal_sid( token_get_user( effective ), &local_system_sid ))
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            close( socket_fd );
+            goto done;
+        }
+        if (!(image = get_protected_process_image( issuer, req->image, req->machine )))
+        {
+            close( socket_fd );
+            goto done;
+        }
+    }
+
     if (!(process = create_process( socket_fd, parent, req->flags, info->data, params.sd,
                                     handles, req->handles_size / sizeof(*handles), token,
                                     native_session_id, preserve_trust )))
@@ -1498,12 +1525,14 @@ DECL_HANDLER(new_process)
     {
         if (!is_native_machine() ||
             !equal_sid( token_get_user( process->token ), &local_system_sid ) ||
+            !token_has_process_trust( process->token ) ||
             (req->protection != 0x61 && req->protection != 0x51 && req->protection != 0x41))
         {
             set_error( STATUS_ACCESS_DENIED );
             goto done;
         }
         process->protection = req->protection;
+        process->protected_image = (struct object *)grab_object( image );
     }
     else if (req->protection)
     {
@@ -1591,6 +1620,7 @@ DECL_HANDLER(new_process)
     reply->handle = alloc_handle_no_access_check( current->process, process, req->access, params.attr );
 
  done:
+    if (image) release_object( image );
     if (process) release_object( process );
     if (debug_obj) release_object( debug_obj );
     if (token) release_object( token );
@@ -1666,7 +1696,10 @@ DECL_HANDLER(get_startup_info)
     struct startup_info *info = process->startup_info;
     data_size_t size;
 
-    if (!info) return;
+    if (!info || !info->data) return;
+    if (process->protected_image &&
+        !(reply->image = alloc_handle_no_access_check( process, process->protected_image,
+                                                        SECTION_QUERY | SECTION_MAP_READ, 0 ))) return;
 
     /* we return the data directly without making a copy so this can only be called once */
     reply->debugged = !!process->debug_obj;
@@ -1690,7 +1723,8 @@ DECL_HANDLER(init_process_done)
         return;
     }
 
-    if (process->native_bootstrap_pid && !process->native_bootstrap_mapped)
+    if ((process->native_bootstrap_pid && !process->native_bootstrap_mapped) ||
+        (process->protected_image && !process->protected_image_mapped))
     {
         set_error( STATUS_ACCESS_DENIED );
         return;

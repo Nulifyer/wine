@@ -74,6 +74,7 @@ static void dump_new_process_request( const struct new_process_request *req )
     fprintf( stderr, ", machine=%04x", req->machine );
     fprintf( stderr, ", native_session=%d", req->native_session );
     fprintf( stderr, ", protection=%08x", req->protection );
+    fprintf( stderr, ", image=%04x", req->image );
     fprintf( stderr, ", info_size=%u", req->info_size );
     fprintf( stderr, ", handles_size=%u", req->handles_size );
     fprintf( stderr, ", jobs_size=%u", req->jobs_size );
@@ -135,6 +136,7 @@ static void dump_get_startup_info_reply( const struct get_startup_info_reply *re
     fprintf( stderr, " info_size=%u", req->info_size );
     fprintf( stderr, ", debugged=%d", req->debugged );
     fprintf( stderr, ", machine=%04x", req->machine );
+    fprintf( stderr, ", image=%04x", req->image );
     dump_varargs_startup_info( ", info=", min( cur_size, req->info_size ));
     dump_varargs_unicode_str( ", env=", cur_size );
 }
