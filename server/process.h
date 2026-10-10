@@ -77,6 +77,7 @@ struct process
     int                  disable_boost;   /* disable priority boost */
     unsigned int         handle_checking_mode; /* process handle checking policy */
     unsigned int         extension_point_disable; /* irreversible extension-point mitigation */
+    unsigned int         signature_policy; /* irreversible binary-signature mitigation */
     unsigned int         native_session_owner:1; /* admitted per-session native startup owner */
     unsigned int         native_session_delegate:1; /* authenticated descendant of the admitted session owner */
     unsigned int         native_user_server:1; /* admitted native child of the session startup owner */

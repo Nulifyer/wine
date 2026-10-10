@@ -60,6 +60,7 @@
 #include "file.h"
 #include "handle.h"
 #include "process.h"
+#include "image_trust.h"
 #include "thread.h"
 #include "request.h"
 #include "alpc.h"
@@ -634,6 +635,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->disable_boost   = 0;
     process->handle_checking_mode = 0;
     process->extension_point_disable = 0;
+    process->signature_policy = 0;
     process->native_session_owner = 0;
     process->native_session_delegate = 0;
     process->native_user_server = 0;
@@ -1748,6 +1750,7 @@ DECL_HANDLER(get_process_info)
         reply->disable_boost    = process->disable_boost;
         reply->handle_checking_mode = process->handle_checking_mode;
         reply->extension_point_disable = process->extension_point_disable;
+        reply->signature_policy = process->signature_policy;
         reply->affinity         = process->affinity;
         reply->peb              = process->peb;
         reply->start_time       = process->start_time;
@@ -2063,16 +2066,29 @@ DECL_HANDLER(set_process_info)
 {
     struct process *process;
 
+    if (req->mask & SET_PROCESS_INFO_SIGNATURE)
+    {
+        if (req->mask != SET_PROCESS_INFO_SIGNATURE || req->handle != (obj_handle_t)-1 ||
+            (req->mitigation_flags & ~1))
+            set_error( STATUS_INVALID_PARAMETER );
+        else if (current->process->signature_policy && !req->mitigation_flags)
+            set_error( STATUS_ACCESS_DENIED );
+        else if (req->mitigation_flags && !image_trust_ready())
+            set_error( STATUS_NOT_SUPPORTED );
+        else current->process->signature_policy = req->mitigation_flags ? 5 : 0;
+        return;
+    }
+
     if (req->mask & SET_PROCESS_INFO_EXTENSION_POINT)
     {
         /* Validate at the shared state owner too. A client may only tighten
          * its own policy, and may not combine this update with another one. */
         if (req->mask != SET_PROCESS_INFO_EXTENSION_POINT || req->handle != (obj_handle_t)-1 ||
-            (req->extension_point_disable & ~1))
+            (req->mitigation_flags & ~1))
             set_error( STATUS_INVALID_PARAMETER );
-        else if (current->process->extension_point_disable && !req->extension_point_disable)
+        else if (current->process->extension_point_disable && !req->mitigation_flags)
             set_error( STATUS_ACCESS_DENIED );
-        else current->process->extension_point_disable = req->extension_point_disable;
+        else current->process->extension_point_disable = req->mitigation_flags;
         return;
     }
 

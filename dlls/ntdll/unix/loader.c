@@ -796,6 +796,19 @@ static NTSTATUS dlopen_dll( const char *so_name, UNICODE_STRING *nt_name, void *
     void *module, *handle;
     const IMAGE_NT_HEADERS *nt;
 
+    NTSTATUS status;
+
+    /* dlopen executes ELF constructors. Ask the authoritative process owner
+     * before opening any fresh legacy builtin, not after registering its view. */
+    SERVER_START_REQ( get_process_info )
+    {
+        req->handle = wine_server_obj_handle( GetCurrentProcess() );
+        status = wine_server_call( req );
+        if (!status && (reply->signature_policy & 1)) status = STATUS_INVALID_IMAGE_HASH;
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
     handle = dlopen( so_name, RTLD_NOW );
     if (!handle)
     {
@@ -938,7 +951,7 @@ static NTSTATUS open_builtin_so_file( char *name, OBJECT_ATTRIBUTES *attr, void 
 
         status = dlopen_dll( name, attr->ObjectName, module, &info, prefer_native );
         if (!status) virtual_fill_image_information( &info, image_info );
-        else if (status != STATUS_IMAGE_ALREADY_LOADED)
+        else if (status != STATUS_IMAGE_ALREADY_LOADED && status != STATUS_INVALID_IMAGE_HASH)
         {
             ERR( "failed to load .so lib %s\n", debugstr_a(name) );
             status = STATUS_PROCEDURE_NOT_FOUND;

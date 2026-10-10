@@ -98,7 +98,7 @@ static BOOL load_library_as_datafile( LPCWSTR load_path, DWORD flags, LPCWSTR na
 
     *mod_ret = 0;
 
-    if (flags & LOAD_LIBRARY_AS_IMAGE_RESOURCE) protect |= SEC_IMAGE;
+    if (flags & LOAD_LIBRARY_AS_IMAGE_RESOURCE) protect |= SEC_IMAGE_NO_EXECUTE;
 
     if (SearchPathW( NULL, name, L".dll", ARRAY_SIZE( filenameW ), filenameW, NULL ))
     {

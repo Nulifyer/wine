@@ -7153,6 +7153,23 @@ typedef struct _PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY
     } DUMMYUNIONNAME;
 } PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY, *PPROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY;
 
+typedef struct _PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY
+{
+    union
+    {
+        DWORD Flags;
+        struct
+        {
+            DWORD MicrosoftSignedOnly : 1;
+            DWORD StoreSignedOnly : 1;
+            DWORD MitigationOptIn : 1;
+            DWORD AuditMicrosoftSignedOnly : 1;
+            DWORD AuditStoreSignedOnly : 1;
+            DWORD ReservedFlags : 27;
+        } DUMMYSTRUCTNAME;
+    } DUMMYUNIONNAME;
+} PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY, *PPROCESS_MITIGATION_BINARY_SIGNATURE_POLICY;
+
 typedef enum _FIRMWARE_TYPE
 {
     FirmwareTypeUnknown,

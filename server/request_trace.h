@@ -221,6 +221,7 @@ static void dump_get_process_info_reply( const struct get_process_info_reply *re
     fprintf( stderr, ", handle_checking_mode=%02x", req->handle_checking_mode );
     fprintf( stderr, ", machine=%04x", req->machine );
     fprintf( stderr, ", extension_point_disable=%02x", req->extension_point_disable );
+    fprintf( stderr, ", signature_policy=%02x", req->signature_policy );
     dump_varargs_pe_image_info( ", image=", cur_size );
 }
 
@@ -315,7 +316,7 @@ static void dump_set_process_info_request( const struct set_process_info_request
     fprintf( stderr, ", mask=%d", req->mask );
     fprintf( stderr, ", handle_checking_mode=%08x", req->handle_checking_mode );
     fprintf( stderr, ", critical=%d", req->critical );
-    fprintf( stderr, ", extension_point_disable=%08x", req->extension_point_disable );
+    fprintf( stderr, ", mitigation_flags=%08x", req->mitigation_flags );
 }
 
 static void dump_get_thread_info_request( const struct get_thread_info_request *req )
@@ -6617,6 +6618,7 @@ static const struct
     { "INVALID_FILE_FOR_SECTION",    STATUS_INVALID_FILE_FOR_SECTION },
     { "INVALID_HANDLE",              STATUS_INVALID_HANDLE },
     { "INVALID_IMAGE_FORMAT",        STATUS_INVALID_IMAGE_FORMAT },
+    { "INVALID_IMAGE_HASH",          STATUS_INVALID_IMAGE_HASH },
     { "INVALID_IMAGE_NE_FORMAT",     STATUS_INVALID_IMAGE_NE_FORMAT },
     { "INVALID_IMAGE_NOT_MZ",        STATUS_INVALID_IMAGE_NOT_MZ },
     { "INVALID_IMAGE_PROTECT",       STATUS_INVALID_IMAGE_PROTECT },

@@ -169,6 +169,7 @@ struct async_fileio
 
 struct pe_mapping_info
 {
+    unsigned int         flags;
     HANDLE               shared_file;
     UNICODE_STRING       nt_name;
     ANSI_STRING          exp_name;

@@ -1162,12 +1162,17 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
 
             if (size != sizeof(*policy)) return STATUS_INFO_LENGTH_MISMATCH;
             if (!policy) return STATUS_ACCESS_VIOLATION;
-            if (policy->Policy != ProcessExtensionPointDisablePolicy) return STATUS_NOT_SUPPORTED;
+            if (policy->Policy != ProcessExtensionPointDisablePolicy &&
+                policy->Policy != ProcessSignaturePolicy) return STATUS_NOT_SUPPORTED;
             SERVER_START_REQ( get_process_info )
             {
                 req->handle = wine_server_obj_handle( handle );
                 if (!(ret = wine_server_call( req )))
-                    policy->ExtensionPointDisablePolicy.Flags = reply->extension_point_disable;
+                {
+                    if (policy->Policy == ProcessSignaturePolicy)
+                        policy->SignaturePolicy.Flags = reply->signature_policy;
+                    else policy->ExtensionPointDisablePolicy.Flags = reply->extension_point_disable;
+                }
             }
             SERVER_END_REQ;
             /* This information class leaves ReturnLength untouched. */
@@ -1816,13 +1821,23 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
             if (size != sizeof(*policy)) return STATUS_INFO_LENGTH_MISMATCH;
             if (handle != GetCurrentProcess()) return STATUS_INVALID_PARAMETER;
             if (!policy) return STATUS_ACCESS_VIOLATION;
-            if (policy->Policy != ProcessExtensionPointDisablePolicy) return STATUS_NOT_SUPPORTED;
+            if (policy->Policy != ProcessExtensionPointDisablePolicy &&
+                policy->Policy != ProcessSignaturePolicy) return STATUS_NOT_SUPPORTED;
+            /* Both supported policies accept only input flags zero and one. */
             if (policy->ExtensionPointDisablePolicy.Flags & ~1) return STATUS_INVALID_PARAMETER;
             SERVER_START_REQ( set_process_info )
             {
                 req->handle = wine_server_obj_handle( handle );
-                req->mask = SET_PROCESS_INFO_EXTENSION_POINT;
-                req->extension_point_disable = policy->ExtensionPointDisablePolicy.Flags;
+                if (policy->Policy == ProcessSignaturePolicy)
+                {
+                    req->mask = SET_PROCESS_INFO_SIGNATURE;
+                    req->mitigation_flags = policy->SignaturePolicy.Flags;
+                }
+                else
+                {
+                    req->mask = SET_PROCESS_INFO_EXTENSION_POINT;
+                    req->mitigation_flags = policy->ExtensionPointDisablePolicy.Flags;
+                }
                 ret = wine_server_call( req );
             }
             SERVER_END_REQ;

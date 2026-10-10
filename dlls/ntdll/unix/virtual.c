@@ -143,6 +143,7 @@ struct file_view
 #define VPROT_SYSTEM           0x0200  /* system view (underlying mmap not under our control) */
 #define VPROT_PLACEHOLDER      0x0400
 #define VPROT_FREE_PLACEHOLDER 0x0800
+#define VPROT_IMAGE_NOEXEC     0x1000  /* SEC_IMAGE_NO_EXECUTE view */
 
 /* Conversion from VPROT_* to Win32 flags */
 static const BYTE VIRTUAL_Win32Flags[16] =
@@ -1969,6 +1970,9 @@ static inline int mprotect_exec( void *base, size_t size, int unix_prot )
 {
     if (force_exec_prot && (unix_prot & PROT_READ) && !(unix_prot & PROT_EXEC))
     {
+        struct file_view *view = find_view( base, size );
+
+        if (view && (view->protect & VPROT_IMAGE_NOEXEC)) return mprotect( base, size, unix_prot );
         TRACE( "forcing exec permission on %p-%p\n", base, (char *)base + size - 1 );
         if (!mprotect( base, size, unix_prot | PROT_EXEC )) return 0;
         /* exec + write may legitimately fail, in that case fall back to write only */
@@ -2042,6 +2046,8 @@ static NTSTATUS set_protection( struct file_view *view, void *base, SIZE_T size,
     NTSTATUS status;
 
     if ((status = get_vprot_flags( protect, &vprot, view->protect & SEC_IMAGE ))) return status;
+    if ((view->protect & VPROT_IMAGE_NOEXEC) && (vprot & VPROT_EXEC))
+        return STATUS_SECTION_PROTECTION;
     if (is_view_valloc( view ))
     {
         if (vprot & VPROT_WRITECOPY) return STATUS_INVALID_PAGE_PROTECTION;
@@ -3103,7 +3109,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
         }
 
         /* set the image protections */
-        set_vprot( view, ptr, total_size, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC );
+        set_vprot( view, ptr, total_size, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY |
+                   ((view->protect & VPROT_IMAGE_NOEXEC) ? 0 : VPROT_EXEC) );
 
         /* no relocations are performed on non page-aligned binaries */
         status = STATUS_SUCCESS;
@@ -3260,7 +3267,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
 
         if (sec[i].Characteristics & IMAGE_SCN_MEM_READ)    vprot |= VPROT_READ;
         if (sec[i].Characteristics & IMAGE_SCN_MEM_WRITE)   vprot |= VPROT_WRITECOPY;
-        if (sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) vprot |= VPROT_EXEC;
+        if ((sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) &&
+            !(view->protect & VPROT_IMAGE_NOEXEC)) vprot |= VPROT_EXEC;
 
         if (!set_vprot( view, ptr + sec[i].VirtualAddress, size, vprot ) && (vprot & VPROT_EXEC))
             ERR( "failed to set %08x protection on %s section %.8s, noexec filesystem?\n",
@@ -3309,7 +3317,7 @@ static unsigned int get_mapping_info( HANDLE handle, ACCESS_MASK access, unsigne
             req->access = access;
             wine_server_set_reply( req, &info->image, size );
             status = wine_server_call( req );
-            *sec_flags   = reply->flags;
+            *sec_flags = info->flags = reply->flags;
             *full_size   = reply->size;
             total        = reply->total;
             info->shared_file = wine_server_ptr_handle( reply->shared_file );
@@ -3344,7 +3352,7 @@ static unsigned int get_mapping_info( HANDLE handle, ACCESS_MASK access, unsigne
  * Map a view for a PE image at an appropriate address.
  */
 static NTSTATUS map_image_view( struct file_view **view_ret, struct pe_image_info *image_info, SIZE_T size,
-                                ULONG_PTR limit_low, ULONG_PTR limit_high, ULONG alloc_type )
+                                ULONG_PTR limit_low, ULONG_PTR limit_high, ULONG alloc_type, BOOL no_execute )
 {
     unsigned int vprot = SEC_IMAGE | SEC_FILE | VPROT_COMMITTED | VPROT_READ | VPROT_EXEC | VPROT_WRITECOPY;
     void *base;
@@ -3352,6 +3360,8 @@ static NTSTATUS map_image_view( struct file_view **view_ret, struct pe_image_inf
     ULONG_PTR start, end;
     BOOL top_down = (image_info->image_charact & IMAGE_FILE_DLL) &&
                     (image_info->image_flags & IMAGE_FLAGS_ImageDynamicallyRelocated);
+
+    if (no_execute) vprot = (vprot & ~VPROT_EXEC) | VPROT_IMAGE_NOEXEC;
 
     limit_low = max( limit_low, (ULONG_PTR)address_space_start );  /* make sure the DOS area remains free */
     if (!limit_high) limit_high = (ULONG_PTR)user_space_limit;
@@ -3443,7 +3453,8 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
 
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
 
-    status = map_image_view( &view, &pe_mapping->image, size, limit_low, limit_high, alloc_type );
+    status = map_image_view( &view, &pe_mapping->image, size, limit_low, limit_high, alloc_type,
+                             !!(pe_mapping->flags & SEC_NOCACHE) );
     if (status) goto done;
 
     status = map_image_into_view( view, &pe_mapping->nt_name, unix_fd, &pe_mapping->image,
@@ -3548,8 +3559,9 @@ static unsigned int virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_P
             teb64->Tib.ArbitraryUserPointer = PtrToUlong(data->teb->Tib.ArbitraryUserPointer);
         }
         /* check if we can replace that mapping with the builtin */
-        res = load_builtin( pe_mapping, machine, &info, addr_ptr, size_ptr,
-                            limit_low, limit_high, offset.QuadPart );
+        if (sec_flags & SEC_NOCACHE) res = STATUS_IMAGE_ALREADY_LOADED;
+        else res = load_builtin( pe_mapping, machine, &info, addr_ptr, size_ptr,
+                                 limit_low, limit_high, offset.QuadPart );
         if (res == STATUS_IMAGE_ALREADY_LOADED)
             res = virtual_map_image( handle, addr_ptr, size_ptr, limit_low, limit_high,
                                      alloc_type, pe_mapping, machine, FALSE, offset.QuadPart );
@@ -6669,6 +6681,7 @@ NTSTATUS WINAPI NtQuerySection( HANDLE handle, SECTION_INFORMATION_CLASS class, 
             {
                 SECTION_BASIC_INFORMATION *info = ptr;
                 info->Attributes    = reply->flags;
+                if (reply->flags & SEC_IMAGE) info->Attributes &= ~SEC_NOCACHE;
                 info->BaseAddress   = NULL;
                 info->Size.QuadPart = reply->size;
                 if (ret_size) *ret_size = sizeof(*info);

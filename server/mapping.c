@@ -1019,7 +1019,7 @@ static int add_process_view( struct thread *thread, struct memory_view *view )
     struct unicode_str name;
     data_size_t i;
 
-    if (view->flags & SEC_IMAGE)
+    if ((view->flags & (SEC_IMAGE | SEC_NOCACHE)) == SEC_IMAGE)
     {
         if (is_process_init_done( process ))
         {
@@ -1756,7 +1756,7 @@ static unsigned int get_mapping_flags( obj_handle_t handle, unsigned int flags )
     {
     case SEC_IMAGE:
         if (flags & (SEC_WRITECOMBINE | SEC_LARGE_PAGES)) break;
-        if (handle) return SEC_FILE | SEC_IMAGE;
+        if (handle) return SEC_FILE | SEC_IMAGE | (flags & SEC_NOCACHE);
         set_error( STATUS_INVALID_FILE_FOR_SECTION );
         return 0;
     case SEC_COMMIT:
@@ -1825,7 +1825,7 @@ static bool mapping_init( struct object *obj, const void *init_data )
                 mapping->image_fd = (struct fd *)grab_object(data->snapshot);
                 unix_fd = get_unix_fd(mapping->image_fd);
             }
-            else if (is_native_machine() || image_trust_ready())
+            else if (is_native_machine() || image_trust_ready() || current->process->signature_policy)
             {
                 /* All native/catalog image callers must use the bounded job path. */
                 set_error( STATUS_NOT_SUPPORTED );
@@ -1882,6 +1882,15 @@ static bool mapping_init( struct object *obj, const void *init_data )
             {
                 mapping->image_class = data->digest ? classify_image_digest( data->digest, st.st_size,
                                                                             mapping->image.machine ) : 0;
+                /* Enforce new executable sections only. Existing section handles and
+                 * loader cache entries retain their measured pre-policy behavior. */
+                if ((current->process->signature_policy & 1) && !(mapping->flags & SEC_NOCACHE) &&
+                    mapping->image_class != IMAGE_TRUST_MICROSOFT &&
+                    mapping->image_class != IMAGE_TRUST_PLATFORM)
+                {
+                    set_error( STATUS_INVALID_IMAGE_HASH );
+                    goto error;
+                }
                 if (debug_level && image_trust_ready())
                     fprintf( stderr, "image-trust: class=%u machine=%04x bytes=%llu\n",
                              mapping->image_class, mapping->image.machine, (unsigned long long)st.st_size );
@@ -2349,7 +2358,8 @@ DECL_HANDLER(create_mapping)
         data.fd = get_obj_fd( (struct object *)file );
     }
 
-    if (data.fd && (data.flags & SEC_IMAGE) && (is_native_machine() || image_trust_ready()))
+    if (data.fd && (data.flags & SEC_IMAGE) &&
+        (is_native_machine() || image_trust_ready() || current->process->signature_policy))
     {
         struct object *existing = NULL;
         if (params.name.len)
@@ -2512,7 +2522,7 @@ DECL_HANDLER(map_image_view)
         goto done;
     }
 
-    if (!(mapping->image.image_charact & IMAGE_FILE_DLL) &&
+    if (!(mapping->flags & SEC_NOCACHE) && !(mapping->image.image_charact & IMAGE_FILE_DLL) &&
         !validate_native_bootstrap_image( current->process, get_unix_fd( mapping->fd ))) goto done;
 
     if ((view = mem_alloc( sizeof(*view) )))
@@ -2563,6 +2573,13 @@ DECL_HANDLER(map_builtin_view)
         !is_valid_view_addr( current->process, image->base, image->map_size ))
     {
         set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+
+    /* Client-provided names and PE metadata cannot authenticate legacy ELF code. */
+    if (current->process->signature_policy & 1)
+    {
+        set_error( STATUS_INVALID_IMAGE_HASH );
         return;
     }
 

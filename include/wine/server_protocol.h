@@ -1351,8 +1351,8 @@ struct get_process_info_reply
     unsigned char handle_checking_mode;
     unsigned short machine;
     unsigned char extension_point_disable;
+    unsigned char signature_policy;
     /* VARARG(image,pe_image_info); */
-    char __pad_63[1];
 };
 
 
@@ -1486,7 +1486,7 @@ struct set_process_info_request
     int          mask;
     unsigned int handle_checking_mode;
     int          critical;
-    unsigned int extension_point_disable;
+    unsigned int mitigation_flags;
 };
 struct set_process_info_reply
 {
@@ -1503,6 +1503,7 @@ struct set_process_info_reply
 #define SET_PROCESS_INFO_PRIORITY_EX   0x100
 #define SET_PROCESS_INFO_OWNER         0x200
 #define SET_PROCESS_INFO_EXTENSION_POINT 0x400
+#define SET_PROCESS_INFO_SIGNATURE       0x800
 
 
 
@@ -10103,6 +10104,6 @@ union generic_reply
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1107
+#define SERVER_PROTOCOL_VERSION 1108
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
