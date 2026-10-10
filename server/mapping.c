@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,6 +87,7 @@ struct shared_map
     struct fd      *fd;              /* file descriptor of the mapped PE file */
     struct file    *file;            /* temp file holding the shared data */
     struct list     entry;           /* entry in global shared maps list */
+    file_pos_t      image_bytes;     /* bounded prepared shared image backing */
 };
 
 static void shared_map_dump( struct object *obj, int verbose );
@@ -148,6 +150,8 @@ struct mapping
     void                *ver_res;    /* version resource (for PE image mapping) */
     data_size_t          exp_len;    /* length of export name (for PE image mapping) */
     data_size_t          ver_len;    /* length of version resource (for PE image mapping) */
+    void                *metadata;  /* sealed worker metadata, owns exp_name/ver_res */
+    size_t               metadata_size;
 };
 
 struct mapping_init_data
@@ -160,7 +164,21 @@ struct mapping_init_data
     file_pos_t   snapshot_bytes;
     bool        *snapshot_consumed;
     const unsigned char *digest;
+    const struct pe_image_info *image;
+    mem_size_t   image_size;
+    struct fd   *metadata;
+    data_size_t  exp_len, ver_len;
+    struct fd   *shared;
+    file_pos_t   shared_size;
 };
+
+#define MAX_IMAGE_METADATA_BYTES (1024 * 1024)
+#define MAX_SHARED_IMAGE_BYTES (64ULL * 1024 * 1024)
+#define MAX_RETAINED_SHARED_IMAGE_BYTES (512ULL * 1024 * 1024)
+static file_pos_t retained_shared_image_bytes;
+static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_size, int unix_fd,
+                                      int *prepared_shared, file_pos_t *shared_size );
+static unsigned int install_shared_mapping( struct mapping *mapping, int fd, file_pos_t size );
 
 static void mapping_dump( struct object *obj, int verbose );
 static bool mapping_init( struct object *obj, const void *init_data );
@@ -267,6 +285,7 @@ static void shared_map_destroy( struct object *obj )
 {
     struct shared_map *shared = (struct shared_map *)obj;
 
+    retained_shared_image_bytes -= shared->image_bytes;
     release_object( shared->fd );
     release_object( shared->file );
     list_remove( &shared->entry );
@@ -440,6 +459,34 @@ error:
 #endif
 }
 
+/* Private worker outputs never use the parent's namespace or directory fds. */
+static int create_prepared_image_file( const char *name, file_pos_t size, int executable )
+{
+#if defined(HAVE_MEMFD_CREATE) && defined(F_ADD_SEALS)
+    unsigned int flags = MFD_CLOEXEC | MFD_ALLOW_SEALING;
+    int fd;
+#ifdef MFD_EXEC
+    if (executable) flags |= MFD_EXEC;
+#endif
+    fd = memfd_create( name, flags );
+#ifdef MFD_EXEC
+    if (fd == -1 && errno == EINVAL && (flags & MFD_EXEC))
+        fd = memfd_create( name, flags & ~MFD_EXEC );
+#endif
+    if (fd == -1) { file_set_error(); return -1; }
+    if (ftruncate( fd, size ))
+    {
+        file_set_error();
+        close( fd );
+        return -1;
+    }
+    return fd;
+#else
+    set_error( STATUS_NOT_SUPPORTED );
+    return -1;
+#endif
+}
+
 /* Trusted child work is bounded independently of retained section backing.
  * A timed-out/killed job keeps its slot and charge until waitpid reaps it. */
 #define MAX_IMAGE_WORKERS 4
@@ -450,9 +497,14 @@ static struct list image_jobs = LIST_INIT(image_jobs);
 
 struct image_job_result
 {
+    unsigned int phase; /* 0: pin bytes/digest before parsing; 1: prepared metadata */
     unsigned int status;
     unsigned int hashed;
     unsigned char digest[32];
+    struct pe_image_info image;
+    mem_size_t size;
+    data_size_t exp_len, ver_len;
+    file_pos_t shared_size;
 };
 
 struct image_job
@@ -461,6 +513,8 @@ struct image_job
     struct list entry;
     struct fd *channel;
     struct fd *snapshot;
+    struct fd *metadata;
+    struct fd *shared;
     struct thread *thread;
     struct token *primary_token, *thread_token;
     struct object_params params;
@@ -469,6 +523,8 @@ struct image_job
     struct timeout_user *timeout;
     file_pos_t charge;
     int pid, result_ready;
+    int pinned, hashed;
+    unsigned char digest[32];
     struct image_job_result result;
 };
 
@@ -519,7 +575,14 @@ static void image_job_reply( struct image_job *job, unsigned int status )
         job->data.snapshot = job->snapshot;
         job->data.snapshot_bytes = job->charge;
         job->data.snapshot_consumed = &consumed;
-        job->data.digest = job->result.hashed ? job->result.digest : NULL;
+        job->data.digest = job->hashed ? job->digest : NULL;
+        job->data.image = &job->result.image;
+        job->data.image_size = job->result.size;
+        job->data.metadata = job->metadata;
+        job->data.exp_len = job->result.exp_len;
+        job->data.ver_len = job->result.ver_len;
+        job->data.shared = job->shared;
+        job->data.shared_size = job->result.shared_size;
         clear_error();
         reply.create_mapping_reply.handle = create_named_obj_handle( thread->process, &job->params );
         status = get_error();
@@ -549,6 +612,8 @@ static void image_job_destroy( struct object *obj )
     if (job->timeout) remove_timeout_user( job->timeout );
     if (job->channel) release_object( job->channel );
     if (job->snapshot) release_object( job->snapshot );
+    if (job->metadata) release_object( job->metadata );
+    if (job->shared) release_object( job->shared );
     if (job->data.fd) release_object( job->data.fd );
     if (job->params.root) release_object( job->params.root );
     if (job->primary_token) release_object( job->primary_token );
@@ -557,15 +622,18 @@ static void image_job_destroy( struct object *obj )
     free( job->attributes );
 }
 
-/* One bounded packet from the server's own forked child, never a Wine client. */
+/* Pin sealed bytes before any PE parsing. Later parser output cannot replace
+ * the digest or snapshot used for authority, even if the parser child fails. */
 static void image_job_poll( struct fd *fd, int events )
 {
     struct image_job *job = get_fd_user( fd );
-    struct iovec iov = { &job->result, sizeof(job->result) };
-    union { struct cmsghdr align; char bytes[CMSG_SPACE(sizeof(int))]; } control;
+    struct image_job_result result = {0};
+    struct iovec iov = { &result, sizeof(result) };
+    union { struct cmsghdr align; char bytes[CMSG_SPACE(3 * sizeof(int))]; } control;
     struct msghdr msg = {0};
     struct cmsghdr *cmsg;
-    int snapshot = -1;
+    int received[3], count = 0, expected, i;
+    size_t metadata_size;
     ssize_t ret;
 
     if (job->result_ready) return;
@@ -578,22 +646,57 @@ static void image_job_poll( struct fd *fd, int events )
     for (cmsg = CMSG_FIRSTHDR(&msg); ret > 0 && cmsg; cmsg = CMSG_NXTHDR(&msg,cmsg))
     {
         if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS &&
-            cmsg->cmsg_len == CMSG_LEN(sizeof(int))) memcpy( &snapshot, CMSG_DATA(cmsg), sizeof(snapshot) );
-    }
-    job->result_ready = 1;
-    if (ret != sizeof(job->result) || msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC) ||
-        (!job->result.status && snapshot == -1)) job->result.status = STATUS_UNSUCCESSFUL;
-    if (snapshot != -1)
-    {
-        if (job->result.status) close( snapshot );
-        else
+            cmsg->cmsg_len >= CMSG_LEN(0))
         {
-            if (!(job->snapshot = create_anonymous_fd( &mapping_fd_ops, snapshot, NULL,
-                                                       FILE_SYNCHRONOUS_IO_NONALERT )))
-                job->result.status = STATUS_NO_MEMORY;
-            else allow_fd_caching( job->snapshot );
+            size_t bytes = cmsg->cmsg_len - CMSG_LEN(0);
+            int n = bytes / sizeof(int);
+            if (n <= 3 - count)
+            {
+                memcpy( received + count, CMSG_DATA(cmsg), n * sizeof(int) );
+                count += n;
+            }
         }
     }
+    metadata_size = ((size_t)result.exp_len + 3) / 4 * 4 + result.ver_len;
+    expected = job->pinned ? !!metadata_size + !!result.shared_size : 1;
+    if (ret != sizeof(result) || msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC) ||
+        result.phase != job->pinned || metadata_size > MAX_IMAGE_METADATA_BYTES ||
+        result.shared_size > MAX_SHARED_IMAGE_BYTES || (!result.status && count != expected))
+        result.status = STATUS_UNSUCCESSFUL;
+    for (i = 0; i < count; i++)
+    {
+        if (result.status) close( received[i] );
+        else
+        {
+            struct fd **target = !job->pinned ? &job->snapshot :
+                                 (metadata_size && !i) ? &job->metadata : &job->shared;
+            if (!(*target = create_anonymous_fd( &mapping_fd_ops, received[i], NULL,
+                                                FILE_SYNCHRONOUS_IO_NONALERT )))
+                result.status = STATUS_NO_MEMORY;
+            else allow_fd_caching( *target );
+        }
+    }
+    if (!job->pinned && !result.status)
+    {
+        struct stat st;
+        int snapshot = get_unix_fd(job->snapshot);
+        const int required = F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL;
+        int seals = fcntl(snapshot,F_GET_SEALS);
+        if (metadata_size || result.shared_size || seals == -1 || (seals & required) != required ||
+            fstat(snapshot,&st) || !S_ISREG(st.st_mode) || st.st_size != job->charge)
+        {
+            job->result.status = STATUS_UNSUCCESSFUL;
+            job->result_ready = 1;
+            set_fd_events(fd,-1);
+            return;
+        }
+        job->pinned = 1;
+        job->hashed = result.hashed;
+        memcpy( job->digest, result.digest, sizeof(job->digest) );
+        return;
+    }
+    job->result = result;
+    job->result_ready = 1;
     set_fd_events( fd, -1 );
 }
 
@@ -607,6 +710,7 @@ int mapping_worker_exited( int pid, int status )
         if (!WIFEXITED(status) && !WIFSIGNALED(status)) return 1;
         job->pid = 0;
         if (!job->result_ready) image_job_poll( job->channel, POLLIN );
+        if (!job->result_ready) image_job_poll( job->channel, POLLIN ); /* bounded two-phase drain */
         if (!job->result_ready || !WIFEXITED(status) || WEXITSTATUS(status))
             job->result.status = STATUS_UNSUCCESSFUL;
         image_job_reply( job, job->result.status );
@@ -618,16 +722,37 @@ int mapping_worker_exited( int pid, int status )
     return 0;
 }
 
-static void image_worker( int source, int channel, file_pos_t size, int parent )
+static int send_image_job_result( int channel, const struct image_job_result *result,
+                                  const int *outputs, unsigned int count )
+{
+    struct iovec iov = { (void *)result, sizeof(*result) };
+    union { struct cmsghdr align; char bytes[CMSG_SPACE(3 * sizeof(int))]; } control;
+    struct msghdr msg = {0};
+    struct cmsghdr *cmsg;
+
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    if (count)
+    {
+        msg.msg_control = control.bytes;
+        msg.msg_controllen = CMSG_SPACE(count * sizeof(int));
+        cmsg = CMSG_FIRSTHDR(&msg);
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type = SCM_RIGHTS;
+        cmsg->cmsg_len = CMSG_LEN(count * sizeof(int));
+        memcpy( CMSG_DATA(cmsg), outputs, count * sizeof(int) );
+    }
+    return sendmsg(channel,&msg,MSG_NOSIGNAL) == sizeof(*result);
+}
+
+static void image_worker( int source, int channel, file_pos_t size, mem_size_t requested_size, int parent )
 {
 #ifdef linux
     struct image_job_result result = {0};
-    struct iovec iov = { &result, sizeof(result) };
-    union { struct cmsghdr align; char bytes[CMSG_SPACE(sizeof(int))]; } control;
-    struct msghdr msg = {0};
-    struct cmsghdr *cmsg;
     sigset_t empty;
-    int a, b, snapshot;
+    struct mapping prepared = {0};
+    int a, b, snapshot, metadata = -1, shared = -1, outputs[3], count = 0;
+    size_t metadata_size, ver_offset;
     long max_fd;
 
     if (prctl( PR_SET_PDEATHSIG, SIGKILL ) || getppid() != parent) _exit(1);
@@ -654,21 +779,43 @@ static void image_worker( int source, int channel, file_pos_t size, int parent )
         result.hashed = hash_image_fd( snapshot, result.digest );
         if (!result.hashed) result.status = STATUS_UNSUCCESSFUL;
     }
-    close(3);
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
+    if (!send_image_job_result(4,&result,&snapshot,!result.status)) _exit(1);
+    if (result.status) _exit(0);
+    result.phase = 1;
+    prepared.size = requested_size;
+    if (!result.status)
+        result.status = get_image_params( &prepared, size, snapshot, &shared, &result.shared_size );
     if (!result.status)
     {
-        msg.msg_control = control.bytes;
-        msg.msg_controllen = sizeof(control);
-        cmsg = CMSG_FIRSTHDR(&msg);
-        cmsg->cmsg_level = SOL_SOCKET;
-        cmsg->cmsg_type = SCM_RIGHTS;
-        cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-        memcpy( CMSG_DATA(cmsg), &snapshot, sizeof(snapshot) );
+        result.image = prepared.image;
+        result.size = prepared.size;
+        result.exp_len = prepared.exp_len;
+        result.ver_len = prepared.ver_len;
+        ver_offset = ((size_t)result.exp_len + 3) / 4 * 4;
+        metadata_size = ver_offset + result.ver_len;
+        if (metadata_size > MAX_IMAGE_METADATA_BYTES) result.status = STATUS_SECTION_TOO_BIG;
+        else if (metadata_size)
+        {
+            metadata = create_prepared_image_file( "wine-image-metadata", metadata_size, 0 );
+            if (metadata == -1 ||
+                (result.exp_len && pwrite( metadata, prepared.exp_name, result.exp_len, 0 ) != result.exp_len) ||
+                (result.ver_len && pwrite( metadata, prepared.ver_res, result.ver_len, ver_offset ) != result.ver_len) ||
+                fcntl( metadata, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL ) == -1)
+                result.status = STATUS_UNSUCCESSFUL;
+        }
     }
-    if (sendmsg(4,&msg,MSG_NOSIGNAL) != sizeof(result)) _exit(1);
+    free( prepared.exp_name );
+    free( prepared.ver_res );
+    close(3);
+    if (!result.status)
+    {
+        if (metadata != -1) outputs[count++] = metadata;
+        if (shared != -1) outputs[count++] = shared;
+    }
+    if (!send_image_job_result(4,&result,outputs,count)) _exit(1);
     if (snapshot != -1) close(snapshot);
+    if (metadata != -1) close(metadata);
+    if (shared != -1) close(shared);
     close(4);
     _exit(0);
 #else
@@ -687,7 +834,7 @@ static int launch_image_worker( struct image_job *job )
         return 0;
     }
     pid = fork();
-    if (!pid) { close(sockets[0]); image_worker(source,sockets[1],job->data.snapshot_bytes,parent); }
+    if (!pid) { close(sockets[0]); image_worker(source,sockets[1],job->data.snapshot_bytes,job->data.size,parent); }
     close(sockets[1]);
     if (pid == -1) { file_set_error(); return 0; }
     job->pid = pid;
@@ -743,14 +890,14 @@ static int start_image_job( const struct object_params *params, const struct map
     job->params.init_data = &job->data;
     job->params.root = params->root ? grab_object(params->root) : NULL;
     job->data.fd = (struct fd *)grab_object(data->fd);
-    job->channel = job->snapshot = NULL;
+    job->channel = job->snapshot = job->metadata = job->shared = NULL;
     job->thread = NULL;
     job->primary_token = job->thread_token = NULL;
     job->attributes = NULL;
     job->timeout = NULL;
     job->charge = 0;
     job->pid = 0;
-    job->result_ready = 0;
+    job->result_ready = job->pinned = job->hashed = 0;
     memset(&job->result,0,sizeof(job->result));
     if (attr_size)
     {
@@ -1081,83 +1228,128 @@ static int find_committed_range( struct memory_view *view, file_pos_t start, mem
     return 0;
 }
 
-/* allocate and fill the temp file for a shared PE image mapping */
-static int build_shared_mapping( struct mapping *mapping, size_t align_mask, int fd,
-                                 IMAGE_SECTION_HEADER *sec, unsigned int nb_sec )
+/* Prepare bytes without publishing cross-process state. The worker and the
+ * ordinary path use the same copy mechanism; only the server installs identity. */
+static unsigned int copy_shared_mapping( size_t align_mask, int fd, IMAGE_SECTION_HEADER *sec,
+                                         unsigned int nb_sec, int isolated, int *output,
+                                         file_pos_t *output_size )
 {
-    struct shared_map *shared;
-    struct file *file;
     unsigned int i;
-    mem_size_t total_size;
-    size_t file_size, map_size, max_size;
-    off_t shared_pos, read_pos, write_pos;
-    char *buffer = NULL;
+    mem_size_t total_size = 0;
+    size_t file_size, map_size;
+    off_t shared_pos, read_pos;
+    char buffer[65536];
     int shared_fd;
-    long toread;
 
-    /* compute the total size of the shared mapping */
-
-    total_size = max_size = 0;
+    *output = -1;
+    *output_size = 0;
     for (i = 0; i < nb_sec; i++)
     {
-        if ((sec[i].Characteristics & IMAGE_SCN_MEM_SHARED) &&
-            (sec[i].Characteristics & IMAGE_SCN_MEM_WRITE))
-        {
-            get_section_sizes( &sec[i], align_mask, &map_size, &read_pos, &file_size );
-            if (file_size > max_size) max_size = file_size;
-            total_size += map_size;
-        }
+        if (!(sec[i].Characteristics & IMAGE_SCN_MEM_SHARED) ||
+            !(sec[i].Characteristics & IMAGE_SCN_MEM_WRITE)) continue;
+        get_section_sizes( &sec[i], align_mask, &map_size, &read_pos, &file_size );
+        if (isolated && map_size > MAX_SHARED_IMAGE_BYTES - total_size) return STATUS_SECTION_TOO_BIG;
+        total_size += map_size;
     }
-    if (!total_size) return 1;  /* nothing to do */
-
-    if ((mapping->shared = get_shared_file( mapping->fd ))) return 1;
-
-    /* create a temp file for the mapping */
-
-    if ((shared_fd = create_temp_file( total_size )) == -1) return 0;
-    if (!(file = create_file_for_fd( shared_fd, FILE_GENERIC_READ|FILE_GENERIC_WRITE, 0 ))) return 0;
-
-    if (!(buffer = malloc( max_size ))) goto error;
-
-    /* copy the shared sections data into the temp file */
+    if (!total_size) return STATUS_SUCCESS;
+    shared_fd = isolated ? create_prepared_image_file( "wine-image-shared", total_size, 1 ) :
+                           create_temp_file( total_size );
+    if (shared_fd == -1) return STATUS_INVALID_FILE_FOR_SECTION;
 
     shared_pos = 0;
     for (i = 0; i < nb_sec; i++)
     {
-        if (!(sec[i].Characteristics & IMAGE_SCN_MEM_SHARED)) continue;
-        if (!(sec[i].Characteristics & IMAGE_SCN_MEM_WRITE)) continue;
+        size_t remaining;
+        off_t write_pos;
+        if (!(sec[i].Characteristics & IMAGE_SCN_MEM_SHARED) ||
+            !(sec[i].Characteristics & IMAGE_SCN_MEM_WRITE)) continue;
         get_section_sizes( &sec[i], align_mask, &map_size, &read_pos, &file_size );
         write_pos = shared_pos;
         shared_pos += map_size;
         if (!sec[i].PointerToRawData || !file_size) continue;
-        toread = file_size;
-        while (toread)
+        remaining = file_size;
+        while (remaining)
         {
-            long res = pread( fd, buffer + file_size - toread, toread, read_pos );
-            if (!res && toread < 0x200)  /* partial sector at EOF is not an error */
-            {
-                file_size -= toread;
-                break;
-            }
+            size_t written = 0;
+            ssize_t res;
+            do res = pread( fd, buffer, min(remaining,sizeof(buffer)), read_pos );
+            while (res == -1 && errno == EINTR);
+            if (!res && remaining < 0x200) break; /* partial sector at EOF */
             if (res <= 0) goto error;
-            toread -= res;
             read_pos += res;
+            remaining -= res;
+            while (written < res)
+            {
+                ssize_t ret;
+                do ret = pwrite( shared_fd, buffer + written, res - written, write_pos + written );
+                while (ret == -1 && errno == EINTR);
+                if (ret <= 0) goto error;
+                written += ret;
+            }
+            write_pos += res;
         }
-        if (pwrite( shared_fd, buffer, file_size, write_pos ) != file_size) goto error;
     }
+    /* Shared data stays writable, but its bounded extent cannot change. */
+    if (isolated && fcntl( shared_fd, F_ADD_SEALS, F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL ) == -1)
+        goto error;
+    *output = shared_fd;
+    *output_size = total_size;
+    return STATUS_SUCCESS;
+error:
+    close( shared_fd );
+    return STATUS_INVALID_FILE_FOR_SECTION;
+}
 
-    if (!(shared = alloc_object( &shared_map_ops ))) goto error;
+static unsigned int install_shared_mapping( struct mapping *mapping, int fd, file_pos_t size )
+{
+    struct shared_map *shared;
+    struct file *file;
+    int copy;
+
+    /* Recheck at completion: another job can already have published this file. */
+    if ((mapping->shared = get_shared_file( mapping->fd ))) return STATUS_SUCCESS;
+    if (size > MAX_RETAINED_SHARED_IMAGE_BYTES - retained_shared_image_bytes)
+        return STATUS_COMMITMENT_LIMIT;
+    if ((copy = fcntl( fd, F_DUPFD_CLOEXEC, 0 )) == -1) return STATUS_NO_MEMORY;
+    if (!(file = create_file_for_fd( copy, FILE_GENERIC_READ | FILE_GENERIC_WRITE, 0 )))
+        return get_error();
+    if (!(shared = alloc_object( &shared_map_ops )))
+    {
+        release_object( file );
+        return STATUS_NO_MEMORY;
+    }
     shared->fd = (struct fd *)grab_object( mapping->fd );
     shared->file = file;
+    shared->image_bytes = size;
+    retained_shared_image_bytes += size;
     list_add_head( &shared_map_list, &shared->entry );
     mapping->shared = shared;
-    free( buffer );
-    return 1;
+    return STATUS_SUCCESS;
+}
 
- error:
-    release_object( file );
-    free( buffer );
-    return 0;
+static unsigned int build_shared_mapping( struct mapping *mapping, size_t align_mask, int fd,
+                                          IMAGE_SECTION_HEADER *sec, unsigned int nb_sec )
+{
+    unsigned int i, status;
+    int shared_fd;
+    file_pos_t size;
+    size_t file_size, map_size;
+    off_t read_pos;
+
+    for (i = 0; i < nb_sec; i++)
+    {
+        if (!(sec[i].Characteristics & IMAGE_SCN_MEM_SHARED) ||
+            !(sec[i].Characteristics & IMAGE_SCN_MEM_WRITE)) continue;
+        get_section_sizes( &sec[i], align_mask, &map_size, &read_pos, &file_size );
+        if (map_size) break;
+    }
+    if (i == nb_sec) return STATUS_SUCCESS;
+    if ((mapping->shared = get_shared_file( mapping->fd ))) return STATUS_SUCCESS;
+    status = copy_shared_mapping( align_mask, fd, sec, nb_sec, 0, &shared_fd, &size );
+    if (status || shared_fd == -1) return status;
+    status = install_shared_mapping( mapping, shared_fd, 0 ); /* ordinary path is not image-budgeted */
+    close( shared_fd );
+    return status;
 }
 
 /* load a data directory header from its section */
@@ -1253,7 +1445,8 @@ static size_t find_resource_entry( unsigned int id, IMAGE_DATA_DIRECTORY *data,
 
 /* load the version resource */
 static int load_version_resource( void **ret_buf, IMAGE_DATA_DIRECTORY *data, size_t align_mask,
-                                  int unix_fd, IMAGE_SECTION_HEADER *sec, unsigned int nb_sec )
+                                  int unix_fd, IMAGE_SECTION_HEADER *sec, unsigned int nb_sec,
+                                  size_t limit )
 {
     IMAGE_RESOURCE_DATA_ENTRY entry;
     size_t offset;
@@ -1266,7 +1459,8 @@ static int load_version_resource( void **ret_buf, IMAGE_DATA_DIRECTORY *data, si
     ret = load_data_dir( &entry, sizeof(entry), data->VirtualAddress + offset, data->Size - offset,
                          align_mask, unix_fd, sec, nb_sec );
     if (ret != sizeof(entry)) return 0;
-    if (!(*ret_buf = malloc( entry.Size + 3 ))) return 0;
+    if (entry.Size > limit) return -1;
+    if (!(*ret_buf = malloc( (size_t)entry.Size + 3 ))) return 0;
     if ((ret = load_data_dir( *ret_buf, entry.Size, entry.OffsetToData, entry.Size,
                               align_mask, unix_fd, sec, nb_sec )) > 0)
     {
@@ -1309,7 +1503,8 @@ static int load_cfg_header( IMAGE_LOAD_CONFIG_DIRECTORY64 *cfg, IMAGE_DATA_DIREC
 }
 
 /* retrieve the mapping parameters for an executable (PE) image */
-static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_size, int unix_fd )
+static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_size, int unix_fd,
+                                      int *prepared_shared, file_pos_t *shared_size )
 {
     static const char builtin_signature[] = "Wine builtin DLL";
     static const char fakedll_signature[] = "Wine placeholder DLL";
@@ -1451,7 +1646,7 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
 
     mapping->image.is_hybrid     = 0;
     mapping->image.padding       = 0;
-    mapping->image.map_addr      = get_fd_map_address( mapping->fd );
+    mapping->image.map_addr      = mapping->fd ? get_fd_map_address( mapping->fd ) : 0;
     mapping->image.image_charact = nt.FileHeader.Characteristics;
     mapping->image.machine       = nt.FileHeader.Machine;
     mapping->image.dbg_offset    = nt.FileHeader.PointerToSymbolTable;
@@ -1499,8 +1694,13 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
                                                           unix_fd, sec, nt.FileHeader.NumberOfSections );
     }
     else if (res_dir)
-        mapping->ver_len = load_version_resource( &mapping->ver_res, res_dir, align_mask,
-                                                  unix_fd, sec, nt.FileHeader.NumberOfSections );
+    {
+        size = load_version_resource( &mapping->ver_res, res_dir, align_mask, unix_fd, sec,
+                                      nt.FileHeader.NumberOfSections,
+                                      prepared_shared ? MAX_IMAGE_METADATA_BYTES : SIZE_MAX );
+        if (size < 0) { ret = STATUS_SECTION_TOO_BIG; goto done; }
+        mapping->ver_len = size;
+    }
 
     if (clr_dir &&
         load_clr_header( &clr, clr_dir, align_mask, unix_fd, sec, nt.FileHeader.NumberOfSections ) &&
@@ -1525,8 +1725,10 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
             mapping->image.is_hybrid = !!cfg.cfg64.CHPEMetadataPointer;
     }
 
-    if (build_shared_mapping( mapping, align_mask, unix_fd, sec, nt.FileHeader.NumberOfSections ))
-        ret = STATUS_SUCCESS;
+    ret = prepared_shared ? copy_shared_mapping( align_mask, unix_fd, sec, nt.FileHeader.NumberOfSections,
+                                                1, prepared_shared, shared_size ) :
+                            build_shared_mapping( mapping, align_mask, unix_fd, sec,
+                                                  nt.FileHeader.NumberOfSections );
 
 done:
     free( sec );
@@ -1589,6 +1791,8 @@ static bool mapping_init( struct object *obj, const void *init_data )
     mapping->ver_res     = NULL;
     mapping->exp_len     = 0;
     mapping->ver_len     = 0;
+    mapping->metadata    = NULL;
+    mapping->metadata_size = 0;
 
     if (data->fd)
     {
@@ -1627,7 +1831,53 @@ static bool mapping_init( struct object *obj, const void *init_data )
                 set_error( STATUS_NOT_SUPPORTED );
                 goto error;
             }
-            err = get_image_params( mapping, st.st_size, unix_fd );
+            if (data->image)
+            {
+                size_t ver_offset = ((size_t)data->exp_len + 3) / 4 * 4;
+                mapping->image = *data->image;
+                mapping->image.map_addr = get_fd_map_address( mapping->fd );
+                mapping->size = data->image_size;
+                mapping->exp_len = data->exp_len;
+                mapping->ver_len = data->ver_len;
+                mapping->metadata_size = ver_offset + data->ver_len;
+                if (mapping->metadata_size)
+                {
+                    struct stat metadata_stat;
+                    int fd = data->metadata ? get_unix_fd(data->metadata) : -1;
+                    const int seals = F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL;
+                    int actual_seals = fd == -1 ? -1 : fcntl(fd,F_GET_SEALS);
+                    if (mapping->metadata_size > MAX_IMAGE_METADATA_BYTES || fd == -1 ||
+                        fstat(fd,&metadata_stat) || metadata_stat.st_size != mapping->metadata_size ||
+                        actual_seals == -1 || (actual_seals & seals) != seals)
+                    {
+                        set_error( STATUS_UNSUCCESSFUL );
+                        goto error;
+                    }
+                    mapping->metadata = mmap( NULL, mapping->metadata_size, PROT_READ, MAP_SHARED, fd, 0 );
+                    if (mapping->metadata == MAP_FAILED)
+                    {
+                        mapping->metadata = NULL;
+                        set_error( STATUS_NO_MEMORY );
+                        goto error;
+                    }
+                    if (data->exp_len) mapping->exp_name = mapping->metadata;
+                    if (data->ver_len) mapping->ver_res = (char *)mapping->metadata + ver_offset;
+                }
+                err = STATUS_SUCCESS;
+                if (data->shared_size)
+                {
+                    struct stat shared_stat;
+                    int fd = data->shared ? get_unix_fd(data->shared) : -1;
+                    const int seals = F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL;
+                    int actual_seals = fd == -1 ? -1 : fcntl(fd,F_GET_SEALS);
+                    if (fd == -1 || data->shared_size > MAX_SHARED_IMAGE_BYTES || fstat(fd,&shared_stat) ||
+                        shared_stat.st_size != data->shared_size || actual_seals == -1 ||
+                        (actual_seals & seals) != seals)
+                        err = STATUS_UNSUCCESSFUL;
+                    else err = install_shared_mapping( mapping, fd, data->shared_size );
+                }
+            }
+            else err = get_image_params( mapping, st.st_size, unix_fd, NULL, NULL );
             if (!err)
             {
                 mapping->image_class = data->digest ? classify_image_digest( data->digest, st.st_size,
@@ -1680,6 +1930,7 @@ static bool mapping_init( struct object *obj, const void *init_data )
     retained_image_bytes -= mapping->snapshot_bytes;
     if (mapping->committed) release_object( mapping->committed );
     if (mapping->shared) release_object( mapping->shared );
+    if (mapping->metadata) munmap( mapping->metadata, mapping->metadata_size );
     return false;
 }
 
@@ -1785,8 +2036,12 @@ static void mapping_destroy( struct object *obj )
     retained_image_bytes -= mapping->snapshot_bytes;
     if (mapping->committed) release_object( mapping->committed );
     if (mapping->shared) release_object( mapping->shared );
-    free( mapping->exp_name );
-    free( mapping->ver_res );
+    if (mapping->metadata) munmap( mapping->metadata, mapping->metadata_size );
+    else
+    {
+        free( mapping->exp_name );
+        free( mapping->ver_res );
+    }
 }
 
 static enum server_fd_type mapping_get_fd_type( struct fd *fd )
