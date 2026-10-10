@@ -111,7 +111,7 @@ int init_image_trust( int fd, const char *pin )
 {
     unsigned long long size, start, end;
     unsigned char digest[32], expected[32], *bytes;
-    unsigned int count, i;
+    unsigned int count, i, version;
     time_t now = time( NULL );
 
     if (catalog || strlen( pin ) != 64 ||
@@ -130,8 +130,10 @@ int init_image_trust( int fd, const char *pin )
         expected[i] = value;
     }
     if (!(bytes = malloc( size ))) return 0;
-    if (!hash_fd( fd, size, digest, bytes ) || memcmp( digest, expected, 32 ) ||
-        memcmp( bytes, "LNTICT02", 8 ) || read_u32( bytes + 8 ) != 2) goto invalid;
+    if (!hash_fd( fd, size, digest, bytes ) || memcmp( digest, expected, 32 )) goto invalid;
+    version = read_u32( bytes + 8 );
+    if ((version != 2 || memcmp( bytes, "LNTICT02", 8 )) &&
+        (version != 3 || memcmp( bytes, "LNTICT03", 8 ))) goto invalid;
     count = read_u32( bytes + 12 );
     start = read_u64( bytes + 16 );
     end = read_u64( bytes + 24 );
@@ -141,10 +143,14 @@ int init_image_trust( int fd, const char *pin )
     {
         const unsigned char *entry = bytes + HEADER_BYTES + i * ENTRY_BYTES;
         unsigned long long image_size = read_u64( entry + 32 );
-        unsigned int machine = read_u32( entry + 40 ), kind = read_u32( entry + 44 );
+        unsigned int machine = read_u32( entry + 40 ), tag = read_u32( entry + 44 );
+        unsigned int kind = tag & 0xff, protection = (tag >> 8) & 0xff;
         if (!image_size || image_size > IMAGE_TRUST_MAX_IMAGE_BYTES ||
             (machine != 0x14c && machine != 0x8664) ||
             (kind != IMAGE_TRUST_MICROSOFT && kind != IMAGE_TRUST_PLATFORM) ||
+            (tag & ~0xffff) || (version == 2 && protection) ||
+            (protection && (kind != IMAGE_TRUST_MICROSOFT ||
+                           (protection != 0x41 && protection != 0x51 && protection != 0x61))) ||
             (i && memcmp( entry - ENTRY_BYTES, entry, 32 ) >= 0)) goto invalid;
     }
     catalog = bytes;
@@ -164,9 +170,10 @@ int hash_image_fd( int fd, unsigned char digest[32] )
 }
 
 unsigned int classify_image_digest( const unsigned char digest[32], unsigned long long size,
-                                   unsigned short machine )
+                                   unsigned short machine, unsigned int *protection )
 {
     unsigned int low = 0, high = entry_count;
+    if (protection) *protection = 0;
     if (!image_trust_ready()) return IMAGE_TRUST_UNTRUSTED;
     while (low < high)
     {
@@ -175,8 +182,14 @@ unsigned int classify_image_digest( const unsigned char digest[32], unsigned lon
         int order = memcmp( digest, entry, 32 );
         if (order < 0) high = middle;
         else if (order > 0) low = middle + 1;
-        else return read_u64( entry + 32 ) == size && read_u32( entry + 40 ) == machine ?
-                    read_u32( entry + 44 ) : IMAGE_TRUST_UNTRUSTED;
+        else
+        {
+            unsigned int tag = read_u32( entry + 44 );
+            if (read_u64( entry + 32 ) != size || read_u32( entry + 40 ) != machine)
+                return IMAGE_TRUST_UNTRUSTED;
+            if (protection) *protection = (tag >> 8) & 0xff;
+            return tag & 0xff;
+        }
     }
     return IMAGE_TRUST_UNTRUSTED;
 }
@@ -187,5 +200,5 @@ unsigned int classify_image_fd( int fd, unsigned short machine )
     unsigned long long size;
     if (!image_trust_ready() || !sealed_size( fd, IMAGE_TRUST_MAX_IMAGE_BYTES, &size ) ||
         !hash_fd( fd, size, digest, NULL )) return IMAGE_TRUST_UNTRUSTED;
-    return classify_image_digest( digest, size, machine );
+    return classify_image_digest( digest, size, machine, NULL );
 }

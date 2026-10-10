@@ -1507,7 +1507,7 @@ DECL_HANDLER(new_process)
             close( socket_fd );
             goto done;
         }
-        if (!(image = get_protected_process_image( issuer, req->image, req->machine )))
+        if (!(image = get_protected_process_image( issuer, req->image, req->machine, req->protection )))
         {
             close( socket_fd );
             goto done;

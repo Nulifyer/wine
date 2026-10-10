@@ -143,6 +143,7 @@ struct mapping
     struct fd           *image_fd;   /* immutable native image bytes; fd retains identity/sharing */
     file_pos_t           snapshot_bytes; /* charged retained image backing */
     unsigned int         image_class; /* authenticated bytes, independent of PE markers */
+    unsigned int         image_protection; /* exact host catalog grant, not inferred signer */
     struct pe_image_info image;      /* image info (for PE image mapping) */
     struct ranges       *committed;  /* list of committed ranges in this mapping */
     struct shared_map   *shared;     /* temp file for shared PE mapping */
@@ -1814,6 +1815,7 @@ static bool mapping_init( struct object *obj, const void *init_data )
     mapping->snapshot_bytes = data->snapshot ? data->snapshot_bytes : 0;
     if (data->snapshot_consumed) *data->snapshot_consumed = true;
     mapping->image_class = IMAGE_TRUST_UNTRUSTED;
+    mapping->image_protection = 0;
     mapping->shared      = NULL;
     mapping->committed   = NULL;
     mapping->exp_name    = NULL;
@@ -1910,7 +1912,8 @@ static bool mapping_init( struct object *obj, const void *init_data )
             if (!err)
             {
                 mapping->image_class = data->digest ? classify_image_digest( data->digest, st.st_size,
-                                                                            mapping->image.machine ) : 0;
+                                                                            mapping->image.machine,
+                                                                            &mapping->image_protection ) : 0;
                 /* Enforce new executable sections only. Existing section handles and
                  * loader cache entries retain their measured pre-policy behavior. */
                 if ((current->process->signature_policy & 1) && !(mapping->flags & SEC_NOCACHE) &&
@@ -1991,15 +1994,17 @@ static struct mapping *get_mapping_obj( struct process *process, obj_handle_t ha
 /* Retain the exact authenticated executable section through process startup.
  * Publisher authentication does not establish a Windows protection signer. */
 struct object *get_protected_process_image( struct process *process, obj_handle_t handle,
-                                            unsigned short machine )
+                                            unsigned short machine, unsigned int protection )
 {
     struct mapping *mapping = get_mapping_obj( process, handle, SECTION_QUERY | SECTION_MAP_READ );
 
     if (!mapping) return NULL;
     if ((mapping->flags & (SEC_IMAGE | SEC_NOCACHE)) != SEC_IMAGE ||
         (mapping->image.image_charact & IMAGE_FILE_DLL) || !mapping->image_fd ||
+        !(mapping->image.image_charact & IMAGE_FILE_EXECUTABLE_IMAGE) ||
         mapping->image.machine != machine || !image_trust_ready() ||
-        mapping->image_class != IMAGE_TRUST_MICROSOFT)
+        mapping->image_class != IMAGE_TRUST_MICROSOFT || !protection ||
+        mapping->image_protection != protection)
     {
         set_error( STATUS_ACCESS_DENIED );
         release_object( mapping );

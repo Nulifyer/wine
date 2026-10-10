@@ -16,6 +16,8 @@ extern int image_trust_ready(void);
 extern unsigned int classify_image_fd( int fd, unsigned short machine );
 extern int hash_image_fd( int fd, unsigned char digest[32] );
 extern unsigned int classify_image_digest( const unsigned char digest[32], unsigned long long size,
-                                          unsigned short machine );
+                                          unsigned short machine, unsigned int *protection );
+/* Optional protection output is an exact LinuxNT grant from catalog v3.
+ * V2, untrusted and expired entries have no protected-process authority. */
 
 #endif

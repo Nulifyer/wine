@@ -182,7 +182,7 @@ extern void free_mapped_views( struct process *process );
 extern size_t get_page_size(void);
 extern int mapping_worker_exited( int pid, int status );
 extern struct object *get_protected_process_image( struct process *process, obj_handle_t handle,
-                                                   unsigned short machine );
+                                                  unsigned short machine, unsigned int protection );
 extern struct mapping *create_fd_mapping( struct object *root, struct unicode_str name, struct fd *fd,
                                           unsigned int attr, const struct security_descriptor *sd );
 extern struct object *get_shared_data_section( struct process *process, obj_handle_t handle, mem_size_t *size );
