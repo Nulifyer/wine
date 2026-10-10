@@ -693,6 +693,7 @@
 @ stdcall RtlDecompressBuffer(long ptr long ptr long ptr)
 @ stdcall RtlDecompressFragment(long ptr long ptr long long ptr ptr)
 @ stdcall RtlDefaultNpAcl(ptr)
+@ stdcall RtlDelayExecution(long ptr)
 @ stdcall RtlDelete(ptr)
 @ stdcall RtlDeleteAce(ptr long)
 @ stdcall RtlDeleteAtomFromAtomTable(ptr long)

@@ -2429,6 +2429,10 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
 {
     unsigned int status = STATUS_SUCCESS;
 
+    /* Native KernelBase uses the minimum signed interval for an infinite delay.
+     * Route it to the existing infinite wait without negating it. */
+    if (timeout && timeout->QuadPart == LLONG_MIN) timeout = NULL;
+
     /* if alertable, we need to query the server */
     if (alertable)
     {

@@ -47,6 +47,17 @@ static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
 }
 
 /******************************************************************
+ *              RtlDelayExecution (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeout )
+{
+    /* Native RTL reads the interval before entering the NT wait. A bad pointer
+     * raises a read exception instead of becoming an infinite wait. */
+    (void)*(const volatile LONGLONG *)&timeout->QuadPart;
+    return NtDelayExecution( alertable, timeout );
+}
+
+/******************************************************************
  *              NtCreateIRTimer (NTDLL.@)
  *
  * IR timers use a restricted Timer2 object on Windows. Wine's timer
