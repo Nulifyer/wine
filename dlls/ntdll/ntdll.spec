@@ -1018,7 +1018,7 @@
 # @ stub RtlMapSecurityErrorToNtStatus
 # @ stub RtlMergeRangeLists
 @ stdcall RtlMoveMemory(ptr ptr long)
-# @ stub RtlMultiAppendUnicodeStringBuffer
+@ stdcall RtlMultiAppendUnicodeStringBuffer(ptr long ptr)
 @ stdcall RtlMultiByteToUnicodeN(ptr long ptr ptr long)
 @ stdcall RtlMultiByteToUnicodeSize(ptr str long)
 @ stub RtlNewInstanceSecurityObject

@@ -42,6 +42,39 @@ WINE_DECLARE_DEBUG_CHANNEL(debugstr);
 
 
 /***********************************************************************
+ *             RtlMultiAppendUnicodeStringBuffer  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlMultiAppendUnicodeStringBuffer( RTL_UNICODE_STRING_BUFFER *buffer, ULONG count,
+                                                 const UNICODE_STRING *strings )
+{
+    SIZE_T length = buffer->String.Length, size = length;
+    ULONG i;
+    NTSTATUS status;
+
+    for (i = 0; i < count; i++)
+    {
+        size += strings[i].Length;
+        if (size > 0xfffe) return STATUS_NAME_TOO_LONG;
+    }
+    size += sizeof(WCHAR);
+    if (size > 0xfffe) return STATUS_NAME_TOO_LONG;
+    if ((status = RtlpEnsureBufferSize( 0, &buffer->ByteBuffer, size )) < 0) return status;
+
+    buffer->String.MaximumLength = size;
+    buffer->String.Length = size - sizeof(WCHAR);
+    buffer->String.Buffer = (WCHAR *)buffer->ByteBuffer.Buffer;
+    for (i = 0; i < count; i++)
+    {
+        if (strings[i].Length)
+            memmove( buffer->String.Buffer + length / sizeof(WCHAR), strings[i].Buffer, strings[i].Length );
+        length += strings[i].Length;
+    }
+    buffer->String.Buffer[length / sizeof(WCHAR)] = 0;
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
  *             RtlpApplyLengthFunction  (NTDLL.@)
  */
 NTSTATUS WINAPI RtlpApplyLengthFunction( ULONG flags, SIZE_T type, void *buffer,
