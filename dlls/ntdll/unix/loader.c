@@ -811,6 +811,15 @@ static NTSTATUS dlopen_dll( const char *so_name, UNICODE_STRING *nt_name, void *
     SERVER_END_REQ;
     if (status) return status;
 
+    SERVER_START_REQ( get_process_protection )
+    {
+        req->handle = wine_server_obj_handle( GetCurrentProcess() );
+        status = wine_server_call( req );
+        if (!status && reply->protection) status = STATUS_INVALID_IMAGE_HASH;
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+
     handle = dlopen( so_name, RTLD_NOW );
     if (!handle)
     {
@@ -1733,7 +1742,14 @@ static void load_ntdll(void)
         status = open_builtin_so_file( name, &attr, &module, &info, machine, 0, FALSE );
     }
     if (status == STATUS_IMAGE_NOT_AT_BASE) status = virtual_relocate_module( module );
-    if (status) fatal_error( "failed to load %s error %x\n", name, status );
+    if (status)
+    {
+        fprintf( stderr, "wine: failed to load %s error %x\n", name, status );
+        /* Preserve the NT failure for a waiting creator. A host exit(1)
+         * would become a non-failing NTSTATUS with no process handles. */
+        NtTerminateProcess( GetCurrentProcess(), status );
+        fatal_error( "could not terminate after ntdll load failure\n" );
+    }
     free( name );
     load_ntdll_functions( module );
     if (is_arm64ec()) redirect_ntdll_functions( module );

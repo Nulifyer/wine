@@ -142,8 +142,7 @@ struct mapping
     struct fd           *fd;         /* fd for mapped file */
     struct fd           *image_fd;   /* immutable native image bytes; fd retains identity/sharing */
     file_pos_t           snapshot_bytes; /* charged retained image backing */
-    unsigned int         image_class; /* authenticated bytes, independent of PE markers */
-    unsigned int         image_protection; /* exact host catalog grant, not inferred signer */
+    struct image_trust_info image_trust; /* authenticated bytes and explicit host grants */
     struct pe_image_info image;      /* image info (for PE image mapping) */
     struct ranges       *committed;  /* list of committed ranges in this mapping */
     struct shared_map   *shared;     /* temp file for shared PE mapping */
@@ -1814,8 +1813,7 @@ static bool mapping_init( struct object *obj, const void *init_data )
     mapping->image_fd    = NULL;
     mapping->snapshot_bytes = data->snapshot ? data->snapshot_bytes : 0;
     if (data->snapshot_consumed) *data->snapshot_consumed = true;
-    mapping->image_class = IMAGE_TRUST_UNTRUSTED;
-    mapping->image_protection = 0;
+    memset( &mapping->image_trust, 0, sizeof(mapping->image_trust) );
     mapping->shared      = NULL;
     mapping->committed   = NULL;
     mapping->exp_name    = NULL;
@@ -1911,21 +1909,20 @@ static bool mapping_init( struct object *obj, const void *init_data )
             else err = get_image_params( mapping, st.st_size, unix_fd, NULL, NULL );
             if (!err)
             {
-                mapping->image_class = data->digest ? classify_image_digest( data->digest, st.st_size,
-                                                                            mapping->image.machine,
-                                                                            &mapping->image_protection ) : 0;
+                if (data->digest)
+                    mapping->image_trust = classify_image_digest( data->digest, st.st_size, mapping->image.machine );
                 /* Enforce new executable sections only. Existing section handles and
                  * loader cache entries retain their measured pre-policy behavior. */
                 if ((current->process->signature_policy & 1) && !(mapping->flags & SEC_NOCACHE) &&
-                    mapping->image_class != IMAGE_TRUST_MICROSOFT &&
-                    mapping->image_class != IMAGE_TRUST_PLATFORM)
+                    mapping->image_trust.publisher_class != IMAGE_TRUST_MICROSOFT &&
+                    mapping->image_trust.publisher_class != IMAGE_TRUST_PLATFORM)
                 {
                     set_error( STATUS_INVALID_IMAGE_HASH );
                     goto error;
                 }
                 if (debug_level && image_trust_ready())
                     fprintf( stderr, "image-trust: class=%u machine=%04x bytes=%llu\n",
-                             mapping->image_class, mapping->image.machine, (unsigned long long)st.st_size );
+                             mapping->image_trust.publisher_class, mapping->image.machine, (unsigned long long)st.st_size );
                 return true;
             }
             set_error( err );
@@ -2003,8 +2000,8 @@ struct object *get_protected_process_image( struct process *process, obj_handle_
         (mapping->image.image_charact & IMAGE_FILE_DLL) || !mapping->image_fd ||
         !(mapping->image.image_charact & IMAGE_FILE_EXECUTABLE_IMAGE) ||
         mapping->image.machine != machine || !image_trust_ready() ||
-        mapping->image_class != IMAGE_TRUST_MICROSOFT || !protection ||
-        mapping->image_protection != protection)
+        mapping->image_trust.publisher_class != IMAGE_TRUST_MICROSOFT || !protection ||
+        mapping->image_trust.process_protection != protection)
     {
         set_error( STATUS_ACCESS_DENIED );
         release_object( mapping );
@@ -2586,6 +2583,21 @@ DECL_HANDLER(map_image_view)
         goto done;
     }
 
+    /* Check the recipient, including sections created or transferred by an
+     * ordinary process. Exact retained main images and the sealed initial host
+     * bootstrap have their own authority; every other executable view needs an
+     * explicit code grant. Resource views remain non-executable. */
+    if (current->process->protection && !(mapping->flags & SEC_NOCACHE) &&
+        !(!(mapping->image.image_charact & IMAGE_FILE_DLL) &&
+          (current->process->protected_image == &mapping->obj ||
+           (current->process->native_bootstrap_pid && !is_process_init_done( current->process )))) &&
+        (!mapping->image_fd || !(mapping->image.image_charact & IMAGE_FILE_EXECUTABLE_IMAGE) ||
+         !image_trust_allows_code( &mapping->image_trust, current->process->protection )))
+    {
+        set_error( STATUS_INVALID_IMAGE_HASH );
+        goto done;
+    }
+
     if ((view = mem_alloc( sizeof(*view) )))
     {
         view->base      = req->base;
@@ -2639,7 +2651,7 @@ DECL_HANDLER(map_builtin_view)
     }
 
     /* Client-provided names and PE metadata cannot authenticate legacy ELF code. */
-    if (current->process->signature_policy & 1)
+    if ((current->process->signature_policy & 1) || current->process->protection)
     {
         set_error( STATUS_INVALID_IMAGE_HASH );
         return;
