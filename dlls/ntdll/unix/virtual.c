@@ -7417,6 +7417,12 @@ NTSTATUS WINAPI NtWow64CsrClientCallServer( void *message, void *capture, ULONG 
     return STATUS_NOT_SUPPORTED;
 }
 
+NTSTATUS WINAPI NtWow64CsrCaptureMessageString( void *capture, const char *source, ULONG length,
+                                              ULONG maximum, STRING *string )
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
 NTSTATUS WINAPI NtWow64CsrFreeCaptureBuffer( void *capture )
 {
     return STATUS_NOT_SUPPORTED;

@@ -15,8 +15,8 @@
 @ stub CsrAllocateCapturePointer
 @ stdcall CsrAllocateMessagePointer(ptr long ptr)
 @ stdcall CsrCaptureMessageBuffer(ptr ptr long ptr)
-# @ stub CsrCaptureMessageMultiUnicodeStringsInPlace
-@ stub CsrCaptureMessageString
+@ stdcall CsrCaptureMessageMultiUnicodeStringsInPlace(ptr long ptr)
+@ stdcall CsrCaptureMessageString(ptr ptr long long ptr)
 @ stub CsrCaptureTimeout
 @ stdcall CsrClientCallServer(ptr ptr long long)
 @ stdcall CsrClientConnectToServer(ptr long ptr long ptr)
@@ -514,6 +514,7 @@
 @ stdcall -syscall -arch=win32 NtWow64CsrAllocateCaptureBuffer(long long)
 @ stdcall -syscall -arch=win32 NtWow64CsrAllocateMessagePointer(ptr long ptr)
 @ stdcall -syscall -arch=win32 NtWow64CsrCaptureMessageBuffer(ptr ptr long ptr)
+@ stdcall -syscall -arch=win32 NtWow64CsrCaptureMessageString(ptr ptr long long ptr)
 @ stdcall -syscall -arch=win32 NtWow64CsrClientCallServer(ptr ptr long long)
 @ stdcall -syscall -arch=win32 NtWow64CsrFreeCaptureBuffer(ptr)
 @ stdcall -syscall -arch=win32 NtWow64CsrClientConnectToServer(ptr long ptr long ptr)
@@ -1725,6 +1726,7 @@
 @ stdcall -private -arch=win32 ZwWow64CsrAllocateCaptureBuffer(long long) NtWow64CsrAllocateCaptureBuffer
 @ stdcall -private -arch=win32 ZwWow64CsrAllocateMessagePointer(ptr long ptr) NtWow64CsrAllocateMessagePointer
 @ stdcall -private -arch=win32 ZwWow64CsrCaptureMessageBuffer(ptr ptr long ptr) NtWow64CsrCaptureMessageBuffer
+@ stdcall -private -arch=win32 ZwWow64CsrCaptureMessageString(ptr ptr long long ptr) NtWow64CsrCaptureMessageString
 @ stdcall -private -arch=win32 ZwWow64CsrClientCallServer(ptr ptr long long) NtWow64CsrClientCallServer
 @ stdcall -private -arch=win32 ZwWow64CsrFreeCaptureBuffer(ptr) NtWow64CsrFreeCaptureBuffer
 @ stdcall -private -arch=win32 ZwWow64CsrClientConnectToServer(ptr long ptr long ptr) NtWow64CsrClientConnectToServer

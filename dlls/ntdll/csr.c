@@ -250,6 +250,61 @@ void WINAPI CsrCaptureMessageBuffer( void *capture, const void *source, ULONG si
         memcpy( *pointer, source, size );
 }
 
+/***********************************************************************
+ *           CsrCaptureMessageString (NTDLL.@)
+ */
+void WINAPI CsrCaptureMessageString( void *capture, const char *source, ULONG length,
+                                     ULONG maximum, STRING *string )
+{
+    ULONG aligned;
+
+#ifdef __i386__
+    if (NtCurrentTeb()->WowTebOffset)
+    {
+        NtWow64CsrCaptureMessageString( capture, source, length, maximum, string );
+        return;
+    }
+#endif
+    string->Length = source ? length : 0;
+    aligned = CsrAllocateMessagePointer( capture, maximum, (void **)&string->Buffer );
+    string->MaximumLength = source ? aligned : maximum;
+    if (maximum && !aligned) return;
+    if (source)
+    {
+        if (length && maximum) memmove( string->Buffer, source, maximum );
+        if (string->Length < string->MaximumLength) string->Buffer[string->Length] = 0;
+    }
+    else if (maximum) string->Buffer[0] = 0;
+}
+
+/***********************************************************************
+ *           CsrCaptureMessageMultiUnicodeStringsInPlace (NTDLL.@)
+ */
+NTSTATUS WINAPI CsrCaptureMessageMultiUnicodeStringsInPlace( void **capture, ULONG count,
+                                                            UNICODE_STRING **strings )
+{
+    ULONG i, size = 0;
+
+    if (!capture) return STATUS_INVALID_PARAMETER;
+    if (!*capture)
+    {
+        for (i = 0; i < count; i++)
+            if (strings[i]) size += strings[i]->MaximumLength;
+        if (!(*capture = CsrAllocateCaptureBuffer( count, size ))) return STATUS_NO_MEMORY;
+    }
+    for (i = 0; i < count; i++)
+    {
+        UNICODE_STRING *string = strings[i];
+
+        if (!string) continue;
+        CsrCaptureMessageString( *capture, (const char *)string->Buffer, string->Length,
+                                string->MaximumLength, (STRING *)string );
+        if (string->Length < string->MaximumLength && string->MaximumLength - string->Length >= 2)
+            string->Buffer[string->Length / sizeof(WCHAR)] = 0;
+    }
+    return STATUS_SUCCESS;
+}
+
 #ifdef _WIN64
 struct csr_pointer_state
 {

@@ -310,14 +310,15 @@
     SYSCALL_ENTRY( 0x0132, NtWow64CsrAllocateCaptureBuffer, 8 ) \
     SYSCALL_ENTRY( 0x0133, NtWow64CsrAllocateMessagePointer, 12 ) \
     SYSCALL_ENTRY( 0x0134, NtWow64CsrCaptureMessageBuffer, 16 ) \
-    SYSCALL_ENTRY( 0x0135, NtWow64CsrClientCallServer, 16 ) \
-    SYSCALL_ENTRY( 0x0136, NtWow64CsrClientConnectToServer, 20 ) \
-    SYSCALL_ENTRY( 0x0137, NtWow64CsrFreeCaptureBuffer, 4 ) \
-    SYSCALL_ENTRY( 0x0138, NtWow64GetNativeSystemInformation, 16 ) \
-    SYSCALL_ENTRY( 0x0139, NtWow64IsProcessorFeaturePresent, 4 ) \
-    SYSCALL_ENTRY( 0x013a, NtWow64QueryInformationProcess64, 20 ) \
-    SYSCALL_ENTRY( 0x013b, NtWow64ReadVirtualMemory64, 28 ) \
-    SYSCALL_ENTRY( 0x013c, NtWow64WriteVirtualMemory64, 28 )
+    SYSCALL_ENTRY( 0x0135, NtWow64CsrCaptureMessageString, 20 ) \
+    SYSCALL_ENTRY( 0x0136, NtWow64CsrClientCallServer, 16 ) \
+    SYSCALL_ENTRY( 0x0137, NtWow64CsrClientConnectToServer, 20 ) \
+    SYSCALL_ENTRY( 0x0138, NtWow64CsrFreeCaptureBuffer, 4 ) \
+    SYSCALL_ENTRY( 0x0139, NtWow64GetNativeSystemInformation, 16 ) \
+    SYSCALL_ENTRY( 0x013a, NtWow64IsProcessorFeaturePresent, 4 ) \
+    SYSCALL_ENTRY( 0x013b, NtWow64QueryInformationProcess64, 20 ) \
+    SYSCALL_ENTRY( 0x013c, NtWow64ReadVirtualMemory64, 28 ) \
+    SYSCALL_ENTRY( 0x013d, NtWow64WriteVirtualMemory64, 28 )
 #ifdef _WIN64
 #define ALL_SYSCALLS \
     SYSCALL_ENTRY( 0x0000, NtAccessCheck, 64 ) \

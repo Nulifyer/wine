@@ -5002,6 +5002,8 @@ NTSYSAPI NTSTATUS  WINAPI ApiSetQueryApiSetPresenceEx(const UNICODE_STRING*,BOOL
 NTSYSAPI void *    WINAPI CsrAllocateCaptureBuffer(ULONG,ULONG);
 NTSYSAPI ULONG     WINAPI CsrAllocateMessagePointer(void*,ULONG,void**);
 NTSYSAPI void      WINAPI CsrCaptureMessageBuffer(void*,const void*,ULONG,void**);
+NTSYSAPI void      WINAPI CsrCaptureMessageString(void*,const char*,ULONG,ULONG,STRING*);
+NTSYSAPI NTSTATUS  WINAPI CsrCaptureMessageMultiUnicodeStringsInPlace(void**,ULONG,UNICODE_STRING**);
 NTSYSAPI NTSTATUS  WINAPI CsrClientCallServer(void*,void*,ULONG,ULONG);
 NTSYSAPI void      WINAPI CsrFreeCaptureBuffer(void*);
 NTSYSAPI NTSTATUS  WINAPI CsrClientConnectToServer(const WCHAR*,ULONG,void*,ULONG,BOOLEAN*);
@@ -5979,6 +5981,7 @@ NTSYSAPI NTSTATUS  WINAPI NtWow64AllocateVirtualMemory64(HANDLE,ULONG64*,ULONG64
 NTSYSAPI NTSTATUS  WINAPI NtWow64CsrAllocateCaptureBuffer(ULONG,ULONG);
 NTSYSAPI NTSTATUS  WINAPI NtWow64CsrAllocateMessagePointer(void*,ULONG,void**);
 NTSYSAPI NTSTATUS  WINAPI NtWow64CsrCaptureMessageBuffer(void*,const void*,ULONG,void**);
+NTSYSAPI NTSTATUS  WINAPI NtWow64CsrCaptureMessageString(void*,const char*,ULONG,ULONG,STRING*);
 NTSYSAPI NTSTATUS  WINAPI NtWow64CsrClientCallServer(void*,void*,ULONG,ULONG);
 NTSYSAPI NTSTATUS  WINAPI NtWow64CsrFreeCaptureBuffer(void*);
 NTSYSAPI NTSTATUS  WINAPI NtWow64CsrClientConnectToServer(const WCHAR*,ULONG,void*,ULONG,BOOLEAN*);

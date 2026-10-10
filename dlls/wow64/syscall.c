@@ -1239,6 +1239,23 @@ NTSTATUS WINAPI wow64_NtWow64CsrCaptureMessageBuffer( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtWow64CsrCaptureMessageString
+ */
+NTSTATUS WINAPI wow64_NtWow64CsrCaptureMessageString( UINT *args )
+{
+    void *capture = get_ptr( &args );
+    const char *source = get_ptr( &args );
+    ULONG length = get_ulong( &args );
+    ULONG maximum = get_ulong( &args );
+    STRING *string = get_ptr( &args );
+
+    /* Like other CSR operations, the descriptor and pointer slot are native. */
+    CsrCaptureMessageString( capture, source, length, maximum, string );
+    return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
  *           wow64_NtWow64CsrClientCallServer
  */
 NTSTATUS WINAPI wow64_NtWow64CsrClientCallServer( UINT *args )
