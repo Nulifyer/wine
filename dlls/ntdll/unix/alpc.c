@@ -35,6 +35,7 @@ C_ASSERT( sizeof(LPC_SECTION_WRITE) == (sizeof(void *) == 8 ? 48 : 24) );
 C_ASSERT( sizeof(LPC_SECTION_READ) == (sizeof(void *) == 8 ? 24 : 12) );
 C_ASSERT( sizeof(ALPC_PORT_MESSAGE32) == 24 );
 C_ASSERT( offsetof(ALPC_PORT_MESSAGE32, MessageId) == 16 );
+C_ASSERT( sizeof(ALPC_VIEW_ATTR) == (sizeof(void *) == 8 ? 32 : 16) );
 
 static void trace_message_data( const char *direction, HANDLE port_handle,
                                 const ALPC_PORT_MESSAGE *message )
@@ -358,6 +359,123 @@ NTSTATUS WINAPI NtAlpcDeleteSectionView( HANDLE port, ULONG flags, void *base )
     SERVER_END_REQ;
     if (!status) NtUnmapViewOfSection( NtCurrentProcess(), base );
     return status;
+}
+
+static BOOL valid_section_token( HANDLE token )
+{
+    ULONG id = HandleToULong( token );
+    return token == ULongToHandle( id ) || token == LongToHandle( id );
+}
+
+NTSTATUS WINAPI NtAlpcDeletePortSection( HANDLE port, ULONG flags, HANDLE token )
+{
+    NTSTATUS status;
+    if (flags) return STATUS_INVALID_PARAMETER;
+    if (!valid_section_token( token )) return STATUS_INVALID_HANDLE;
+    SERVER_START_REQ( alpc_delete_port_section )
+    {
+        req->port = wine_server_obj_handle( port );
+        req->id = HandleToULong( token );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtAlpcCreatePortSection( HANDLE port, ULONG flags, HANDLE backing, SIZE_T size,
+                                        HANDLE *token, SIZE_T *actual_size )
+{
+    HANDLE old_token, result;
+    SIZE_T old_size, allocated;
+    NTSTATUS status;
+
+    if (flags & ~0x40000) return STATUS_INVALID_PARAMETER;
+    if (NtReadVirtualMemory( NtCurrentProcess(), token, &old_token, sizeof(old_token), NULL ) ||
+        NtReadVirtualMemory( NtCurrentProcess(), actual_size, &old_size, sizeof(old_size), NULL ) ||
+        !virtual_check_buffer_for_write( token, sizeof(*token) ) ||
+        !virtual_check_buffer_for_write( actual_size, sizeof(*actual_size) )) return STATUS_ACCESS_VIOLATION;
+    SERVER_START_REQ( alpc_create_port_section )
+    {
+        req->port = wine_server_obj_handle( port );
+        req->flags = flags;
+        req->section = wine_server_obj_handle( backing );
+        req->size = size;
+        status = wine_server_call( req );
+        result = ULongToHandle( reply->id );
+        allocated = reply->size;
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+    if (NtWriteVirtualMemory( NtCurrentProcess(), token, &result, sizeof(result), NULL ) ||
+        NtWriteVirtualMemory( NtCurrentProcess(), actual_size, &allocated, sizeof(allocated), NULL ))
+    {
+        NtWriteVirtualMemory( NtCurrentProcess(), token, &old_token, sizeof(old_token), NULL );
+        NtAlpcDeletePortSection( port, 0, result );
+        return STATUS_ACCESS_VIOLATION;
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS register_section_view( HANDLE port, ULONG allocation_id, void *base )
+{
+    NTSTATUS status;
+    SERVER_START_REQ( alpc_register_section_view )
+    {
+        req->port = wine_server_obj_handle( port );
+        req->allocation_id = allocation_id;
+        req->base = wine_server_client_ptr( base );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+NTSTATUS WINAPI NtAlpcCreateSectionView( HANDLE port, ULONG flags, ALPC_VIEW_ATTR *attributes )
+{
+    ALPC_VIEW_ATTR attr;
+    HANDLE section = NULL;
+    LARGE_INTEGER offset;
+    SIZE_T size;
+    void *base = NULL;
+    ULONG allocation_id;
+    NTSTATUS status;
+
+    if (flags) return STATUS_INVALID_PARAMETER;
+    if (NtReadVirtualMemory( NtCurrentProcess(), attributes, &attr, sizeof(attr), NULL ) ||
+        !virtual_check_buffer_for_write( attributes, sizeof(attr) )) return STATUS_ACCESS_VIOLATION;
+    if (attr.Flags || attr.ViewBase || !attr.ViewSize) return STATUS_INVALID_PARAMETER;
+    if (!valid_section_token( attr.SectionHandle )) return STATUS_INVALID_HANDLE;
+    SERVER_START_REQ( alpc_allocate_section_view )
+    {
+        req->port = wine_server_obj_handle( port );
+        req->id = HandleToULong( attr.SectionHandle );
+        req->size = attr.ViewSize;
+        status = wine_server_call( req );
+        section = wine_server_ptr_handle( reply->section );
+        allocation_id = reply->allocation_id;
+        offset.QuadPart = reply->offset;
+        size = reply->size;
+    }
+    SERVER_END_REQ;
+    if (status) return status;
+    status = NtMapViewOfSection( section, NtCurrentProcess(), &base, is_wow64() ? ~0u : 0,
+                                0, &offset, &size, ViewUnmap, 0, PAGE_READWRITE );
+    NtClose( section );
+    if (status) { register_section_view( port, allocation_id, NULL ); return status; }
+    if ((status = register_section_view( port, allocation_id, base )))
+    {
+        NtUnmapViewOfSection( NtCurrentProcess(), base );
+        register_section_view( port, allocation_id, NULL );
+        return status;
+    }
+    attr.ViewBase = base;
+    attr.ViewSize = size;
+    if (NtWriteVirtualMemory( NtCurrentProcess(), attributes, &attr, sizeof(attr), NULL ))
+    {
+        NtAlpcDeleteSectionView( port, 0, base );
+        return STATUS_ACCESS_VIOLATION;
+    }
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS connect_port( HANDLE *port_handle, UNICODE_STRING *port_name,

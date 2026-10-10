@@ -700,6 +700,70 @@ NTSTATUS WINAPI wow64_NtAlpcDeleteSectionView( UINT *args )
     return NtAlpcDeleteSectionView( port, flags, base );
 }
 
+NTSTATUS WINAPI wow64_NtAlpcCreatePortSection( UINT *args )
+{
+    HANDLE port = get_handle( &args );
+    ULONG flags = get_ulong( &args );
+    HANDLE backing = get_handle( &args );
+    SIZE_T size = get_ulong( &args );
+    ULONG *token32 = get_ptr( &args ), *actual32 = get_ptr( &args );
+    ULONG output = 0, old_size;
+    HANDLE token;
+    SIZE_T actual;
+    NTSTATUS status;
+
+    /* WoW64 clears the handle before the native call, including its failures. */
+    if (NtWriteVirtualMemory( GetCurrentProcess(), token32, &output, sizeof(output), NULL ) ||
+        NtReadVirtualMemory( GetCurrentProcess(), actual32, &old_size, sizeof(old_size), NULL ) ||
+        NtWriteVirtualMemory( GetCurrentProcess(), actual32, &old_size, sizeof(old_size), NULL ))
+        return STATUS_ACCESS_VIOLATION;
+    if ((status = NtAlpcCreatePortSection( port, flags, backing, size, &token, &actual ))) return status;
+    output = HandleToULong( token );
+    old_size = actual;
+    if (NtWriteVirtualMemory( GetCurrentProcess(), token32, &output, sizeof(output), NULL ) ||
+        NtWriteVirtualMemory( GetCurrentProcess(), actual32, &old_size, sizeof(old_size), NULL ))
+    {
+        NtAlpcDeletePortSection( port, 0, token );
+        return STATUS_ACCESS_VIOLATION;
+    }
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI wow64_NtAlpcDeletePortSection( UINT *args )
+{
+    HANDLE port = get_handle( &args );
+    ULONG flags = get_ulong( &args );
+    HANDLE token = get_handle( &args );
+    return NtAlpcDeletePortSection( port, flags, token );
+}
+
+NTSTATUS WINAPI wow64_NtAlpcCreateSectionView( UINT *args )
+{
+    HANDLE port = get_handle( &args );
+    ULONG flags = get_ulong( &args );
+    ALPC_VIEW_ATTR32 *attributes = get_ptr( &args ), captured;
+    ALPC_VIEW_ATTR native;
+    NTSTATUS status;
+
+    C_ASSERT( sizeof(ALPC_VIEW_ATTR32) == 16 );
+    if (NtReadVirtualMemory( GetCurrentProcess(), attributes, &captured, sizeof(captured), NULL ) ||
+        NtWriteVirtualMemory( GetCurrentProcess(), attributes, &captured, sizeof(captured), NULL ))
+        return STATUS_ACCESS_VIOLATION;
+    native.Flags = captured.Flags;
+    native.SectionHandle = ULongToHandle( captured.SectionHandle );
+    native.ViewBase = ULongToPtr( captured.ViewBase );
+    native.ViewSize = captured.ViewSize;
+    if ((status = NtAlpcCreateSectionView( port, flags, &native ))) return status;
+    captured.ViewBase = PtrToUlong( native.ViewBase );
+    captured.ViewSize = native.ViewSize;
+    if (NtWriteVirtualMemory( GetCurrentProcess(), attributes, &captured, sizeof(captured), NULL ))
+    {
+        NtAlpcDeleteSectionView( port, 0, native.ViewBase );
+        return STATUS_ACCESS_VIOLATION;
+    }
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS WINAPI wow64_NtAlpcDeleteSecurityContext( UINT *args )
 {
     HANDLE port = get_handle( &args );

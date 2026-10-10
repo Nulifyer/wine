@@ -370,6 +370,10 @@ DECL_HANDLER(alpc_get_lpc_connect_info);
 DECL_HANDLER(alpc_capture_lpc_section);
 DECL_HANDLER(alpc_connection_view);
 DECL_HANDLER(alpc_delete_section_view);
+DECL_HANDLER(alpc_create_port_section);
+DECL_HANDLER(alpc_delete_port_section);
+DECL_HANDLER(alpc_allocate_section_view);
+DECL_HANDLER(alpc_register_section_view);
 DECL_HANDLER(alpc_get_closed_view);
 DECL_HANDLER(alpc_accept_connect_port);
 DECL_HANDLER(alpc_query_message_security);
@@ -841,6 +845,10 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_alpc_capture_lpc_section,
     (req_handler)req_alpc_connection_view,
     (req_handler)req_alpc_delete_section_view,
+    (req_handler)req_alpc_create_port_section,
+    (req_handler)req_alpc_delete_port_section,
+    (req_handler)req_alpc_allocate_section_view,
+    (req_handler)req_alpc_register_section_view,
     (req_handler)req_alpc_get_closed_view,
     (req_handler)req_alpc_accept_connect_port,
     (req_handler)req_alpc_query_message_security,
@@ -3031,6 +3039,30 @@ C_ASSERT( sizeof(struct alpc_connection_view_reply) == 32 );
 C_ASSERT( offsetof(struct alpc_delete_section_view_request, port) == 12 );
 C_ASSERT( offsetof(struct alpc_delete_section_view_request, base) == 16 );
 C_ASSERT( sizeof(struct alpc_delete_section_view_request) == 24 );
+C_ASSERT( offsetof(struct alpc_create_port_section_request, port) == 12 );
+C_ASSERT( offsetof(struct alpc_create_port_section_request, flags) == 16 );
+C_ASSERT( offsetof(struct alpc_create_port_section_request, section) == 20 );
+C_ASSERT( offsetof(struct alpc_create_port_section_request, size) == 24 );
+C_ASSERT( sizeof(struct alpc_create_port_section_request) == 32 );
+C_ASSERT( offsetof(struct alpc_create_port_section_reply, id) == 8 );
+C_ASSERT( offsetof(struct alpc_create_port_section_reply, size) == 16 );
+C_ASSERT( sizeof(struct alpc_create_port_section_reply) == 24 );
+C_ASSERT( offsetof(struct alpc_delete_port_section_request, port) == 12 );
+C_ASSERT( offsetof(struct alpc_delete_port_section_request, id) == 16 );
+C_ASSERT( sizeof(struct alpc_delete_port_section_request) == 24 );
+C_ASSERT( offsetof(struct alpc_allocate_section_view_request, port) == 12 );
+C_ASSERT( offsetof(struct alpc_allocate_section_view_request, id) == 16 );
+C_ASSERT( offsetof(struct alpc_allocate_section_view_request, size) == 24 );
+C_ASSERT( sizeof(struct alpc_allocate_section_view_request) == 32 );
+C_ASSERT( offsetof(struct alpc_allocate_section_view_reply, section) == 8 );
+C_ASSERT( offsetof(struct alpc_allocate_section_view_reply, allocation_id) == 12 );
+C_ASSERT( offsetof(struct alpc_allocate_section_view_reply, offset) == 16 );
+C_ASSERT( offsetof(struct alpc_allocate_section_view_reply, size) == 24 );
+C_ASSERT( sizeof(struct alpc_allocate_section_view_reply) == 32 );
+C_ASSERT( offsetof(struct alpc_register_section_view_request, port) == 12 );
+C_ASSERT( offsetof(struct alpc_register_section_view_request, allocation_id) == 16 );
+C_ASSERT( offsetof(struct alpc_register_section_view_request, base) == 24 );
+C_ASSERT( sizeof(struct alpc_register_section_view_request) == 32 );
 C_ASSERT( sizeof(struct alpc_get_closed_view_request) == 16 );
 C_ASSERT( offsetof(struct alpc_get_closed_view_reply, base) == 8 );
 C_ASSERT( sizeof(struct alpc_get_closed_view_reply) == 16 );

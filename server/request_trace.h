@@ -4130,6 +4130,48 @@ static void dump_alpc_delete_section_view_request( const struct alpc_delete_sect
     dump_uint64( ", base=", &req->base );
 }
 
+static void dump_alpc_create_port_section_request( const struct alpc_create_port_section_request *req )
+{
+    fprintf( stderr, " port=%04x", req->port );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", section=%04x", req->section );
+    dump_uint64( ", size=", &req->size );
+}
+
+static void dump_alpc_create_port_section_reply( const struct alpc_create_port_section_reply *req )
+{
+    fprintf( stderr, " id=%08x", req->id );
+    dump_uint64( ", size=", &req->size );
+}
+
+static void dump_alpc_delete_port_section_request( const struct alpc_delete_port_section_request *req )
+{
+    fprintf( stderr, " port=%04x", req->port );
+    fprintf( stderr, ", id=%08x", req->id );
+}
+
+static void dump_alpc_allocate_section_view_request( const struct alpc_allocate_section_view_request *req )
+{
+    fprintf( stderr, " port=%04x", req->port );
+    fprintf( stderr, ", id=%08x", req->id );
+    dump_uint64( ", size=", &req->size );
+}
+
+static void dump_alpc_allocate_section_view_reply( const struct alpc_allocate_section_view_reply *req )
+{
+    fprintf( stderr, " section=%04x", req->section );
+    fprintf( stderr, ", allocation_id=%08x", req->allocation_id );
+    dump_uint64( ", offset=", &req->offset );
+    dump_uint64( ", size=", &req->size );
+}
+
+static void dump_alpc_register_section_view_request( const struct alpc_register_section_view_request *req )
+{
+    fprintf( stderr, " port=%04x", req->port );
+    fprintf( stderr, ", allocation_id=%08x", req->allocation_id );
+    dump_uint64( ", base=", &req->base );
+}
+
 static void dump_alpc_get_closed_view_request( const struct alpc_get_closed_view_request *req )
 {
 }
@@ -5503,6 +5545,10 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_capture_lpc_section_request,
     (dump_func)dump_alpc_connection_view_request,
     (dump_func)dump_alpc_delete_section_view_request,
+    (dump_func)dump_alpc_create_port_section_request,
+    (dump_func)dump_alpc_delete_port_section_request,
+    (dump_func)dump_alpc_allocate_section_view_request,
+    (dump_func)dump_alpc_register_section_view_request,
     (dump_func)dump_alpc_get_closed_view_request,
     (dump_func)dump_alpc_accept_connect_port_request,
     (dump_func)dump_alpc_query_message_security_request,
@@ -5973,6 +6019,10 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_alpc_get_lpc_connect_info_reply,
     (dump_func)dump_alpc_capture_lpc_section_reply,
     (dump_func)dump_alpc_connection_view_reply,
+    NULL,
+    (dump_func)dump_alpc_create_port_section_reply,
+    NULL,
+    (dump_func)dump_alpc_allocate_section_view_reply,
     NULL,
     (dump_func)dump_alpc_get_closed_view_reply,
     (dump_func)dump_alpc_accept_connect_port_reply,
@@ -6445,6 +6495,10 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "alpc_capture_lpc_section",
     "alpc_connection_view",
     "alpc_delete_section_view",
+    "alpc_create_port_section",
+    "alpc_delete_port_section",
+    "alpc_allocate_section_view",
+    "alpc_register_section_view",
     "alpc_get_closed_view",
     "alpc_accept_connect_port",
     "alpc_query_message_security",

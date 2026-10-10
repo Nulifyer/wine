@@ -179,8 +179,11 @@
 @ stdcall -syscall NtAlpcConnectPort(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtAlpcConnectPortEx(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr)
 @ stdcall -syscall NtAlpcCreatePort(ptr ptr ptr)
+@ stdcall -syscall NtAlpcCreatePortSection(ptr long ptr long ptr ptr)
 @ stdcall -syscall NtAlpcCreateResourceReserve(ptr long long ptr)
 @ stdcall -syscall NtAlpcCreateSecurityContext(ptr long ptr)
+@ stdcall -syscall NtAlpcCreateSectionView(ptr long ptr)
+@ stdcall -syscall NtAlpcDeletePortSection(ptr long ptr)
 @ stdcall -syscall NtAlpcDeleteResourceReserve(ptr long long)
 @ stdcall -syscall NtAlpcDeleteSectionView(ptr long ptr)
 @ stdcall -syscall NtAlpcDeleteSecurityContext(ptr long ptr)
@@ -1399,8 +1402,11 @@
 @ stdcall -private ZwAlpcCancelMessage(ptr long ptr) NtAlpcCancelMessage
 @ stdcall -private ZwAlpcConnectPort(ptr ptr ptr ptr long ptr ptr ptr ptr ptr ptr) NtAlpcConnectPort
 @ stdcall -private ZwAlpcCreatePort(ptr ptr ptr) NtAlpcCreatePort
+@ stdcall -private ZwAlpcCreatePortSection(ptr long ptr long ptr ptr) NtAlpcCreatePortSection
 @ stdcall -private ZwAlpcCreateResourceReserve(ptr long long ptr) NtAlpcCreateResourceReserve
 @ stdcall -private ZwAlpcCreateSecurityContext(ptr long ptr) NtAlpcCreateSecurityContext
+@ stdcall -private ZwAlpcCreateSectionView(ptr long ptr) NtAlpcCreateSectionView
+@ stdcall -private ZwAlpcDeletePortSection(ptr long ptr) NtAlpcDeletePortSection
 @ stdcall -private ZwAlpcDeleteResourceReserve(ptr long long) NtAlpcDeleteResourceReserve
 @ stdcall -private ZwAlpcDeleteSectionView(ptr long ptr) NtAlpcDeleteSectionView
 @ stdcall -private ZwAlpcDeleteSecurityContext(ptr long ptr) NtAlpcDeleteSecurityContext

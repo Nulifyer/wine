@@ -141,6 +141,34 @@ struct alpc_port
 };
 
 static const struct object_ops alpc_port_ops;
+static unsigned int allocate_resource_id(void);
+
+/* The registration and each allocated extent retain the backing independently.
+ * Deleting a token cannot revoke an existing local mapping. */
+struct alpc_port_section
+{
+    struct list entry;
+    struct alpc_port *owner;       /* weak; final port handle unregisters */
+    struct object *section;
+    mem_size_t size;
+    unsigned int id, refs;
+};
+static struct list port_sections = LIST_INIT(port_sections);
+
+static void release_port_section( struct alpc_port_section *section )
+{
+    if (--section->refs) return;
+    assert( !section->owner );
+    release_object( section->section );
+    free( section );
+}
+
+static void unregister_port_section( struct alpc_port_section *section )
+{
+    list_remove( &section->entry );
+    section->owner = NULL;
+    release_port_section( section );
+}
 
 /* The section reference is independent of both user handles and mappings.
  * A delivered receiver registration survives connector closure and ordinary
@@ -155,6 +183,9 @@ struct alpc_section_view
     client_ptr_t base;
     mem_size_t offset, size;
     unsigned int message_id, receiver, delivered;
+    struct alpc_port_section *port_section;
+    mem_size_t extent_size;
+    unsigned int allocation_id;
 };
 static struct list section_views = LIST_INIT(section_views);
 
@@ -174,6 +205,9 @@ static struct alpc_section_view *new_section_view( struct alpc_port *owner, stru
     view->message_id = message_id;
     view->receiver = receiver;
     view->delivered = 0;
+    view->port_section = NULL;
+    view->extent_size = 0;
+    view->allocation_id = 0;
     list_add_tail( &section_views, &view->entry );
     return view;
 }
@@ -182,6 +216,7 @@ static void free_section_view( struct alpc_section_view *view )
 {
     list_remove( &view->entry );
     release_object( view->section );
+    if (view->port_section) release_port_section( view->port_section );
     free( view );
 }
 
@@ -300,6 +335,121 @@ done:
     release_object( port );
 }
 
+static struct alpc_port_section *find_port_section( struct alpc_port *port, unsigned int id )
+{
+    struct alpc_port_section *section;
+    LIST_FOR_EACH_ENTRY( section, &port_sections, struct alpc_port_section, entry )
+        if (section->owner == port && section->id == id) return section;
+    return NULL;
+}
+
+DECL_HANDLER(alpc_create_port_section)
+{
+    struct alpc_port *port;
+    struct alpc_port_section *section;
+    struct object *backing;
+    mem_size_t size, backing_size;
+
+    if ((req->flags & ~0x40000) || !req->size || req->size > ~(mem_size_t)0 - 0xffff)
+    { set_error( STATUS_INVALID_PARAMETER ); return; }
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->port,
+                                                   ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
+    if (port->thread->process != current->process)
+    { set_error( STATUS_ACCESS_DENIED ); goto done; }
+    size = (req->size + 0xffff) & ~(mem_size_t)0xffff;
+    if (req->section)
+        backing = get_shared_data_section( current->process, req->section, &backing_size );
+    else backing = (struct object *)create_anonymous_mapping( size, FILE_READ_DATA | FILE_WRITE_DATA );
+    if (!backing) goto done;
+    if (!(section = mem_alloc( sizeof(*section) ))) { release_object( backing ); goto done; }
+    section->owner = port;
+    section->section = backing;
+    section->size = size;
+    section->id = allocate_resource_id();
+    section->refs = 1;
+    list_add_tail( &port_sections, &section->entry );
+    reply->id = section->id;
+    reply->size = size;
+done:
+    release_object( port );
+}
+
+DECL_HANDLER(alpc_delete_port_section)
+{
+    struct alpc_port *port;
+    struct alpc_port_section *section;
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->port,
+                                                   ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
+    if (port->thread->process != current->process) set_error( STATUS_ACCESS_DENIED );
+    else if (!(section = find_port_section( port, req->id ))) set_error( STATUS_INVALID_HANDLE );
+    else unregister_port_section( section );
+    release_object( port );
+}
+
+/* Reserve a real 64 KiB-aligned extent before releasing storage authority to
+ * the mapper. Concurrent requests cannot select an in-flight extent. */
+DECL_HANDLER(alpc_allocate_section_view)
+{
+    struct alpc_port *port;
+    struct alpc_port_section *section;
+    struct alpc_section_view *view, *existing;
+    mem_size_t size, extent, offset = 0;
+
+    if (!req->size || req->size > ~(mem_size_t)0 - 0xffff)
+    { set_error( STATUS_INVALID_PARAMETER ); return; }
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->port,
+                                                   ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
+    if (port->thread->process != current->process)
+    { set_error( STATUS_ACCESS_DENIED ); goto done; }
+    if (!(section = find_port_section( port, req->id )))
+    { set_error( STATUS_INVALID_HANDLE ); goto done; }
+    size = (req->size + 0xfff) & ~(mem_size_t)0xfff;
+    extent = (size + 0xffff) & ~(mem_size_t)0xffff;
+retry:
+    if (extent > section->size || offset > section->size - extent)
+    { set_error( STATUS_INSUFFICIENT_RESOURCES ); goto done; }
+    LIST_FOR_EACH_ENTRY( existing, &section_views, struct alpc_section_view, entry )
+        if (existing->port_section == section && offset < existing->offset + existing->extent_size &&
+            existing->offset < offset + extent)
+        { offset = existing->offset + existing->extent_size; goto retry; }
+    if (!(view = new_section_view( port, section->section, 0, offset, size, 0, 1 ))) goto done;
+    view->port_section = section;
+    section->refs++;
+    view->extent_size = extent;
+    view->allocation_id = allocate_resource_id();
+    if (!(reply->section = alloc_handle( current->process, section->section,
+                                         SECTION_MAP_READ | SECTION_MAP_WRITE, 0 )))
+    { free_section_view( view ); goto done; }
+    reply->allocation_id = view->allocation_id;
+    reply->offset = offset;
+    reply->size = size;
+done:
+    release_object( port );
+}
+
+/* Publish only a mapper-confirmed section, offset and range. A zero base cancels
+ * an unpublished reservation; it cannot delete an already mapped registration. */
+DECL_HANDLER(alpc_register_section_view)
+{
+    struct alpc_port *port;
+    struct alpc_section_view *view;
+    if (!(port = (struct alpc_port *)get_handle_obj( current->process, req->port,
+                                                   ALPC_PORT_ALL_ACCESS, &alpc_port_ops ))) return;
+    if (port->thread->process != current->process)
+    { set_error( STATUS_ACCESS_DENIED ); goto done; }
+    LIST_FOR_EACH_ENTRY( view, &section_views, struct alpc_section_view, entry )
+        if (view->owner == port && view->process == current->process &&
+            view->allocation_id && view->allocation_id == req->allocation_id) break;
+    if (&view->entry == &section_views) set_error( STATUS_INVALID_HANDLE );
+    else if (view->base) set_error( STATUS_RESOURCE_IN_USE );
+    else if (!req->base) free_section_view( view );
+    else if (!is_data_section_view( current->process, view->section, req->base, view->offset, view->size ))
+        set_error( STATUS_INVALID_ADDRESS );
+    else view->base = req->base;
+done:
+    release_object( port );
+}
+
 /* The registry owns each live request. Endpoint pointers are weak and are
  * cleared or removed on final handle close. A released private reply retains
  * identity until its operation consumes or abandons it. */
@@ -394,6 +544,8 @@ static unsigned int allocate_resource_id(void)
     struct alpc_resource_reserve *reserve;
     struct alpc_request *request;
     struct alpc_security_context *context;
+    struct alpc_port_section *section;
+    struct alpc_section_view *view;
     unsigned int id;
     int occupied;
 
@@ -402,6 +554,11 @@ static unsigned int allocate_resource_id(void)
         if (++next_resource_id >= 0x7fffffff) next_resource_id = 1;
         id = 0x80000000 | next_resource_id;
         occupied = 0;
+        LIST_FOR_EACH_ENTRY( section, &port_sections, struct alpc_port_section, entry )
+            if (section->id == id) { occupied = 1; break; }
+        if (!occupied)
+            LIST_FOR_EACH_ENTRY( view, &section_views, struct alpc_section_view, entry )
+                if (view->allocation_id == id) { occupied = 1; break; }
         LIST_FOR_EACH_ENTRY( reserve, &resource_reserves, struct alpc_resource_reserve, entry )
             if (reserve->id == id) { occupied = 1; break; }
         if (!occupied)
@@ -2579,6 +2736,11 @@ static int alpc_port_close_handle( struct object *obj, struct process *process, 
     if (cancel_operation) finish_connect_operation( port );
     if (obj->handle_count != 1 && !cancel_operation) return 1;
     close_section_views( port, process );
+    {
+        struct alpc_port_section *section, *next;
+        LIST_FOR_EACH_ENTRY_SAFE( section, next, &port_sections, struct alpc_port_section, entry )
+            if (section->owner == port) unregister_port_section( section );
+    }
     {
         struct alpc_resource_reserve *reserve, *next;
         LIST_FOR_EACH_ENTRY_SAFE( reserve, next, &resource_reserves, struct alpc_resource_reserve, entry )
