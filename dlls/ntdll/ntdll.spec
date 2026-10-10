@@ -359,6 +359,7 @@
 @ stdcall -syscall=0x0015 NtQueryDefaultLocale(long ptr)
 @ stdcall -syscall=0x0044 NtQueryDefaultUILanguage(ptr)
 @ stdcall -syscall=0x0035 NtQueryDirectoryFile(long long ptr ptr ptr ptr long long long ptr long)
+@ stdcall -syscall NtQueryDirectoryFileEx(long long ptr ptr ptr ptr long long long ptr)
 @ stdcall -syscall NtQueryDirectoryObject(long ptr long long long ptr ptr)
 @ stdcall -syscall NtQueryEaFile(long ptr ptr long long ptr long ptr long)
 @ stdcall -syscall=0x0056 NtQueryEvent(long long ptr long ptr)

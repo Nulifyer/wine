@@ -2939,23 +2939,18 @@ static unsigned int get_cached_dir_data( HANDLE handle, struct dir_data **data_r
 }
 
 
-/******************************************************************************
- *              NtQueryDirectoryFile   (NTDLL.@)
- */
-NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_routine,
-                                      void *apc_context, IO_STATUS_BLOCK *io, void *buffer, ULONG length,
-                                      FILE_INFORMATION_CLASS info_class, BOOLEAN single_entry,
-                                      UNICODE_STRING *mask, BOOLEAN restart_scan )
+static NTSTATUS query_directory_file( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_routine,
+                                     void *apc_context, IO_STATUS_BLOCK *io, void *buffer, ULONG length,
+                                     FILE_INFORMATION_CLASS info_class, ULONG flags, UNICODE_STRING *mask )
 {
     int cwd, fd, needs_close;
     enum server_fd_type type;
-    struct dir_data *data;
+    struct dir_data *data = NULL;
     unsigned int status;
 
-    TRACE("(%p %p %p %p %p %p 0x%08x 0x%08x 0x%08x %s 0x%08x\n",
+    TRACE("(%p %p %p %p %p %p 0x%08x 0x%08x 0x%08x %s)\n",
           handle, event, apc_routine, apc_context, io, buffer,
-          length, info_class, single_entry, debugstr_us(mask),
-          restart_scan);
+          length, info_class, flags, debugstr_us(mask));
 
     if (event || apc_routine)
     {
@@ -2997,14 +2992,13 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTI
         return STATUS_INVALID_PARAMETER;
     }
 
-    io->Information = 0;
-
     /* FileReparsePointInformation is only valid for a filesystem's reparse
      * index, not for ordinary directories.  Wine has no persistent NTFS
      * reparse index yet; expose the synthetic index directory as empty. */
     if (info_class == FileReparsePointInformation)
     {
         status = is_ntfs_reparse_index( handle ) ? STATUS_NO_MORE_FILES : STATUS_INVALID_INFO_CLASS;
+        io->Information = 0;
         io->Status = status;
         if (needs_close) close( fd );
         return status;
@@ -3017,25 +3011,38 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTI
     cwd = open( ".", O_RDONLY );
     if (fchdir( fd ) != -1)
     {
-        if (!(status = get_cached_dir_data( handle, &data, fd, mask, restart_scan )))
+        /* No-cursor queries have a per-call filter and leave the shared handle
+         * cursor, including its initial search expression, unchanged. */
+        if (flags & SL_NO_CURSOR_UPDATE_QUERY)
+            status = init_cached_dir_data( &data, fd, mask );
+        else
+            status = get_cached_dir_data( handle, &data, fd, mask, flags & SL_RESTART_SCAN );
+        if (!status)
         {
             union file_directory_info *last_info = NULL;
 
+            io->Information = 0;
             while (!status && data->pos < data->count)
             {
                 status = get_dir_data_entry( data, buffer, io, length, info_class, &last_info );
-                if (!status || status == STATUS_BUFFER_OVERFLOW) data->pos++;
-                if (single_entry && last_info) break;
+                /* A truncated first name must be returned again on retry. */
+                if (!status) data->pos++;
+                if ((flags & SL_RETURN_SINGLE_ENTRY) && last_info) break;
             }
 
             if (!last_info) status = STATUS_NO_MORE_FILES;
             else if (status == STATUS_MORE_ENTRIES) status = STATUS_SUCCESS;
         }
+        if (flags & SL_NO_CURSOR_UPDATE_QUERY) free_dir_data( data );
         if (cwd == -1 || fchdir( cwd ) == -1) chdir( "/" );
     }
     else status = errno_to_status( errno );
 
-    if (status != STATUS_NO_SUCH_FILE) io->Status = status;
+    if (status != STATUS_NO_SUCH_FILE)
+    {
+        if (status && status != STATUS_BUFFER_OVERFLOW) io->Information = 0;
+        io->Status = status;
+    }
 
     mutex_unlock( &dir_mutex );
 
@@ -3043,6 +3050,35 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTI
     if (cwd != -1) close( cwd );
     TRACE( "=> %x (%ld)\n", status, io->Information );
     return status;
+}
+
+
+/******************************************************************************
+ *              NtQueryDirectoryFile   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_routine,
+                                    void *apc_context, IO_STATUS_BLOCK *io, void *buffer, ULONG length,
+                                    FILE_INFORMATION_CLASS info_class, BOOLEAN single_entry,
+                                    UNICODE_STRING *mask, BOOLEAN restart_scan )
+{
+    ULONG flags = (single_entry ? SL_RETURN_SINGLE_ENTRY : 0) | (restart_scan ? SL_RESTART_SCAN : 0);
+
+    return query_directory_file( handle, event, apc_routine, apc_context, io, buffer, length,
+                                 info_class, flags, mask );
+}
+
+
+/******************************************************************************
+ *              NtQueryDirectoryFileEx   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQueryDirectoryFileEx( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_routine,
+                                      void *apc_context, IO_STATUS_BLOCK *io, void *buffer, ULONG length,
+                                      FILE_INFORMATION_CLASS info_class, ULONG flags, UNICODE_STRING *mask )
+{
+    /* There is no caller-supplied index in this ABI or directory virtualization
+     * filter here. Other bits have no effect on this filesystem query. */
+    return query_directory_file( handle, event, apc_routine, apc_context, io, buffer, length,
+                                 info_class, flags, mask );
 }
 
 

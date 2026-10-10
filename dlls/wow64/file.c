@@ -581,6 +581,34 @@ NTSTATUS WINAPI wow64_NtQueryDirectoryFile( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtQueryDirectoryFileEx
+ */
+NTSTATUS WINAPI wow64_NtQueryDirectoryFileEx( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    HANDLE event = get_handle( &args );
+    ULONG apc = get_ulong( &args );
+    ULONG apc_param = get_ulong( &args );
+    IO_STATUS_BLOCK32 *io32 = get_ptr( &args );
+    void *buffer = get_ptr( &args );
+    ULONG len = get_ulong( &args );
+    FILE_INFORMATION_CLASS class = get_ulong( &args );
+    ULONG flags = get_ulong( &args );
+    UNICODE_STRING32 *mask32 = get_ptr( &args );
+
+    UNICODE_STRING mask;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+
+    status = NtQueryDirectoryFileEx( handle, event, apc_32to64( apc ), apc_param_32to64( apc, apc_param ),
+                                     iosb_32to64( &io, io32 ), buffer, len, class, flags,
+                                     unicode_str_32to64( &mask, mask32 ) );
+    put_iosb( io32, &io );
+    return status;
+}
+
+
+/**********************************************************************
  *           wow64_NtQueryEaFile
  */
 NTSTATUS WINAPI wow64_NtQueryEaFile( UINT *args )

@@ -39,10 +39,12 @@
 #include "winternl.h"
 #include "ddk/ntifs.h"
 
-static NTSTATUS (WINAPI *pNtClose)( PHANDLE );
+static NTSTATUS (WINAPI *pNtClose)( HANDLE );
 static NTSTATUS (WINAPI *pNtOpenFile)    ( PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK, ULONG, ULONG );
 static NTSTATUS (WINAPI *pNtQueryDirectoryFile)(HANDLE,HANDLE,PIO_APC_ROUTINE,PVOID,PIO_STATUS_BLOCK,
                                                 PVOID,ULONG,FILE_INFORMATION_CLASS,BOOLEAN,PUNICODE_STRING,BOOLEAN);
+static NTSTATUS (WINAPI *pNtQueryDirectoryFileEx)(HANDLE,HANDLE,PIO_APC_ROUTINE,PVOID,PIO_STATUS_BLOCK,
+                                               PVOID,ULONG,FILE_INFORMATION_CLASS,ULONG,PUNICODE_STRING);
 static NTSTATUS (WINAPI *pNtQueryInformationFile)(HANDLE,PIO_STATUS_BLOCK,PVOID,LONG,FILE_INFORMATION_CLASS);
 static NTSTATUS (WINAPI *pNtSetInformationFile)(HANDLE,PIO_STATUS_BLOCK,PVOID,ULONG,FILE_INFORMATION_CLASS);
 static BOOL     (WINAPI *pRtlDosPathNameToNtPathName_U)( LPCWSTR, PUNICODE_STRING, PWSTR*, CURDIR* );
@@ -1057,14 +1059,14 @@ static BOOL test_NtQueryDirectoryFile_mask(HANDLE handle, BOOL restart_scan, UNI
 static void test_NtQueryDirectoryFile_change_mask(void)
 {
     NTSTATUS status;
-    HANDLE dirh;
+    HANDLE dirh = NULL;
     HANDLE dirh_test_multiple_handles;
     HANDLE dirh_test_fresh_null;
     HANDLE dirh_test_fresh_empty;
     char testdir[MAX_PATH];
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
-    UNICODE_STRING ntdirname;
+    UNICODE_STRING ntdirname = {0};
     WCHAR testdir_w[MAX_PATH];
 
     UNICODE_STRING atestfile;
@@ -1121,7 +1123,8 @@ static void test_NtQueryDirectoryFile_change_mask(void)
     test_NtQueryDirectoryFile_mask(dirh_test_multiple_handles, FALSE, &atestfile, STATUS_NO_MORE_FILES, &atestfile, FALSE);
     /* Confirm that another handle is able to find atestfile */
     test_NtQueryDirectoryFile_mask(dirh, TRUE, &atestfile, STATUS_SUCCESS, &atestfile, FALSE);
-    pNtClose(&dirh_test_multiple_handles);
+    status = pNtClose(dirh_test_multiple_handles);
+    ok( !status, "failed to close directory handle, status %#lx\n", status );
 
     /* All searches for `notatestfile` are expected to fail */
     /* Tests should also fail if the scan is not reset, and the mask changes to an incompatible one */
@@ -1174,7 +1177,8 @@ static void test_NtQueryDirectoryFile_change_mask(void)
     test_NtQueryDirectoryFile_mask(dirh_test_fresh_null, TRUE, NULL, STATUS_SUCCESS, NULL, FALSE);
     test_NtQueryDirectoryFile_mask(dirh_test_fresh_null, FALSE, NULL, STATUS_SUCCESS, NULL, FALSE);
     test_NtQueryDirectoryFile_mask(dirh_test_fresh_null, TRUE, NULL, STATUS_SUCCESS, NULL, FALSE);
-    pNtClose(&dirh_test_fresh_null);
+    status = pNtClose(dirh_test_fresh_null);
+    ok( !status, "failed to close directory handle, status %#lx\n", status );
 
     status = pNtOpenFile(&dirh_test_fresh_empty, SYNCHRONIZE | FILE_LIST_DIRECTORY, &attr, &io, FILE_SHARE_READ,
                          FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT | FILE_DIRECTORY_FILE);
@@ -1183,12 +1187,17 @@ static void test_NtQueryDirectoryFile_change_mask(void)
     /* Test empty mask with a fresh handle */
     test_NtQueryDirectoryFile_mask(dirh_test_fresh_empty, TRUE, &emptymask, STATUS_SUCCESS, NULL, FALSE);
     test_NtQueryDirectoryFile_mask(dirh_test_fresh_empty, FALSE, &emptymask, STATUS_SUCCESS, NULL, FALSE);
-    pNtClose(&dirh_test_fresh_empty);
+    status = pNtClose(dirh_test_fresh_empty);
+    ok( !status, "failed to close directory handle, status %#lx\n", status );
 
 done:
+    if (dirh)
+    {
+        status = pNtClose(dirh);
+        ok( !status, "failed to close directory handle, status %#lx\n", status );
+    }
     tear_down_mask_test(testdir);
     pRtlFreeUnicodeString(&ntdirname);
-    pNtClose(&dirh);
 }
 
 static NTSTATUS get_file_id( FILE_INTERNAL_INFORMATION *info, const WCHAR *root, const WCHAR *name )
@@ -1710,14 +1719,93 @@ static void test_info_classes(void)
     ok( ret == TRUE, "failed to delete %s, error %lu\n", debugstr_w(path), GetLastError() );
 }
 
+static NTSTATUS WINAPI query_directory_ex_adapter( HANDLE h, HANDLE event, PIO_APC_ROUTINE apc,
+                                                  void *context, IO_STATUS_BLOCK *io, void *buffer,
+                                                  ULONG length, FILE_INFORMATION_CLASS class,
+                                                  BOOLEAN single, UNICODE_STRING *mask, BOOLEAN restart )
+{
+    return pNtQueryDirectoryFileEx( h, event, apc, context, io, buffer, length, class,
+                                   (single ? SL_RETURN_SINGLE_ENTRY : 0) | (restart ? SL_RESTART_SCAN : 0), mask );
+}
+
+static void test_directory_no_cursor(void)
+{
+    WCHAR temp[MAX_PATH], directory[MAX_PATH], path[MAX_PATH];
+    IO_STATUS_BLOCK io;
+    UNICODE_STRING mask;
+    BYTE buffer[1024];
+    FILE_BOTH_DIRECTORY_INFORMATION *info = (void *)buffer;
+    HANDLE h, file;
+    NTSTATUS status;
+    unsigned int i;
+    static const WCHAR *names[] = {L"file1", L"file2"};
+
+    GetTempPathW( ARRAY_SIZE(temp), temp );
+    GetTempFileNameW( temp, L"dir", 0, directory );
+    DeleteFileW( directory );
+    ok( CreateDirectoryW( directory, NULL ), "error %lu\n", GetLastError() );
+    for (i = 0; i < ARRAY_SIZE(names); ++i)
+    {
+        swprintf( path, ARRAY_SIZE(path), L"%s\\%s", directory, names[i] );
+        file = CreateFileW( path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL );
+        ok( file != INVALID_HANDLE_VALUE, "error %lu\n", GetLastError() );
+        CloseHandle( file );
+    }
+    h = CreateFileW( directory, FILE_LIST_DIRECTORY | SYNCHRONIZE,
+                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                     OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL );
+    ok( h != INVALID_HANDLE_VALUE, "error %lu\n", GetLastError() );
+    if (h == INVALID_HANDLE_VALUE) goto cleanup;
+
+    pRtlInitUnicodeString( &mask, names[0] );
+    status = pNtQueryDirectoryFileEx( h, NULL, NULL, NULL, &io, buffer, sizeof(buffer),
+                                     FileBothDirectoryInformation,
+                                     SL_RETURN_SINGLE_ENTRY | SL_NO_CURSOR_UPDATE_QUERY, &mask );
+    ok( !status, "status %#lx\n", status );
+    check_string( info->FileName, info->FileNameLength, names[0] );
+
+    /* No-cursor queries do not capture the legacy handle's initial filter. */
+    pRtlInitUnicodeString( &mask, names[1] );
+    status = pNtQueryDirectoryFile( h, NULL, NULL, NULL, &io, buffer, sizeof(buffer),
+                                   FileBothDirectoryInformation, TRUE, &mask, FALSE );
+    ok( !status, "status %#lx\n", status );
+    check_string( info->FileName, info->FileNameLength, names[1] );
+
+    status = pNtQueryDirectoryFileEx( h, NULL, NULL, NULL, &io, buffer, sizeof(buffer),
+                                     FileBothDirectoryInformation,
+                                     SL_RETURN_SINGLE_ENTRY | SL_NO_CURSOR_UPDATE_QUERY, NULL );
+    ok( !status, "status %#lx\n", status );
+    check_string( info->FileName, info->FileNameLength, L"." );
+    status = pNtQueryDirectoryFile( h, NULL, NULL, NULL, &io, buffer, sizeof(buffer),
+                                   FileBothDirectoryInformation, TRUE, NULL, FALSE );
+    ok( status == STATUS_NO_MORE_FILES, "status %#lx\n", status );
+
+    pRtlInitUnicodeString( &mask, names[0] );
+    status = pNtQueryDirectoryFileEx( h, NULL, NULL, NULL, &io, buffer, sizeof(buffer),
+                                     FileBothDirectoryInformation, SL_RESTART_SCAN | SL_RETURN_SINGLE_ENTRY, &mask );
+    ok( !status, "status %#lx\n", status );
+    check_string( info->FileName, info->FileNameLength, names[0] );
+    CloseHandle( h );
+
+cleanup:
+    for (i = 0; i < ARRAY_SIZE(names); ++i)
+    {
+        swprintf( path, ARRAY_SIZE(path), L"%s\\%s", directory, names[i] );
+        ok( DeleteFileW( path ), "error %lu\n", GetLastError() );
+    }
+    ok( RemoveDirectoryW( directory ), "error %lu\n", GetLastError() );
+}
+
 START_TEST(directory)
 {
     WCHAR sysdir[MAX_PATH];
     HMODULE hntdll = GetModuleHandleA("ntdll.dll");
+    void *legacy_query;
 
     pNtClose                = (void *)GetProcAddress(hntdll, "NtClose");
     pNtOpenFile             = (void *)GetProcAddress(hntdll, "NtOpenFile");
     pNtQueryDirectoryFile   = (void *)GetProcAddress(hntdll, "NtQueryDirectoryFile");
+    pNtQueryDirectoryFileEx = (void *)GetProcAddress(hntdll, "NtQueryDirectoryFileEx");
     pNtQueryInformationFile = (void *)GetProcAddress(hntdll, "NtQueryInformationFile");
     pNtSetInformationFile   = (void *)GetProcAddress(hntdll, "NtSetInformationFile");
     pRtlDosPathNameToNtPathName_U = (void *)GetProcAddress(hntdll, "RtlDosPathNameToNtPathName_U");
@@ -1735,4 +1823,22 @@ START_TEST(directory)
     test_NtQueryDirectoryFile_change_mask();
     test_redirection();
     test_info_classes();
+
+    if (!pNtQueryDirectoryFileEx)
+    {
+        win_skip( "NtQueryDirectoryFileEx is not available\n" );
+        return;
+    }
+    test_directory_no_cursor();
+    /* Run the legacy contracts through the extended ABI without duplicating
+     * their fixtures, validation checks or expected filesystem differences. */
+    legacy_query = pNtQueryDirectoryFile;
+    pNtQueryDirectoryFile = query_directory_ex_adapter;
+    winetest_push_context( "NtQueryDirectoryFileEx" );
+    test_NtQueryDirectoryFile();
+    test_NtQueryDirectoryFile_case();
+    test_NtQueryDirectoryFile_change_mask();
+    test_info_classes();
+    winetest_pop_context();
+    pNtQueryDirectoryFile = legacy_query;
 }
