@@ -478,28 +478,41 @@ NTSTATUS WINAPI RtlWow64SuspendThread( HANDLE thread, ULONG *count )
 /**********************************************************************
  *           RtlCreateUserProcess  (NTDLL.@)
  */
-NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
-                                      RTL_USER_PROCESS_PARAMETERS *params,
-                                      SECURITY_DESCRIPTOR *process_descr,
-                                      SECURITY_DESCRIPTOR *thread_descr,
-                                      HANDLE parent, BOOLEAN inherit, HANDLE debug, HANDLE token,
-                                      RTL_USER_PROCESS_INFORMATION *info )
+static NTSTATUS create_user_process( UNICODE_STRING *path, RTL_USER_PROCESS_PARAMETERS *params,
+                                     RTL_USER_PROCESS_EXTENDED_PARAMETERS *extended, BOOLEAN inherit,
+                                     BOOL modern, RTL_USER_PROCESS_INFORMATION *info )
 {
     OBJECT_ATTRIBUTES process_attr, thread_attr;
     PS_CREATE_INFO create_info = { .Size = sizeof(create_info) };
-    ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[6] ) / sizeof(ULONG_PTR)];
+    ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[9] ) / sizeof(ULONG_PTR)];
     PS_ATTRIBUTE_LIST *attr = (PS_ATTRIBUTE_LIST *)buffer;
     UINT pos = 0;
+    ULONG process_flags = inherit ? PROCESS_CREATE_FLAGS_INHERIT_HANDLES : 0;
+    ULONG std_handle_info[2] = { 2, 0 };
+    USHORT node = extended->NodeNumber - 1;
     HANDLE console;
     NTSTATUS status;
 
     RtlNormalizeProcessParams( params );
+    if (modern)
+    {
+        memset( info, 0, sizeof(*info) );
+        info->Length = sizeof(*info);
+        create_info.InitState.InitFlags = 4;
+        if (params->Flags & 0x40000) process_flags |= PROCESS_CREATE_FLAGS_CREATE_SESSION;
+        if (params->Flags & 0x400000) process_flags |= PROCESS_CREATE_FLAGS_PROTECTED_PROCESS;
+        if (params->Flags & 0x800000) process_flags |= 0x40000;
+        if (!extended->NodeNumber) process_flags |= PROCESS_CREATE_FLAGS_INHERIT_FROM_PARENT;
+    }
 
-    attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_IMAGE_NAME;
-    attr->Attributes[pos].Size         = path->Length;
-    attr->Attributes[pos].ValuePtr     = path->Buffer;
-    attr->Attributes[pos].ReturnLength = NULL;
-    pos++;
+    if (!modern)
+    {
+        attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_IMAGE_NAME;
+        attr->Attributes[pos].Size         = path->Length;
+        attr->Attributes[pos].ValuePtr     = path->Buffer;
+        attr->Attributes[pos].ReturnLength = NULL;
+        pos++;
+    }
     attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_CLIENT_ID;
     attr->Attributes[pos].Size         = sizeof(info->ClientId);
     attr->Attributes[pos].ValuePtr     = &info->ClientId;
@@ -510,46 +523,90 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
     attr->Attributes[pos].ValuePtr     = &info->ImageInformation;
     attr->Attributes[pos].ReturnLength = NULL;
     pos++;
-    if (parent)
+    if (modern)
+    {
+        attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_IMAGE_NAME;
+        attr->Attributes[pos].Size         = path->Length;
+        attr->Attributes[pos].ValuePtr     = path->Buffer;
+        attr->Attributes[pos].ReturnLength = NULL;
+        pos++;
+        attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_STD_HANDLE_INFO;
+        attr->Attributes[pos].Size         = sizeof(std_handle_info);
+        attr->Attributes[pos].ValuePtr     = std_handle_info;
+        attr->Attributes[pos].ReturnLength = NULL;
+        pos++;
+    }
+    if (extended->ParentProcess)
     {
         attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_PARENT_PROCESS;
-        attr->Attributes[pos].Size         = sizeof(parent);
-        attr->Attributes[pos].ValuePtr     = parent;
+        attr->Attributes[pos].Size         = sizeof(extended->ParentProcess);
+        attr->Attributes[pos].ValuePtr     = extended->ParentProcess;
         attr->Attributes[pos].ReturnLength = NULL;
         pos++;
     }
-    if (debug)
+    if (extended->DebugPort)
     {
         attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_DEBUG_PORT;
-        attr->Attributes[pos].Size         = sizeof(debug);
-        attr->Attributes[pos].ValuePtr     = debug;
+        attr->Attributes[pos].Size         = sizeof(extended->DebugPort);
+        attr->Attributes[pos].ValuePtr     = extended->DebugPort;
         attr->Attributes[pos].ReturnLength = NULL;
         pos++;
     }
-    if (token)
+    if (extended->TokenHandle)
     {
         attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_TOKEN;
-        attr->Attributes[pos].Size         = sizeof(token);
-        attr->Attributes[pos].ValuePtr     = token;
+        attr->Attributes[pos].Size         = sizeof(extended->TokenHandle);
+        attr->Attributes[pos].ValuePtr     = extended->TokenHandle;
+        attr->Attributes[pos].ReturnLength = NULL;
+        pos++;
+    }
+    if (modern && extended->NodeNumber)
+    {
+        attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_PREFERRED_NODE;
+        attr->Attributes[pos].Size         = sizeof(node);
+        attr->Attributes[pos].ValuePtr     = &node;
+        attr->Attributes[pos].ReturnLength = NULL;
+        pos++;
+    }
+    if (modern && (process_flags & PROCESS_CREATE_FLAGS_PROTECTED_PROCESS))
+    {
+        attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_PROTECTION_LEVEL;
+        attr->Attributes[pos].Size         = sizeof(BYTE);
+        attr->Attributes[pos].Value        = 0x61;
         attr->Attributes[pos].ReturnLength = NULL;
         pos++;
     }
     attr->TotalLength = offsetof( PS_ATTRIBUTE_LIST, Attributes[pos] );
 
-    InitializeObjectAttributes( &process_attr, NULL, 0, NULL, process_descr );
-    InitializeObjectAttributes( &thread_attr, NULL, 0, NULL, thread_descr );
+    InitializeObjectAttributes( &process_attr, NULL, modern ? OBJ_KERNEL_HANDLE : 0, NULL, extended->ProcessSecurityDescriptor );
+    InitializeObjectAttributes( &thread_attr, NULL, modern ? OBJ_KERNEL_HANDLE : 0, NULL, extended->ThreadSecurityDescriptor );
 
     /* Raw NT creation has no Win32 DETACHED_PROCESS option. Let the child loader
      * attach the inherited console, without changing the caller's parameters. */
     console = params->ConsoleHandle;
     if (!console) params->ConsoleHandle = NtCurrentTeb()->Peb->ProcessParameters->ConsoleHandle;
-    status = NtCreateUserProcess( &info->Process, &info->Thread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
+    status = NtCreateUserProcess( &info->Process, &info->Thread, modern ? MAXIMUM_ALLOWED : PROCESS_ALL_ACCESS,
+                                 modern ? MAXIMUM_ALLOWED : THREAD_ALL_ACCESS,
                                  &process_attr, &thread_attr,
-                                 inherit ? PROCESS_CREATE_FLAGS_INHERIT_HANDLES : 0,
+                                 process_flags,
                                  THREAD_CREATE_FLAGS_CREATE_SUSPENDED, params,
                                  &create_info, attr );
     params->ConsoleHandle = console;
     return status;
+}
+
+NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
+                                      RTL_USER_PROCESS_PARAMETERS *params,
+                                      SECURITY_DESCRIPTOR *process_descr,
+                                      SECURITY_DESCRIPTOR *thread_descr,
+                                      HANDLE parent, BOOLEAN inherit, HANDLE debug, HANDLE token,
+                                      RTL_USER_PROCESS_INFORMATION *info )
+{
+    RTL_USER_PROCESS_EXTENDED_PARAMETERS extended = { .Version = 1,
+        .ProcessSecurityDescriptor = process_descr, .ThreadSecurityDescriptor = thread_descr,
+        .ParentProcess = parent, .DebugPort = debug, .TokenHandle = token };
+
+    return create_user_process( path, params, &extended, inherit, FALSE, info );
 }
 
 /**********************************************************************
@@ -559,7 +616,6 @@ NTSTATUS WINAPI RtlCreateUserProcessEx( UNICODE_STRING *path, RTL_USER_PROCESS_P
                                         BOOLEAN inherit, RTL_USER_PROCESS_EXTENDED_PARAMETERS *extended,
                                         RTL_USER_PROCESS_INFORMATION *info )
 {
-    RTL_USER_PROCESS_INFORMATION local = { sizeof(local) };
     UNICODE_STRING nt_path;
     WCHAR *path_buffer;
     SIZE_T path_chars, path_offset = 0;
@@ -598,20 +654,10 @@ NTSTATUS WINAPI RtlCreateUserProcessEx( UNICODE_STRING *path, RTL_USER_PROCESS_P
         free_nt_path = TRUE;
     }
 
-    status = RtlCreateUserProcess( &nt_path, 0, params, extended->ProcessSecurityDescriptor,
-                                   extended->ThreadSecurityDescriptor, extended->ParentProcess,
-                                   inherit, extended->DebugPort, extended->TokenHandle, &local );
+    status = create_user_process( &nt_path, params, extended, inherit, TRUE, info );
     if (free_nt_path) RtlFreeUnicodeString( &nt_path );
     RtlFreeHeap( GetProcessHeap(), 0, path_buffer );
-    if (status)
-    {
-        if (local.Thread) NtClose( local.Thread );
-        if (local.Process) NtClose( local.Process );
-        return status;
-    }
-
-    *info = local;
-    return STATUS_SUCCESS;
+    return status;
 }
 
 /***********************************************************************
