@@ -41,6 +41,31 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 WINE_DECLARE_DEBUG_CHANNEL(debugstr);
 
 
+/***********************************************************************
+ *             RtlpEnsureBufferSize  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlpEnsureBufferSize( ULONG flags, RTL_BUFFER *buffer, SIZE_T size )
+{
+    HANDLE heap = NtCurrentTeb()->Peb->ProcessHeap;
+    BYTE *allocation;
+
+    if (flags & ~1u || !buffer) return STATUS_INVALID_PARAMETER;
+    if (size <= buffer->Size) return STATUS_SUCCESS;
+    if (buffer->Buffer == buffer->StaticBuffer && size <= buffer->StaticSize)
+    {
+        buffer->Size = size;
+        return STATUS_SUCCESS;
+    }
+
+    if (!(allocation = RtlAllocateHeap( heap, 0, size ))) return STATUS_NO_MEMORY;
+    if (!(flags & 1) && buffer->Size) memmove( allocation, buffer->Buffer, buffer->Size );
+    if (buffer->Buffer != buffer->StaticBuffer) RtlFreeHeap( heap, 0, buffer->Buffer );
+    buffer->Buffer = allocation;
+    buffer->Size = size;
+    return STATUS_SUCCESS;
+}
+
+
 static LONG WINAPI debug_exception_handler( EXCEPTION_POINTERS *eptr )
 {
     EXCEPTION_RECORD *rec = eptr->ExceptionRecord;

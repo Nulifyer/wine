@@ -1303,7 +1303,7 @@
 @ stdcall RtlZeroMemory(ptr long)
 @ stdcall RtlZombifyActivationContext(ptr)
 # @ stub RtlpApplyLengthFunction
-# @ stub RtlpEnsureBufferSize
+@ stdcall RtlpEnsureBufferSize(long ptr long)
 # @ stub RtlpNotOwnerCriticalSection
 @ stdcall RtlpNtCreateKey(ptr long ptr long ptr ptr)
 @ stdcall RtlpNtEnumerateSubKey(ptr ptr long)

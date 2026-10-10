@@ -160,6 +160,14 @@ typedef struct _RTL_ACE_DATA
     PSID       *Sid;
 } RTL_ACE_DATA, *PRTL_ACE_DATA;
 
+typedef struct _RTL_BUFFER
+{
+    PUCHAR Buffer;
+    PUCHAR StaticBuffer;
+    SIZE_T Size;
+    SIZE_T StaticSize;
+} RTL_BUFFER, *PRTL_BUFFER;
+
 typedef struct tagRTL_BITMAP {
     ULONG  SizeOfBitMap; /* Number of bits in the bitmap */
     PULONG Buffer; /* Bitmap data, assumed sized to a DWORD boundary */
@@ -5894,6 +5902,7 @@ NTSYSAPI NTSTATUS  WINAPI RtlWow64IsWowGuestMachineSupported(USHORT,BOOLEAN*);
 NTSYSAPI NTSTATUS  WINAPI RtlWow64SuspendThread(HANDLE,ULONG*);
 NTSYSAPI NTSTATUS  WINAPI RtlWriteRegistryValue(ULONG,PCWSTR,PCWSTR,ULONG,PVOID,ULONG);
 NTSYSAPI NTSTATUS  WINAPI RtlZombifyActivationContext(struct _ACTIVATION_CONTEXT *);
+NTSYSAPI NTSTATUS  WINAPI RtlpEnsureBufferSize(ULONG,PRTL_BUFFER,SIZE_T);
 NTSYSAPI NTSTATUS  WINAPI RtlpNtCreateKey(PHANDLE,ACCESS_MASK,OBJECT_ATTRIBUTES*,ULONG,const UNICODE_STRING*,PULONG);
 NTSYSAPI NTSTATUS  WINAPI RtlpNtEnumerateSubKey(HANDLE,UNICODE_STRING *, ULONG);
 NTSYSAPI NTSTATUS  WINAPI RtlpNtMakeTemporaryKey(HANDLE);
