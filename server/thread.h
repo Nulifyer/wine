@@ -73,6 +73,8 @@ struct thread
     unsigned int           req_toread;    /* amount of data still to read in request */
     void                  *reply_data;    /* variable-size data for reply */
     unsigned int           reply_size;    /* size of reply data */
+    void                 (*deferred_cancel)(void *); /* cancel an unfinished server reply */
+    void                  *deferred_private;
     unsigned int           reply_towrite; /* amount of data still to write in reply */
     struct fd             *request_fd;    /* fd for receiving client requests */
     struct fd             *reply_fd;      /* fd to send a reply to a client */

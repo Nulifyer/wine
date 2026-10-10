@@ -14,5 +14,8 @@ extern int image_trust_ready(void);
 /* Classify only sealed full file bytes. Names, markers and client metadata
  * supply no authority. Zero means unknown, unavailable or expired. */
 extern unsigned int classify_image_fd( int fd, unsigned short machine );
+extern int hash_image_fd( int fd, unsigned char digest[32] );
+extern unsigned int classify_image_digest( const unsigned char digest[32], unsigned long long size,
+                                          unsigned short machine );
 
 #endif

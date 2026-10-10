@@ -267,6 +267,40 @@ static void send_reply( union generic_reply *reply )
         fatal_protocol_error( current, "reply write: %s\n", strerror( errno ));
 }
 
+void defer_reply( void (*cancel)(void *), void *private )
+{
+    assert( current && !current->deferred_cancel && cancel );
+    current->deferred_cancel = cancel;
+    current->deferred_private = private;
+    set_fd_events( current->request_fd, 0 ); /* retain HUP/error observation */
+}
+
+void cancel_deferred_reply( struct thread *thread )
+{
+    void (*cancel)(void *) = thread->deferred_cancel;
+    void *private = thread->deferred_private;
+    thread->deferred_cancel = NULL;
+    thread->deferred_private = NULL;
+    if (cancel) cancel( private );
+}
+
+void finish_deferred_reply( struct thread *thread, union generic_reply *reply, unsigned int status )
+{
+    assert( !current );
+    if (thread->state == TERMINATED) return;
+    assert( thread->deferred_cancel );
+    thread->deferred_cancel = NULL;
+    thread->deferred_private = NULL;
+    current = thread;
+    current->error = status;
+    reply->reply_header.error = status;
+    reply->reply_header.reply_size = current->reply_size;
+    if (debug_level) trace_reply( current->req.request_header.req, reply );
+    set_fd_events( current->request_fd, POLLIN );
+    send_reply( reply );
+    current = NULL;
+}
+
 /* call a request handler */
 static void call_req_handler( struct thread *thread )
 {
@@ -285,7 +319,7 @@ static void call_req_handler( struct thread *thread )
     else
         set_error( STATUS_NOT_IMPLEMENTED );
 
-    if (current)
+    if (current && !current->deferred_cancel)
     {
         if (current->reply_fd)
         {

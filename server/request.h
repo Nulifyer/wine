@@ -52,6 +52,11 @@ extern int receive_fd( struct process *process );
 extern int send_client_fd( struct process *process, int fd, obj_handle_t handle );
 extern void read_request( struct thread *thread );
 extern void write_reply( struct thread *thread );
+/* The owner retains request inputs and the thread until completion/cancellation.
+ * No pending status is exposed to the client of this synchronous request. */
+extern void defer_reply( void (*cancel)(void *), void *private );
+extern void cancel_deferred_reply( struct thread *thread );
+extern void finish_deferred_reply( struct thread *thread, union generic_reply *reply, unsigned int status );
 extern timeout_t monotonic_counter(void);
 extern void open_master_socket(void);
 extern void close_master_socket( timeout_t timeout );

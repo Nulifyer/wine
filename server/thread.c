@@ -364,6 +364,8 @@ static inline void init_thread_structure( struct thread *thread )
     thread->req_toread      = 0;
     thread->reply_data      = NULL;
     thread->reply_towrite   = 0;
+    thread->deferred_cancel = NULL;
+    thread->deferred_private = NULL;
     thread->request_fd      = NULL;
     thread->reply_fd        = NULL;
     thread->wait_fd         = NULL;
@@ -572,6 +574,7 @@ static void cleanup_thread( struct thread *thread )
 {
     int i;
 
+    cancel_deferred_reply( thread );
     cleanup_thread_alpc( thread );
     cleanup_thread_completion( thread );
     if (thread->context)

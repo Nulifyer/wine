@@ -157,13 +157,17 @@ invalid:
     return 0;
 }
 
-unsigned int classify_image_fd( int fd, unsigned short machine )
+int hash_image_fd( int fd, unsigned char digest[32] )
 {
-    unsigned char digest[32];
     unsigned long long size;
+    return sealed_size( fd, IMAGE_TRUST_MAX_IMAGE_BYTES, &size ) && hash_fd( fd, size, digest, NULL );
+}
+
+unsigned int classify_image_digest( const unsigned char digest[32], unsigned long long size,
+                                   unsigned short machine )
+{
     unsigned int low = 0, high = entry_count;
-    if (!image_trust_ready() || !sealed_size( fd, IMAGE_TRUST_MAX_IMAGE_BYTES, &size ) ||
-        !hash_fd( fd, size, digest, NULL )) return IMAGE_TRUST_UNTRUSTED;
+    if (!image_trust_ready()) return IMAGE_TRUST_UNTRUSTED;
     while (low < high)
     {
         unsigned int middle = low + (high - low) / 2;
@@ -175,4 +179,13 @@ unsigned int classify_image_fd( int fd, unsigned short machine )
                     read_u32( entry + 44 ) : IMAGE_TRUST_UNTRUSTED;
     }
     return IMAGE_TRUST_UNTRUSTED;
+}
+
+unsigned int classify_image_fd( int fd, unsigned short machine )
+{
+    unsigned char digest[32];
+    unsigned long long size;
+    if (!image_trust_ready() || !sealed_size( fd, IMAGE_TRUST_MAX_IMAGE_BYTES, &size ) ||
+        !hash_fd( fd, size, digest, NULL )) return IMAGE_TRUST_UNTRUSTED;
+    return classify_image_digest( digest, size, machine );
 }

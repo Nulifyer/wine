@@ -169,7 +169,9 @@ void sigchld_callback(void)
         if (!(pid = waitpid( -1, &status, WUNTRACED | WNOHANG | __WALL ))) break;
         if (pid != -1)
         {
-            struct thread *thread = get_thread_from_tid( pid );
+            struct thread *thread;
+            if (mapping_worker_exited(pid,status)) continue;
+            thread = get_thread_from_tid( pid );
             if (!thread) thread = get_thread_from_pid( pid );
             handle_child_status( thread, pid, status, -1 );
         }

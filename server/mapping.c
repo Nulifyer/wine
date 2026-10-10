@@ -31,6 +31,13 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#ifdef linux
+# include <sys/prctl.h>
+# include <sys/syscall.h>
+#endif
 #ifdef HAVE_LINUX_MEMFD_H
 # include <linux/memfd.h>
 #endif
@@ -149,6 +156,10 @@ struct mapping_init_data
     unsigned int flags;
     unsigned int file_access;
     struct fd   *fd;
+    struct fd   *snapshot;
+    file_pos_t   snapshot_bytes;
+    bool        *snapshot_consumed;
+    const unsigned char *digest;
 };
 
 static void mapping_dump( struct object *obj, int verbose );
@@ -427,6 +438,349 @@ error:
     set_error( STATUS_NOT_SUPPORTED );
     return -1;
 #endif
+}
+
+/* Trusted child work is bounded independently of retained section backing.
+ * A timed-out/killed job keeps its slot and charge until waitpid reaps it. */
+#define MAX_IMAGE_WORKERS 4
+#define MAX_IMAGE_JOBS 32
+#define IMAGE_WORK_TIMEOUT (30 * -TICKS_PER_SEC)
+static unsigned int image_worker_count, image_job_count;
+static struct list image_jobs = LIST_INIT(image_jobs);
+
+struct image_job_result
+{
+    unsigned int status;
+    unsigned int hashed;
+    unsigned char digest[32];
+};
+
+struct image_job
+{
+    struct object obj;
+    struct list entry;
+    struct fd *channel;
+    struct fd *snapshot;
+    struct thread *thread;
+    struct token *primary_token, *thread_token;
+    struct object_params params;
+    struct mapping_init_data data;
+    void *attributes;
+    struct timeout_user *timeout;
+    file_pos_t charge;
+    int pid, result_ready;
+    struct image_job_result result;
+};
+
+static void image_job_destroy( struct object *obj );
+static int launch_image_worker( struct image_job *job );
+static void launch_waiting_image_jobs(void);
+static void image_job_drop( struct image_job *job )
+{
+    list_remove(&job->entry);
+    image_job_count--;
+    release_object(job);
+}
+static void image_job_poll( struct fd *fd, int events );
+static const struct object_ops image_job_ops =
+{
+    .size = sizeof(struct image_job),
+    .type = &no_type,
+    .destroy = image_job_destroy,
+};
+static const struct fd_ops image_job_fd_ops = { .poll_event = image_job_poll };
+
+static void image_job_cancel( void *private )
+{
+    struct image_job *job = private;
+    struct thread *thread = job->thread;
+    job->thread = NULL;
+    if (job->pid > 0) kill( job->pid, SIGKILL );
+    if (thread) release_object( thread );
+    if (job->pid == -1) image_job_drop(job);
+}
+
+static void image_job_reply( struct image_job *job, unsigned int status )
+{
+    union generic_reply reply;
+    struct thread *thread = job->thread;
+    struct token *saved_primary, *saved_thread;
+    bool consumed = false;
+
+    if (!thread) return;
+    memset(&reply,0,sizeof(reply));
+    if (!status)
+    {
+        current = thread;
+        saved_primary = thread->process->token;
+        saved_thread = thread->token;
+        thread->process->token = job->primary_token;
+        thread->token = job->thread_token;
+        job->data.snapshot = job->snapshot;
+        job->data.snapshot_bytes = job->charge;
+        job->data.snapshot_consumed = &consumed;
+        job->data.digest = job->result.hashed ? job->result.digest : NULL;
+        clear_error();
+        reply.create_mapping_reply.handle = create_named_obj_handle( thread->process, &job->params );
+        status = get_error();
+        if (consumed) job->charge = 0;
+        thread->process->token = saved_primary;
+        thread->token = saved_thread;
+        current = NULL;
+    }
+    job->thread = NULL; /* detach before reply errors can kill the requesting thread */
+    finish_deferred_reply( thread, &reply, status );
+    release_object( thread );
+}
+
+static void image_job_timeout( void *private )
+{
+    struct image_job *job = private;
+    job->timeout = NULL;
+    if (job->pid > 0) kill( job->pid, SIGKILL );
+    image_job_reply( job, STATUS_IO_TIMEOUT );
+    if (job->pid == -1) image_job_drop(job);
+}
+
+static void image_job_destroy( struct object *obj )
+{
+    struct image_job *job = (struct image_job *)obj;
+    assert( !job->thread && job->pid <= 0 );
+    if (job->timeout) remove_timeout_user( job->timeout );
+    if (job->channel) release_object( job->channel );
+    if (job->snapshot) release_object( job->snapshot );
+    if (job->data.fd) release_object( job->data.fd );
+    if (job->params.root) release_object( job->params.root );
+    if (job->primary_token) release_object( job->primary_token );
+    if (job->thread_token) release_object( job->thread_token );
+    retained_image_bytes -= job->charge;
+    free( job->attributes );
+}
+
+/* One bounded packet from the server's own forked child, never a Wine client. */
+static void image_job_poll( struct fd *fd, int events )
+{
+    struct image_job *job = get_fd_user( fd );
+    struct iovec iov = { &job->result, sizeof(job->result) };
+    union { struct cmsghdr align; char bytes[CMSG_SPACE(sizeof(int))]; } control;
+    struct msghdr msg = {0};
+    struct cmsghdr *cmsg;
+    int snapshot = -1;
+    ssize_t ret;
+
+    if (job->result_ready) return;
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control.bytes;
+    msg.msg_controllen = sizeof(control);
+    ret = recvmsg( get_unix_fd(fd), &msg, MSG_DONTWAIT | MSG_CMSG_CLOEXEC );
+    if (ret == -1 && (errno == EAGAIN || errno == EINTR)) return;
+    for (cmsg = CMSG_FIRSTHDR(&msg); ret > 0 && cmsg; cmsg = CMSG_NXTHDR(&msg,cmsg))
+    {
+        if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS &&
+            cmsg->cmsg_len == CMSG_LEN(sizeof(int))) memcpy( &snapshot, CMSG_DATA(cmsg), sizeof(snapshot) );
+    }
+    job->result_ready = 1;
+    if (ret != sizeof(job->result) || msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC) ||
+        (!job->result.status && snapshot == -1)) job->result.status = STATUS_UNSUCCESSFUL;
+    if (snapshot != -1)
+    {
+        if (job->result.status) close( snapshot );
+        else
+        {
+            if (!(job->snapshot = create_anonymous_fd( &mapping_fd_ops, snapshot, NULL,
+                                                       FILE_SYNCHRONOUS_IO_NONALERT )))
+                job->result.status = STATUS_NO_MEMORY;
+            else allow_fd_caching( job->snapshot );
+        }
+    }
+    set_fd_events( fd, -1 );
+}
+
+/* Called by the normal server child reaper, including after timeout/cancellation. */
+int mapping_worker_exited( int pid, int status )
+{
+    struct image_job *job;
+    LIST_FOR_EACH_ENTRY( job, &image_jobs, struct image_job, entry )
+    {
+        if (job->pid != pid) continue;
+        if (!WIFEXITED(status) && !WIFSIGNALED(status)) return 1;
+        job->pid = 0;
+        if (!job->result_ready) image_job_poll( job->channel, POLLIN );
+        if (!job->result_ready || !WIFEXITED(status) || WEXITSTATUS(status))
+            job->result.status = STATUS_UNSUCCESSFUL;
+        image_job_reply( job, job->result.status );
+        image_worker_count--;
+        image_job_drop(job);
+        launch_waiting_image_jobs();
+        return 1;
+    }
+    return 0;
+}
+
+static void image_worker( int source, int channel, file_pos_t size, int parent )
+{
+#ifdef linux
+    struct image_job_result result = {0};
+    struct iovec iov = { &result, sizeof(result) };
+    union { struct cmsghdr align; char bytes[CMSG_SPACE(sizeof(int))]; } control;
+    struct msghdr msg = {0};
+    struct cmsghdr *cmsg;
+    sigset_t empty;
+    int a, b, snapshot;
+    long max_fd;
+
+    if (prctl( PR_SET_PDEATHSIG, SIGKILL ) || getppid() != parent) _exit(1);
+    if ((a = fcntl( source, F_DUPFD_CLOEXEC, 5 )) == -1 ||
+        (b = fcntl( channel, F_DUPFD_CLOEXEC, 5 )) == -1) _exit(1);
+    if (dup2(a,3) == -1 || dup2(b,4) == -1) _exit(1);
+    max_fd = sysconf( _SC_OPEN_MAX );
+#ifdef SYS_close_range
+    if (syscall( SYS_close_range, 5, ~0U, 0 ))
+#endif
+        for (a = 5; a < max_fd; ++a) close(a);
+    close(0);
+    close(1);
+    signal( SIGTERM, SIG_DFL );
+    signal( SIGABRT, SIG_DFL );
+    signal( SIGCHLD, SIG_DFL );
+    sigemptyset(&empty);
+    sigprocmask( SIG_SETMASK, &empty, NULL );
+    clear_error();
+    snapshot = create_image_snapshot( 3, size );
+    result.status = snapshot == -1 ? get_error() : 0;
+    if (!result.status && image_trust_ready())
+    {
+        result.hashed = hash_image_fd( snapshot, result.digest );
+        if (!result.hashed) result.status = STATUS_UNSUCCESSFUL;
+    }
+    close(3);
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    if (!result.status)
+    {
+        msg.msg_control = control.bytes;
+        msg.msg_controllen = sizeof(control);
+        cmsg = CMSG_FIRSTHDR(&msg);
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type = SCM_RIGHTS;
+        cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+        memcpy( CMSG_DATA(cmsg), &snapshot, sizeof(snapshot) );
+    }
+    if (sendmsg(4,&msg,MSG_NOSIGNAL) != sizeof(result)) _exit(1);
+    if (snapshot != -1) close(snapshot);
+    close(4);
+    _exit(0);
+#else
+    _exit(1);
+#endif
+}
+
+static int launch_image_worker( struct image_job *job )
+{
+    int sockets[2], pid, source = get_unix_fd(job->data.fd), parent = getpid();
+    if (source == -1) return 0;
+    if (socketpair(AF_UNIX,SOCK_SEQPACKET|SOCK_CLOEXEC,0,sockets)) { file_set_error(); return 0; }
+    if (!(job->channel = create_anonymous_fd(&image_job_fd_ops,sockets[0],&job->obj,0)))
+    {
+        close(sockets[1]);
+        return 0;
+    }
+    pid = fork();
+    if (!pid) { close(sockets[0]); image_worker(source,sockets[1],job->data.snapshot_bytes,parent); }
+    close(sockets[1]);
+    if (pid == -1) { file_set_error(); return 0; }
+    job->pid = pid;
+    image_worker_count++;
+    set_fd_events(job->channel,POLLIN);
+    return 1;
+}
+
+static void launch_waiting_image_jobs(void)
+{
+    struct image_job *job, *next;
+    LIST_FOR_EACH_ENTRY_SAFE(job,next,&image_jobs,struct image_job,entry)
+    {
+        if (image_worker_count >= MAX_IMAGE_WORKERS) break;
+        if (job->pid != -1) continue;
+        if (!launch_image_worker(job))
+        {
+            unsigned int status = get_error();
+            image_job_reply(job,status ? status : STATUS_UNSUCCESSFUL);
+            image_job_drop(job);
+        }
+    }
+}
+
+static int start_image_job( const struct object_params *params, const struct mapping_init_data *data )
+{
+    struct image_job *job;
+    struct stat st;
+    int source;
+    data_size_t attr_size = get_req_data_size();
+
+    if ((source = get_unix_fd(data->fd)) == -1) return 0;
+    if (fstat(source,&st)) { file_set_error(); return 0; }
+    if (!S_ISREG(st.st_mode) || st.st_size <= 0)
+    {
+        set_error( STATUS_INVALID_FILE_FOR_SECTION );
+        return 0;
+    }
+    if ((unsigned long long)st.st_size > IMAGE_TRUST_MAX_IMAGE_BYTES)
+    {
+        set_error( STATUS_SECTION_TOO_BIG );
+        return 0;
+    }
+    if (image_job_count >= MAX_IMAGE_JOBS ||
+        (unsigned long long)st.st_size > MAX_RETAINED_IMAGE_BYTES - retained_image_bytes)
+    {
+        set_error( STATUS_COMMITMENT_LIMIT );
+        return 0;
+    }
+    if (!(job = alloc_object(&image_job_ops))) return 0;
+    job->params = *params;
+    job->data = *data;
+    job->params.init_data = &job->data;
+    job->params.root = params->root ? grab_object(params->root) : NULL;
+    job->data.fd = (struct fd *)grab_object(data->fd);
+    job->channel = job->snapshot = NULL;
+    job->thread = NULL;
+    job->primary_token = job->thread_token = NULL;
+    job->attributes = NULL;
+    job->timeout = NULL;
+    job->charge = 0;
+    job->pid = 0;
+    job->result_ready = 0;
+    memset(&job->result,0,sizeof(job->result));
+    if (attr_size)
+    {
+        if (!(job->attributes = mem_alloc(attr_size))) goto error;
+        memcpy(job->attributes,get_req_data(),attr_size);
+        job->params.objattr = job->attributes;
+        if (params->sd) job->params.sd = (void *)((char *)job->attributes +
+                                              ((char *)params->sd - (char *)get_req_data()));
+        job->params.name.str = (void *)((char *)job->attributes +
+                                      ((char *)params->name.str - (char *)get_req_data()));
+    }
+    job->data.snapshot_bytes = st.st_size;
+    if (!(job->timeout = add_timeout_user(IMAGE_WORK_TIMEOUT,image_job_timeout,job))) goto error;
+    if (image_worker_count < MAX_IMAGE_WORKERS)
+    {
+        if (!launch_image_worker(job)) goto error;
+    }
+    else job->pid = -1; /* bounded, charged queue; no helper process yet */
+    job->charge = st.st_size;
+    retained_image_bytes += job->charge;
+    image_job_count++;
+    list_add_tail(&image_jobs,&job->entry);
+    job->primary_token = (struct token *)grab_object(current->process->token);
+    if (current->token) job->thread_token = (struct token *)grab_object(current->token);
+    job->thread = (struct thread *)grab_object(current);
+    defer_reply(image_job_cancel,job);
+    return 1;
+error:
+    release_object(job);
+    return 0;
 }
 
 /* find a memory view from its base address */
@@ -1226,7 +1580,8 @@ static bool mapping_init( struct object *obj, const void *init_data )
     mapping->flags       = data->flags;
     mapping->fd          = NULL;
     mapping->image_fd    = NULL;
-    mapping->snapshot_bytes = 0;
+    mapping->snapshot_bytes = data->snapshot ? data->snapshot_bytes : 0;
+    if (data->snapshot_consumed) *data->snapshot_consumed = true;
     mapping->image_class = IMAGE_TRUST_UNTRUSTED;
     mapping->shared      = NULL;
     mapping->committed   = NULL;
@@ -1249,10 +1604,10 @@ static bool mapping_init( struct object *obj, const void *init_data )
             mapping->fd = dup_fd_object( data->fd, mapping_access, sharing, FILE_SYNCHRONOUS_IO_NONALERT );
             if (mapping->fd) set_fd_user( mapping->fd, &mapping_fd_ops, NULL );
         }
-        if (!mapping->fd) return false;
+        if (!mapping->fd) goto error;
 
         if ((unix_fd = get_unix_fd( mapping->fd )) == -1) goto error;
-        if (fstat( unix_fd, &st ) == -1)
+        if (fstat( data->snapshot ? get_unix_fd(data->snapshot) : unix_fd, &st ) == -1)
         {
             file_set_error();
             goto error;
@@ -1261,35 +1616,22 @@ static bool mapping_init( struct object *obj, const void *init_data )
         {
             unsigned int err;
 
-            if (is_native_machine() || image_trust_ready())
+            if (data->snapshot)
             {
-                if (!S_ISREG(st.st_mode) || st.st_size < 0)
-                {
-                    set_error( STATUS_INVALID_FILE_FOR_SECTION );
-                    goto error;
-                }
-                if ((unsigned long long)st.st_size > IMAGE_TRUST_MAX_IMAGE_BYTES)
-                {
-                    set_error( STATUS_SECTION_TOO_BIG );
-                    goto error;
-                }
-                if ((unsigned long long)st.st_size > MAX_RETAINED_IMAGE_BYTES - retained_image_bytes)
-                {
-                    set_error( STATUS_COMMITMENT_LIMIT );
-                    goto error;
-                }
-                mapping->snapshot_bytes = st.st_size;
-                retained_image_bytes += mapping->snapshot_bytes;
-                if ((unix_fd = create_image_snapshot( unix_fd, st.st_size )) == -1) goto error;
-                if (!(mapping->image_fd = create_anonymous_fd( &mapping_fd_ops, unix_fd, NULL,
-                                                               FILE_SYNCHRONOUS_IO_NONALERT ))) goto error;
-                allow_fd_caching( mapping->image_fd );
-                unix_fd = get_unix_fd( mapping->image_fd );
+                mapping->image_fd = (struct fd *)grab_object(data->snapshot);
+                unix_fd = get_unix_fd(mapping->image_fd);
+            }
+            else if (is_native_machine() || image_trust_ready())
+            {
+                /* All native/catalog image callers must use the bounded job path. */
+                set_error( STATUS_NOT_SUPPORTED );
+                goto error;
             }
             err = get_image_params( mapping, st.st_size, unix_fd );
             if (!err)
             {
-                mapping->image_class = classify_image_fd( unix_fd, mapping->image.machine );
+                mapping->image_class = data->digest ? classify_image_digest( data->digest, st.st_size,
+                                                                            mapping->image.machine ) : 0;
                 if (debug_level && image_trust_ready())
                     fprintf( stderr, "image-trust: class=%u machine=%04x bytes=%llu\n",
                              mapping->image_class, mapping->image.machine, (unsigned long long)st.st_size );
@@ -1752,7 +2094,29 @@ DECL_HANDLER(create_mapping)
         data.fd = get_obj_fd( (struct object *)file );
     }
 
-    reply->handle = create_named_obj_handle( current->process, &params );
+    if (data.fd && (data.flags & SEC_IMAGE) && (is_native_machine() || image_trust_ready()))
+    {
+        struct object *existing = NULL;
+        if (params.name.len)
+        {
+            struct object_params lookup = params;
+            lookup.ops = NULL;
+            existing = open_named_object(&lookup);
+        }
+        if (existing)
+        {
+            release_object(existing);
+            reply->handle = create_named_obj_handle(current->process,&params);
+        }
+        else if (params.name.len && get_error() != STATUS_OBJECT_NAME_NOT_FOUND)
+            reply->handle = create_named_obj_handle(current->process,&params);
+        else
+        {
+            clear_error();
+            start_image_job(&params,&data);
+        }
+    }
+    else reply->handle = create_named_obj_handle( current->process, &params );
 
     if (file) release_object( file );
     if (data.fd) release_object( data.fd );
