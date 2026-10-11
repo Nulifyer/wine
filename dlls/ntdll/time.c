@@ -139,6 +139,48 @@ VOID WINAPI RtlTimeToTimeFields(
 }
 
 /******************************************************************************
+ *       RtlpTimeToTimeFields [NTDLL.@]
+ */
+void WINAPI RtlpTimeToTimeFields( const LARGE_INTEGER *time, TIME_FIELDS *fields, const LARGE_INTEGER *bias )
+{
+    const BYTE *leap_data = NtCurrentTeb()->Peb->LeapSecondData;
+    BOOL leap_enabled = leap_data && *leap_data;
+    LARGE_INTEGER input;
+    TIME_FIELDS converted;
+    volatile TIME_FIELDS *output = fields;
+
+    TRACE( "time %p, fields %p, bias %p, leap_data %p, enabled %u, flags %#lx.\n",
+           time, fields, bias, leap_data, leap_enabled, NtCurrentTeb()->Peb->LeapSecondFlags );
+    if (leap_enabled) FIXME( "Enabled leap-second conversion is not supported.\n" );
+    (void)bias;
+
+    /* Disabled leap data does not consume bias. Capture time before aliased
+     * output writes, and reuse the existing calendar conversion owner. */
+    input = *time;
+    RtlTimeToTimeFields( &input, &converted );
+
+    /* The ordinary native branch writes weekday before the other fields. */
+    output->Weekday = converted.Weekday;
+#ifdef _WIN64
+    output->Month = converted.Month;
+    output->Day = converted.Day;
+    output->Year = converted.Year;
+    output->Hour = converted.Hour;
+    output->Minute = converted.Minute;
+    output->Second = converted.Second;
+    output->Milliseconds = converted.Milliseconds;
+#else
+    output->Year = converted.Year;
+    output->Month = converted.Month;
+    output->Day = converted.Day;
+    output->Milliseconds = converted.Milliseconds;
+    output->Hour = converted.Hour;
+    output->Minute = converted.Minute;
+    output->Second = converted.Second;
+#endif
+}
+
+/******************************************************************************
  *       RtlTimeFieldsToTime [NTDLL.@]
  *
  * Convert a TIME_FIELDS structure into a time.

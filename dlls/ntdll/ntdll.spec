@@ -1317,6 +1317,7 @@
 @ stdcall RtlpNtQueryValueKey(long ptr ptr ptr ptr)
 @ stdcall RtlpNtSetValueKey(ptr long ptr long)
 @ stdcall RtlpQueryDefaultUILanguage(ptr long)
+@ stdcall RtlpTimeToTimeFields(ptr ptr ptr)
 @ stdcall RtlpUnWaitCriticalSection(ptr)
 @ stdcall RtlpVerifyAndCommitUILanguageSettings(long)
 @ stdcall RtlpWaitForCriticalSection(ptr)
