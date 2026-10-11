@@ -114,6 +114,14 @@ void WINAPI RtlAcquirePebLock(void)
 }
 
 /******************************************************************************
+ *  RtlTryAcquirePebLock          [NTDLL.@]
+ */
+ULONG WINAPI RtlTryAcquirePebLock(void)
+{
+    return RtlTryEnterCriticalSection( NtCurrentTeb()->Peb->FastPebLock );
+}
+
+/******************************************************************************
  *  RtlReleasePebLock		[NTDLL.@]
  */
 void WINAPI RtlReleasePebLock(void)
