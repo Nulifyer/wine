@@ -107,6 +107,8 @@ struct thread
     timeout_t              exit_time;     /* Thread exit time */
     struct token          *token;         /* security token associated with this thread */
     bool                   token_copy_on_open; /* IPC impersonation token needs a private opened copy */
+    int                    token_context_level; /* captured level, or -1 for ordinary assignment */
+    bool                   token_context_effective_only;
     struct list            kernel_object; /* list of kernel object pointers */
     data_size_t            desc_len;      /* thread description length in bytes */
     WCHAR                 *desc;          /* thread description string */

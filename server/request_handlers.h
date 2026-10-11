@@ -478,6 +478,7 @@ DECL_HANDLER(query_gdi_object);
 DECL_HANDLER(set_gdi_bitmap_stock);
 DECL_HANDLER(select_gdi_bitmap);
 DECL_HANDLER(check_gdi_bitmap_creator);
+DECL_HANDLER(impersonate_thread);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -953,6 +954,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_gdi_bitmap_stock,
     (req_handler)req_select_gdi_bitmap,
     (req_handler)req_check_gdi_bitmap_creator,
+    (req_handler)req_impersonate_thread,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -3580,3 +3582,9 @@ C_ASSERT( sizeof(struct select_gdi_bitmap_request) == 24 );
 C_ASSERT( offsetof(struct select_gdi_bitmap_reply, count) == 8 );
 C_ASSERT( sizeof(struct select_gdi_bitmap_reply) == 16 );
 C_ASSERT( sizeof(struct check_gdi_bitmap_creator_request) == 16 );
+C_ASSERT( offsetof(struct impersonate_thread_request, receiver) == 12 );
+C_ASSERT( offsetof(struct impersonate_thread_request, source) == 16 );
+C_ASSERT( offsetof(struct impersonate_thread_request, level) == 20 );
+C_ASSERT( offsetof(struct impersonate_thread_request, tracking) == 24 );
+C_ASSERT( offsetof(struct impersonate_thread_request, effective_only) == 28 );
+C_ASSERT( sizeof(struct impersonate_thread_request) == 32 );

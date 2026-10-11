@@ -345,6 +345,25 @@ NTSTATUS WINAPI wow64_NtImpersonateAnonymousToken( UINT *args )
     return NtImpersonateAnonymousToken( handle );
 }
 
+/**********************************************************************
+ *           wow64_NtImpersonateThread
+ */
+NTSTATUS WINAPI wow64_NtImpersonateThread( UINT *args )
+{
+    HANDLE receiver = get_handle( &args );
+    HANDLE source = get_handle( &args );
+    SECURITY_QUALITY_OF_SERVICE *qos = get_ptr( &args );
+    SECURITY_QUALITY_OF_SERVICE captured;
+    SIZE_T size;
+
+    /* The x86 entry point accepts readable unaligned QoS. Capture it before
+     * calling the x64 entry point, whose own four-byte probe is stricter. */
+    if (!qos || NtReadVirtualMemory( GetCurrentProcess(), qos, &captured,
+                                    sizeof(captured), &size ) || size != sizeof(captured))
+        return STATUS_ACCESS_VIOLATION;
+    return NtImpersonateThread( receiver, source, &captured );
+}
+
 
 /**********************************************************************
  *           wow64_NtOpenProcessToken

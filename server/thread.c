@@ -390,6 +390,8 @@ static inline void init_thread_structure( struct thread *thread )
     thread->desktop_users   = 0;
     thread->token           = NULL;
     thread->token_copy_on_open = false;
+    thread->token_context_level = -1;
+    thread->token_context_effective_only = false;
     thread->desc            = NULL;
     thread->desc_len        = 0;
 

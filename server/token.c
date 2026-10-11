@@ -189,6 +189,19 @@ static struct list *token_get_kernel_obj_list( struct object *obj )
     return &token->kernel_object;
 }
 
+/* Take one prepared reference only after all capture and authority checks succeed. */
+static void publish_thread_token( struct thread *thread, struct token *token,
+                                 int copy_on_open, int level, int effective_only )
+{
+    if (thread->token) release_object( thread->token );
+    thread->token = token;
+    thread->token_copy_on_open = copy_on_open;
+    thread->token_context_level = level;
+    thread->token_context_effective_only = effective_only;
+}
+
+static struct token *copy_thread_token_for_open( struct thread *thread, struct token *source );
+
 /* Borrow the supplied token; publish a new reference only after preparation succeeds. */
 int security_assign_thread_token( struct thread *thread, struct token *source )
 {
@@ -210,10 +223,16 @@ int security_assign_thread_token( struct thread *thread, struct token *source )
         }
         else token = (struct token *)grab_object( source );
     }
-    if (thread->token) release_object( thread->token );
-    thread->token = token;
-    thread->token_copy_on_open = false;
+    publish_thread_token( thread, token, false, -1, false );
     return 1;
+}
+
+int security_thread_context_level( struct thread *thread )
+{
+    if (!thread->token) return -1;
+    if (thread->token_copy_on_open && thread->token_context_level >= 0)
+        return thread->token_context_level;
+    return thread->token->impersonation_level;
 }
 
 void security_set_thread_token( struct thread *thread, obj_handle_t handle )
@@ -954,11 +973,17 @@ struct token *get_token_obj( struct process *process, obj_handle_t handle, unsig
             set_error( STATUS_NO_TOKEN );
             return NULL;
         }
-        if ((access & TOKEN_QUERY) && current->token->impersonation_level == SecurityAnonymous)
+        if ((access & TOKEN_QUERY) && security_thread_context_level( current ) == SecurityAnonymous)
         {
             set_error( STATUS_CANT_OPEN_ANONYMOUS );
             return NULL;
         }
+    }
+    if ((handle == 0xfffffffb || handle == 0xfffffffa) && current->token && current->token_copy_on_open)
+    {
+        struct token *copy = copy_thread_token_for_open( current, current->token );
+        if (!copy) return NULL;
+        publish_thread_token( current, copy, false, -1, false );
     }
     return (struct token *)get_handle_obj( process, handle, access, &token_ops );
 }
@@ -1727,8 +1752,21 @@ static struct token *copy_thread_token_for_open( struct thread *thread, struct t
         ace = ace_next( ace );
     }
     assert( sd_is_valid( sd, sizeof(*sd) + size ) );
-    copy = token_duplicate( source, FALSE, source->impersonation_level, sd, NULL, 0, NULL, 0 );
+    copy = token_duplicate( source, FALSE,
+                            thread->token_context_level >= 0 ? thread->token_context_level : source->impersonation_level,
+                            sd, NULL, 0, NULL, 0 );
     free( sd );
+    if (copy && thread->token_context_effective_only)
+    {
+        struct privilege *privilege, *next;
+
+        LIST_FOR_EACH_ENTRY_SAFE( privilege, next, &copy->privileges, struct privilege, entry )
+        {
+            if (privilege->enabled) continue;
+            list_remove( &privilege->entry );
+            free( privilege );
+        }
+    }
     return copy;
 }
 
@@ -1742,7 +1780,7 @@ DECL_HANDLER(open_token)
         {
             if (thread->token)
             {
-                if (!thread->token->primary && thread->token->impersonation_level <= SecurityAnonymous)
+                if (security_thread_context_level( thread ) <= SecurityAnonymous)
                     set_error( STATUS_CANT_OPEN_ANONYMOUS );
                 else
                 {
@@ -1772,6 +1810,8 @@ DECL_HANDLER(open_token)
                                 {
                                     thread->token = copy;
                                     thread->token_copy_on_open = false;
+                                    thread->token_context_level = -1;
+                                    thread->token_context_effective_only = false;
                                     if (thread == current) saved_token = copy;
                                     release_object( token );
                                 }
@@ -1803,6 +1843,68 @@ DECL_HANDLER(open_token)
             release_object( process );
         }
     }
+}
+
+/* QoS probing happens in NTDLL; the authoritative owner checks handles before
+ * semantic QoS fields and retains the actual source token for dynamic tracking.
+ * The first token open makes the existing private copy and ends that tracking. */
+DECL_HANDLER(impersonate_thread)
+{
+    struct thread *receiver, *client;
+    struct token *source, *token = NULL;
+    int source_level, effective_only;
+
+    /* These rights follow the retained Windows fixture, including the reversed
+     * receiver/source roles relative to the public access-right descriptions. */
+    if (!(receiver = get_thread_from_handle( req->receiver, THREAD_IMPERSONATE ))) return;
+    if (!(client = get_thread_from_handle( req->source, THREAD_DIRECT_IMPERSONATION ))) goto done;
+    if (req->level < SecurityAnonymous || req->level > SecurityDelegation)
+    {
+        set_error( STATUS_BAD_IMPERSONATION_LEVEL );
+        goto release_client;
+    }
+    if (req->tracking > 1)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        goto release_client;
+    }
+    source = thread_get_impersonation_token( client );
+    source_level = security_thread_context_level( client );
+    if (source_level >= 0 && (source_level < SecurityImpersonation || req->level > source_level))
+    {
+        set_error( STATUS_BAD_IMPERSONATION_LEVEL );
+        goto release_client;
+    }
+    /* Cross-user credential exceptions are not in the measured partition. */
+    if (!equal_sid( source->user, receiver->process->token->user ))
+    {
+        set_error( STATUS_NOT_IMPLEMENTED );
+        goto release_client;
+    }
+    effective_only = !!req->effective_only || client->token_context_effective_only;
+    if (req->tracking && source->trust_level && !receiver->process->protection)
+    {
+        /* Do not share protected trust into an ordinary receiver. The measured
+         * ordinary dynamic partition cannot establish a reduced live view. */
+        set_error( STATUS_NOT_IMPLEMENTED );
+        goto release_client;
+    }
+    if (req->tracking) token = (struct token *)grab_object( source );
+    else
+    {
+        if (!(token = token_duplicate_impersonation( source, req->level, effective_only )))
+            goto release_client;
+        if (token->trust_level && !receiver->process->protection)
+        {
+            free( token->trust_level );
+            token->trust_level = NULL;
+        }
+    }
+    publish_thread_token( receiver, token, true, req->level, effective_only );
+release_client:
+    release_object( client );
+done:
+    release_object( receiver );
 }
 
 /* adjust the groups held by a token */

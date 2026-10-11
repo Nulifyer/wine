@@ -136,6 +136,7 @@ static inline struct ace *set_ace( struct ace *ace, const struct sid *sid, unsig
 
 extern int security_assign_unprotected_process_token( struct process *process, struct token *source );
 extern int security_assign_thread_token( struct thread *thread, struct token *token );
+extern int security_thread_context_level( struct thread *thread );
 extern void security_set_thread_token( struct thread *thread, obj_handle_t handle );
 extern const struct sid *security_unix_uid_to_sid( uid_t uid );
 extern int token_authorize_trust_labels( struct token *token, const struct security_descriptor *sd );

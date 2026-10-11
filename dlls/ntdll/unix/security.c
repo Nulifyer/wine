@@ -1297,6 +1297,32 @@ NTSTATUS WINAPI NtImpersonateAnonymousToken( HANDLE thread )
     return STATUS_NOT_IMPLEMENTED;
 }
 
+/**********************************************************************
+ *             NtImpersonateThread  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtImpersonateThread( HANDLE receiver, HANDLE source, SECURITY_QUALITY_OF_SERVICE *qos )
+{
+    SECURITY_QUALITY_OF_SERVICE captured;
+    NTSTATUS status;
+
+    TRACE( "(%p,%p,%p)\n", receiver, source, qos );
+    if (!qos) return STATUS_ACCESS_VIOLATION;
+    if ((ULONG_PTR)qos & (sizeof(ULONG) - 1)) return STATUS_DATATYPE_MISALIGNMENT;
+    if (virtual_uninterrupted_read_memory( qos, &captured, sizeof(captured) ) != sizeof(captured))
+        return STATUS_ACCESS_VIOLATION;
+    SERVER_START_REQ( impersonate_thread )
+    {
+        req->receiver = wine_server_obj_handle( receiver );
+        req->source = wine_server_obj_handle( source );
+        req->level = captured.ImpersonationLevel;
+        req->tracking = captured.ContextTrackingMode;
+        req->effective_only = captured.EffectiveOnly;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 
 static NTSTATUS access_check( PSECURITY_DESCRIPTOR descr, PSID principal_self, HANDLE token,
                               ACCESS_MASK access, GENERIC_MAPPING *mapping,

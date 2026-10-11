@@ -294,7 +294,7 @@
 @ stdcall -syscall NtGetWriteWatch(long long ptr long ptr ptr ptr)
 @ stdcall -syscall NtImpersonateAnonymousToken(long)
 @ stdcall -syscall=0x001f NtImpersonateClientOfPort(long ptr)
-# @ stub NtImpersonateThread
+@ stdcall -syscall NtImpersonateThread(long long ptr)
 @ stdcall -syscall NtInitializeNlsFiles(ptr ptr ptr)
 @ stdcall -syscall NtInitializeRegistry(long)
 @ stdcall -syscall NtInitiatePowerAction (long long long long)

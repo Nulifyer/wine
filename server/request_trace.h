@@ -5194,6 +5194,15 @@ static void dump_check_gdi_bitmap_creator_request( const struct check_gdi_bitmap
 {
 }
 
+static void dump_impersonate_thread_request( const struct impersonate_thread_request *req )
+{
+    fprintf( stderr, " receiver=%04x", req->receiver );
+    fprintf( stderr, ", source=%04x", req->source );
+    fprintf( stderr, ", level=%d", req->level );
+    fprintf( stderr, ", tracking=%08x", req->tracking );
+    fprintf( stderr, ", effective_only=%08x", req->effective_only );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -5669,6 +5678,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_set_gdi_bitmap_stock_request,
     (dump_func)dump_select_gdi_bitmap_request,
     (dump_func)dump_check_gdi_bitmap_creator_request,
+    (dump_func)dump_impersonate_thread_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -6143,6 +6153,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_query_gdi_object_reply,
     (dump_func)dump_set_gdi_bitmap_stock_reply,
     (dump_func)dump_select_gdi_bitmap_reply,
+    NULL,
     NULL,
 };
 
@@ -6619,6 +6630,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "set_gdi_bitmap_stock",
     "select_gdi_bitmap",
     "check_gdi_bitmap_creator",
+    "impersonate_thread",
 };
 
 static const struct

@@ -8783,6 +8783,21 @@ struct check_gdi_bitmap_creator_reply
 };
 
 
+struct impersonate_thread_request
+{
+    struct request_header __header;
+    obj_handle_t receiver;
+    obj_handle_t source;
+    int level;
+    unsigned int tracking;
+    unsigned int effective_only;
+};
+struct impersonate_thread_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -9256,6 +9271,7 @@ enum request
     REQ_set_gdi_bitmap_stock,
     REQ_select_gdi_bitmap,
     REQ_check_gdi_bitmap_creator,
+    REQ_impersonate_thread,
     REQ_NB_REQUESTS
 };
 
@@ -9734,6 +9750,7 @@ union generic_request
     struct set_gdi_bitmap_stock_request set_gdi_bitmap_stock_request;
     struct select_gdi_bitmap_request select_gdi_bitmap_request;
     struct check_gdi_bitmap_creator_request check_gdi_bitmap_creator_request;
+    struct impersonate_thread_request impersonate_thread_request;
 };
 union generic_reply
 {
@@ -10210,8 +10227,9 @@ union generic_reply
     struct set_gdi_bitmap_stock_reply set_gdi_bitmap_stock_reply;
     struct select_gdi_bitmap_reply select_gdi_bitmap_reply;
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
+    struct impersonate_thread_reply impersonate_thread_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1112
+#define SERVER_PROTOCOL_VERSION 1113
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

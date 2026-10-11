@@ -4063,9 +4063,8 @@ DECL_HANDLER(alpc_impersonate_client)
         { set_error( STATUS_NOT_IMPLEMENTED ); goto done; }
         if (!(token = token_duplicate_impersonation( source, level, FALSE ))) goto done;
     }
-    if (current->token) release_object( current->token );
-    current->token = token;
-    current->token_copy_on_open = !!token;
+    if (security_assign_thread_token( current, token )) current->token_copy_on_open = !!token;
+    if (token) release_object( token );
 done:
     release_object( port );
 }

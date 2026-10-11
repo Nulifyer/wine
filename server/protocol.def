@@ -5826,3 +5826,12 @@ struct alpc_message_info
 /* Validate the session bitmap creator before examining caller-owned memory. */
 @REQ(check_gdi_bitmap_creator)
 @END
+
+/* Capture a thread's effective security context with explicit handle authority. */
+@REQ(impersonate_thread)
+    obj_handle_t receiver;
+    obj_handle_t source;
+    int level;
+    unsigned int tracking;
+    unsigned int effective_only;
+@END
