@@ -26,6 +26,8 @@ SOURCES = \
 	feature.c \
 	handletable.c \
 	heap.c \
+	ksec.c \
+	ksec_rpc.idl \
 	large_int.c \
 	loader.c \
 	locale.c \

@@ -25,6 +25,7 @@ SOURCES = \
 	image_trust.c \
 	image_trust.h \
 	ksec.c \
+	ksec.h \
 	mach.c \
 	mailslot.c \
 	main.c \

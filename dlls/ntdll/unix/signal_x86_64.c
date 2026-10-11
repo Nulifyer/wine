@@ -1777,7 +1777,8 @@ __ASM_GLOBAL_FUNC( user_mode_abort_thread,
 /***********************************************************************
  *           KeUserModeCallback
  */
-NTSTATUS KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len )
+static NTSTATUS callback_to_user( void *dispatcher, ULONG id, const void *args, ULONG len,
+                                  void **ret_ptr, ULONG *ret_len )
 {
     struct thread_data *data = get_thread_data();
     struct syscall_frame *frame = get_syscall_frame( data );
@@ -1792,9 +1793,22 @@ NTSTATUS KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_p
     stack->machine_frame.rip = frame->rip;
     stack->machine_frame.rsp = frame->rsp;
     memcpy( stack->args_data, args, len );
-    return call_user_mode_callback( rsp, ret_ptr, ret_len, pKiUserCallbackDispatcher, data->teb );
+    return call_user_mode_callback( rsp, ret_ptr, ret_len, dispatcher, data->teb );
 }
 
+
+NTSTATUS KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len )
+{
+    return callback_to_user( pKiUserCallbackDispatcher, id, args, len, ret_ptr, ret_len );
+}
+
+NTSTATUS dispatch_ksec_callback( const void *args, ULONG len )
+{
+    void *ret;
+    ULONG ret_len;
+    if (!p__wine_ksec_dispatcher) return STATUS_NOT_SUPPORTED;
+    return callback_to_user( p__wine_ksec_dispatcher, 0, args, len, &ret, &ret_len );
+}
 
 /***********************************************************************
  *           NtCallbackReturn  (NTDLL.@)

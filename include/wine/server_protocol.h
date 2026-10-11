@@ -3688,7 +3688,10 @@ struct ioctl_reply
     struct reply_header __header;
     obj_handle_t   wait;
     unsigned int   options;
+    object_id_t ksec_generation;
+    obj_handle_t ksec_event;
     /* VARARG(out_data,bytes); */
+    char __pad_28[4];
 };
 
 
@@ -8828,6 +8831,25 @@ struct impersonate_thread_reply
 };
 
 
+
+struct ksec_connection_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    object_id_t generation;
+    unsigned int cleanup;
+    unsigned int status;
+    unsigned int rpc_status;
+    unsigned int has_context;
+    unsigned int first;
+    unsigned int second;
+};
+struct ksec_connection_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -9304,6 +9326,7 @@ enum request
     REQ_select_gdi_bitmap,
     REQ_check_gdi_bitmap_creator,
     REQ_impersonate_thread,
+    REQ_ksec_connection,
     REQ_NB_REQUESTS
 };
 
@@ -9785,6 +9808,7 @@ union generic_request
     struct select_gdi_bitmap_request select_gdi_bitmap_request;
     struct check_gdi_bitmap_creator_request check_gdi_bitmap_creator_request;
     struct impersonate_thread_request impersonate_thread_request;
+    struct ksec_connection_request ksec_connection_request;
 };
 union generic_reply
 {
@@ -10264,8 +10288,9 @@ union generic_reply
     struct select_gdi_bitmap_reply select_gdi_bitmap_reply;
     struct check_gdi_bitmap_creator_reply check_gdi_bitmap_creator_reply;
     struct impersonate_thread_reply impersonate_thread_reply;
+    struct ksec_connection_reply ksec_connection_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1114
+#define SERVER_PROTOCOL_VERSION 1116
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

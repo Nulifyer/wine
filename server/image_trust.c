@@ -134,7 +134,8 @@ int init_image_trust( int fd, const char *pin )
     version = read_u32( bytes + 8 );
     if ((version != 2 || memcmp( bytes, "LNTICT02", 8 )) &&
         (version != 3 || memcmp( bytes, "LNTICT03", 8 )) &&
-        (version != 4 || memcmp( bytes, "LNTICT04", 8 ))) goto invalid;
+        (version != 4 || memcmp( bytes, "LNTICT04", 8 )) &&
+        (version != 5 || memcmp( bytes, "LNTICT05", 8 ))) goto invalid;
     count = read_u32( bytes + 12 );
     start = read_u64( bytes + 16 );
     end = read_u64( bytes + 24 );
@@ -146,10 +147,13 @@ int init_image_trust( int fd, const char *pin )
         unsigned long long image_size = read_u64( entry + 32 );
         unsigned int machine = read_u32( entry + 40 ), tag = read_u32( entry + 44 );
         unsigned int kind = tag & 0xff, protection = (tag >> 8) & 0xff;
+        unsigned int roles = tag >> 19;
         if (!image_size || image_size > IMAGE_TRUST_MAX_IMAGE_BYTES ||
             (machine != 0x14c && machine != 0x8664) ||
             (kind != IMAGE_TRUST_MICROSOFT && kind != IMAGE_TRUST_PLATFORM) ||
-            (tag & ~0x7ffff) || (version < 4 && (tag >> 16)) || (version == 2 && protection) ||
+            (tag & ~0xfffff) || (version < 5 && roles) ||
+            (roles && (kind != IMAGE_TRUST_MICROSOFT || protection != 0x41 || machine != 0x8664)) ||
+            (version < 4 && (tag >> 16)) || (version == 2 && protection) ||
             (protection && (kind != IMAGE_TRUST_MICROSOFT ||
                            (protection != 0x41 && protection != 0x51 && protection != 0x61))) ||
             (i && memcmp( entry - ENTRY_BYTES, entry, 32 ) >= 0)) goto invalid;
@@ -190,7 +194,8 @@ struct image_trust_info classify_image_digest( const unsigned char digest[32], u
                 return trust;
             trust.publisher_class = tag & 0xff;
             trust.process_protection = (tag >> 8) & 0xff;
-            trust.code_grants = tag >> 16;
+            trust.code_grants = (tag >> 16) & 7;
+            trust.roles = tag >> 19;
             return trust;
         }
     }
@@ -211,6 +216,13 @@ int image_trust_allows_code( const struct image_trust_info *trust, unsigned int 
     return image_trust_ready() &&
            (trust->publisher_class == IMAGE_TRUST_MICROSOFT || trust->publisher_class == IMAGE_TRUST_PLATFORM) &&
            (trust->code_grants & grant);
+}
+
+int image_trust_allows_role( const struct image_trust_info *trust, unsigned int role )
+{
+    return role == IMAGE_TRUST_ROLE_KSEC_LSA && image_trust_ready() &&
+           trust->publisher_class == IMAGE_TRUST_MICROSOFT && trust->process_protection == 0x41 &&
+           (trust->roles & role);
 }
 
 unsigned int classify_image_fd( int fd, unsigned short machine )

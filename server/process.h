@@ -130,6 +130,7 @@ extern unsigned int alloc_ptid( void *ptr );
 extern void free_ptid( unsigned int id );
 extern void *get_ptid_entry( unsigned int id );
 extern int is_native_machine(void);
+extern int thread_has_ksec_lsa_role( struct thread *thread );
 extern int init_native_bootstrap( int socket, int image, int pid );
 extern int validate_native_bootstrap_image( struct process *process, int fd );
 extern struct process *create_process( int fd, struct process *parent, unsigned int flags,

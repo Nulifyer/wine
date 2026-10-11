@@ -49,6 +49,7 @@
 #include "ddk/wdm.h"
 
 #include "file.h"
+#include "ksec.h"
 #include "handle.h"
 #include "thread.h"
 #include "process.h"
@@ -110,6 +111,7 @@ struct memory_view
     struct fd      *fd;              /* fd for mapped file */
     struct ranges  *committed;       /* list of committed ranges in this mapping */
     struct shared_map *shared;       /* temp file for shared PE mapping */
+    struct object  *main_image;      /* retained protected main section, if this view maps it */
     struct pe_image_info image;      /* image info (for PE image mapping) */
     unsigned int    flags;           /* SEC_* flags */
     client_ptr_t    base;            /* view base address (in process addr space) */
@@ -1098,6 +1100,7 @@ static void free_memory_view( struct memory_view *view )
     if (view->fd) release_object( view->fd );
     if (view->committed) release_object( view->committed );
     if (view->shared) release_object( view->shared );
+    if (view->main_image) release_object( view->main_image );
     list_remove( &view->entry );
     free( view );
 }
@@ -2014,6 +2017,29 @@ struct object *get_protected_process_image( struct process *process, obj_handle_
     return &mapping->obj;
 }
 
+/* A startup flag cannot attest a live view after unmapping. Match the exact
+ * retained section object, and recheck the catalog's validity at every use. */
+int process_has_image_role( struct process *process, unsigned int role )
+{
+    struct mapping *mapping;
+    struct memory_view *view;
+
+    if (!process->protected_image || !process->running_threads) return 0;
+    mapping = (struct mapping *)process->protected_image;
+    if (!image_trust_allows_role( &mapping->image_trust, role ) || !mapping->image_fd ||
+        (mapping->image.image_charact & IMAGE_FILE_DLL) ||
+        !(mapping->image.image_charact & IMAGE_FILE_EXECUTABLE_IMAGE) ||
+        mapping->image.machine != process->machine || mapping->image.machine != IMAGE_FILE_MACHINE_AMD64 ||
+        process->protection != mapping->image_trust.process_protection) return 0;
+    LIST_FOR_EACH_ENTRY( view, &process->views, struct memory_view, entry )
+    {
+        if (view->main_image == process->protected_image &&
+            (view->flags & (SEC_IMAGE | SEC_NOCACHE)) == SEC_IMAGE &&
+            view->size == mapping->image.map_size) return 1;
+    }
+    return 0;
+}
+
 /* open a new file for the file descriptor backing the view */
 struct file *get_view_file( const struct memory_view *view, unsigned int access, unsigned int sharing )
 {
@@ -2550,6 +2576,7 @@ DECL_HANDLER(map_view)
         view->fd        = !is_fd_removable( mapping->fd ) ? (struct fd *)grab_object( mapping->fd ) : NULL;
         view->committed = mapping->committed ? (struct ranges *)grab_object( mapping->committed ) : NULL;
         view->shared    = NULL;
+        view->main_image = NULL;
         add_process_view( current, view );
     }
 
@@ -2613,6 +2640,7 @@ DECL_HANDLER(map_image_view)
         view->committed = NULL;
         view->shared    = mapping->shared ? (struct shared_map *)grab_object( mapping->shared ) : NULL;
         view->image     = mapping->image;
+        view->main_image = current->process->protected_image == &mapping->obj ? grab_object( mapping ) : NULL;
         if (add_process_view( current, view ))
         {
             if (current->process->native_bootstrap_pid) current->process->native_bootstrap_mapped = 1;
@@ -2695,6 +2723,7 @@ DECL_HANDLER(unmap_view)
 
     if (!view) return;
     generate_dll_event( current, DbgUnloadDllStateChange, view );
+    if (view->main_image) ksec_image_unmapped( current->process );
     free_memory_view( view );
 }
 

@@ -54,6 +54,7 @@
 #include "ddk/wdm.h"
 
 #include "file.h"
+#include "ksec.h"
 #include "handle.h"
 #include "process.h"
 #include "thread.h"
@@ -1629,6 +1630,7 @@ int thread_get_inflight_fd( struct thread *thread, int client )
 void kill_thread( struct thread *thread, int violent_death )
 {
     if (thread->state == TERMINATED) return;  /* already killed */
+    ksec_thread_exit( thread );
     thread->state = TERMINATED;
     thread->exit_time = current_time;
     if (current == thread) current = NULL;

@@ -5952,6 +5952,25 @@ static unsigned int server_write_file( HANDLE handle, HANDLE event, PIO_APC_ROUT
     return status;
 }
 
+NTSTATUS ksec_receipt( void *args )
+{
+    const struct ksec_receipt *receipt = args;
+    NTSTATUS status;
+    SERVER_START_REQ( ksec_connection )
+    {
+        req->generation = receipt->generation;
+        req->cleanup = receipt->cleanup;
+        req->status = receipt->status;
+        req->rpc_status = receipt->rpc_status;
+        req->has_context = receipt->has_context;
+        req->first = receipt->first;
+        req->second = receipt->second;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
 /* do an ioctl call through the server */
 static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
                                    PIO_APC_ROUTINE apc, PVOID apc_context,
@@ -5963,6 +5982,7 @@ static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
     unsigned int status;
     HANDLE wait_handle;
     ULONG options;
+    struct ksec_callback_args callback = {0};
 
     if (!(async = (struct async_irp *)alloc_fileio( sizeof(*async), irp_completion )))
         return STATUS_NO_MEMORY;
@@ -5979,10 +5999,30 @@ static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
         status = virtual_locked_server_call( req );
         wait_handle = wine_server_ptr_handle( reply->wait );
         options     = reply->options;
+        callback.generation = reply->ksec_generation;
+        callback.revoked = wine_server_ptr_handle( reply->ksec_event );
         if (wait_handle && status != STATUS_PENDING)
             set_sync_iosb( io, status, wine_server_reply_size( reply ), options );
     }
     SERVER_END_REQ;
+
+    if (callback.generation)
+    {
+        NTSTATUS dispatched = STATUS_NOT_SUPPORTED;
+#ifdef __x86_64__
+        dispatched = dispatch_ksec_callback( &callback, sizeof(callback) );
+#endif
+        if (dispatched)
+        {
+            struct ksec_receipt receipt = { callback.generation, 0, dispatched };
+            ksec_receipt( &receipt );
+            /* No callback work item owns the event/context on this path. */
+            receipt.cleanup = 1;
+            receipt.status = 0;
+            ksec_receipt( &receipt );
+            NtClose( callback.revoked );
+        }
+    }
 
     if (status == STATUS_NOT_SUPPORTED)
         WARN("Unsupported ioctl %x (device=%x access=%x func=%x method=%x)\n",

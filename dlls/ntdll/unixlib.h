@@ -73,6 +73,18 @@ struct unwind_builtin_dll_params
     CONTEXT                    *context;
 };
 
+struct ksec_callback_args
+{
+    ULONGLONG generation;
+    HANDLE revoked;
+};
+
+struct ksec_receipt
+{
+    ULONGLONG generation;
+    ULONG cleanup, status, rpc_status, has_context, first, second;
+};
+
 enum ntdll_unix_funcs
 {
     unix_load_so_dll,
@@ -83,6 +95,7 @@ enum ntdll_unix_funcs
     unix_wine_server_handle_to_fd,
     unix_wine_spawnvp,
     unix_system_time_precise,
+    unix_ksec_receipt,
 };
 
 extern unixlib_handle_t __wine_unixlib_handle;

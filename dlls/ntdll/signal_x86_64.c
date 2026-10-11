@@ -414,6 +414,27 @@ __ASM_GLOBAL_FUNC( KiUserApcDispatcher,
                    "int3" )
 
 
+/* The private Ksec dispatcher shares the nested callback frame, but never
+ * interprets the process USER callback table. Its C entry handles exceptions. */
+__ASM_GLOBAL_FUNC( __wine_ksec_dispatcher,
+                   __ASM_SEH(".seh_pushframe\n\t")
+                   __ASM_SEH(".seh_stackalloc 0x30\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
+                   __ASM_CFI(".cfi_signal_frame\n\t")
+                   __ASM_CFI(".cfi_def_cfa_offset 0\n\t")
+                   __ASM_CFI(".cfi_offset %rip,0x30\n\t")
+                   __ASM_CFI(".cfi_offset %rsp,0x48\n\t")
+                   "movq 0x20(%rsp),%rcx\n\t"
+                   "movl 0x28(%rsp),%edx\n\t"
+                   "call " __ASM_NAME("dispatch_ksec_connection") "\n\t"
+                   "xorq %rcx,%rcx\n\t"
+                   "xorl %edx,%edx\n\t"
+                   "movl %eax,%r8d\n\t"
+                   "call " __ASM_NAME("NtCallbackReturn") "\n\t"
+                   "movl %eax,%ecx\n\t"
+                   "call " __ASM_NAME("RtlRaiseStatus") "\n\t"
+                   "int3" )
+
 /*******************************************************************
  *		KiUserCallbackDispatcher (NTDLL.@)
  */

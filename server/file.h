@@ -183,6 +183,7 @@ extern size_t get_page_size(void);
 extern int mapping_worker_exited( int pid, int status );
 extern struct object *get_protected_process_image( struct process *process, obj_handle_t handle,
                                                   unsigned short machine, unsigned int protection );
+extern int process_has_image_role( struct process *process, unsigned int role );
 extern struct mapping *create_fd_mapping( struct object *root, struct unicode_str name, struct fd *fd,
                                           unsigned int attr, const struct security_descriptor *sd );
 extern struct object *get_shared_data_section( struct process *process, obj_handle_t handle, mem_size_t *size );
@@ -266,6 +267,8 @@ extern void queue_async( struct async_queue *queue, struct async *async );
 extern void async_set_timeout( struct async *async, timeout_t timeout, unsigned int status );
 extern void async_set_result( struct object *obj, unsigned int status, apc_param_t total );
 extern void async_set_completion_callback( struct async *async, async_completion_callback func, void *private );
+/* Notification at termination, before client settlement; separate from completion. */
+extern void async_set_termination_callback( struct async *async, void (*func)(void *, unsigned int), void *private );
 extern void async_set_unknown_status( struct async *async );
 extern void set_async_pending( struct async *async );
 extern void async_set_initial_status( struct async *async, unsigned int status );

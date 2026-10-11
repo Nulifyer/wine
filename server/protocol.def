@@ -2782,6 +2782,8 @@ enum message_type
 @REPLY
     obj_handle_t   wait;          /* handle to wait on for blocking ioctl */
     unsigned int   options;       /* device open options */
+    object_id_t ksec_generation; /* reserved Ksec connection, zero for other IO */
+    obj_handle_t ksec_event;      /* server-owned revocation event, wait access only */
     VARARG(out_data,bytes);       /* ioctl output data */
 @END
 
@@ -5851,4 +5853,16 @@ struct alpc_message_info
     int level;
     unsigned int tracking;
     unsigned int effective_only;
+@END
+
+
+/* Private NTDLL receipt for the server-owned Ksec connection transaction. */
+@REQ(ksec_connection)
+    object_id_t generation;
+    unsigned int cleanup;
+    unsigned int status;
+    unsigned int rpc_status;
+    unsigned int has_context;
+    unsigned int first;
+    unsigned int second;
 @END

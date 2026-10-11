@@ -1786,6 +1786,8 @@ static void dump_ioctl_reply( const struct ioctl_reply *req )
 {
     fprintf( stderr, " wait=%04x", req->wait );
     fprintf( stderr, ", options=%08x", req->options );
+    dump_uint64( ", ksec_generation=", &req->ksec_generation );
+    fprintf( stderr, ", ksec_event=%04x", req->ksec_event );
     dump_varargs_bytes( ", out_data=", cur_size );
 }
 
@@ -5221,6 +5223,17 @@ static void dump_impersonate_thread_request( const struct impersonate_thread_req
     fprintf( stderr, ", effective_only=%08x", req->effective_only );
 }
 
+static void dump_ksec_connection_request( const struct ksec_connection_request *req )
+{
+    dump_uint64( " generation=", &req->generation );
+    fprintf( stderr, ", cleanup=%08x", req->cleanup );
+    fprintf( stderr, ", status=%08x", req->status );
+    fprintf( stderr, ", rpc_status=%08x", req->rpc_status );
+    fprintf( stderr, ", has_context=%08x", req->has_context );
+    fprintf( stderr, ", first=%08x", req->first );
+    fprintf( stderr, ", second=%08x", req->second );
+}
+
 typedef void (*dump_func)( const void *req );
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] =
@@ -5699,6 +5712,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_select_gdi_bitmap_request,
     (dump_func)dump_check_gdi_bitmap_creator_request,
     (dump_func)dump_impersonate_thread_request,
+    (dump_func)dump_ksec_connection_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
@@ -6175,6 +6189,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_query_gdi_object_reply,
     (dump_func)dump_set_gdi_bitmap_stock_reply,
     (dump_func)dump_select_gdi_bitmap_reply,
+    NULL,
     NULL,
     NULL,
 };
@@ -6655,6 +6670,7 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "select_gdi_bitmap",
     "check_gdi_bitmap_creator",
     "impersonate_thread",
+    "ksec_connection",
 };
 
 static const struct

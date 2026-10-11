@@ -33,6 +33,7 @@
 
 #include "handle.h"
 #include "file.h"
+#include "ksec.h"
 #include "process.h"
 #include "thread.h"
 #include "security.h"
@@ -2042,6 +2043,7 @@ static void lose_message_wait( struct alpc_request *request )
 
 static void free_message_request( struct alpc_request *request )
 {
+    ksec_alpc_request_end( request );
     if (request->message) request->message->request = NULL;
     if (request->reply) request->reply->request = NULL;
     lose_message_wait( request );
@@ -2124,6 +2126,22 @@ static void cancel_message_request( struct alpc_request *request, struct alpc_po
         if (message) message->request = request;
     }
     else free_message_request( request );
+}
+
+/* Ksec holds a weak invocation link into this registry, never a client pointer.
+ * Reuse ordinary ALPC cancellation to retract an undelivered privilege bit and
+ * terminate the sender's wait. A delivered call cannot be retroactively undone. */
+void alpc_cancel_ksec_request( const void *identity )
+{
+    struct alpc_request *request;
+    if (!identity) return;
+    LIST_FOR_EACH_ENTRY( request, &message_requests, struct alpc_request, entry )
+        if (request == identity)
+        {
+            lose_message_wait( request );
+            cancel_message_request( request, request->queue );
+            return;
+        }
 }
 
 /* Explicit cancellation of a delivered request returns a cancellation to the
@@ -2670,6 +2688,25 @@ static int send_message( struct alpc_port *port, unsigned int flags, unsigned in
         request->wow64 = wow64;
         request->canceled = 0;
     }
+    /* Observe only an admitted request, after every fallible send allocation.
+     * A native server may reply through its listener handle; the request owner
+     * has already bound origin and target to the actual communication endpoints. */
+    if (!wow64 && !reserve && request && origin->type == COMMUNICATION_PORT &&
+        target->type == COMMUNICATION_PORT)
+    {
+        struct alpc_port *listener = id ? origin->connection_port : target->connection_port;
+        int observed = ksec_alpc_message( &origin->obj, &target->obj, listener ? &listener->obj : NULL,
+                                         target->thread->process, request, message->info.id, !!id, data, size );
+        if (observed < 0)
+        {
+            /* Rejection revoked the transaction and may have retired request.
+             * This message has not been attached or delivered. */
+            free_message( message );
+            set_error( STATUS_REQUEST_CANCELED );
+            return 0;
+        }
+        if (observed) message->info.type |= 0x8000;
+    }
     set_message_destination( message, target, received_context );
     if (request && request->wait)
     {
@@ -2735,6 +2772,7 @@ static int alpc_port_close_handle( struct object *obj, struct process *process, 
 
     if (cancel_operation) finish_connect_operation( port );
     if (obj->handle_count != 1 && !cancel_operation) return 1;
+    ksec_alpc_close( obj );
     close_section_views( port, process );
     {
         struct alpc_port_section *section, *next;

@@ -481,6 +481,7 @@ DECL_HANDLER(set_gdi_bitmap_stock);
 DECL_HANDLER(select_gdi_bitmap);
 DECL_HANDLER(check_gdi_bitmap_creator);
 DECL_HANDLER(impersonate_thread);
+DECL_HANDLER(ksec_connection);
 
 typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
@@ -959,6 +960,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_select_gdi_bitmap,
     (req_handler)req_check_gdi_bitmap_creator,
     (req_handler)req_impersonate_thread,
+    (req_handler)req_ksec_connection,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -1882,7 +1884,9 @@ C_ASSERT( offsetof(struct ioctl_request, async) == 16 );
 C_ASSERT( sizeof(struct ioctl_request) == 56 );
 C_ASSERT( offsetof(struct ioctl_reply, wait) == 8 );
 C_ASSERT( offsetof(struct ioctl_reply, options) == 12 );
-C_ASSERT( sizeof(struct ioctl_reply) == 16 );
+C_ASSERT( offsetof(struct ioctl_reply, ksec_generation) == 16 );
+C_ASSERT( offsetof(struct ioctl_reply, ksec_event) == 24 );
+C_ASSERT( sizeof(struct ioctl_reply) == 32 );
 C_ASSERT( offsetof(struct set_irp_result_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_irp_result_request, status) == 16 );
 C_ASSERT( offsetof(struct set_irp_result_request, size) == 20 );
@@ -3601,3 +3605,11 @@ C_ASSERT( offsetof(struct impersonate_thread_request, level) == 20 );
 C_ASSERT( offsetof(struct impersonate_thread_request, tracking) == 24 );
 C_ASSERT( offsetof(struct impersonate_thread_request, effective_only) == 28 );
 C_ASSERT( sizeof(struct impersonate_thread_request) == 32 );
+C_ASSERT( offsetof(struct ksec_connection_request, generation) == 16 );
+C_ASSERT( offsetof(struct ksec_connection_request, cleanup) == 24 );
+C_ASSERT( offsetof(struct ksec_connection_request, status) == 28 );
+C_ASSERT( offsetof(struct ksec_connection_request, rpc_status) == 32 );
+C_ASSERT( offsetof(struct ksec_connection_request, has_context) == 36 );
+C_ASSERT( offsetof(struct ksec_connection_request, first) == 40 );
+C_ASSERT( offsetof(struct ksec_connection_request, second) == 44 );
+C_ASSERT( sizeof(struct ksec_connection_request) == 48 );

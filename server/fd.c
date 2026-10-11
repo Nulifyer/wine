@@ -97,6 +97,7 @@
 #include "ntstatus.h"
 #include "object.h"
 #include "file.h"
+#include "ksec.h"
 #include "handle.h"
 #include "process.h"
 #include "request.h"
@@ -3137,6 +3138,8 @@ DECL_HANDLER(ioctl)
         else set_error( STATUS_OBJECT_TYPE_MISMATCH );
         reply->wait = async_handoff( async, NULL, 0 );
         reply->options = fd->options;
+        if (req->code == 0x398000 && get_error() == STATUS_PENDING)
+            ksec_ioctl_info( fd, &reply->ksec_generation, &reply->ksec_event );
         release_object( async );
     }
     release_object( fd );

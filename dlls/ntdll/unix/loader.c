@@ -100,6 +100,7 @@ void *pKiRaiseUserExceptionDispatcher = NULL;
 void *pKiUserExceptionDispatcher = NULL;
 void *pKiUserApcDispatcher = NULL;
 void *pKiUserCallbackDispatcher = NULL;
+void *p__wine_ksec_dispatcher = NULL;
 void *pKiUserEmulationDispatcher = NULL;
 void *pLdrInitializeThunk = NULL;
 void *pRtlUserThreadStart = NULL;
@@ -1039,6 +1040,7 @@ static const unixlib_entry_t unix_call_funcs[] =
     unixcall_wine_server_handle_to_fd,
     unixcall_wine_spawnvp,
     system_time_precise,
+    ksec_receipt,
 };
 
 
@@ -1057,6 +1059,7 @@ const unixlib_entry_t unix_call_wow64_funcs[] =
     wow64_wine_server_handle_to_fd,
     wow64_wine_spawnvp,
     system_time_precise,
+    ksec_receipt,
 };
 
 #endif  /* _WIN64 */
@@ -1599,6 +1602,9 @@ static void load_ntdll_functions( HMODULE module )
     GET_FUNC( KiUserExceptionDispatcher );
     GET_FUNC( KiUserApcDispatcher );
     GET_FUNC( KiUserCallbackDispatcher );
+#ifdef __x86_64__
+    GET_FUNC( __wine_ksec_dispatcher );
+#endif
     GET_FUNC( LdrInitializeThunk );
     GET_FUNC( LdrSystemDllInitBlock );
     GET_FUNC( RtlUserThreadStart );

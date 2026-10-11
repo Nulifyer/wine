@@ -1,0 +1,13 @@
+/* Private Ksec connection client; the selected RPCRT4 owns NDR and context. */
+#pragma makedep client
+import "wtypes.idl";
+cpp_quote("extern CLIENT_CALL_RETURN (RPC_VAR_ENTRY *ksec_ndr_client_call)(PMIDL_STUB_DESC, PFORMAT_STRING, ...);")
+cpp_quote("#define NdrClientCall2 ksec_ndr_client_call")
+[uuid(4f32adc8-6052-4a04-8701-293ccf2096f0), version(1.0), pointer_default(unique)]
+interface ksec_rpc
+{
+    typedef [context_handle] void *KSEC_CONTEXT;
+    LONG ksec_rpc_connect([in] handle_t binding, [in, unique, string] char *name,
+                         [in] LONG request, [out] LONG *first, [out] LONG *second,
+                         [out] KSEC_CONTEXT *context);
+}

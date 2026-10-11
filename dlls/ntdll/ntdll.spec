@@ -2005,3 +2005,5 @@
 @ stdcall RtlUnsubscribeWnfNotificationWaitForCompletion(ptr)
 @ stdcall RtlUnsubscribeWnfStateChangeNotification(ptr)
 @ stdcall RtlWaitForWnfMetaNotification(int64 long long long ptr)
+
+@ extern -arch=x86_64 __wine_ksec_dispatcher

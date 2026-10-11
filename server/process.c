@@ -59,6 +59,7 @@
 #include "ddk/wdm.h"
 
 #include "file.h"
+#include "ksec.h"
 #include "handle.h"
 #include "process.h"
 #include "image_trust.h"
@@ -67,6 +68,21 @@
 #include "alpc.h"
 #include "user.h"
 #include "security.h"
+
+/* The host connection role attests the live main section and both token
+ * identities. Neither a requested protection byte nor a PID supplies it. */
+int thread_has_ksec_lsa_role( struct thread *thread )
+{
+    struct process *process = thread->process;
+    struct token *effective = thread->token ? thread->token : process->token;
+
+    return is_native_machine() && process->token && effective &&
+           equal_sid( token_get_user( process->token ), &local_system_sid ) &&
+           token_has_process_trust( process->token ) &&
+           equal_sid( token_get_user( effective ), &local_system_sid ) &&
+           token_has_process_trust( effective ) &&
+           process_has_image_role( process, IMAGE_TRUST_ROLE_KSEC_LSA );
+}
 
 /* process object */
 
@@ -1117,6 +1133,7 @@ static void process_killed( struct process *process )
     process->winstation = 0;
     process->desktop = 0;
     process->ui_context_initialized = 0;
+    ksec_process_exit( process );
     cancel_terminating_process_asyncs( process );
     cleanup_process_gdi_objects( process );
     cleanup_process_coremsg_connections( process );

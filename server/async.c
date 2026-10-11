@@ -121,6 +121,8 @@ struct async
     unsigned int         comp_flags;      /* completion flags */
     async_completion_callback completion_callback; /* callback to be called on completion */
     void                *completion_callback_private; /* argument to completion_callback */
+    void (*termination_callback)(void *, unsigned int);
+    void *termination_callback_private;
     struct async_cancel *async_cancel;    /* cancel object if async is being canceled */
 };
 
@@ -225,6 +227,14 @@ void async_terminate( struct async *async, unsigned int status )
      * thread_queue_apc() may trigger async_set_result(), which may drop the
      * last reference to the async, so grab a temporary reference here */
     grab_object( async );
+    if (async->termination_callback)
+    {
+        void (*callback)(void *, unsigned int) = async->termination_callback;
+        void *private = async->termination_callback_private;
+        async->termination_callback = NULL;
+        callback( private, status );
+    }
+
 
     if (!async->direct_result)
     {
@@ -331,6 +341,8 @@ struct async *create_async( struct fd *fd, struct thread *thread, const struct a
     async->comp_flags    = 0;
     async->completion_callback = NULL;
     async->completion_callback_private = NULL;
+    async->termination_callback = NULL;
+    async->termination_callback_private = NULL;
     async->async_cancel = NULL;
 
     if (iosb) async->iosb = (struct iosb *)grab_object( iosb );
@@ -524,6 +536,12 @@ void async_set_completion_callback( struct async *async, async_completion_callba
 {
     async->completion_callback = func;
     async->completion_callback_private = private;
+}
+
+void async_set_termination_callback( struct async *async, void (*func)(void *, unsigned int), void *private )
+{
+    async->termination_callback = func;
+    async->termination_callback_private = private;
 }
 
 static void add_async_completion( struct async *async, apc_param_t cvalue, unsigned int status,
