@@ -56,25 +56,79 @@ BOOLEAN WINAPI RtlAreLongPathsEnabled(void)
     return NtCurrentTeb()->Peb->IsLongPathAwareProcess;
 }
 
+/* Classify only the supplied UTF-16 bytes, including odd byte lengths. */
+static RTL_PATH_TYPE get_path_type( const WCHAR *path, ULONG bytes )
+{
+    if (bytes < sizeof(WCHAR)) return RtlPathTypeRelative;
+    if (IS_SEPARATOR(path[0]))
+    {
+        if (bytes < 2 * sizeof(WCHAR) || !IS_SEPARATOR(path[1])) return RtlPathTypeRooted;
+        if (bytes >= 3 * sizeof(WCHAR) && (path[2] == '.' || path[2] == '?'))
+        {
+            if (bytes >= 4 * sizeof(WCHAR) && IS_SEPARATOR(path[3])) return RtlPathTypeLocalDevice;
+            if (bytes == 3 * sizeof(WCHAR)) return RtlPathTypeRootLocalDevice;
+        }
+        return RtlPathTypeUncAbsolute;
+    }
+    if (bytes < 2 * sizeof(WCHAR) || !path[0] || path[1] != ':') return RtlPathTypeRelative;
+    if (bytes >= 3 * sizeof(WCHAR) && IS_SEPARATOR(path[2])) return RtlPathTypeDriveAbsolute;
+    return RtlPathTypeDriveRelative;
+}
+
 /***********************************************************************
  *             RtlDetermineDosPathNameType_U   (NTDLL.@)
  */
 RTL_PATH_TYPE WINAPI RtlDetermineDosPathNameType_U( PCWSTR path )
 {
-    if (IS_SEPARATOR(path[0]))
+    ULONG count = 0;
+
+    while (count < 4 && path[count]) count++;
+    return get_path_type( path, count * sizeof(WCHAR) );
+}
+
+/***********************************************************************
+ *             RtlGetLengthWithoutLastFullDosOrNtPathElement  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlGetLengthWithoutLastFullDosOrNtPathElement( ULONG flags,
+                                                            const UNICODE_STRING *string, ULONG *length )
+{
+    static const UNICODE_STRING root = RTL_CONSTANT_STRING(L"\\\\?");
+    static const UNICODE_STRING root_slash = RTL_CONSTANT_STRING(L"\\\\?\\");
+    static const UNICODE_STRING unc_root = RTL_CONSTANT_STRING(L"\\\\?\\UNC");
+    static const UNICODE_STRING unc_root_slash = RTL_CONSTANT_STRING(L"\\\\?\\UNC\\");
+    UNICODE_STRING tail;
+    RTL_PATH_TYPE type;
+    ULONG count;
+
+    if (length) *length = 0;
+    if (flags || !string || !length) return STATUS_INVALID_PARAMETER;
+    count = string->Length / sizeof(WCHAR);
+    if (!count) return STATUS_SUCCESS;
+
+    type = get_path_type( string->Buffer, string->Length );
+    if (type != RtlPathTypeUncAbsolute && type != RtlPathTypeDriveAbsolute &&
+        type != RtlPathTypeRooted && type != RtlPathTypeLocalDevice && type != RtlPathTypeRootLocalDevice)
+        return STATUS_INVALID_PARAMETER;
+
+    /* Extended Win32 prefixes require a complete drive or UNC form. */
+    if (!RtlEqualUnicodeString( &root, string, TRUE ) &&
+        !RtlEqualUnicodeString( &root_slash, string, TRUE ) &&
+        RtlPrefixUnicodeString( &root_slash, string, TRUE ) &&
+        !RtlEqualUnicodeString( &unc_root, string, TRUE ) &&
+        !RtlPrefixUnicodeString( &unc_root_slash, string, TRUE ))
     {
-        if (!IS_SEPARATOR(path[1])) return RtlPathTypeRooted;                   /* "/foo" */
-        if (path[2] != '.' && path[2] != '?') return RtlPathTypeUncAbsolute;    /* "//foo" */
-        if (IS_SEPARATOR(path[3])) return RtlPathTypeLocalDevice;               /* "//./foo" or "//?/foo" */
-        if (path[3]) return RtlPathTypeUncAbsolute;                             /* "//.foo" or "//?foo" */
-        return RtlPathTypeRootLocalDevice;                                      /* "//." or "//?" */
+        tail = *string;
+        tail.Buffer += root_slash.Length / sizeof(WCHAR);
+        tail.Length -= root_slash.Length;
+        if (get_path_type( tail.Buffer, tail.Length ) != RtlPathTypeDriveAbsolute)
+            return STATUS_INVALID_PARAMETER;
     }
-    else
-    {
-        if (!path[0] || path[1] != ':') return RtlPathTypeRelative; /* "foo" */
-        if (IS_SEPARATOR(path[2])) return RtlPathTypeDriveAbsolute; /* "c:/foo" */
-        return RtlPathTypeDriveRelative;                            /* "c:foo" */
-    }
+
+    while (count && IS_SEPARATOR(string->Buffer[count - 1])) count--;
+    while (count && !IS_SEPARATOR(string->Buffer[count - 1])) count--;
+    while (count && IS_SEPARATOR(string->Buffer[count - 1])) count--;
+    *length = count ? count + 1 : 0;
+    return STATUS_SUCCESS;
 }
 
 /***********************************************************************

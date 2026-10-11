@@ -852,7 +852,7 @@
 @ stdcall RtlGetGroupSecurityDescriptor(ptr ptr ptr)
 @ stdcall RtlGetLastNtStatus()
 @ stdcall RtlGetLastWin32Error()
-# @ stub RtlGetLengthWithoutLastFullDosOrNtPathElement
+@ stdcall RtlGetLengthWithoutLastFullDosOrNtPathElement(long ptr ptr)
 # Yes, Microsoft really misspelled this one!
 @ stdcall RtlGetLengthWithoutTrailingPathSeperators(long ptr ptr)
 @ stdcall RtlGetLocaleFileMappingAddress(ptr ptr ptr)
