@@ -128,6 +128,22 @@ static LONG WINAPI debug_exception_handler( EXCEPTION_POINTERS *eptr )
 }
 
 /******************************************************************************
+ *      DbgQueryDebugFilterState  [NTDLL.@]
+ */
+NTSTATUS WINAPI DbgQueryDebugFilterState( ULONG component_id, ULONG level )
+{
+    return NtQueryDebugFilterState( component_id, level );
+}
+
+/******************************************************************************
+ *      DbgSetDebugFilterState  [NTDLL.@]
+ */
+NTSTATUS WINAPI DbgSetDebugFilterState( ULONG component_id, ULONG level, BOOLEAN state )
+{
+    return NtSetDebugFilterState( component_id, level, state );
+}
+
+/******************************************************************************
  *	DbgPrint	[NTDLL.@]
  */
 NTSTATUS WINAPIV DbgPrint(LPCSTR fmt, ...)

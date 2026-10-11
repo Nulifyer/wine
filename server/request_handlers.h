@@ -98,6 +98,8 @@ DECL_HANDLER(get_exception_status);
 DECL_HANDLER(continue_debug_event);
 DECL_HANDLER(debug_process);
 DECL_HANDLER(set_debug_obj_info);
+DECL_HANDLER(get_debug_filter_state);
+DECL_HANDLER(set_debug_filter_state);
 DECL_HANDLER(read_process_memory);
 DECL_HANDLER(write_process_memory);
 DECL_HANDLER(create_key);
@@ -574,6 +576,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_continue_debug_event,
     (req_handler)req_debug_process,
     (req_handler)req_set_debug_obj_info,
+    (req_handler)req_get_debug_filter_state,
+    (req_handler)req_set_debug_filter_state,
     (req_handler)req_read_process_memory,
     (req_handler)req_write_process_memory,
     (req_handler)req_create_key,
@@ -1583,6 +1587,15 @@ C_ASSERT( sizeof(struct debug_process_request) == 24 );
 C_ASSERT( offsetof(struct set_debug_obj_info_request, debug) == 12 );
 C_ASSERT( offsetof(struct set_debug_obj_info_request, flags) == 16 );
 C_ASSERT( sizeof(struct set_debug_obj_info_request) == 24 );
+C_ASSERT( offsetof(struct get_debug_filter_state_request, component_id) == 12 );
+C_ASSERT( offsetof(struct get_debug_filter_state_request, level) == 16 );
+C_ASSERT( sizeof(struct get_debug_filter_state_request) == 24 );
+C_ASSERT( offsetof(struct get_debug_filter_state_reply, enabled) == 8 );
+C_ASSERT( sizeof(struct get_debug_filter_state_reply) == 16 );
+C_ASSERT( offsetof(struct set_debug_filter_state_request, component_id) == 12 );
+C_ASSERT( offsetof(struct set_debug_filter_state_request, level) == 16 );
+C_ASSERT( offsetof(struct set_debug_filter_state_request, state) == 20 );
+C_ASSERT( sizeof(struct set_debug_filter_state_request) == 24 );
 C_ASSERT( offsetof(struct read_process_memory_request, handle) == 12 );
 C_ASSERT( offsetof(struct read_process_memory_request, addr) == 16 );
 C_ASSERT( sizeof(struct read_process_memory_request) == 24 );

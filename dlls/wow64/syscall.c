@@ -1075,6 +1075,17 @@ NTSTATUS WINAPI wow64_NtGetCurrentProcessorNumber( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtQueryDebugFilterState
+ */
+NTSTATUS WINAPI wow64_NtQueryDebugFilterState( UINT *args )
+{
+    ULONG component_id = get_ulong( &args );
+    ULONG level = get_ulong( &args );
+
+    return NtQueryDebugFilterState( component_id, level );
+}
+
+/**********************************************************************
  *           wow64_NtQueryDefaultLocale
  */
 NTSTATUS WINAPI wow64_NtQueryDefaultLocale( UINT *args )

@@ -34,9 +34,19 @@
 #include "file.h"
 #include "process.h"
 #include "thread.h"
+#include "security.h"
 #include "request.h"
 
 enum debug_event_state { EVENT_QUEUED, EVENT_SENT, EVENT_DELAYED, EVENT_CONTINUED };
+
+/* Debug filter IDs exposed by the measured Windows NTDLL contract. */
+static unsigned int debug_filter_masks[156] = { [120] = 1 };
+static unsigned int debug_filter_common_mask = 1;
+
+static unsigned int debug_filter_level_mask( unsigned int level )
+{
+    return level < 32 ? 1u << level : level;
+}
 
 /* debug event */
 struct debug_event
@@ -671,4 +681,28 @@ DECL_HANDLER(set_debug_obj_info)
     if (!(debug_obj = get_debug_obj( current->process, req->debug, DEBUG_SET_INFORMATION ))) return;
     debug_obj->flags = req->flags;
     release_object( debug_obj );
+}
+
+DECL_HANDLER(get_debug_filter_state)
+{
+    if (req->component_id < ARRAY_SIZE(debug_filter_masks))
+        reply->enabled = !!((debug_filter_masks[req->component_id] | debug_filter_common_mask)
+                            & debug_filter_level_mask( req->level ));
+}
+
+DECL_HANDLER(set_debug_filter_state)
+{
+    unsigned int *mask, level = debug_filter_level_mask( req->level );
+
+    if (!thread_single_check_privilege( current, SeDebugPrivilege ))
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (req->component_id == ~0u) mask = &debug_filter_common_mask;
+    else if (req->component_id < ARRAY_SIZE(debug_filter_masks)) mask = &debug_filter_masks[req->component_id];
+    else return;
+
+    if (req->state) *mask |= level;
+    else *mask &= ~level;
 }

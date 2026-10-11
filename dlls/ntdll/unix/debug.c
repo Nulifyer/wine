@@ -381,11 +381,37 @@ NTSTATUS WINAPI NtTraceControl( ULONG code, void *inbuf, ULONG inbuf_len,
 
 
 /***********************************************************************
+ *              NtQueryDebugFilterState  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQueryDebugFilterState( ULONG component_id, ULONG level )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( get_debug_filter_state )
+    {
+        req->component_id = component_id;
+        req->level = level;
+        status = wine_server_call( req );
+        if (!status) status = reply->enabled;
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+/***********************************************************************
  *              NtSetDebugFilterState  (NTDLL.@)
  */
 NTSTATUS WINAPI NtSetDebugFilterState( ULONG component_id, ULONG level, BOOLEAN state )
 {
-    FIXME( "component_id %#x, level %u, state %#x stub.\n", component_id, level, state );
+    NTSTATUS status;
 
-    return STATUS_SUCCESS;
+    SERVER_START_REQ( set_debug_filter_state )
+    {
+        req->component_id = component_id;
+        req->level = level;
+        req->state = state;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
 }

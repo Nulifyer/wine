@@ -1169,6 +1169,24 @@ static void dump_set_debug_obj_info_request( const struct set_debug_obj_info_req
     fprintf( stderr, ", flags=%08x", req->flags );
 }
 
+static void dump_get_debug_filter_state_request( const struct get_debug_filter_state_request *req )
+{
+    fprintf( stderr, " component_id=%08x", req->component_id );
+    fprintf( stderr, ", level=%08x", req->level );
+}
+
+static void dump_get_debug_filter_state_reply( const struct get_debug_filter_state_reply *req )
+{
+    fprintf( stderr, " enabled=%08x", req->enabled );
+}
+
+static void dump_set_debug_filter_state_request( const struct set_debug_filter_state_request *req )
+{
+    fprintf( stderr, " component_id=%08x", req->component_id );
+    fprintf( stderr, ", level=%08x", req->level );
+    fprintf( stderr, ", state=%d", req->state );
+}
+
 static void dump_read_process_memory_request( const struct read_process_memory_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -5298,6 +5316,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] =
     (dump_func)dump_continue_debug_event_request,
     (dump_func)dump_debug_process_request,
     (dump_func)dump_set_debug_obj_info_request,
+    (dump_func)dump_get_debug_filter_state_request,
+    (dump_func)dump_set_debug_filter_state_request,
     (dump_func)dump_read_process_memory_request,
     (dump_func)dump_write_process_memory_request,
     (dump_func)dump_create_key_request,
@@ -5773,6 +5793,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] =
     NULL,
     NULL,
     NULL,
+    NULL,
+    (dump_func)dump_get_debug_filter_state_reply,
     NULL,
     (dump_func)dump_read_process_memory_reply,
     (dump_func)dump_write_process_memory_reply,
@@ -6250,6 +6272,8 @@ static const char * const req_names[REQ_NB_REQUESTS] =
     "continue_debug_event",
     "debug_process",
     "set_debug_obj_info",
+    "get_debug_filter_state",
+    "set_debug_filter_state",
     "read_process_memory",
     "write_process_memory",
     "create_key",

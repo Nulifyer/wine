@@ -2209,6 +2209,23 @@ struct process_info
 @END
 
 
+/* Query a system debug-message filter */
+@REQ(get_debug_filter_state)
+    unsigned int component_id;
+    unsigned int level;
+@REPLY
+    unsigned int enabled;
+@END
+
+
+/* Change a system debug-message filter with effective debug privilege */
+@REQ(set_debug_filter_state)
+    unsigned int component_id;
+    unsigned int level;
+    int          state;
+@END
+
+
 /* Read data from a process address space */
 @REQ(read_process_memory)
     obj_handle_t handle;       /* process handle */

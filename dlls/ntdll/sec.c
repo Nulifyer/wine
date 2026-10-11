@@ -2279,7 +2279,7 @@ RtlAdjustPrivilege(ULONG Privilege,
     if (OldState.PrivilegeCount == 0)
         *Enabled = Enable;
     else
-        *Enabled = (OldState.Privileges[0].Attributes & SE_PRIVILEGE_ENABLED);
+        *Enabled = !!(OldState.Privileges[0].Attributes & SE_PRIVILEGE_ENABLED);
 
     return STATUS_SUCCESS;
 }

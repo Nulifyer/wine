@@ -496,6 +496,7 @@ DEFINE_SYSCALL(NtPrivilegeCheck, (HANDLE token, PRIVILEGE_SET *privs, BOOLEAN *r
 DEFINE_WRAPPED_SYSCALL(NtProtectVirtualMemory, (HANDLE process, PVOID *addr_ptr, SIZE_T *size_ptr, ULONG new_prot, ULONG *old_prot))
 DEFINE_SYSCALL(NtPulseEvent, (HANDLE handle, LONG *prev_state))
 DEFINE_SYSCALL(NtQueryAttributesFile, (const OBJECT_ATTRIBUTES *attr, FILE_BASIC_INFORMATION *info))
+DEFINE_SYSCALL(NtQueryDebugFilterState, (ULONG component_id, ULONG level))
 DEFINE_SYSCALL(NtQueryDefaultLocale, (BOOLEAN user, LCID *lcid))
 DEFINE_SYSCALL(NtQueryDefaultUILanguage, (LANGID *lang))
 DEFINE_SYSCALL(NtQueryDirectoryFile, (HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_routine, void *apc_context, IO_STATUS_BLOCK *io, void *buffer, ULONG length, FILE_INFORMATION_CLASS info_class, BOOLEAN single_entry, UNICODE_STRING *mask, BOOLEAN restart_scan))

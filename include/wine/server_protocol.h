@@ -2759,6 +2759,36 @@ struct set_debug_obj_info_reply
 
 
 
+struct get_debug_filter_state_request
+{
+    struct request_header __header;
+    unsigned int component_id;
+    unsigned int level;
+    char __pad_20[4];
+};
+struct get_debug_filter_state_reply
+{
+    struct reply_header __header;
+    unsigned int enabled;
+    char __pad_12[4];
+};
+
+
+
+struct set_debug_filter_state_request
+{
+    struct request_header __header;
+    unsigned int component_id;
+    unsigned int level;
+    int          state;
+};
+struct set_debug_filter_state_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct read_process_memory_request
 {
     struct request_header __header;
@@ -8891,6 +8921,8 @@ enum request
     REQ_continue_debug_event,
     REQ_debug_process,
     REQ_set_debug_obj_info,
+    REQ_get_debug_filter_state,
+    REQ_set_debug_filter_state,
     REQ_read_process_memory,
     REQ_write_process_memory,
     REQ_create_key,
@@ -9370,6 +9402,8 @@ union generic_request
     struct continue_debug_event_request continue_debug_event_request;
     struct debug_process_request debug_process_request;
     struct set_debug_obj_info_request set_debug_obj_info_request;
+    struct get_debug_filter_state_request get_debug_filter_state_request;
+    struct set_debug_filter_state_request set_debug_filter_state_request;
     struct read_process_memory_request read_process_memory_request;
     struct write_process_memory_request write_process_memory_request;
     struct create_key_request create_key_request;
@@ -9847,6 +9881,8 @@ union generic_reply
     struct continue_debug_event_reply continue_debug_event_reply;
     struct debug_process_reply debug_process_reply;
     struct set_debug_obj_info_reply set_debug_obj_info_reply;
+    struct get_debug_filter_state_reply get_debug_filter_state_reply;
+    struct set_debug_filter_state_reply set_debug_filter_state_reply;
     struct read_process_memory_reply read_process_memory_reply;
     struct write_process_memory_reply write_process_memory_reply;
     struct create_key_reply create_key_reply;
@@ -10230,6 +10266,6 @@ union generic_reply
     struct impersonate_thread_reply impersonate_thread_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 1113
+#define SERVER_PROTOCOL_VERSION 1114
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

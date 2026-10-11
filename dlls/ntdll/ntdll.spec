@@ -36,8 +36,8 @@
 @ varargs DbgPrintEx(long long str)
 # @ stub DbgPrintReturnControlC
 @ stub DbgPrompt
-# @ stub DbgQueryDebugFilterState
-# @ stub DbgSetDebugFilterState
+@ stdcall DbgQueryDebugFilterState(long long)
+@ stdcall DbgSetDebugFilterState(long long long)
 @ stdcall DbgUiConnectToDbg()
 @ stdcall DbgUiContinue(ptr long)
 @ stdcall DbgUiConvertStateChangeStructure(ptr ptr)
@@ -358,7 +358,7 @@
 @ stdcall -syscall=0x003d NtQueryAttributesFile(ptr ptr)
 # @ stub NtQueryBootEntryOrder
 # @ stub NtQueryBootOptions
-# @ stub NtQueryDebugFilterState
+@ stdcall -syscall NtQueryDebugFilterState(long long)
 @ stdcall -syscall=0x0015 NtQueryDefaultLocale(long ptr)
 @ stdcall -syscall=0x0044 NtQueryDefaultUILanguage(ptr)
 @ stdcall -syscall=0x0035 NtQueryDirectoryFile(long long ptr ptr ptr ptr long long long ptr long)
@@ -1574,7 +1574,7 @@
 @ stdcall -private ZwQueryAttributesFile(ptr ptr) NtQueryAttributesFile
 # @ stub ZwQueryBootEntryOrder
 # @ stub ZwQueryBootOptions
-# @ stub ZwQueryDebugFilterState
+@ stdcall -private ZwQueryDebugFilterState(long long) NtQueryDebugFilterState
 @ stdcall -private ZwQueryDefaultLocale(long ptr) NtQueryDefaultLocale
 @ stdcall -private ZwQueryDefaultUILanguage(ptr) NtQueryDefaultUILanguage
 @ stdcall -private ZwQueryDirectoryFile(long long ptr ptr ptr ptr long long long ptr long) NtQueryDirectoryFile
