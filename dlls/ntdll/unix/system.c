@@ -1700,35 +1700,53 @@ static void init_logical_proc_info(void)
     numa_info.HighestNodeNumber = numa_node_count - 1;
 }
 
-static void read_dev_urandom( void *buf, ULONG len )
+static BOOL read_dev_urandom( void *buf, ULONG len )
 {
-    int fd = open( "/dev/urandom", O_RDONLY );
-    if (fd != -1)
+    int fd;
+    ssize_t ret;
+
+    if (!len) return TRUE;
+    do fd = open( "/dev/urandom", O_RDONLY );
+    while (fd == -1 && errno == EINTR);
+    if (fd == -1)
     {
-        int ret;
-        do
-        {
-            ret = read( fd, buf, len );
-        }
-        while (ret == -1 && errno == EINTR);
-        close( fd );
+        WARN( "can't open /dev/urandom\n" );
+        return FALSE;
     }
-    else WARN( "can't open /dev/urandom\n" );
+
+    while (len)
+    {
+        ret = read( fd, buf, len );
+        if (ret == -1 && errno == EINTR) continue;
+        if (ret <= 0) break;
+        buf = (char *)buf + ret;
+        len -= ret;
+    }
+    close( fd );
+    return !len;
 }
 
-static void get_random( void *buf, ULONG len )
+static BOOL get_random( void *buf, ULONG len )
 {
 #ifdef HAVE_GETRANDOM
-    int ret;
-    do
+    ssize_t ret;
+
+    while (len)
     {
         ret = getrandom( buf, len, 0 );
+        if (ret == -1)
+        {
+            if (errno == EINTR) continue;
+            if (errno == ENOSYS) return read_dev_urandom( buf, len );
+            return FALSE;
+        }
+        if (!ret) return FALSE;
+        buf = (char *)buf + ret;
+        len -= ret;
     }
-    while (ret == -1 && errno == EINTR);
-
-    if (ret == -1 && errno == ENOSYS) read_dev_urandom( buf, len );
+    return TRUE;
 #else
-    read_dev_urandom( buf, len );
+    return read_dev_urandom( buf, len );
 #endif
 }
 
@@ -3669,7 +3687,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         if (size >= len)
         {
             if (!info) ret = STATUS_ACCESS_VIOLATION;
-            else get_random( info, len );
+            else if (!get_random( info, len )) ret = STATUS_UNSUCCESSFUL;
         }
         else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
