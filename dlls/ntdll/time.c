@@ -405,6 +405,55 @@ ULONG WINAPI DECLSPEC_HOTPATCH NtGetTickCount(void)
 }
 
 /***********************************************************************
+ *      RtlGetSystemTimeAndBias [NTDLL.@]
+ */
+static ULONGLONG read_shared_system_time( const volatile KSYSTEM_TIME *time )
+{
+    ULONG high, low;
+
+    for (;;)
+    {
+        high = time->High1Time;
+        low = time->LowPart;
+        if (high == time->High2Time) return ((ULONGLONG)high << 32) | low;
+        YieldProcessor();
+    }
+}
+
+ULONGLONG WINAPI RtlGetSystemTimeAndBias( LARGE_INTEGER *bias, LARGE_INTEGER *start, LARGE_INTEGER *end )
+{
+    const struct silo_shared_data *data = active_silo_shared_data();
+    const volatile KSYSTEM_TIME *bias_source = &user_shared_data->TimeZoneBias;
+    const volatile ULONG *stamp_source = &user_shared_data->TimeZoneBiasStamp;
+    const volatile LARGE_INTEGER *start_source = &user_shared_data->TimeZoneBiasEffectiveStart;
+    const volatile LARGE_INTEGER *end_source = &user_shared_data->TimeZoneBiasEffectiveEnd;
+    ULONGLONG time;
+    ULONG stamp;
+
+    if (data)
+    {
+        bias_source = &data->time_zone_bias;
+        stamp_source = &data->time_zone_bias_stamp;
+        start_source = &data->time_zone_bias_effective_start;
+        end_source = &data->time_zone_bias_effective_end;
+    }
+
+    for (;;)
+    {
+        stamp = *stamp_source;
+        if (!(stamp & 1))
+        {
+            ((volatile LARGE_INTEGER *)bias)->QuadPart = read_shared_system_time( bias_source );
+            if (start) ((volatile LARGE_INTEGER *)start)->QuadPart = start_source->QuadPart;
+            if (end) ((volatile LARGE_INTEGER *)end)->QuadPart = end_source->QuadPart;
+            time = read_shared_system_time( &user_shared_data->SystemTime );
+            if (stamp == *stamp_source) return time;
+        }
+        YieldProcessor();
+    }
+}
+
+/***********************************************************************
  *      RtlQueryTimeZoneInformation [NTDLL.@]
  *
  * Get information about the current timezone.

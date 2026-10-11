@@ -876,6 +876,7 @@
 @ stdcall RtlGetSystemBootStatus(long ptr long ptr)
 @ stdcall RtlGetSystemPreferredUILanguages(long long ptr ptr ptr)
 @ stdcall RtlGetSuiteMask()
+@ stdcall -ret64 RtlGetSystemTimeAndBias(ptr ptr ptr)
 @ stdcall -ret64 RtlGetSystemTimePrecise()
 @ stdcall RtlGetThreadErrorMode()
 @ stdcall RtlGetThreadPreferredUILanguages(long ptr ptr ptr)

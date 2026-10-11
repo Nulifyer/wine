@@ -27,6 +27,7 @@
 #include "winbase.h"
 #include "winnt.h"
 #include "winternl.h"
+#include "ddk/ntddk.h"
 #include "rtlsupportapi.h"
 #include "unixlib.h"
 #include "wine/asm.h"
@@ -99,6 +100,37 @@ extern const WCHAR windows_dir[];
 extern void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *);
 
 extern struct _KUSER_SHARED_DATA *user_shared_data;
+
+/* Silo user shared data referenced by PEB.SharedData. These readers do not
+ * create service sessions or provision their system capability flags. */
+struct silo_shared_data
+{
+    ULONG service_session_id;
+    ULONG active_console_id;
+    LONGLONG foreground_process_id;
+    ULONG product_type;
+    ULONG suite_mask;
+    ULONG shared_user_session_id;
+    BOOLEAN multi_session_sku;
+    BOOLEAN state_separation_enabled;
+    BYTE reserved[0x24c - 0x1e];
+    volatile ULONG time_zone_bias_stamp;
+    volatile KSYSTEM_TIME time_zone_bias;
+    ULONG reserved2;
+    volatile LARGE_INTEGER time_zone_bias_effective_start;
+    volatile LARGE_INTEGER time_zone_bias_effective_end;
+};
+
+C_ASSERT( offsetof(struct silo_shared_data, time_zone_bias_stamp) == 0x24c );
+C_ASSERT( offsetof(struct silo_shared_data, time_zone_bias) == 0x250 );
+C_ASSERT( offsetof(struct silo_shared_data, time_zone_bias_effective_start) == 0x260 );
+C_ASSERT( offsetof(struct silo_shared_data, time_zone_bias_effective_end) == 0x268 );
+
+static inline const struct silo_shared_data *active_silo_shared_data(void)
+{
+    const struct silo_shared_data *data = NtCurrentTeb()->Peb->SharedData;
+    return data && data->service_session_id ? data : NULL;
+}
 
 #ifdef _WIN64
 static inline TEB64 *NtCurrentTeb64(void) { return NULL; }

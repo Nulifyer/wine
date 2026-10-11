@@ -541,26 +541,6 @@ done:
            current_version->wProductType );
 }
 
-/* Prefix of the silo user shared data referenced by PEB.SharedData.  These
- * readers do not create a silo or provision its system capability flags. */
-struct silo_shared_data
-{
-    ULONG service_session_id;
-    ULONG active_console_id;
-    LONGLONG foreground_process_id;
-    ULONG product_type;
-    ULONG suite_mask;
-    ULONG shared_user_session_id;
-    BOOLEAN multi_session_sku;
-    BOOLEAN state_separation_enabled;
-};
-
-static const struct silo_shared_data *active_silo_shared_data(void)
-{
-    const struct silo_shared_data *data = NtCurrentTeb()->Peb->SharedData;
-    return data && data->service_session_id ? data : NULL;
-}
-
 /***********************************************************************
  *           RtlGetCurrentServiceSessionId    (NTDLL.@)
  */
