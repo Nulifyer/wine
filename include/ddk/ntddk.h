@@ -227,6 +227,13 @@ typedef struct _RTL_BALANCED_LINKS {
 } RTL_BALANCED_LINKS;
 typedef RTL_BALANCED_LINKS *PRTL_BALANCED_LINKS;
 
+typedef enum _TABLE_SEARCH_RESULT {
+    TableEmptyTree,
+    TableFoundNode,
+    TableInsertAsLeft,
+    TableInsertAsRight
+} TABLE_SEARCH_RESULT;
+
 struct _RTL_AVL_TABLE;
 
 typedef RTL_GENERIC_COMPARE_RESULTS (WINAPI *PRTL_AVL_COMPARE_ROUTINE)(struct _RTL_AVL_TABLE *, void *, void *);
@@ -327,10 +334,12 @@ void      WINAPI RtlInitializeGenericTable(PRTL_GENERIC_TABLE,PRTL_GENERIC_COMPA
 void      WINAPI RtlInitializeGenericTableAvl(PRTL_AVL_TABLE,PRTL_AVL_COMPARE_ROUTINE,PRTL_AVL_ALLOCATE_ROUTINE, PRTL_AVL_FREE_ROUTINE,void *);
 PVOID     WINAPI RtlInsertElementGenericTable(PRTL_GENERIC_TABLE,PVOID,CLONG,PBOOLEAN);
 void *    WINAPI RtlInsertElementGenericTableAvl(PRTL_AVL_TABLE,void *,ULONG,PBOOLEAN);
+void *    WINAPI RtlInsertElementGenericTableFullAvl(PRTL_AVL_TABLE,void *,ULONG,PBOOLEAN,void *,TABLE_SEARCH_RESULT);
 BOOLEAN   WINAPI RtlIsGenericTableEmptyAvl(PRTL_AVL_TABLE);
 BOOLEAN   WINAPI RtlIsGenericTableEmpty(PRTL_GENERIC_TABLE);
 void *    WINAPI RtlLookupElementGenericTable(PRTL_GENERIC_TABLE,void *);
 void *    WINAPI RtlLookupElementGenericTableAvl(PRTL_AVL_TABLE,void *);
+void *    WINAPI RtlLookupElementGenericTableFullAvl(PRTL_AVL_TABLE,void *,void **,TABLE_SEARCH_RESULT *);
 void      WINAPI RtlMapGenericMask(ACCESS_MASK*,const GENERIC_MAPPING*);
 ULONG     WINAPI RtlNumberGenericTableElements(PRTL_GENERIC_TABLE);
 ULONG     WINAPI RtlNumberGenericTableElementsAvl(PRTL_AVL_TABLE);

@@ -932,6 +932,7 @@
 # @ stub RtlInitializeStackTraceDataBase
 @ stdcall RtlInsertElementGenericTable(ptr ptr long ptr)
 @ stdcall RtlInsertElementGenericTableAvl(ptr ptr long ptr)
+@ stdcall RtlInsertElementGenericTableFullAvl(ptr ptr long ptr ptr long)
 @ stdcall RtlInsertEntryHashTable(ptr ptr long ptr)
 @ cdecl -arch=!i386 RtlInstallFunctionTableCallback(long long long ptr ptr wstr)
 @ stdcall RtlInt64ToUnicodeString(int64 long ptr)
@@ -1010,6 +1011,7 @@
 @ stdcall RtlLookupAtomInAtomTable(ptr wstr ptr)
 @ stdcall RtlLookupElementGenericTable(ptr ptr)
 @ stdcall RtlLookupElementGenericTableAvl(ptr ptr)
+@ stdcall RtlLookupElementGenericTableFullAvl(ptr ptr ptr ptr)
 @ stdcall RtlLookupEntryHashTable(ptr long ptr)
 @ stdcall -arch=!i386 RtlLookupFunctionEntry(long ptr ptr)
 @ stdcall -arch=!i386 RtlLookupFunctionTable(long ptr ptr)

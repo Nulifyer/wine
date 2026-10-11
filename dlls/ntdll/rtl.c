@@ -2073,7 +2073,7 @@ static RTL_BALANCED_LINKS *rtl_avl_successor(RTL_BALANCED_LINKS *links)
     return NULL;
 }
 
-static RTL_BALANCED_LINKS *rtl_avl_predecessor(RTL_BALANCED_LINKS *links)
+static RTL_BALANCED_LINKS *rtl_avl_predecessor(RTL_AVL_TABLE *table, RTL_BALANCED_LINKS *links)
 {
     RTL_BALANCED_LINKS *parent;
 
@@ -2085,7 +2085,7 @@ static RTL_BALANCED_LINKS *rtl_avl_predecessor(RTL_BALANCED_LINKS *links)
     }
 
     while ((parent = links->Parent) && parent->LeftChild == links) links = parent;
-    if (parent && parent->RightChild == links) return parent;
+    if (parent && parent != &table->BalancedRoot && parent->RightChild == links) return parent;
     return NULL;
 }
 
@@ -2396,7 +2396,7 @@ BOOLEAN WINAPI RtlDeleteElementGenericTableAvl(RTL_AVL_TABLE *table, void *buffe
     }
     if (!links) return FALSE;
 
-    if (table->RestartKey == links) table->RestartKey = rtl_avl_predecessor(links);
+    if (table->RestartKey == links) table->RestartKey = rtl_avl_predecessor(table, links);
 
     if (!links->LeftChild || !links->RightChild)
     {
@@ -2448,56 +2448,101 @@ BOOLEAN WINAPI RtlDeleteElementGenericTableAvl(RTL_AVL_TABLE *table, void *buffe
 }
 
 /***********************************************************************
+ *           RtlLookupElementGenericTableFullAvl  (NTDLL.@)
+ */
+void * WINAPI RtlLookupElementGenericTableFullAvl(RTL_AVL_TABLE *table, void *buffer,
+                                                 void **node, TABLE_SEARCH_RESULT *search)
+{
+    RTL_BALANCED_LINKS *links;
+    RTL_GENERIC_COMPARE_RESULTS result;
+
+    if (!table->NumberGenericTableElements)
+    {
+        *search = TableEmptyTree;
+        return NULL;
+    }
+
+    links = table->BalancedRoot.RightChild;
+    for (;;)
+    {
+        result = table->CompareRoutine(table, buffer, links + 1);
+        if (result == GenericLessThan)
+        {
+            if (links->LeftChild)
+            {
+                links = links->LeftChild;
+                continue;
+            }
+            *search = TableInsertAsLeft;
+        }
+        else if (result == GenericGreaterThan)
+        {
+            if (links->RightChild)
+            {
+                links = links->RightChild;
+                continue;
+            }
+            *search = TableInsertAsRight;
+        }
+        else
+        {
+            *node = links;
+            *search = TableFoundNode;
+            return links + 1;
+        }
+        *node = links;
+        return NULL;
+    }
+}
+
+/***********************************************************************
+ *           RtlInsertElementGenericTableFullAvl  (NTDLL.@)
+ */
+void * WINAPI RtlInsertElementGenericTableFullAvl(RTL_AVL_TABLE *table, void *buffer, ULONG size,
+                                                 BOOLEAN *element, void *node, TABLE_SEARCH_RESULT search)
+{
+    RTL_BALANCED_LINKS *links = node, *parent;
+
+    if (search != TableFoundNode)
+    {
+        if (size > ~(ULONG)0 - sizeof(*links) ||
+            !(links = table->AllocateRoutine(table, size + sizeof(*links))))
+        {
+            if (element) *element = FALSE;
+            return NULL;
+        }
+
+        memset(links, 0, sizeof(*links));
+        parent = search == TableEmptyTree ? &table->BalancedRoot : node;
+        links->Parent = parent;
+        if (search == TableEmptyTree)
+            table->BalancedRoot.RightChild = links;
+        else if (search == TableInsertAsLeft)
+            parent->LeftChild = links;
+        else
+            parent->RightChild = links;
+
+        table->NumberGenericTableElements++;
+        rtl_avl_rebalance_after_insert(table, links);
+        memcpy(links + 1, buffer, size);
+    }
+
+    if (element) *element = search != TableFoundNode;
+    table->OrderedPointer = NULL;
+    table->WhichOrderedElement = 0;
+    return links + 1;
+}
+
+/***********************************************************************
  *           RtlInsertElementGenericTableAvl  (NTDLL.@)
  */
 void * WINAPI RtlInsertElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer, ULONG size, BOOLEAN *element)
 {
-    RTL_BALANCED_LINKS *links, *parent = &table->BalancedRoot;
-    RTL_GENERIC_COMPARE_RESULTS result = GenericEqual;
-    void *data;
+    TABLE_SEARCH_RESULT search;
+    void *node = NULL;
 
-    links = table->BalancedRoot.RightChild;
-    while (links)
-    {
-        data = links + 1;
-        result = table->CompareRoutine(table, buffer, data);
-        if (result == GenericLessThan)
-            parent = links, links = links->LeftChild;
-        else if (result == GenericGreaterThan)
-            parent = links, links = links->RightChild;
-        else
-        {
-            if (element) *element = FALSE;
-            table->OrderedPointer = NULL;
-            table->WhichOrderedElement = 0;
-            return data;
-        }
-    }
-
-    if (size > ~(ULONG)0 - sizeof(*links) ||
-        !(links = table->AllocateRoutine(table, size + sizeof(*links))))
-    {
-        if (element) *element = FALSE;
-        return NULL;
-    }
-
-    memset(links, 0, sizeof(*links));
-    links->Parent = parent;
-    if (parent == &table->BalancedRoot)
-        table->BalancedRoot.RightChild = links;
-    else if (result == GenericLessThan)
-        parent->LeftChild = links;
-    else
-        parent->RightChild = links;
-
-    data = links + 1;
-    memcpy(data, buffer, size);
-    table->NumberGenericTableElements++;
-    table->OrderedPointer = NULL;
-    table->WhichOrderedElement = 0;
-    rtl_avl_rebalance_after_insert(table, links);
-    if (element) *element = TRUE;
-    return data;
+    RtlLookupElementGenericTableFullAvl(table, buffer, &node, &search);
+    return RtlInsertElementGenericTableFullAvl(table, buffer, size, element, node, search);
 }
 
 /******************************************************************************
@@ -2505,22 +2550,10 @@ void * WINAPI RtlInsertElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer
  */
 void * WINAPI RtlLookupElementGenericTableAvl(PRTL_AVL_TABLE table, void *buffer)
 {
-    RTL_BALANCED_LINKS *links = table->BalancedRoot.RightChild;
-    RTL_GENERIC_COMPARE_RESULTS result;
-    void *data;
+    TABLE_SEARCH_RESULT search;
+    void *node;
 
-    while (links)
-    {
-        data = links + 1;
-        result = table->CompareRoutine(table, buffer, data);
-        if (result == GenericLessThan)
-            links = links->LeftChild;
-        else if (result == GenericGreaterThan)
-            links = links->RightChild;
-        else
-            return data;
-    }
-    return NULL;
+    return RtlLookupElementGenericTableFullAvl(table, buffer, &node, &search);
 }
 
 /*********************************************************************
