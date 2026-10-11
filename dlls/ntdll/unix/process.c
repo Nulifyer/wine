@@ -769,8 +769,9 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
     }
     if (!process_attr) process_attr = &empty_attr;
 
-    TRACE( "%s image %s cmdline %s parent %p machine %x\n", debugstr_us( &path ),
-           debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ), parent, machine );
+    TRACE( "%s image %s cmdline %s parent %p machine %x flags %#lx protection %#x\n", debugstr_us( &path ),
+           debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ), parent, machine,
+           process_flags, protection );
 
     unixdir = get_unix_curdir( params );
 

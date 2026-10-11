@@ -1117,8 +1117,9 @@ NTSTATUS WINAPI NtCreateEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_
     SERVER_END_REQ;
 
     if (getenv( "LINUXNT_DEBUG_NAMED_EVENTS" ) && attr && attr->ObjectName)
-        fprintf( stderr, "linuxnt: pid=%u tid=%04x NtCreateEvent name=%s type=%u state=%u status=%#x handle=%p\n",
-                 getpid(), GetCurrentThreadId(), debugstr_us( attr->ObjectName ), type, state, ret, *handle );
+        fprintf( stderr, "linuxnt: pid=%u tid=%04x NtCreateEvent name=%s root=%p access=%#x attributes=%#lx type=%u state=%u status=%#x handle=%p\n",
+                 getpid(), GetCurrentThreadId(), debugstr_us( attr->ObjectName ), attr->RootDirectory,
+                 access, attr->Attributes, type, state, ret, *handle );
     free( objattr );
     return ret;
 }
@@ -1925,6 +1926,10 @@ NTSTATUS WINAPI NtOpenDirectoryObject( HANDLE *handle, ACCESS_MASK access, const
         *handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
+    if (getenv( "LINUXNT_DEBUG_NAMED_EVENTS" ))
+        fprintf( stderr, "linuxnt: pid=%u tid=%04x NtOpenDirectoryObject name=%s root=%p access=%#x status=%#x handle=%p\n",
+                 getpid(), GetCurrentThreadId(), debugstr_us( attr->ObjectName ), attr->RootDirectory,
+                 access, ret, *handle );
     return ret;
 }
 

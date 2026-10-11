@@ -1996,6 +1996,10 @@ struct object *get_protected_process_image( struct process *process, obj_handle_
     struct mapping *mapping = get_mapping_obj( process, handle, SECTION_QUERY | SECTION_MAP_READ );
 
     if (!mapping) return NULL;
+    if (getenv( "LINUXNT_DEBUG_PROCESS_EXITS" ))
+        fprintf( stderr, "linuxnt: protected main-image issuer=%04x section=%04x machine=%#x image-machine=%#x class=%u requested=%#x granted=%#x\n",
+                 process->id, handle, machine, mapping->image.machine, mapping->image_trust.publisher_class,
+                 protection, mapping->image_trust.process_protection );
     if ((mapping->flags & (SEC_IMAGE | SEC_NOCACHE)) != SEC_IMAGE ||
         (mapping->image.image_charact & IMAGE_FILE_DLL) || !mapping->image_fd ||
         !(mapping->image.image_charact & IMAGE_FILE_EXECUTABLE_IMAGE) ||
